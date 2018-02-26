@@ -301,7 +301,8 @@ func home(w http.ResponseWriter, r *http.Request) {
 	homeTemplate.Execute(w, "ws://"+r.Host+"/download")
 }
 
-func main() {
+func Mymain() {
+
 	flag.Parse()
 	log.SetFlags(0)
 
