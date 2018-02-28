@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build ignore
-
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
-	"bytes"
 	"log"
 	"net/http"
 	"os"
@@ -56,6 +54,8 @@ type afmPsInfo struct {
 }
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
+
+var wschan chan appInfo
 
 var upgrader = websocket.Upgrader{} // use default options
 
@@ -275,7 +275,7 @@ func download_list_of_image(w http.ResponseWriter, r *http.Request) {
 }
 
 func update(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
+	/*c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
 		return
@@ -294,23 +294,28 @@ func update(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(message, &file)
 
 		perfromActionFormackage(file)
-	}
+	}*/
+	var infore appInfo
+	infore.Name = "somename"
+	wschan <- infore
 }
 
 func home(w http.ResponseWriter, r *http.Request) {
+	log.Printf("INIT\n")
 	homeTemplate.Execute(w, "ws://"+r.Host+"/download")
 }
 
-func Mymain() {
+func Initwshandler(outch chan appInfo) {
 
+	wschan = outch
 	flag.Parse()
 	log.SetFlags(0)
 
-	log.Printf("run all available apps")
-	allAppList := getAllInstalledWgt()
-	for _, appInfo := range allAppList {
-		runWgt(appInfo.Id)
-	}
+	// log.Printf("run all available apps")
+	// allAppList := getAllInstalledWgt()
+	// for _, appInfo := range allAppList {
+	// 	runWgt(appInfo.Id)
+	// }
 
 	/*var wgtPr FileProperties
 	wgtPr.DownloadUrl = "https://fusionpoc1storage.blob.core.windows.net/images/runc-system-monitor.wgt"
@@ -321,7 +326,7 @@ func Mymain() {
 	//2017/12/22 17:36:19 [{"Name":"Demo application","DownloadUrl":"https://fusionpoc1storage.blob.core.windows.net/images/runc-system-monitor.wgt","Version":"1.41"
 	perfromActionFormackage(wgtPr)
 	*/
-
+	log.Printf("INIT\n")
 	http.HandleFunc("/download", download_list_of_image)
 	http.HandleFunc("/update", update)
 	http.HandleFunc("/", home)
