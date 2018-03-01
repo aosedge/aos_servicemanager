@@ -8,7 +8,7 @@ import (
 	"github.com/cavaliercoder/grab"
 )
 
-func MyDownloadFile(storage, url string, filepath chan string) {
+func DownloadPkg(storage, url string, filepath chan string) {
 	client := grab.NewClient()
 	req, err := grab.NewRequest(storage, url)
 

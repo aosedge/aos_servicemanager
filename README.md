@@ -7,6 +7,7 @@ Build instruction:
 
 ```
 go get github.com/cavaliercoder/grab
+go get github.com/streadway/amqp
 
 cd aos_lifecycle_manager
 export GOPATH=$GOPATH:$PWD
