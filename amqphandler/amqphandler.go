@@ -10,7 +10,6 @@ import (
 	"os"
 	"time"
 
-	//"github.com/gorilla/websocket"
 	"github.com/streadway/amqp"
 )
 
