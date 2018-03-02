@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	amqp "gitpct.epam.com/empd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/empd-aepr/aos_servicemanager/downloadmanager"
 )
