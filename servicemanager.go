@@ -1,9 +1,9 @@
 package main
 
 import (
-	. "./amqphandler"
-	"./downloadmanager"
 	"fmt"
+	amqp "gitpct.epam.com/empd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/empd-aepr/aos_servicemanager/downloadmanager"
 )
 
 type appInfo struct {
@@ -14,11 +14,11 @@ func main() {
 
 	out := make(chan string)
 
-	amqpChan := make(chan PackageInfo, 100)
+	amqpChan := make(chan amqp.PackageInfo, 100)
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
 
-	go InitAmqphandler(amqpChan)
+	go amqp.InitAmqphandler(amqpChan)
 
 	for {
 		select {
