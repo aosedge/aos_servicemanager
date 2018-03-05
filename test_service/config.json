@@ -1,13 +1,13 @@
 {
 	"ociVersion": "1.0.0",
 	"process": {
-		"terminal": true,
+		"terminal": false,
 		"user": {
 			"uid": 0,
 			"gid": 0
 		},
 		"args": [
-			"bash"
+			"/home/service/service_app"
 		],
 		"env": [
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -89,15 +89,6 @@
 			]
 		},
 		{
-			"destination": "/lib64",
-			"type": "bind",
-			"source": "/lib64",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
 			"destination": "/usr",
 			"type": "bind",
 			"source": "/usr",
@@ -107,7 +98,7 @@
 			]
 		},
 		{
-			"destination": "/home/container/storage",
+			"destination": "/home/service/storage",
 			"type": "bind",
 			"source": "storage",
 			"options": [
@@ -193,7 +184,7 @@
 	"hooks": {
 		"prestart": [
 			{
-				"path": "/home/al1/go/bin/netns"
+				"path": "/path/to/netns"
 			}
 		]
 	},
