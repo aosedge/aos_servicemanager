@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	amqp "gitpct.epam.com/empd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/empd-aepr/aos_servicemanager/downloadmanager"
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/downloadmanager"
 )
 
 type appInfo struct {
