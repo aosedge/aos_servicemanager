@@ -6,12 +6,12 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 )
 
@@ -243,14 +243,14 @@ func getQmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, er
 
 	caCert, err := ioutil.ReadFile("server.crt") //todo add path to cerificates
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
 	}
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
 	cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
 		return jsonResp.Connection, err
 	}
 
@@ -264,20 +264,20 @@ func getQmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, er
 	}
 	resp, err := client.Post("https://localhost:8443", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		return jsonResp.Connection, err
 	}
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		return jsonResp.Connection, err
 	}
 	defer resp.Body.Close()
 
 	err = json.Unmarshal(htmlData, &jsonResp) // todo add check
 	if err != nil {
-		log.Println(err)
+		log.Error(err)
 		return jsonResp.Connection, err
 	}
 
@@ -310,7 +310,7 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 
 	amqpConn, err2 := getQmqpConnInfo(servRequst)
 	if err2 != nil {
-		log.Printf("NO connection info: %v\n", err2)
+		log.Error("NO connection info: ", err2)
 	}
 	log.Printf("Results: %v\n", amqpConn)
 
