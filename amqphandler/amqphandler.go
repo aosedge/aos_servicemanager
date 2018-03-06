@@ -1,11 +1,13 @@
 package amqphandler
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
@@ -14,6 +16,27 @@ import (
 )
 
 const DEFAULT_CONFIG_FILE = "/etc/demo-application/demo_config.json"
+
+//NEW
+type serviseDiscoveryRequest struct {
+	Version int
+	VIN     string `json:"VIN"`
+	Users   []string
+}
+
+type serviseDiscoveryResp struct {
+	Version    int
+	Connection reqbbitConnectioninfo
+}
+type reqbbitConnectioninfo struct {
+	Exchange     string
+	ExchangeHost string
+	Queue        string
+	QueueHost    string
+	SsessionId   string
+}
+
+//OLD
 
 type RequestStruct struct {
 	User          string `json:"userName"`
@@ -207,10 +230,89 @@ func get_list_TLS() {
 	}
 	log.Printf(" \n END ")
 }
+func getQmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
+
+	var jsonResp serviseDiscoveryResp
+
+	reqJson, err := json.Marshal(request)
+	if err != nil {
+		log.Printf("erroe :%v", err)
+	}
+
+	log.Printf("request :%v", string(reqJson))
+
+	caCert, err := ioutil.ReadFile("server.crt") //todo add path to cerificates
+	if err != nil {
+		log.Fatal(err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
+	if err != nil {
+		log.Fatal(err)
+		return jsonResp.Connection, err
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:      caCertPool,
+				Certificates: []tls.Certificate{cert},
+			},
+		},
+	}
+	resp, err := client.Post("https://localhost:8443", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
+	if err != nil {
+		log.Println(err)
+		return jsonResp.Connection, err
+	}
+
+	htmlData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+		return jsonResp.Connection, err
+	}
+	defer resp.Body.Close()
+
+	err = json.Unmarshal(htmlData, &jsonResp) // todo add check
+	if err != nil {
+		log.Println(err)
+		return jsonResp.Connection, err
+	}
+
+	log.Printf("Results: %v\n", jsonResp)
+
+	return jsonResp.Connection, nil
+}
 
 func InitAmqphandler(outputchan chan PackageInfo) {
 
 	amqpChan = outputchan
+
+	//todo get VIn users form VIS
+	servRequst := serviseDiscoveryRequest{Version: 1,
+		VIN:   "12345ZXCVBNMA1234",
+		Users: []string{"user1", "vendor2"}}
+
+	//log.Printf("strucrt %v", servRequst)
+
+	// file2, e := ioutil.ReadFile("./test.json")
+	// if e != nil {
+	// 	log.Printf("!!!!!!!!!!!!File error: %v\n", e)
+	// 	os.Exit(1)
+	// }
+
+	// var jsonResp serviseDiscoveryResp
+	// json.Unmarshal(file2, &jsonResp)
+	// log.Printf("Results: %v\n", jsonResp.Connection.Exchange)
+	// log.Printf("Results: %v\n", jsonResp)
+
+	amqpConn, err2 := getQmqpConnInfo(servRequst)
+	if err2 != nil {
+		log.Printf("NO connection info: %v\n", err2)
+	}
+	log.Printf("Results: %v\n", amqpConn)
 
 	config := DEFAULT_CONFIG_FILE
 
