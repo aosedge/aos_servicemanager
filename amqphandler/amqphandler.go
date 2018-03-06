@@ -19,21 +19,21 @@ const DEFAULT_CONFIG_FILE = "/etc/demo-application/demo_config.json"
 
 //NEW
 type serviseDiscoveryRequest struct {
-	Version int
-	VIN     string `json:"VIN"`
-	Users   []string
+	Version int      `json:"versions"`
+	VIN     string   `json:"VIN"`
+	Users   []string `json:"users"`
 }
 
 type serviseDiscoveryResp struct {
-	Version    int
-	Connection reqbbitConnectioninfo
+	Version    int                   `json:"versions"`
+	Connection reqbbitConnectioninfo `json:"connection"`
 }
 type reqbbitConnectioninfo struct {
-	Exchange     string
-	ExchangeHost string
-	Queue        string
-	QueueHost    string
-	SsessionId   string
+	Exchange     string `json:"exchange"`
+	ExchangeHost string `json:"exchangeHost"`
+	Queue        string `json:"queue"`
+	QueueHost    string `json:"queueHost"`
+	SsessionId   string `json:"ssessionId"`
 }
 
 //OLD
