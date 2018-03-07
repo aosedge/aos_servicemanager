@@ -2,6 +2,8 @@
 package launcher
 
 import (
+	"path"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -9,9 +11,29 @@ import (
  * Consts
  ******************************************************************************/
 
+const (
+	serviceDatabase = "services.db"
+)
+
+// Service status
+const (
+	statusOk = iota
+	statusError
+)
+
+// Service state
+const (
+	stateInit = iota
+	stateRunning
+	stateStopped
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
+
+type serviceStatus int
+type serviceState int
 
 type ServiceInfo struct {
 	Id      string `json:id`
@@ -21,6 +43,7 @@ type ServiceInfo struct {
 
 // Launcher instance
 type Launcher struct {
+	db *database
 }
 
 /*******************************************************************************
@@ -31,12 +54,19 @@ type Launcher struct {
 func New(workingDir string) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	return &Launcher{}, nil
+	db, err := newDatabase(path.Join(workingDir, serviceDatabase))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &Launcher{db}, nil
 }
 
 // Close closes launcher
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
+	launcher.db.close()
 }
 
 // GetServiceVersion returns installed version of requested service
