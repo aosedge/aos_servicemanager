@@ -25,6 +25,10 @@ const (
 	serviceDir = "services"
 )
 
+var (
+	statusStr []string = []string{"OK", "Error"}
+)
+
 // Service status
 const (
 	statusOk = iota
@@ -92,7 +96,14 @@ func (launcher *Launcher) Close() {
 func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error) {
 	log.WithField("id", id).Debug("Get service version")
 
-	return 1, nil
+	service, err := launcher.db.getService(id)
+	if err != nil {
+		return version, err
+	}
+
+	version = service.version
+
+	return version, nil
 }
 
 // InstallService installs and runs service
@@ -206,7 +217,18 @@ func (launcher *Launcher) RemoveService(id string) (status <-chan error) {
 func (launcher *Launcher) GetServicesInfo() (info []ServiceInfo, err error) {
 	log.Debug("Get services info")
 
-	return []ServiceInfo{}, nil
+	services, err := launcher.db.getServices()
+	if err != nil {
+		return info, err
+	}
+
+	info = make([]ServiceInfo, len(services))
+
+	for i, service := range services {
+		info[i] = ServiceInfo{service.id, service.version, statusStr[service.status]}
+	}
+
+	return info, nil
 }
 
 /*******************************************************************************
@@ -283,8 +305,8 @@ func (launcher *Launcher) newService(id string, version uint, installDir string)
 		id:      id,
 		version: version,
 		path:    installDir,
-		state:   StateInit,
-		status:  StatusOk}
+		state:   stateInit,
+		status:  statusOk}
 
 	if err := launcher.db.addService(service); err != nil {
 		return err
