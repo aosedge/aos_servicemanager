@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -34,6 +35,33 @@ type reqbbitConnectioninfo struct {
 	Queue        string `json:"queue"`
 	QueueHost    string `json:"queueHost"`
 	SsessionId   string `json:"ssessionId"`
+	ExchageParam exchangeParams
+}
+
+//todo change after review
+type exchangeParams struct {
+	Host         string
+	ExchangeName string
+	queue        amqpQueue
+}
+
+type consumeeParams struct {
+	Host  string
+	queue amqpQueue
+}
+
+type amqpQueue struct {
+	Name             string `json:"name"`
+	Durable          string `json:"durable"`
+	DeleteWhenUnused string `json:"deleteWhenUnused"`
+	Exclusive        string `json:"exclusive"`
+	NoWait           string `json:"noWait"`
+}
+
+type amqpLocalConnectionInfo struct {
+	conn  *amqp.Connection
+	ch    *amqp.Channel
+	valid bool
 }
 
 //OLD
@@ -80,7 +108,16 @@ type Configuration struct {
 
 var configuration Configuration
 
+//NEW
+
+// channel for return packages
 var amqpChan chan PackageInfo
+
+// connection for sending data
+var exchangeInfo amqpLocalConnectionInfo
+
+// connection for receiving data
+var consumerInfo amqpLocalConnectionInfo
 
 func sendRequestDownload(body string) {
 
@@ -230,7 +267,7 @@ func get_list_TLS() {
 	}
 	log.Printf(" \n END ")
 }
-func getQmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
+func getAmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
 
 	var jsonResp serviseDiscoveryResp
 
@@ -286,14 +323,103 @@ func getQmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, er
 	return jsonResp.Connection, nil
 }
 
+func getamqpLocalConnectionInfo(params exchangeParams) (amqpLocalConnectionInfo, error) {
+
+	var retData amqpLocalConnectionInfo
+	conn, err := amqp.Dial("amqp://localhost:5672/")
+	if err != nil {
+		log.Warning("amqp.Dial to exchange ", err)
+		return retData, err
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Warning("Failed to open a channel", err)
+		return retData, err
+	}
+
+	err = ch.ExchangeDeclare(
+		"logs",   // name
+		"fanout", // type
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
+	if err != nil {
+		log.Warning("Failed to declare an exchangel", err)
+		return retData, err
+	}
+
+	retData.conn = conn
+	retData.ch = ch
+	retData.valid = true
+	log.Info("create excahnge OK\n")
+	return retData, nil
+}
+
+/*func getConsumeInfo(param consumeeParams) (amqpLocalConnectionInfo, error) {
+
+}*/
+
+func publishMessage(data []byte, correlationId string) error {
+	if exchangeInfo.valid != true {
+		return errors.New("invalid connection")
+	}
+
+	err := exchangeInfo.ch.Publish(
+		"logs", // exchange
+		"",     // routing key
+		false,  // mandatory
+		false,  // immediate
+		amqp.Publishing{
+			ContentType:   "application/json",
+			DeliveryMode:  2,
+			CorrelationId: correlationId,
+			Body:          data,
+		})
+	if err != nil {
+		log.Warning("error publish", err)
+	}
+	return err
+}
+
+//todo add return error
 func InitAmqphandler(outputchan chan PackageInfo) {
 
 	amqpChan = outputchan
 
 	//todo get VIn users form VIS
-	servRequst := serviseDiscoveryRequest{Version: 1,
-		VIN:   "12345ZXCVBNMA1234",
-		Users: []string{"user1", "vendor2"}}
+	servRequst := serviseDiscoveryRequest{
+		Version: 1,
+		VIN:     "12345ZXCVBNMA1234",
+		Users:   []string{"user1", "vendor2"}}
+
+	amqpConn, err2 := getAmqpConnInfo(servRequst)
+	if err2 != nil {
+		log.Error("NO connection info: ", err2)
+		//todo add return
+	}
+	log.Printf("Results: %v\n", amqpConn)
+
+	exchangeInfo, err := getamqpLocalConnectionInfo(amqpConn.ExchageParam)
+	if err != nil {
+		log.Error("error get exchage info ", err)
+		//todo add return
+	}
+
+	log.Info("ex %v", exchangeInfo.valid)
+
+	//main logic
+	// getSendQueuq()
+	// selsect{
+	// 	1) receive data
+	// 	2) onCloseExcahnge connection
+	// 	3) onClose qiue
+	// }
+
+	//implment closeAll
 
 	//log.Printf("strucrt %v", servRequst)
 
@@ -307,13 +433,6 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 	// json.Unmarshal(file2, &jsonResp)
 	// log.Printf("Results: %v\n", jsonResp.Connection.Exchange)
 	// log.Printf("Results: %v\n", jsonResp)
-
-	amqpConn, err2 := getQmqpConnInfo(servRequst)
-	if err2 != nil {
-		log.Error("NO connection info: ", err2)
-	}
-	log.Printf("Results: %v\n", amqpConn)
-
 	config := DEFAULT_CONFIG_FILE
 
 	file, err2 := os.Open(config)
@@ -323,7 +442,7 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 	}
 
 	decoder := json.NewDecoder(file)
-	err := decoder.Decode(&configuration)
+	err = decoder.Decode(&configuration)
 	if err != nil {
 		log.Println(" Decode error:", err)
 		return
@@ -344,5 +463,4 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 	}
 
 	log.Printf(" [.] Got ")
-
 }
