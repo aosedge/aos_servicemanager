@@ -82,7 +82,7 @@ func Test_exchangeInfo(t *testing.T) {
 
 	var someParam exchangeParams
 
-	exchangeInfo, err := getamqpLocalConnectionInfo(someParam)
+	exchangeInfo, err := getSendConnectionInfo(someParam)
 	if err != nil {
 		log.Error("error get exchage info ", err)
 		//todo add return
