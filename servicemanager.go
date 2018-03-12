@@ -2,11 +2,13 @@ package main
 
 import (
 	"os"
+	"path"
 
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/downloadmanager"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
 type appInfo struct {
@@ -35,6 +37,12 @@ func main() {
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
 
 	go amqp.InitAmqphandler(amqpChan)
+
+	launcher, err := launcher.New(path.Join(os.Getenv("GOPATH"), "aos"))
+	if err != nil {
+		log.Fatal("Can't create launcher")
+	}
+	defer launcher.Close()
 
 	for {
 		select {
