@@ -23,7 +23,7 @@ type Configuration struct {
 	CACert         string
 	ClientCert     string
 	ClientKey      string
-	ServerPubKey   string
+	ContainerCert  string
 	OfflinePrivKey string
 	OfflineCert    string
 }
@@ -45,7 +45,7 @@ func init() {
 	log.Println("CAcert:         ", config.CACert)
 	log.Println("ClientCert:     ", config.ClientCert)
 	log.Println("ClientKey:      ", config.ClientKey)
-	log.Println("ServerPubKey:   ", config.ServerPubKey)
+	log.Println("ContainerCert:  ", config.ContainerCert)
 	log.Println("OfflinePrivKey: ", config.OfflinePrivKey)
 	log.Println("OfflineCert:    ", config.OfflineCert)
 }
@@ -108,17 +108,24 @@ func getOfflineCert() (*x509.Certificate, error) {
 }
 
 func getServerPubKey() (*rsa.PublicKey, error) {
-	key, err := ioutil.ReadFile(config.ServerPubKey)
+	pemCert, err := ioutil.ReadFile(config.ContainerCert)
 	if err != nil {
-		log.Println("Error reading public key:", err)
+		log.Println("Error reading container certificate:", err)
 		return nil, err
 	}
-	pub, err := x509.ParsePKIXPublicKey(key)
+
+	block, pemCert := pem.Decode(pemCert)
+	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+		return nil, errors.New("Invalid PEM Block")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		log.Println("Error parsing public key:", err)
+		log.Println("Error parsing container certificate:", err)
 		return nil, err
 	}
-	switch pub := pub.(type) {
+
+	switch pub := cert.PublicKey.(type) {
 	case *rsa.PublicKey:
 		return pub, nil
 	default:
