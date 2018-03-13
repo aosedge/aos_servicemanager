@@ -2,8 +2,8 @@ package amqphandler
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
+	//"crypto/tls"
+	//"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -20,18 +20,18 @@ const DEFAULT_CONFIG_FILE = "/etc/demo-application/demo_config.json"
 
 ///API structures
 type serviseDiscoveryRequest struct {
-	Version int      `json:"versions"`
+	Version int      `json:"version"`
 	VIN     string   `json:"VIN"`
 	Users   []string `json:"users"`
 }
 
 type serviseDiscoveryResp struct {
-	Version    int                   `json:"versions"`
+	Version    int                   `json:"version"`
 	Connection reqbbitConnectioninfo `json:"connection"`
 }
 type reqbbitConnectioninfo struct {
 	SessionId     string        `json:"sessionId"`
-	SendParam     sendParam     `json:"sendParam"`
+	SendParam     sendParam     `json:"sendParams"`
 	ReceiveParams receiveParams `json:"receiveParams"`
 }
 
@@ -108,47 +108,49 @@ func getAmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, er
 
 	log.Printf("request :%v", string(reqJson))
 
-	caCert, err := ioutil.ReadFile("server.crt") //todo add path to cerificates
-	if err != nil {
-		log.Error(err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	// caCert, err := ioutil.ReadFile("server.crt") //todo add path to cerificates
+	// if err != nil {
+	// 	log.Error(err)
+	// }
+	// caCertPool := x509.NewCertPool()
+	// caCertPool.AppendCertsFromPEM(caCert)
 
-	cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
-	if err != nil {
-		log.Error(err)
-		return jsonResp.Connection, err
-	}
+	// cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
+	// if err != nil {
+	// 	log.Error(err)
+	// 	return jsonResp.Connection, err
+	// }
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs:      caCertPool,
-				Certificates: []tls.Certificate{cert},
-			},
-		},
-	}
-	resp, err := client.Post("https://localhost:8443", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
-	if err != nil {
-		log.Error(err)
-		return jsonResp.Connection, err
-	}
+	// client := &http.Client{
+	// 	Transport: &http.Transport{
+	// 		TLSClientConfig: &tls.Config{
+	// 			RootCAs:      caCertPool,
+	// 			Certificates: []tls.Certificate{cert},
+	// 		},
+	// 	},
+	// }
+	// resp, err := client.Post("https://someurl.com", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
+	// if err != nil {
+	// 	log.Error(err)
+	// 	return jsonResp.Connection, err
+	// }
+	log.Info("Try to send: %v\n")
+
+	resp, err := http.Post("https://someurl.com", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
+	log.Info("Send OK: %v\n")
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Error(err)
+		log.Error("error Read ", err)
 		return jsonResp.Connection, err
 	}
 	defer resp.Body.Close()
 
 	err = json.Unmarshal(htmlData, &jsonResp) // todo add check
 	if err != nil {
-		log.Error(err)
+		log.Error("receive ", string(htmlData), err)
 		return jsonResp.Connection, err
 	}
-
-	log.Printf("Results: %v\n", jsonResp)
 
 	return jsonResp.Connection, nil
 }
