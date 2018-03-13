@@ -2,18 +2,17 @@ package amqphandler
 
 import (
 	"bytes"
-	//"crypto/tls"
-	//"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net/http"
 	//	"net/url"
 	//"os"
-	//	"time"
-
+	//"time"
 	log "github.com/sirupsen/logrus"
+
 	"github.com/streadway/amqp"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
 const DEFAULT_CONFIG_FILE = "/etc/demo-application/demo_config.json"
@@ -88,7 +87,7 @@ type PackageInfo struct {
 }
 
 // channel for return packages
-var amqpChan chan PackageInfo
+var amqpChan = make(chan PackageInfo, 100)
 
 // connection for sending data
 var exchangeInfo amqpLocalSenderConnectionInfo
@@ -97,46 +96,34 @@ var exchangeInfo amqpLocalSenderConnectionInfo
 var consumerInfo amqpLocalConsumerConnectionInfo
 
 //service discovery implementation
-func getAmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
+func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
 
 	var jsonResp serviseDiscoveryResp
 
 	reqJson, err := json.Marshal(request)
 	if err != nil {
-		log.Printf("erroe :%v", err)
+		log.Warn("erroe :%v", err)
+		return jsonResp.Connection, err
 	}
 
-	log.Printf("request :%v", string(reqJson))
+	log.Info("request :%v", string(reqJson))
 
-	// caCert, err := ioutil.ReadFile("server.crt") //todo add path to cerificates
-	// if err != nil {
-	// 	log.Error(err)
-	// }
-	// caCertPool := x509.NewCertPool()
-	// caCertPool.AppendCertsFromPEM(caCert)
+	tlsConfig, err := fcrypt.GetTlsConfig()
+	if err != nil {
+		log.Warn("GetTlsConfig error : ", err)
+		return jsonResp.Connection, err
+	}
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	client := &http.Client{Transport: transport}
 
-	// cert, err := tls.LoadX509KeyPair("client.crt", "client.key")
-	// if err != nil {
-	// 	log.Error(err)
-	// 	return jsonResp.Connection, err
-	// }
+	resp, err := client.Post("https://someurl1111.com", "text", bytes.NewBuffer(reqJson)) //todo: define service descovery url
 
-	// client := &http.Client{
-	// 	Transport: &http.Transport{
-	// 		TLSClientConfig: &tls.Config{
-	// 			RootCAs:      caCertPool,
-	// 			Certificates: []tls.Certificate{cert},
-	// 		},
-	// 	},
-	// }
-	// resp, err := client.Post("https://someurl.com", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
-	// if err != nil {
-	// 	log.Error(err)
-	// 	return jsonResp.Connection, err
-	// }
-	log.Info("Try to send: %v\n")
+	if err != nil {
+		log.Warn("Post error : ", err)
+		return jsonResp.Connection, err
+	}
+	defer resp.Body.Close()
 
-	resp, err := http.Post("https://someurl.com", "application/json", bytes.NewBuffer(reqJson)) //todo: define service descovery url
 	log.Info("Send OK: %v\n")
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
@@ -158,7 +145,14 @@ func getAmqpConnInfo(request serviseDiscoveryRequest) (reqbbitConnectioninfo, er
 func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
 	//TODO map input params to configs
 	var retData amqpLocalSenderConnectionInfo
-	conn, err := amqp.Dial("amqp://localhost:5672/")
+
+	tlsConfig, err := fcrypt.GetTlsConfig()
+	if err != nil {
+		log.Warn("GetTlsConfig error : ", err)
+		return retData, err
+	}
+	//conn, err := amqp.Dial("amqp://localhost:5672/")
+	conn, err := amqp.DialTLS("amqps://"+params.Host+"/", tlsConfig)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
@@ -191,12 +185,16 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 	return retData, nil
 }
 
-/*func getConsumeInfo(param consumeeParams) (amqpLocalSenderConnectionInfo, error) {
-
-}*/
 func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnectionInfo, error) {
 	var retData amqpLocalConsumerConnectionInfo
-	conn, err := amqp.Dial("amqp://localhost:5672/")
+
+	tlsConfig, err := fcrypt.GetTlsConfig()
+	if err != nil {
+		log.Warn("GetTlsConfig error : ", err)
+		return retData, err
+	}
+
+	conn, err := amqp.DialTLS("amqps://"+param.Host+"/", tlsConfig)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
@@ -262,10 +260,20 @@ func publishMessage(data []byte, correlationId string) error {
 	return err
 }
 
-//todo add return error
-func InitAmqphandler(outputchan chan PackageInfo) {
+func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
+	if consumerInfo.valid != true {
+		return
+	}
+	for d := range consumerInfo.ch {
+		log.Printf("Received a message: %s", d.Body)
+		//todo make json
+		//todo decript
+		//todo push to channel
+	}
+}
 
-	amqpChan = outputchan
+//todo add return error
+func InitAmqphandler(sdURL string) (chan PackageInfo, error) {
 
 	//todo get VIn users form VIS
 	servRequst := serviseDiscoveryRequest{
@@ -273,9 +281,9 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 		VIN:     "12345ZXCVBNMA1234",
 		Users:   []string{"user1", "vendor2"}}
 
-	amqpConn, err2 := getAmqpConnInfo(servRequst)
-	if err2 != nil {
-		log.Error("NO connection info: ", err2)
+	amqpConn, err := getAmqpConnInfo(sdURL, servRequst)
+	if err != nil {
+		log.Error("NO connection info: ", err)
 		//todo add return
 	}
 	log.Printf("Results: %v\n", amqpConn)
@@ -286,38 +294,28 @@ func InitAmqphandler(outputchan chan PackageInfo) {
 		//todo add return
 	}
 
-	log.Info("ex %v", exchangeInfo.valid)
+	log.Info("exchange ", exchangeInfo.valid)
 
 	consumerInfo, err := getConsumerConnectionInfo(amqpConn.ReceiveParams)
+	if err != nil {
+		exchangeInfo.conn.Close()
+		exchangeInfo.valid = false
+		log.Error("error get consumer info ", err)
+		//todo add return
+	}
 
-	log.Info("ex %v", consumerInfo.valid)
+	log.Info("consumer %v", consumerInfo.valid)
+
+	go startConumer(&consumerInfo)
 
 	//main logic
-	// getSendQueuq()
-	// selsect{
-	// 	1) receive data
 	// 	2) onCloseExcahnge connection
 	// 	3) onClose qiue
 	// }
 
 	//implment closeAll
 
-	//log.Printf("strucrt %v", servRequst)
-
-	// file2, e := ioutil.ReadFile("./test.json")
-	// if e != nil {
-	// 	log.Printf("!!!!!!!!!!!!File error: %v\n", e)
-	// 	os.Exit(1)
-	// }
-
-	// var jsonResp serviseDiscoveryResp
-	// json.Unmarshal(file2, &jsonResp)
-	// log.Printf("Results: %v\n", jsonResp.Connection.Exchange)
-	// log.Printf("Results: %v\n", jsonResp)
-
-	//str := ("[{\"Name\":\"Demo application\",\"DownloadUrl\":\"https://fusionpoc1storage.blob.core.windows.net/images/Demo_application_1.2_demo_1.txt\",\"Version\":\"1.2\",\"TimeStamp\":\"2017-12-14T17:12:58.1443792Z\",\"ResponseCount\":0}]")
-	//str2 := ("{\"Name\":\"Demo application\",\"DownloadUrl\":\"https://fusionpoc1storage.blob.core.windows.net/images/Demo_application_1.2_demo_1.txt\",\"Version\":\"1.2\",\"TimeStamp\":\"2017-12-14T17:12:58.1443792Z\",\"ResponseCount\":0}")
-	//dec := json.NewDecoder(strings.NewReader(str))
-
 	log.Printf(" [.] Got ")
+
+	return amqpChan, err
 }

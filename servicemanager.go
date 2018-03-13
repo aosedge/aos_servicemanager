@@ -32,17 +32,19 @@ func main() {
 
 	out := make(chan string)
 
-	amqpChan := make(chan amqp.PackageInfo, 100)
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
-
-	go amqp.InitAmqphandler(amqpChan)
 
 	launcher, err := launcher.New(path.Join(os.Getenv("GOPATH"), "aos"))
 	if err != nil {
 		log.Fatal("Can't create launcher")
 	}
 	defer launcher.Close()
+
+	amqpChan, err := amqp.InitAmqphandler("serviseDiscoveryURL")
+	if err != nil {
+		log.Fatal("Can't esablish connection ", err)
+	}
 
 	for {
 		select {
@@ -53,7 +55,7 @@ func main() {
 
 		case msg := <-out:
 			log.Debug("Save file here: %v", msg)
-
+			//todo process
 		}
 	}
 }
