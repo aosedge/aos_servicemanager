@@ -1,0 +1,8 @@
+{
+    "CACert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/rootCA.crt.pem",
+    "ClientCert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_online.crt.pem",
+    "ClientKey": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_online.key.pem",
+    "ContainerCert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/container.crt.pem",
+    "OfflinePrivKey": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_offline.key.der",
+    "OfflineCert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_offline.crt.pem"
+}
