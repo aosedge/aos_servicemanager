@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -10,6 +11,10 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/downloadmanager"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
+
+//TODO
+//- add tls to downloadmanager
+//- add encript image
 
 type appInfo struct {
 	Name string
@@ -24,12 +29,48 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
+func sendInitalSetup(launcher *launcher.Launcher) {
+	initialList, err := launcher.GetServicesInfo()
+	if err != nil {
+		log.Error("erro get inital list ", err)
+		//todo return
+	}
+	amqp.SendInitialSetup(initialList)
+}
+
+func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output chan string) bool {
+	switch data := data.(type) {
+	case error:
+		log.Warning("receive error from amqp ", data)
+		amqp.CloseAllConnections()
+		return false
+	case amqp.ServiseInfoFromCloud:
+		version, err := launcher.GetServiceVersion(data.Id)
+		if err != nil {
+			log.Warning("error get version ", err)
+			break
+		}
+		if data.Version > version {
+			log.Debug("send download request url ", data.Url)
+			go downloadmanager.DownloadPkg("/tmp", data.Url, output)
+		}
+
+		return true
+	default:
+		log.Info("receive some data amqp")
+
+		return true
+	}
+	return true
+}
+
 func main() {
 	log.Info("Start service manager")
 	defer func() {
 		log.Info("Stop service manager")
 	}()
 
+	amqp.CloseAllConnections()
 	out := make(chan string)
 
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
@@ -40,22 +81,31 @@ func main() {
 		log.Fatal("Can't create launcher")
 	}
 	defer launcher.Close()
-
-	amqpChan, err := amqp.InitAmqphandler("serviseDiscoveryURL")
-	if err != nil {
-		log.Fatal("Can't esablish connection ", err)
-	}
+	sendInitalSetup(launcher)
 
 	for {
-		select {
-		case pacghInfo := <-amqpChan:
-			log.Debug("Receive package info: %v", pacghInfo)
-			//todo verify via containerlib if ok
-			go downloadmanager.DownloadPkg("./", pacghInfo.DownloadUrl, out)
+		log.Debug("start connection")
+		amqpChan, err := amqp.InitAmqphandler("serviseDiscoveryURL")
 
-		case msg := <-out:
-			log.Debug("Save file here: %v", msg)
-			//todo process
+		if err != nil {
+			log.Error("Can't esablish connection ", err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		sendInitalSetup(launcher)
+		for {
+			log.Debug("start select")
+			select {
+			case amqpReturn := <-amqpChan:
+				isContinue := processAmqpReturn(amqpReturn, launcher, out)
+				if isContinue != true {
+					break
+				}
+			case msg := <-out:
+				log.Debug("Save file here: %v", msg)
+				launcher.InstallService(msg) //todo add erro handling
+			}
 		}
 	}
+
 }
