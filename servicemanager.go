@@ -51,8 +51,8 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 			break
 		}
 		if data.Version > version {
-			log.Debug("send download request url ", data.Url)
-			go downloadmanager.DownloadPkg("/tmp", data.Url, output)
+			log.Debug("send download request url ", data.DownloadUrl)
+			go downloadmanager.DownloadPkg("/tmp", data, output)
 		}
 
 		return true
@@ -85,7 +85,7 @@ func main() {
 
 	for {
 		log.Debug("start connection")
-		amqpChan, err := amqp.InitAmqphandler("serviseDiscoveryURL")
+		amqpChan, err := amqp.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
 
 		if err != nil {
 			log.Error("Can't esablish connection ", err)

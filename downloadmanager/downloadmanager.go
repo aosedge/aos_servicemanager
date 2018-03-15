@@ -6,11 +6,12 @@ import (
 	//"time"
 
 	"github.com/cavaliercoder/grab"
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 )
 
-func DownloadPkg(storage, url string, filepath chan string) {
+func DownloadPkg(storage string, servInfo amqp.ServiseInfoFromCloud, filepath chan string) {
 	client := grab.NewClient()
-	req, err := grab.NewRequest(storage, url)
+	req, err := grab.NewRequest(storage, servInfo.DownloadUrl)
 
 	if err != nil {
 		fmt.Printf("error = ", err)
