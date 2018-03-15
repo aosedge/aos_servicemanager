@@ -92,9 +92,22 @@ type queueInfo struct {
 }
 
 type ServiseInfoFromCloud struct {
-	Id      string `json:id`
-	Version uint   `json:version`
-	Url     string `json:url`
+	Id                     string `json:"id"`
+	Version                uint   `json:"version"`
+	UpdateType             string `json:"updateType"`
+	DownloadUrl            string `json:"downloadUrl"`
+	UrlExpiration          string `json:"urlExpiration"`
+	Hash                   uint   `json:"hash"`
+	Size                   uint   `json:"size"`
+	SignatureAlgorithm     string `json:"signatureAlgorithm"`
+	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
+	SignatureScheme        string `json:"signatureScheme"`
+	ImageSignature         string `json:"imageSignature"`
+	CertificateChain       string `json:"certificateChain"`
+	EncryptionKey          string `json:"encryptionKey"`
+	EncryptionAlgorythm    string `json:"encryptionAlgorythm"`
+	EncryptionMode         string `json:"encryptionMode"`
+	EncryptionModeParams   string `json:"encryptionModeParams"`
 }
 
 /// internal structures
@@ -128,6 +141,9 @@ var exchangeInfo amqpLocalSenderConnectionInfo
 // connection for receiving data
 var consumerInfo amqpLocalConsumerConnectionInfo
 
+//TODO: redmove from global
+var localSessionID string
+
 //service discovery implementation
 func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
 
@@ -135,11 +151,11 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 
 	reqJson, err := json.Marshal(request)
 	if err != nil {
-		log.Warn("erroe :%v", err)
+		log.Warn("erroe :", err)
 		return jsonResp.Connection, err
 	}
 
-	log.Info("request :%v", string(reqJson))
+	log.Info("request :", string(reqJson))
 
 	tlsConfig, err := fcrypt.GetTlsConfig()
 	if err != nil {
@@ -149,7 +165,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
 
-	resp, err := client.Post(url, "text", bytes.NewBuffer(reqJson)) //TODO: change text to json
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJson))
 
 	if err != nil {
 		log.Warn("Post error : ", err)
@@ -157,7 +173,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	}
 	defer resp.Body.Close()
 
-	log.Info("Send OK: %v\n")
+	log.Info("Send OK: \n")
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -171,7 +187,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 		log.Error("receive ", string(htmlData), err)
 		return jsonResp.Connection, err
 	}
-
+	localSessionID = jsonResp.Connection.SessionId
 	return jsonResp.Connection, nil
 }
 
@@ -355,7 +371,7 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 
 func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: "TODO", Sevices: serviceList}
+	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: localSessionID, Sevices: serviceList}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("erroe :%v", err)
@@ -395,7 +411,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 		log.Error("NO connection info: ", err)
 		return amqpChan, err
 	}
-	log.Printf("Results: %v\n", amqpConn)
+	log.Printf("Results: \n", amqpConn)
 
 	exchangeInfo, err := getSendConnectionInfo(amqpConn.SendParam)
 	if err != nil {
