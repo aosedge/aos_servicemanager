@@ -191,6 +191,16 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	return jsonResp.Connection, nil
 }
 
+type amqpExtAuth struct{}
+
+func (a amqpExtAuth) Mechanism() string {
+	return "EXTERNAL"
+}
+
+func (a amqpExtAuth) Response() string {
+	return ""
+}
+
 func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
 	//TODO: map input params to configs
 	var retData amqpLocalSenderConnectionInfo
@@ -200,8 +210,12 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 		log.Warn("GetTlsConfig error : ", err)
 		return retData, err
 	}
+
+	authentication := []amqp.Authentication{amqpExtAuth{}}
+	config := amqp.Config{TLSClientConfig: tlsConfig,
+		SASL: authentication}
 	//conn, err := amqp.Dial("amqp://localhost:5672/")
-	conn, err := amqp.DialTLS("amqps://"+params.Host+"/", tlsConfig)
+	conn, err := amqp.DialConfig("amqps://"+params.Host+"/", config)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
@@ -256,8 +270,11 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 		log.Warn("GetTlsConfig error : ", err)
 		return retData, err
 	}
+	authentication := []amqp.Authentication{amqpExtAuth{}}
+	config := amqp.Config{TLSClientConfig: tlsConfig,
+		SASL: authentication}
 
-	conn, err := amqp.DialTLS("amqps://"+param.Host+"/", tlsConfig)
+	conn, err := amqp.DialConfig("amqps://"+param.Host+"/", config)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
