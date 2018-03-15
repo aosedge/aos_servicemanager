@@ -286,27 +286,14 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 		return retData, err
 	}
 
-	q, err := ch.QueueDeclare(
-		param.Queue.Name,             // name
-		param.Queue.Durable,          // durable
-		param.Queue.DeleteWhenUnused, // delete when unused
-		param.Queue.Exclusive,        // exclusive
-		param.Queue.NoWait,           // no-wait
-		nil,                          // arguments
-	)
-	if err != nil {
-		log.Warning("Failed to declare a queue", err)
-		return retData, err
-	}
-
 	msgs, err := ch.Consume(
-		q.Name,          // queue
-		param.Consumer,  // consumer
-		true,            // auto-ack param.AutoAck
-		param.Exclusive, // exclusive
-		param.NoLocal,   // no-local
-		param.NoWait,    // no-wait
-		nil,             // args
+		param.Queue.Name, // queue
+		param.Consumer,   // consumer
+		true,             // auto-ack param.AutoAck
+		param.Exclusive,  // exclusive
+		param.NoLocal,    // no-local
+		param.NoWait,     // no-wait
+		nil,              // args
 	)
 	if err != nil {
 		log.Warning("Failed to register a consumer", err)
