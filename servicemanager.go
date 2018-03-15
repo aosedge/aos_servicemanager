@@ -102,8 +102,10 @@ func main() {
 					break
 				}
 			case msg := <-out:
-				log.Debug("Save file here: %v", msg)
-				launcher.InstallService(msg) //TODO: add error handling
+				if msg != "" {
+					log.Debug("Save file here: %v", msg)
+					launcher.InstallService(msg) //TODO: add error handling
+				}
 			}
 		}
 	}
