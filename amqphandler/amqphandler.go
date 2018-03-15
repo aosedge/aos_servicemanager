@@ -296,11 +296,11 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 
 func publishMessage(data []byte, correlationId string) error {
 	if exchangeInfo.valid != true {
-		log.Warning("invalid Sender connection", string(data))
+		log.Error("invalid Sender connection", string(data))
 		return errors.New("invalid Sender connection")
 	}
 
-	err := exchangeInfo.ch.Publish(
+	if err := exchangeInfo.ch.Publish(
 		exchangeInfo.exchangeName, // exchange
 		"", // routing key
 		exchangeInfo.mandatory, // mandatory
@@ -310,11 +310,11 @@ func publishMessage(data []byte, correlationId string) error {
 			DeliveryMode:  2,
 			CorrelationId: correlationId,
 			Body:          data,
-		})
-	if err != nil {
+		}); err != nil {
 		log.Warning("error publish", err)
+		return err
 	}
-	return err
+	return nil
 }
 
 func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
@@ -350,9 +350,9 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			}
 			amqpChan <- servInfo
 		}
-
 	}
 }
+
 func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 	log.Info("SendInitialSetup ", serviceList)
 	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: "TODO", Sevices: serviceList}
@@ -363,20 +363,20 @@ func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 	}
 
 	publishMessage(reqJson, "100")
-
 }
 
 func CloseAllConnections() {
-	if exchangeInfo.valid == true {
+	switch {
+	case exchangeInfo.valid == true:
 		exchangeInfo.valid = false
-	}
-	if exchangeInfo.conn != nil {
+
+	case exchangeInfo.conn != nil:
 		exchangeInfo.conn.Close()
-	}
-	if consumerInfo.valid == true {
+
+	case consumerInfo.valid == true:
 		consumerInfo.valid = false
-	}
-	if consumerInfo.conn != nil {
+
+	case consumerInfo.conn != nil:
 		consumerInfo.conn.Close()
 	}
 }
