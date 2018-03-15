@@ -10,7 +10,7 @@ import (
  ******************************************************************************/
 
 func TestDatabase(t *testing.T) {
-	db, err := newDatabase("test.db")
+	db, err := newDatabase("tmp/test.db")
 	if err != nil {
 		t.Fatalf("Can't create databse: %s", err)
 	}

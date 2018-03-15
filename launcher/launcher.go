@@ -2,6 +2,7 @@
 package launcher
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -9,7 +10,11 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
+	"github.com/containerd/go-runc"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 )
@@ -58,7 +63,16 @@ type ServiceInfo struct {
 // Launcher instance
 type Launcher struct {
 	db         *database
+	runtime    runc.Runc
 	workingDir string
+	mutex      *sync.Mutex
+	services   map[string]*service
+}
+
+type service struct {
+	context context.Context
+	socket  *runc.Socket
+	status  chan serviceStatus
 }
 
 /*******************************************************************************
@@ -73,22 +87,44 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	dir := path.Join(workingDir, serviceDir)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, err
+			return launcher, err
 		}
 	}
 
 	// Create new database instance
 	db, err := newDatabase(path.Join(workingDir, serviceDatabase))
 	if err != nil {
-		return nil, err
+		return launcher, err
 	}
 
-	return &Launcher{db, workingDir}, nil
+	// Create runtime
+	runtime := runc.Runc{
+		LogFormat:    runc.JSON,
+		PdeathSignal: syscall.SIGKILL}
+
+	// Initialize services map
+	services := make(map[string]*service)
+
+	launcher = &Launcher{db, runtime, workingDir, &sync.Mutex{}, services}
+
+	if err := launcher.startInstalledServices(); err != nil {
+		return launcher, err
+	}
+
+	return launcher, nil
 }
 
 // Close closes launcher
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
+
+	// stop all running services
+	for id, _ := range launcher.services {
+		if err := launcher.stopService(id); err != nil {
+			log.WithField("id", id).Errorf("Can't stop service: %s", err)
+		}
+	}
+
 	launcher.db.close()
 }
 
@@ -270,7 +306,9 @@ func getConfigServiceInfo(config string) (id string, version uint, err error) {
 func (launcher *Launcher) updateService(service serviceEntry, version uint, installDir string) (err error) {
 	// stop service
 	if err := launcher.stopService(service.id); err != nil {
-		return err
+		if !strings.Contains(err.Error(), "not started") {
+			return err
+		}
 	}
 	// remove from db
 	if err := launcher.db.removeService(service.id); err != nil {
@@ -324,35 +362,140 @@ func (launcher *Launcher) newService(id string, version uint, installDir string)
 }
 
 func (launcher *Launcher) startService(id string, serviceDir string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	log.WithField("id", id).Debug("Start service")
+
+	_, ok := launcher.services[id]
+	if ok {
+		return errors.New("Service already started")
+	}
+
+	ctx := context.Background()
+
+	// check current status of the container
+	container, err := launcher.runtime.State(ctx, id)
+	if err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return err
+		}
+	}
+
+	if container != nil {
+		switch container.Status {
+		case "running":
+			log.WithField(id, "id").Warning("Service is already running")
+			if err := launcher.runtime.Delete(ctx, id, &runc.DeleteOpts{}); err != nil {
+				return err
+			}
+		}
+		if err := launcher.runtime.Delete(ctx, id, &runc.DeleteOpts{}); err != nil {
+			return err
+		}
+	}
+
+	// create io
+	runIO, err := runc.NewSTDIO()
+	if err != nil {
+		return err
+	}
+
+	consoleSocket, err := runc.NewTempConsoleSocket()
+	if err != nil {
+		return err
+	}
+
+	opts := runc.CreateOpts{
+		IO:            runIO,
+		ConsoleSocket: consoleSocket}
+
+	// create container
+	if err := launcher.runtime.Create(ctx, id, serviceDir, &opts); err != nil {
+		return err
+	}
+
+	// create container
+	if err := launcher.runtime.Start(ctx, id); err != nil {
+		return err
+	}
+
+	launcher.services[id] = &service{
+		context: ctx,
+		socket:  consoleSocket,
+		status:  make(chan serviceStatus, 1)}
 
 	return nil
 }
 
 func (launcher *Launcher) stopService(id string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	log.WithField("id", id).Debug("Stop service")
+
+	service, ok := launcher.services[id]
+	if !ok {
+		return errors.New("Service is not started")
+	}
+
+	if err := launcher.runtime.Kill(service.context, id, int(syscall.SIGKILL), &runc.KillOpts{}); err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return err
+		}
+	}
+
+	// check current status of the container
+	container, err := launcher.runtime.State(service.context, id)
+	if err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return err
+		}
+	}
+
+	if container != nil && container.Status == "running" {
+		log.WithField("id", id).Debugf("Wait for service finished, pid: %d", container.Pid)
+		waitProcessFinished(container.Pid)
+	}
+
+	if err := launcher.runtime.Delete(service.context, id, &runc.DeleteOpts{}); err != nil {
+		if !strings.Contains(err.Error(), "does not exist") {
+			return err
+		}
+	}
+
+	delete(launcher.services, id)
 
 	return nil
 }
 
-/*
-func (launcher *Launcher) run(name string) {
-	log.WithField("name", name).Debug("Start service")
-
-	ctx := context.Background()
-
-	io, err := runc.NewNullIO()
-
+func (launcher *Launcher) startInstalledServices() (err error) {
+	services, err := launcher.db.getServices()
 	if err != nil {
-		log.Fatal("Can't create IO: ", err)
+		return err
 	}
 
-	result, err := runtime.Run(ctx, "test", path.Join(ServicePath, name), &runc.CreateOpts{IO: io})
-
-	if err != nil {
-		log.Fatal("Can't run service: ", err)
+	for _, service := range services {
+		if err := launcher.startService(service.id, service.path); err != nil {
+			log.WithField("id", service.id).Error("Can't start service")
+		}
 	}
 
-	log.Debug("Service finished with status: ", result)
+	return nil
 }
-*/
+
+func waitProcessFinished(pid int) (err error) {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	for {
+		err := process.Signal(syscall.Signal(0))
+		if err != nil && (strings.Contains(err.Error(), "no such process") ||
+			strings.Contains(err.Error(), "process already finished")) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
