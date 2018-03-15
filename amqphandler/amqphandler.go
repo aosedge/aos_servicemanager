@@ -16,11 +16,10 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
-//TODO list
+//TODO: list
 // - map amqp paramters
 // - change ServiseInfoFromCloud according to KB when will be available
 // - sessionID
-// - todo
 // - coleration ID
 // - erro ahndling
 // - reconnect 3 times for each connection
@@ -145,7 +144,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
 
-	resp, err := client.Post("https://someurl1111.com", "text", bytes.NewBuffer(reqJson)) //todo: define service descovery url
+	resp, err := client.Post(url, "text", bytes.NewBuffer(reqJson)) //TODO: change text to json
 
 	if err != nil {
 		log.Warn("Post error : ", err)
@@ -162,7 +161,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	}
 	defer resp.Body.Close()
 
-	err = json.Unmarshal(htmlData, &jsonResp) // todo add check
+	err = json.Unmarshal(htmlData, &jsonResp) // TODO: add check
 	if err != nil {
 		log.Error("receive ", string(htmlData), err)
 		return jsonResp.Connection, err
@@ -172,7 +171,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 }
 
 func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
-	//TODO map input params to configs
+	//TODO: map input params to configs
 	var retData amqpLocalSenderConnectionInfo
 
 	tlsConfig, err := fcrypt.GetTlsConfig()
@@ -316,7 +315,7 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		log.Printf("Received a message: %s", d.Body)
 		var ecriptList desiredStatus
 
-		err := json.Unmarshal(d.Body, &ecriptList) // todo add check
+		err := json.Unmarshal(d.Body, &ecriptList) // TODO: add check
 		if err != nil {
 			log.Error("receive ", string(d.Body), err)
 			continue
@@ -334,7 +333,7 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 				continue
 			}
 			var servInfo ServiseInfoFromCloud
-			err = json.Unmarshal(decriptData, &servInfo) // todo add check
+			err = json.Unmarshal(decriptData, &servInfo) // TODO: add check
 			if err != nil {
 				log.Error("Cand make json from decripted data", string(decriptData), err)
 				continue
@@ -372,10 +371,10 @@ func CloseAllConnections() {
 	}
 }
 
-//todo add return error
+//TODO: add return error
 func InitAmqphandler(sdURL string) (chan interface{}, error) {
 
-	//todo get VIn users form VIS
+	//TODO:do get VIn users form VIS
 	servRequst := serviseDiscoveryRequest{
 		Version: 1,
 		VIN:     "12345ZXCVBNMA1234",
@@ -391,7 +390,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 	exchangeInfo, err := getSendConnectionInfo(amqpConn.SendParam)
 	if err != nil {
 		log.Error("error get exchage info ", err)
-		//todo add return
+		return amqpChan, err
 	}
 
 	log.Info("exchange ", exchangeInfo.valid)
@@ -410,12 +409,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	go startConumer(&consumerInfo)
 
-	//main logic
-	// 	2) onCloseExcahnge connection
-	// 	3) onClose qiue
-	// }
-
-	//implment closeAll
+	//TODO: implment closeAll
 
 	log.Printf(" [.] Got ")
 

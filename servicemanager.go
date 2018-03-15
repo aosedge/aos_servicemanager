@@ -12,7 +12,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
-//TODO
+//TODO:
 //- add tls to downloadmanager
 //- add encript image
 
@@ -32,8 +32,8 @@ func init() {
 func sendInitalSetup(launcher *launcher.Launcher) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
-		log.Error("erro get inital list ", err)
-		//todo return
+		log.Error("Error getting initial list ", err)
+		//TODO: return
 	}
 	amqp.SendInitialSetup(initialList)
 }
@@ -41,7 +41,7 @@ func sendInitalSetup(launcher *launcher.Launcher) {
 func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output chan string) bool {
 	switch data := data.(type) {
 	case error:
-		log.Warning("receive error from amqp ", data)
+		log.Warning("Received error from AMQP channel ", data)
 		amqp.CloseAllConnections()
 		return false
 	case amqp.ServiseInfoFromCloud:
@@ -97,15 +97,14 @@ func main() {
 			log.Debug("start select")
 			select {
 			case amqpReturn := <-amqpChan:
-				isContinue := processAmqpReturn(amqpReturn, launcher, out)
-				if isContinue != true {
+				stop := !processAmqpReturn(amqpReturn, launcher, out)
+				if stop == false {
 					break
 				}
 			case msg := <-out:
 				log.Debug("Save file here: %v", msg)
-				launcher.InstallService(msg) //todo add erro handling
+				launcher.InstallService(msg) //TODO: add erro handling
 			}
 		}
 	}
-
 }

@@ -31,7 +31,7 @@ type Configuration struct {
 var config = Configuration{}
 
 func init() {
-	file, err := os.Open("./config/fcrypt.json")
+	file, err := os.Open("fcrypt.json")
 	if err != nil {
 		log.Fatal("Error while opening fcrypt configurataion file: ", err)
 	}

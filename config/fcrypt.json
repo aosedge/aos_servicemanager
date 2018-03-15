@@ -5,5 +5,4 @@
     "ContainerCert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/container.crt.pem",
     "OfflinePrivKey": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_offline.key.der",
     "OfflineCert": "src/gitpct.epam.com/epmd-aepr/aos_servicemanager/data/fcrypt/vehicle1_offline.crt.pem"
-
 }
