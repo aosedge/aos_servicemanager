@@ -103,7 +103,7 @@ func main() {
 				}
 			case msg := <-out:
 				log.Debug("Save file here: %v", msg)
-				launcher.InstallService(msg) //TODO: add erro handling
+				launcher.InstallService(msg) //TODO: add error handling
 			}
 		}
 	}

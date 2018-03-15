@@ -18,6 +18,8 @@ import (
 
 //TODO: list
 // - map amqp paramters
+// - add cahnnel for send data
+// - remove global variables
 // - change ServiseInfoFromCloud according to KB when will be available
 // - sessionID
 // - coleration ID
@@ -76,7 +78,7 @@ type receiveParams struct {
 	Consumer  string    `json:"consumer"`
 	AutoAck   bool      `json:"autoAck"`
 	Exclusive bool      `json:"exclusive"`
-	MoLocal   bool      `json:"noLocal"`
+	NoLocal   bool      `json:"noLocal"`
 	NoWait    bool      `json:"noWait"`
 	Queue     queueInfo `json:"queue"`
 }
@@ -97,9 +99,12 @@ type ServiseInfoFromCloud struct {
 
 /// internal structures
 type amqpLocalSenderConnectionInfo struct {
-	conn  *amqp.Connection
-	ch    *amqp.Channel
-	valid bool
+	conn         *amqp.Connection
+	ch           *amqp.Channel
+	valid        bool
+	exchangeName string
+	mandatory    bool
+	immediate    bool
 }
 
 type amqpLocalConsumerConnectionInfo struct {
@@ -193,13 +198,13 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 	}
 
 	err = ch.ExchangeDeclare(
-		"logs",   // name
-		"fanout", // type
-		true,     // durable
-		false,    // auto-deleted
-		false,    // internal
-		false,    // no-wait
-		nil,      // arguments
+		params.Exchange.Name,       // name
+		"fanout",                   // type
+		params.Exchange.Durable,    // durable
+		params.Exchange.AutoDetect, // auto-deleted
+		params.Exchange.Internal,   // internal
+		params.Exchange.NoWait,     // no-wait
+		nil, // arguments
 	)
 	if err != nil {
 		log.Warning("Failed to declare an exchangel", err)
@@ -218,6 +223,11 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 	retData.conn = conn
 	retData.ch = ch
 	retData.valid = true
+
+	retData.mandatory = params.Mandatory
+	retData.immediate = params.Immediate
+	retData.exchangeName = params.Exchange.Name
+
 	log.Info("create excahnge OK\n")
 	return retData, nil
 }
@@ -244,12 +254,12 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 	}
 
 	q, err := ch.QueueDeclare(
-		"task_queue", // name
-		true,         // durable
-		false,        // delete when unused
-		false,        // exclusive
-		false,        // no-wait
-		nil,          // arguments
+		param.Queue.Name,             // name
+		param.Queue.Durable,          // durable
+		param.Queue.DeleteWhenUnused, // delete when unused
+		param.Queue.Exclusive,        // exclusive
+		param.Queue.NoWait,           // no-wait
+		nil,                          // arguments
 	)
 	if err != nil {
 		log.Warning("Failed to declare a queue", err)
@@ -257,13 +267,13 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 	}
 
 	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
+		q.Name,          // queue
+		param.Consumer,  // consumer
+		true,            // auto-ack param.AutoAck
+		param.Exclusive, // exclusive
+		param.NoLocal,   // no-local
+		param.NoWait,    // no-wait
+		nil,             // args
 	)
 	if err != nil {
 		log.Warning("Failed to register a consumer", err)
@@ -291,10 +301,10 @@ func publishMessage(data []byte, correlationId string) error {
 	}
 
 	err := exchangeInfo.ch.Publish(
-		"logs", // exchange
-		"",     // routing key
-		false,  // mandatory
-		false,  // immediate
+		exchangeInfo.exchangeName, // exchange
+		"", // routing key
+		exchangeInfo.mandatory, // mandatory
+		exchangeInfo.immediate, // immediate
 		amqp.Publishing{
 			ContentType:   "application/json",
 			DeliveryMode:  2,
