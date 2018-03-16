@@ -17,7 +17,7 @@ import (
 )
 
 //TODO: list
-// - map amqp paramters
+// - close/erase channel
 // - add cahnnel for send data
 // - remove global variables
 // - change ServiseInfoFromCloud according to KB when will be available
@@ -315,6 +315,7 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 }
 
 func publishMessage(data []byte, correlationId string) error {
+
 	if exchangeInfo.valid != true {
 		log.Error("invalid Sender connection", string(data))
 		return errors.New("invalid Sender connection")
@@ -334,6 +335,7 @@ func publishMessage(data []byte, correlationId string) error {
 		log.Warning("error publish", err)
 		return err
 	}
+	log.Info("SNED OK ", string(data))
 	return nil
 }
 
@@ -382,6 +384,8 @@ func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 		return
 	}
 
+	log.Info("some info ", exchangeInfo.valid, exchangeInfo.exchangeName)
+
 	publishMessage(reqJson, "100")
 }
 
@@ -417,7 +421,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 	}
 	log.Printf("Results: \n", amqpConn)
 
-	exchangeInfo, err := getSendConnectionInfo(amqpConn.SendParam)
+	exchangeInfo, err = getSendConnectionInfo(amqpConn.SendParam)
 	if err != nil {
 		log.Error("error get exchage info ", err)
 		return amqpChan, err
@@ -425,7 +429,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	log.Info("exchange ", exchangeInfo.valid)
 
-	consumerInfo, err := getConsumerConnectionInfo(amqpConn.ReceiveParams)
+	consumerInfo, err = getConsumerConnectionInfo(amqpConn.ReceiveParams)
 	if err != nil {
 		if exchangeInfo.valid == true {
 			exchangeInfo.conn.Close()
@@ -435,12 +439,11 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 		return amqpChan, err
 	}
 
-	log.Info("consumer %v", consumerInfo.valid)
+	log.Info("consumer ", consumerInfo.valid)
 
 	go startConumer(&consumerInfo)
 
 	//TODO: implment closeAll
-
 	log.Printf(" [.] Got ")
 
 	return amqpChan, nil

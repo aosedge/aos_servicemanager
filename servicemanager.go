@@ -70,7 +70,6 @@ func main() {
 		log.Info("Stop service manager")
 	}()
 
-	amqp.CloseAllConnections()
 	out := make(chan string)
 
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
@@ -81,7 +80,6 @@ func main() {
 		log.Fatal("Can't create launcher")
 	}
 	defer launcher.Close()
-	sendInitalSetup(launcher)
 
 	for {
 		log.Debug("start connection")
