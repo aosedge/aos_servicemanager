@@ -23,7 +23,6 @@ type Configuration struct {
 	CACert         string
 	ClientCert     string
 	ClientKey      string
-	ContainerCert  string
 	OfflinePrivKey string
 	OfflineCert    string
 }
@@ -45,7 +44,6 @@ func init() {
 	log.Println("CAcert:         ", config.CACert)
 	log.Println("ClientCert:     ", config.ClientCert)
 	log.Println("ClientKey:      ", config.ClientKey)
-	log.Println("ContainerCert:  ", config.ContainerCert)
 	log.Println("OfflinePrivKey: ", config.OfflinePrivKey)
 	log.Println("OfflineCert:    ", config.OfflineCert)
 }
@@ -54,8 +52,7 @@ func verify_cert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error 
 	return nil
 }
 
-// Provides TLS configuration which can be used with HTTPS client
-func GetTlsConfig() (*tls.Config, error) {
+func getCaCertPool() (*x509.CertPool, error) {
 	// Load CA cert
 	caCert, err := ioutil.ReadFile(config.CACert)
 	if err != nil {
@@ -63,14 +60,23 @@ func GetTlsConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+	return caCertPool, nil
+}
+
+// Provides TLS configuration which can be used with HTTPS client
+func GetTlsConfig() (*tls.Config, error) {
 	// Load client cert
 	cert, err := tls.LoadX509KeyPair(config.ClientCert, config.ClientKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	caCertPool, err := getCaCertPool()
+	if err != nil {
+		return nil, err
+	}
 
 	tlsConfig := &tls.Config{
 		Certificates:          []tls.Certificate{cert},
@@ -107,24 +113,7 @@ func getOfflineCert() (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-func getServerPubKey() (*rsa.PublicKey, error) {
-	pemCert, err := ioutil.ReadFile(config.ContainerCert)
-	if err != nil {
-		log.Println("Error reading container certificate:", err)
-		return nil, err
-	}
-
-	block, pemCert := pem.Decode(pemCert)
-	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-		return nil, errors.New("Invalid PEM Block")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		log.Println("Error parsing container certificate:", err)
-		return nil, err
-	}
-
+func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
 	switch pub := cert.PublicKey.(type) {
 	case *rsa.PublicKey:
 		return pub, nil
@@ -183,7 +172,63 @@ func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 	return nil
 }
 
-func checkSign(f *os.File, signatureAlg string, signature []byte) error {
+func parseCertificates(pem_data string) (ret []*x509.Certificate, err error) {
+
+	for block, remainder := pem.Decode([]byte(pem_data)); block != nil; block, remainder = pem.Decode(remainder) {
+		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+			return nil, errors.New("Invalid PEM Block")
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			log.Println("Error parsing certifiate: ", err)
+			return nil, err
+		}
+		ret = append(ret, cert)
+	}
+	return
+}
+func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error) {
+	certs, err := parseCertificates(certificates)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(certs) == 0 {
+		return nil, errors.New("No certificates found in certificate chain")
+	}
+
+	signCertificate := certs[0]
+
+	intermediatePool := x509.NewCertPool()
+	for _, cert := range certs[1:] {
+		intermediatePool.AddCert(cert)
+	}
+
+	caCertPool, err := getCaCertPool()
+	if err != nil {
+		return
+	}
+
+	verifyOptions := x509.VerifyOptions{
+		Intermediates: intermediatePool,
+		Roots:         caCertPool,
+		// TODO: Use more sensible ExtKeyUsage
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+	_, err = signCertificate.Verify(verifyOptions)
+	if err != nil {
+		return
+	}
+
+	return signCertificate, nil
+}
+
+func checkSign(f *os.File, signatureAlg string, signature []byte, certificates string) error {
+
+	signCert, err := getAndVerifySignCert(certificates)
+	if err != nil {
+		return err
+	}
 	f.Seek(0, 0)
 	switch signatureAlg {
 	case "RSA-PKCS1_5-SHA1":
@@ -194,7 +239,7 @@ func checkSign(f *os.File, signatureAlg string, signature []byte) error {
 			return err
 		}
 
-		key, err := getServerPubKey()
+		key, err := extractKeyFromCert(signCert)
 		if err != nil {
 			return err
 		}
@@ -246,7 +291,8 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 
 // Decrypts given image into temprorary file
 func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
-	signatureAlg string, cryptoAlgMode string) (outfname string, err error) {
+	signatureAlg string, cryptoAlgMode string,
+	certificates string) (outfname string, err error) {
 
 	// Create tmp file with output data
 	fout, err := ioutil.TempFile("", "fcrypt")
@@ -272,7 +318,7 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 		return outfname, err
 	}
 
-	err = checkSign(fout, signatureAlg, signature)
+	err = checkSign(fout, signatureAlg, signature, certificates)
 	if err != nil {
 		log.Println("Signature verify error:", err)
 		return outfname, err
