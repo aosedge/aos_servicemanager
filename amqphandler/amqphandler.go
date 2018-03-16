@@ -370,6 +370,8 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 				log.Warning(" decript metadta erroe")
 				continue
 			}
+
+			log.Info("Decrypted data:", string(decriptData))
 			var servInfo ServiseInfoFromCloud
 			err = json.Unmarshal(decriptData, &servInfo) // TODO: add check
 			if err != nil {

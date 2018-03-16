@@ -1,6 +1,9 @@
 package downloadmanager
 
 import (
+	"encoding/hex"
+	"strings"
+
 	"github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
 
@@ -32,14 +35,33 @@ func DownloadPkg(destDir string, servInfo amqp.ServiseInfoFromCloud, filepath ch
 		return
 	}
 
+	imageSignature, err := hex.DecodeString(servInfo.ImageSignature)
+	if err != nil {
+		log.Error("Error decoding HEX string for signature", err)
+		return
+	}
+
+	encryptionKey, err := hex.DecodeString(servInfo.EncryptionKey)
+	if err != nil {
+		log.Error("Error decoding HEX string for key", err)
+		return
+	}
+
+	encryptionModeParams, err := hex.DecodeString(servInfo.EncryptionModeParams)
+	if err != nil {
+		log.Error("Error decoding HEX string for IV", err)
+		return
+	}
+
+	certificateChain := strings.Replace(servInfo.CertificateChain, "\\n", "", -1)
 	outFileName, err := fcrypt.DecryptImage(
 		resp.Filename,
-		[]byte(servInfo.ImageSignature),
-		[]byte(servInfo.EncryptionKey),
-		[]byte(servInfo.EncryptionModeParams),
-		servInfo.SignatureAlgorithm,
+		imageSignature,
+		encryptionKey,
+		encryptionModeParams,
+		servInfo.SignatureAlgorithmHash,
 		servInfo.EncryptionMode,
-		servInfo.CertificateChain)
+		certificateChain)
 
 	if err != nil {
 		log.Error("Can't decrypt image: ", err)
