@@ -1,57 +1,54 @@
 package downloadmanager
 
 import (
-	"fmt"
-	//"os"
-	//"time"
-
 	"github.com/cavaliercoder/grab"
+	log "github.com/sirupsen/logrus"
+
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
-func DownloadPkg(storage string, servInfo amqp.ServiseInfoFromCloud, filepath chan string) {
+func DownloadPkg(destDir string, servInfo amqp.ServiseInfoFromCloud, filepath chan string) {
 	client := grab.NewClient()
-	req, err := grab.NewRequest(storage, servInfo.DownloadUrl)
 
+	req, err := grab.NewRequest(destDir, servInfo.DownloadUrl)
 	if err != nil {
-		fmt.Printf("error = ", err)
+		log.Error("Can't download package: ", err)
 		filepath <- ""
 		return
 	}
 
 	// start download
-	fmt.Printf("Downloading %v...\n", req.URL())
 	resp := client.Do(req)
-	fmt.Printf("  %v\n", resp.HTTPResponse.Status)
 
-	// start UI loop
-	//t := time.NewTicker(1000 * time.Millisecond)
-	//defer t.Stop()
+	log.WithField("filename", resp.Filename).Debug("Start downloading")
 
-	/*Loop:
-	for {
-		select {
-		case <-t.C:
-			fmt.Printf("  transferred %v / %v bytes (%.2f%%)\n",
-				resp.BytesComplete(),
-				resp.Size,
-				100*resp.Progress())
+	// wait when finished
+	resp.Wait()
 
-		case <-resp.Done:
-			// download is complete
-			break Loop
-		}
+	if err := resp.Err(); err != nil {
+		log.Error("Can't download package: ", err)
+		filepath <- ""
+		return
 	}
 
-	// check for errors
-	if err := resp.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Download failed: %v\n", err)
-		os.Exit(1)
-	}*/
+	outFileName, err := fcrypt.DecryptImage(
+		resp.Filename,
+		[]byte(servInfo.ImageSignature),
+		[]byte(servInfo.EncryptionKey),
+		[]byte(servInfo.EncryptionModeParams),
+		servInfo.SignatureAlgorithm,
+		servInfo.EncryptionMode)
 
-	fmt.Printf("Download saved to ./%v \n", resp.Filename)
-	filepath <- resp.Filename
-	fmt.Printf("ret  \n")
+	if err != nil {
+		log.Error("Can't decrypt image: ", err)
+		filepath <- ""
+		return
+	}
+
+	log.WithField("filename", outFileName).Debug("Decrypt image")
+
+	filepath <- outFileName
 
 	return
 }

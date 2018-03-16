@@ -246,36 +246,36 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 
 // Decrypts given image into temprorary file
 func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
-	signatureAlg string, cryptoAlgMode string) (*os.File, error) {
+	signatureAlg string, cryptoAlgMode string) (outfname string, err error) {
 
 	// Create tmp file with output data
 	fout, err := ioutil.TempFile("", "fcrypt")
 	if err != nil {
 		log.Println("Can't create temp file for image:", err)
-		return nil, err
+		return outfname, err
 	}
+	defer fout.Close()
 	log.Println("Temp file name: ", fout.Name())
 
 	// Open file
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Println("Error openinng encrypted image:", err)
-		return nil, err
+		return outfname, err
 	}
+	defer f.Close()
 
 	// Decrypt file into fout
 	err = decrypt(f, fout, key, iv, cryptoAlgMode)
 	if err != nil {
 		log.Println("Error decrypting file:", err)
-		f.Close()
-		return nil, err
+		return outfname, err
 	}
 
 	err = checkSign(fout, signatureAlg, signature)
 	if err != nil {
 		log.Println("Signature verify error:", err)
-		f.Close()
-		return nil, err
+		return outfname, err
 	}
-	return fout, nil
+	return fout.Name(), nil
 }
