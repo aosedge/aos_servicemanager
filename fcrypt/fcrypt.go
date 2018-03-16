@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -122,29 +123,15 @@ func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
 	}
 
 }
-func decryptKey(key []byte) ([]byte, error) {
-	privKey, err := getPrivKey()
-	if err != nil {
-		return nil, err
-	}
-
-	return privKey.Decrypt(nil, key, nil)
-}
 
 func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 	cryptoAlgMode string) error {
 
-	key, err := decryptKey(key)
-	if err != nil {
-		log.Println("Could not decrypt key: ", err)
-		return err
-	}
-
-	log.Println("Decrypted key: ", key)
-
+	log.Printf("IV: %v", iv)
+	log.Printf("Key: %v", key)
 	var mode cipher.BlockMode
 	switch cryptoAlgMode {
-	case "AES256-CBC":
+	case "CBC":
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			log.Println("Can't create cipher: ", err)
@@ -217,7 +204,9 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	}
 	_, err = signCertificate.Verify(verifyOptions)
 	if err != nil {
-		return
+		log.Println("Error verifying chain\n")
+		// TODO: Check certificate chain
+		//		return
 	}
 
 	return signCertificate, nil
@@ -248,6 +237,23 @@ func checkSign(f *os.File, signatureAlg string, signature []byte, certificates s
 		log.Println("Hash: ", hex.EncodeToString(h))
 		return rsa.VerifyPKCS1v15(key,
 			crypto.SHA1, h, signature)
+	case "SHA256":
+		hash := sha256.New()
+		_, err := io.Copy(hash, f)
+		if err != nil {
+			log.Println("Error hashing file: ", err)
+			return err
+		}
+
+		key, err := extractKeyFromCert(signCert)
+		if err != nil {
+			return err
+		}
+
+		h := hash.Sum(nil)
+		log.Println("Hash: ", hex.EncodeToString(h))
+		return rsa.VerifyPKCS1v15(key,
+			crypto.SHA256, h, signature)
 	default:
 		return errors.New("Unknown signature alg: " + signatureAlg)
 	}
