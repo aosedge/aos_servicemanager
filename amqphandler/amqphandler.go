@@ -341,8 +341,10 @@ func publishMessage(data []byte, correlationId string) error {
 
 func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 	if consumerInfo.valid != true {
+		log.Error("Invalid consumer connection ")
 		return
 	}
+	log.Info("start listen")
 	for d := range consumerInfo.ch {
 		log.Printf("Received a message: %s", d.Body)
 		var ecriptList desiredStatus
@@ -373,6 +375,7 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			amqpChan <- servInfo
 		}
 	}
+	log.Info("END listen") //TODO: add return errro to cahnnel
 }
 
 func SendInitialSetup(serviceList []launcher.ServiceInfo) {
@@ -383,9 +386,6 @@ func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 		log.Warn("erroe :%v", err)
 		return
 	}
-
-	log.Info("some info ", exchangeInfo.valid, exchangeInfo.exchangeName)
-
 	publishMessage(reqJson, "100")
 }
 
