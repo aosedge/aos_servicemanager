@@ -191,6 +191,16 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	return jsonResp.Connection, nil
 }
 
+type amqpExtAuth struct{}
+
+func (a amqpExtAuth) Mechanism() string {
+	return "EXTERNAL"
+}
+
+func (a amqpExtAuth) Response() string {
+	return ""
+}
+
 func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
 	//TODO: map input params to configs
 	var retData amqpLocalSenderConnectionInfo
@@ -200,8 +210,12 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 		log.Warn("GetTlsConfig error : ", err)
 		return retData, err
 	}
+
+	authentication := []amqp.Authentication{amqpExtAuth{}}
+	config := amqp.Config{TLSClientConfig: tlsConfig,
+		SASL: authentication}
 	//conn, err := amqp.Dial("amqp://localhost:5672/")
-	conn, err := amqp.DialTLS("amqps://"+params.Host+"/", tlsConfig)
+	conn, err := amqp.DialConfig("amqps://"+params.Host+"/", config)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
@@ -256,8 +270,11 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 		log.Warn("GetTlsConfig error : ", err)
 		return retData, err
 	}
+	authentication := []amqp.Authentication{amqpExtAuth{}}
+	config := amqp.Config{TLSClientConfig: tlsConfig,
+		SASL: authentication}
 
-	conn, err := amqp.DialTLS("amqps://"+param.Host+"/", tlsConfig)
+	conn, err := amqp.DialConfig("amqps://"+param.Host+"/", config)
 	if err != nil {
 		log.Warning("amqp.Dial to exchange ", err)
 		return retData, err
@@ -269,27 +286,14 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 		return retData, err
 	}
 
-	q, err := ch.QueueDeclare(
-		param.Queue.Name,             // name
-		param.Queue.Durable,          // durable
-		param.Queue.DeleteWhenUnused, // delete when unused
-		param.Queue.Exclusive,        // exclusive
-		param.Queue.NoWait,           // no-wait
-		nil,                          // arguments
-	)
-	if err != nil {
-		log.Warning("Failed to declare a queue", err)
-		return retData, err
-	}
-
 	msgs, err := ch.Consume(
-		q.Name,          // queue
-		param.Consumer,  // consumer
-		true,            // auto-ack param.AutoAck
-		param.Exclusive, // exclusive
-		param.NoLocal,   // no-local
-		param.NoWait,    // no-wait
-		nil,             // args
+		param.Queue.Name, // queue
+		param.Consumer,   // consumer
+		true,             // auto-ack param.AutoAck
+		param.Exclusive,  // exclusive
+		param.NoLocal,    // no-local
+		param.NoWait,     // no-wait
+		nil,              // args
 	)
 	if err != nil {
 		log.Warning("Failed to register a consumer", err)
