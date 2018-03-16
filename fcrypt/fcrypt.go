@@ -204,9 +204,8 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	}
 	_, err = signCertificate.Verify(verifyOptions)
 	if err != nil {
-		log.Println("Error verifying chain\n")
-		// TODO: Check certificate chain
-		//		return
+		log.Println("Error verifying certificate chain\n")
+		return
 	}
 
 	return signCertificate, nil
