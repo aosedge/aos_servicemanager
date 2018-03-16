@@ -38,7 +38,8 @@ func DownloadPkg(destDir string, servInfo amqp.ServiseInfoFromCloud, filepath ch
 		[]byte(servInfo.EncryptionKey),
 		[]byte(servInfo.EncryptionModeParams),
 		servInfo.SignatureAlgorithm,
-		servInfo.EncryptionMode)
+		servInfo.EncryptionMode,
+		servInfo.CertificateChain)
 
 	if err != nil {
 		log.Error("Can't decrypt image: ", err)

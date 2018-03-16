@@ -2,6 +2,7 @@ package amqphandler
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -361,7 +362,12 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		}
 
 		for _, element := range ecriptList.Sevices {
-			decriptData, err := fcrypt.DecryptMetadata([]byte(element))
+			cms_data, err := base64.StdEncoding.DecodeString(element)
+			if err != nil {
+				log.Error("Can't decode base64 data from element: ", err)
+				continue
+			}
+			decriptData, err := fcrypt.DecryptMetadata(cms_data)
 			if err != nil {
 				log.Warning(" decript metadta erroe")
 				continue
