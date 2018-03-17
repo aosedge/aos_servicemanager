@@ -109,6 +109,13 @@ func UnpackImage(name, destination string) (err error) {
 			}
 
 		case tar.TypeReg:
+			dir, _ := filepath.Split(target)
+			if _, err := os.Stat(dir); err != nil {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return err
+				}
+			}
+
 			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
 			if err != nil {
 				return err
