@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -131,8 +130,14 @@ func main() {
 				}
 			case msg := <-out:
 				if msg != "" {
-					log.Debug("Save file here: %v", msg)
-					launcher.InstallService(msg) //TODO: add error handling
+					log.Debug("Save file here: ", msg)
+					err = <- launcher.InstallService(msg)
+					if err != nil {
+						log.Error("Can't install service: ", err)
+					}
+					if err := os.Remove(msg); err != nil {
+						log.Errorf("Can't remove file %s: %s", msg, err)
+					}
 				}
 			}
 		}

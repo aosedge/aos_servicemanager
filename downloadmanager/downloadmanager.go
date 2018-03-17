@@ -2,6 +2,7 @@ package downloadmanager
 
 import (
 	"encoding/hex"
+	"os"
 	"strings"
 
 	"github.com/cavaliercoder/grab"
@@ -23,6 +24,7 @@ func DownloadPkg(destDir string, servInfo amqp.ServiseInfoFromCloud, filepath ch
 
 	// start download
 	resp := client.Do(req)
+	defer os.Remove(resp.Filename)
 
 	log.WithField("filename", resp.Filename).Debug("Start downloading")
 
