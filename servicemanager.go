@@ -105,9 +105,9 @@ func main() {
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
 
-	launcher, err := launcher.New(path.Join(os.Getenv("GOPATH"), "aos"))
+	launcher, err := launcher.New("data")
 	if err != nil {
-		log.Fatal("Can't create launcher")
+		log.Fatal("Can't create launcher: ", err)
 	}
 	defer launcher.Close()
 
