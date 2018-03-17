@@ -361,6 +361,8 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			continue
 		}
 
+		var servInfoArray []ServiseInfoFromCloud
+
 		for _, element := range ecriptList.Sevices {
 			cms_data, err := base64.StdEncoding.DecodeString(element)
 			if err != nil {
@@ -380,10 +382,11 @@ func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 				log.Error("Cand make json from decripted data", string(decriptData), err)
 				continue
 			}
-			amqpChan <- servInfo
+			servInfoArray = append(servInfoArray, servInfo)			
 		}
+		amqpChan <- servInfoArray
 	}
-	log.Info("END listen") //TODO: add return errro to cahnnel
+	log.Warning("END listen") //TODO: add return errro to cahnnel
 }
 
 func SendInitialSetup(serviceList []launcher.ServiceInfo) {

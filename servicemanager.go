@@ -56,6 +56,36 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 		}
 
 		return true
+	case []amqp.ServiseInfoFromCloud:
+		log.Info("recive array of services len ", len(data))
+		currenList, err := launcher.GetServicesInfo()
+		if err != nil {
+			log.Warning("error get GetServicesInfo ", err)
+			break
+		}
+		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
+			for iDes := len(data) - 1; iDes >= 0; iDes-- {
+
+				if data[iDes].Id == currenList[iCur].Id {
+					if data[iDes].Version >= currenList[iCur].Version {
+						log.Info("Update ", data[iDes].Id, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
+						go downloadmanager.DownloadPkg("/tmp", data[iDes], output)
+					}
+					data = append(data[:iDes], data[iDes+1:]...)
+					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
+				}
+			}
+		}
+		for _, deleteElemnt := range currenList {
+			log.Info("delete ID ", deleteElemnt.Id)
+			launcher.RemoveService(deleteElemnt.Id) //TODO ADD CHECK ERROR
+		}
+
+		for _, newElemnt := range data {
+			log.Info("Download new serv Id ", newElemnt.Id, " version ", newElemnt.Version)
+			go downloadmanager.DownloadPkg("/tmp", newElemnt, output)
+		}
+		return true
 	default:
 		log.Info("receive some data amqp")
 
