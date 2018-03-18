@@ -2,16 +2,13 @@ package launcher_test
 
 import (
 	"container/list"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"testing"
 
-	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
@@ -43,17 +40,12 @@ func setup() (err error) {
 		return err
 	}
 
-	spec, err := readSpec("tmp/tmp_image")
+	specFile := path.Join("tmp/tmp_image", "config.json")
+
+	spec, err := launcher.GetServiceSpec(specFile)
 	if err != nil {
 		return err
 	}
-
-	mounts := []specs.Mount{
-		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
-		specs.Mount{"/lib", "bind", "/lib", []string{"bind", "ro"}},
-		specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}}}
-
-	spec.Mounts = append(spec.Mounts, mounts...)
 
 	if spec.Annotations == nil {
 		spec.Annotations = make(map[string]string)
@@ -63,7 +55,7 @@ func setup() (err error) {
 		spec.Annotations["packageName"] = fmt.Sprintf("service%d", i)
 		spec.Annotations["version"] = fmt.Sprintf("%d", i)
 
-		if err := writeSpec("tmp/tmp_image", spec); err != nil {
+		if err := launcher.WriteServiceSpec(&spec, specFile); err != nil {
 			return err
 		}
 
@@ -78,36 +70,6 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	if err := os.RemoveAll("tmp"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func readSpec(imagePath string) (spec specs.Spec, err error) {
-	raw, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
-	if err != nil {
-		return spec, err
-	}
-
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return spec, err
-	}
-
-	return spec, nil
-}
-
-func writeSpec(imagePath string, spec specs.Spec) (err error) {
-	f, err := os.Create(path.Join(imagePath, "config.json"))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "\t")
-
-	if err := encoder.Encode(spec); err != nil {
 		return err
 	}
 

@@ -3,11 +3,14 @@ package launcher
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -127,4 +130,34 @@ func UnpackImage(name, destination string) (err error) {
 			}
 		}
 	}
+}
+
+func GetServiceSpec(configFile string) (spec specs.Spec, err error) {
+	raw, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return spec, err
+	}
+
+	if err = json.Unmarshal(raw, &spec); err != nil {
+		return spec, err
+	}
+
+	return spec, nil
+}
+
+func WriteServiceSpec(spec *specs.Spec, configFile string) (err error) {
+	f, err := os.Create(configFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "\t")
+
+	if err := encoder.Encode(spec); err != nil {
+		return err
+	}
+
+	return nil
 }

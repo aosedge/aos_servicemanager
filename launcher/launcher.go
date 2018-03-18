@@ -3,7 +3,6 @@ package launcher
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"os"
@@ -173,8 +172,26 @@ func (launcher *Launcher) InstallService(image string) (status <-chan error) {
 			panic(err)
 		}
 
+		configFile := path.Join(installDir, "config.json")
+
+		// get service spec
+		spec, err := GetServiceSpec(configFile)
+		if err != nil {
+			panic(err)
+		}
+
+		// update config.json
+		if err := updateServiceSpec(&spec); err != nil {
+			panic(err)
+		}
+
+		// update config.json
+		if err := WriteServiceSpec(&spec, configFile); err != nil {
+			panic(err)
+		}
+
 		// get id and version from config.json
-		id, version, err := getConfigServiceInfo(path.Join(installDir, "config.json"))
+		id, version, err := getServiceInfo(&spec)
 		if err != nil {
 			panic(err)
 		}
@@ -271,20 +288,30 @@ func (launcher *Launcher) GetServicesInfo() (info []ServiceInfo, err error) {
  * Private
  ******************************************************************************/
 
-func getConfigServiceInfo(config string) (id string, version uint, err error) {
-	id, version = "", 0
-
-	raw, err := ioutil.ReadFile(config)
-	if err != nil {
-		return id, version, err
+func updateServiceSpec(spec *specs.Spec) (err error) {
+	mounts := []specs.Mount{
+		specs.Mount{"/etc/resolv.conf", "bind", "/etc/resolv.conf", []string{"bind", "ro"}},
+		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
+		specs.Mount{"/sbin", "bind", "/sbin", []string{"bind", "ro"}},
+		specs.Mount{"/lib", "bind", "/lib", []string{"bind", "ro"}},
+		specs.Mount{"/usr", "bind", "/usr", []string{"bind", "ro"}}}
+	spec.Mounts = append(spec.Mounts, mounts...)
+	// add lib64 if exists
+	if _, err := os.Stat("/lib64"); err == nil {
+		spec.Mounts = append(spec.Mounts, specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}})
 	}
 
-	var spec specs.Spec
-
-	if err = json.Unmarshal(raw, &spec); err != nil {
-		return id, version, err
+	// add netns hook
+	// TODO: consider env variable or config to netns path
+	if spec.Hooks == nil {
+		spec.Hooks = &specs.Hooks{}
 	}
+	spec.Hooks.Prestart = append(spec.Hooks.Prestart, specs.Hook{Path: "/usr/local/bin/netns"})
 
+	return nil
+}
+
+func getServiceInfo(spec *specs.Spec) (id string, version uint, err error) {
 	id, isPresent := spec.Annotations["packageName"]
 	if !isPresent {
 		return id, version, errors.New("No service id provided")
