@@ -126,8 +126,8 @@ func main() {
 			log.Debug("start select ")
 			select {
 			case amqpReturn := <-amqpChan:
-				stop := processAmqpReturn(amqpReturn, launcher, out)
-				if stop == false {
+				stop := !processAmqpReturn(amqpReturn, launcher, out)
+				if stop == true {
 					connectionOK = false
 					break
 				}
