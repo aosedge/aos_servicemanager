@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"time"
+	"os/signal"
+	"syscall"
 
 	log "github.com/sirupsen/logrus"
 
@@ -108,7 +110,14 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
-	defer launcher.Close()
+
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		launcher.Close()
+		os.Exit(1)
+	}()
 
 	for {
 		log.Debug("start connection")
