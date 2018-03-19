@@ -41,7 +41,7 @@ func sendInitalSetup(launcher *launcher.Launcher) {
 func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output chan string) bool {
 	switch data := data.(type) {
 	case error:
-		log.Warning("Received error from AMQP channel ", data)
+		log.Warning("Received error from AMQP channel: ", data)
 		amqp.CloseAllConnections()
 		return false
 	case amqp.ServiseInfoFromCloud:
@@ -120,13 +120,15 @@ func main() {
 			time.Sleep(3 * time.Second)
 			continue
 		}
-		sendInitalSetup(launcher)
-		for {
-			log.Debug("start select")
+		connectionOK := true 
+		sendInitalSetup(launcher)		
+		for connectionOK != false {
+			log.Debug("start select ")
 			select {
 			case amqpReturn := <-amqpChan:
 				stop := !processAmqpReturn(amqpReturn, launcher, out)
-				if stop == false {
+				if stop == true {
+					connectionOK = false
 					break
 				}
 			case msg := <-out:
@@ -136,5 +138,6 @@ func main() {
 				}
 			}
 		}
+		log.Warning("StartReconect")
 	}
 }

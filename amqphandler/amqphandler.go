@@ -244,7 +244,7 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 
 	go func() {
 		err := <-conn.NotifyClose(make(chan *amqp.Error))
-		log.Printf("Excahnge connection closing: %s \n")
+		log.Warning("Excahnge connection closing: ",err)
 		if exchangeInfo.valid != false {
 			exchangeInfo.valid = false
 			amqpChan <- err
@@ -302,7 +302,7 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 	}
 	go func() {
 		err := <-conn.NotifyClose(make(chan *amqp.Error))
-		log.Printf("closing: %s \n")
+		log.Warning("Consumer connection closing: ", err)
 		if consumerInfo.valid != false {
 			consumerInfo.valid = false
 			amqpChan <- err
@@ -340,7 +340,7 @@ func publishMessage(data []byte, correlationId string) error {
 	return nil
 }
 
-func startConumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
+func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 	if consumerInfo.valid != true {
 		log.Error("Invalid consumer connection ")
 		return
@@ -401,18 +401,23 @@ func SendInitialSetup(serviceList []launcher.ServiceInfo) {
 }
 
 func CloseAllConnections() {
+	log.Info("CloseAllConnections")
 	switch {
 	case exchangeInfo.valid == true:
 		exchangeInfo.valid = false
+		fallthrough
 
 	case exchangeInfo.conn != nil:
 		exchangeInfo.conn.Close()
+		fallthrough
 
 	case consumerInfo.valid == true:
 		consumerInfo.valid = false
+		fallthrough
 
 	case consumerInfo.conn != nil:
 		consumerInfo.conn.Close()
+		
 	}
 }
 
@@ -452,7 +457,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	log.Info("consumer ", consumerInfo.valid)
 
-	go startConumer(&consumerInfo)
+	go startConsumer(&consumerInfo)
 
 	//TODO: implment closeAll
 	log.Printf(" [.] Got ")

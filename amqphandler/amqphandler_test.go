@@ -56,7 +56,7 @@ func Test_seviceDiscovery(t *testing.T) {
 		VIN:     "12345ZXCVBNMA1234",
 		Users:   []string{"user1", "vendor2"}}
 
-	amqpConn, err := getAmqpConnInfo(servRequst)
+	amqpConn, err := getAmqpConnInfo("someurl", servRequst)
 	if err != nil {
 		t.Error(err)
 		return
