@@ -502,6 +502,8 @@ func (launcher *Launcher) stopService(id string) (err error) {
 		}
 	}
 
+	service.socket.Close()
+
 	delete(launcher.services, id)
 
 	return nil
