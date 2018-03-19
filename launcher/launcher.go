@@ -419,7 +419,10 @@ func (launcher *Launcher) startService(id string, serviceDir string) (err error)
 		switch container.Status {
 		case "running":
 			log.WithField(id, "id").Warning("Service is already running")
-			if err := launcher.runtime.Delete(ctx, id, &runc.DeleteOpts{}); err != nil {
+			if err := launcher.runtime.Kill(ctx, id, int(syscall.SIGKILL), &runc.KillOpts{}); err != nil {
+				return err
+			}
+			if err := waitProcessFinished(container.Pid); err != nil {
 				return err
 			}
 		}
