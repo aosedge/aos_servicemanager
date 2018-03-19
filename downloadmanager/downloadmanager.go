@@ -31,7 +31,7 @@ func DownloadPkg(servInfo amqp.ServiceInfoFromCloud, filepath chan string) {
 
 	// start download
 	resp := client.Do(req)
-	defer os.Remove(resp.Filename)
+	defer os.RemoveAll(destDir)
 
 	log.WithField("filename", resp.Filename).Debug("Start downloading")
 
