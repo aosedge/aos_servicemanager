@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -181,7 +182,7 @@ func (launcher *Launcher) InstallService(image string) (status <-chan error) {
 		}
 
 		// update config.json
-		if err := updateServiceSpec(&spec); err != nil {
+		if err := launcher.updateServiceSpec(&spec); err != nil {
 			panic(err)
 		}
 
@@ -288,7 +289,7 @@ func (launcher *Launcher) GetServicesInfo() (info []ServiceInfo, err error) {
  * Private
  ******************************************************************************/
 
-func updateServiceSpec(spec *specs.Spec) (err error) {
+func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	mounts := []specs.Mount{
 		specs.Mount{"/etc/resolv.conf", "bind", "/etc/resolv.conf", []string{"bind", "ro"}},
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
@@ -299,6 +300,11 @@ func updateServiceSpec(spec *specs.Spec) (err error) {
 	// add lib64 if exists
 	if _, err := os.Stat("/lib64"); err == nil {
 		spec.Mounts = append(spec.Mounts, specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}})
+	}
+	// add hosts if exists
+	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "hosts"))
+	if _, err := os.Stat(hosts); err == nil {
+		spec.Mounts = append(spec.Mounts, specs.Mount{"/etc/hosts/", "bind", hosts, []string{"bind", "ro"}})
 	}
 
 	// add netns hook
