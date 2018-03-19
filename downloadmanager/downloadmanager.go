@@ -68,7 +68,10 @@ func DownloadPkg(servInfo amqp.ServiceInfoFromCloud, filepath chan string) {
 		imageSignature,
 		encryptionKey,
 		encryptionModeParams,
+		servInfo.SignatureAlgorithm,
 		servInfo.SignatureAlgorithmHash,
+		servInfo.SignatureScheme,
+		servInfo.EncryptionAlgorythm,
 		servInfo.EncryptionMode,
 		certificateChain)
 
