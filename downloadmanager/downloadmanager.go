@@ -12,7 +12,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
-func DownloadPkg(destDir string, servInfo amqp.ServiseInfoFromCloud, filepath chan string) {
+func DownloadPkg(destDir string, servInfo amqp.ServiceInfoFromCloud, filepath chan string) {
 	client := grab.NewClient()
 
 	req, err := grab.NewRequest(destDir, servInfo.DownloadUrl)

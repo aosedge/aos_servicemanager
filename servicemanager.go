@@ -2,9 +2,9 @@ package main
 
 import (
 	"os"
-	"time"
 	"os/signal"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -45,7 +45,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 		log.Warning("Received error from AMQP channel: ", data)
 		amqp.CloseAllConnections()
 		return false
-	case amqp.ServiseInfoFromCloud:
+	case amqp.ServiceInfoFromCloud:
 		version, err := launcher.GetServiceVersion(data.Id)
 		if err != nil {
 			log.Warning("error get version ", err)
@@ -57,7 +57,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 		}
 
 		return true
-	case []amqp.ServiseInfoFromCloud:
+	case []amqp.ServiceInfoFromCloud:
 		log.Info("recive array of services len ", len(data))
 		currenList, err := launcher.GetServicesInfo()
 		if err != nil {
@@ -68,7 +68,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 			for iDes := len(data) - 1; iDes >= 0; iDes-- {
 
 				if data[iDes].Id == currenList[iCur].Id {
-					if data[iDes].Version >= currenList[iCur].Version {
+					if data[iDes].Version > currenList[iCur].Version {
 						log.Info("Update ", data[iDes].Id, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
 						go downloadmanager.DownloadPkg("/tmp", data[iDes], output)
 					}
@@ -128,8 +128,8 @@ func main() {
 			time.Sleep(3 * time.Second)
 			continue
 		}
-		connectionOK := true 
-		sendInitalSetup(launcher)		
+		connectionOK := true
+		sendInitalSetup(launcher)
 		for connectionOK != false {
 			log.Debug("start select ")
 			select {
@@ -142,7 +142,7 @@ func main() {
 			case msg := <-out:
 				if msg != "" {
 					log.Debug("Save file here: ", msg)
-					err = <- launcher.InstallService(msg)
+					err = <-launcher.InstallService(msg)
 					if err != nil {
 						log.Error("Can't install service: ", err)
 					}
