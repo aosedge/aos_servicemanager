@@ -318,7 +318,7 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func getServiceInfo(spec *specs.Spec) (id string, version uint, err error) {
-	id, isPresent := spec.Annotations["packageName"]
+	id, isPresent := spec.Annotations["id"]
 	if !isPresent {
 		return id, version, errors.New("No service id provided")
 	}
