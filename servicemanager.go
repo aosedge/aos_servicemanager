@@ -2,8 +2,9 @@ package main
 
 import (
 	"os"
-	"path"
 	"time"
+	"os/signal"
+	"syscall"
 
 	log "github.com/sirupsen/logrus"
 
@@ -105,11 +106,18 @@ func main() {
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
 
-	launcher, err := launcher.New(path.Join(os.Getenv("GOPATH"), "aos"))
+	launcher, err := launcher.New("data")
 	if err != nil {
-		log.Fatal("Can't create launcher")
+		log.Fatal("Can't create launcher: ", err)
 	}
-	defer launcher.Close()
+
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		launcher.Close()
+		os.Exit(1)
+	}()
 
 	for {
 		log.Debug("start connection")
@@ -133,8 +141,14 @@ func main() {
 				}
 			case msg := <-out:
 				if msg != "" {
-					log.Debug("Save file here: %v", msg)
-					launcher.InstallService(msg) //TODO: add error handling
+					log.Debug("Save file here: ", msg)
+					err = <- launcher.InstallService(msg)
+					if err != nil {
+						log.Error("Can't install service: ", err)
+					}
+					if err := os.Remove(msg); err != nil {
+						log.Errorf("Can't remove file %s: %s", msg, err)
+					}
 				}
 			}
 		}

@@ -1,19 +1,19 @@
 {
 	"ociVersion": "1.0.0",
 	"process": {
-		"terminal": false,
+		"terminal": true,
 		"user": {
 			"uid": 0,
 			"gid": 0
 		},
 		"args": [
-			"/home/service/service_app"
+			"bash"
 		],
 		"env": [
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 			"TERM=xterm"
 		],
-		"cwd": "/",
+		"cwd": "/home/service",
 		"capabilities": {
 			"bounding": [
 				"CAP_AUDIT_WRITE",
@@ -61,51 +61,6 @@
 	},
 	"hostname": "runc",
 	"mounts": [
-		{
-			"destination": "/etc/resolv.conf",
-			"type": "bind",
-			"source": "resolv.conf",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/bin",
-			"type": "bind",
-			"source": "/bin",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/lib",
-			"type": "bind",
-			"source": "/lib",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/usr",
-			"type": "bind",
-			"source": "/usr",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/home/service/storage",
-			"type": "bind",
-			"source": "storage",
-			"options": [
-				"bind",
-				"rw"
-			]
-		},
 		{
 			"destination": "/proc",
 			"type": "proc",
@@ -181,13 +136,6 @@
 			]
 		}
 	],
-	"hooks": {
-		"prestart": [
-			{
-				"path": "/path/to/netns"
-			}
-		]
-	},
 	"linux": {
 		"resources": {
 			"devices": [
@@ -231,5 +179,11 @@
 			"/proc/sys",
 			"/proc/sysrq-trigger"
 		]
+	},
+	"annotations": {
+		"packageName": "SensorSender",
+		"version": "1",
+		"description": "Some Descroption",
+		"vendor": "Super Vendor"
 	}
 }
