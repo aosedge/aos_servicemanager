@@ -439,11 +439,13 @@ func (launcher *Launcher) startService(id string, serviceDir string) (err error)
 
 	// create container
 	if err := launcher.runtime.Create(ctx, id, serviceDir, &opts); err != nil {
+		consoleSocket.Close()
 		return err
 	}
 
 	// create container
 	if err := launcher.runtime.Start(ctx, id); err != nil {
+		consoleSocket.Close()
 		return err
 	}
 
