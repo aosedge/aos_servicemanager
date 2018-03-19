@@ -2,6 +2,7 @@ package downloadmanager
 
 import (
 	"encoding/hex"
+	"io/ioutil"
 	"os"
 	"strings"
 
@@ -12,9 +13,15 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
-func DownloadPkg(destDir string, servInfo amqp.ServiceInfoFromCloud, filepath chan string) {
+func DownloadPkg(servInfo amqp.ServiceInfoFromCloud, filepath chan string) {
 	client := grab.NewClient()
 
+	destDir, err := ioutil.TempDir("", "blob")
+	if err != nil {
+		log.Error("Can't create tmp dir : ", err)
+		filepath <- ""
+		return
+	}
 	req, err := grab.NewRequest(destDir, servInfo.DownloadUrl)
 	if err != nil {
 		log.Error("Can't download package: ", err)
