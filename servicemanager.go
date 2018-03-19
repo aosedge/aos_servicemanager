@@ -53,7 +53,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 		}
 		if data.Version > version {
 			log.Debug("send download request url ", data.DownloadUrl)
-			go downloadmanager.DownloadPkg("/tmp", data, output)
+			go downloadmanager.DownloadPkg(data, output)
 		}
 
 		return true
@@ -70,7 +70,8 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 				if data[iDes].Id == currenList[iCur].Id {
 					if data[iDes].Version > currenList[iCur].Version {
 						log.Info("Update ", data[iDes].Id, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
-						go downloadmanager.DownloadPkg("/tmp", data[iDes], output)
+
+						go downloadmanager.DownloadPkg(data[iDes], output)
 					}
 					data = append(data[:iDes], data[iDes+1:]...)
 					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
@@ -84,7 +85,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 
 		for _, newElemnt := range data {
 			log.Info("Download new serv Id ", newElemnt.Id, " version ", newElemnt.Version)
-			go downloadmanager.DownloadPkg("/tmp", newElemnt, output)
+			go downloadmanager.DownloadPkg(newElemnt, output)
 		}
 		return true
 	default:
