@@ -21,7 +21,7 @@ import (
 // - close/erase channel
 // - add cahnnel for send data
 // - remove global variables
-// - change ServiseInfoFromCloud according to KB when will be available
+// - change ServiceInfoFromCloud according to KB when will be available
 // - sessionID
 // - coleration ID
 // - erro ahndling
@@ -92,7 +92,7 @@ type queueInfo struct {
 	NoWait           bool   `json:"noWait"`
 }
 
-type ServiseInfoFromCloud struct {
+type ServiceInfoFromCloud struct {
 	Id                     string `json:"id"`
 	Version                uint   `json:"version"`
 	UpdateType             string `json:"updateType"`
@@ -244,7 +244,7 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 
 	go func() {
 		err := <-conn.NotifyClose(make(chan *amqp.Error))
-		log.Warning("Excahnge connection closing: ",err)
+		log.Warning("Excahnge connection closing: ", err)
 		if exchangeInfo.valid != false {
 			exchangeInfo.valid = false
 			amqpChan <- err
@@ -361,7 +361,7 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			continue
 		}
 
-		var servInfoArray []ServiseInfoFromCloud
+		var servInfoArray []ServiceInfoFromCloud
 
 		for _, element := range ecriptList.Sevices {
 			cms_data, err := base64.StdEncoding.DecodeString(element)
@@ -376,13 +376,13 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			}
 
 			log.Info("Decrypted data:", string(decriptData))
-			var servInfo ServiseInfoFromCloud
+			var servInfo ServiceInfoFromCloud
 			err = json.Unmarshal(decriptData, &servInfo) // TODO: add check
 			if err != nil {
 				log.Error("Cand make json from decripted data", string(decriptData), err)
 				continue
 			}
-			servInfoArray = append(servInfoArray, servInfo)			
+			servInfoArray = append(servInfoArray, servInfo)
 		}
 		amqpChan <- servInfoArray
 	}
@@ -417,7 +417,7 @@ func CloseAllConnections() {
 
 	case consumerInfo.conn != nil:
 		consumerInfo.conn.Close()
-		
+
 	}
 }
 
