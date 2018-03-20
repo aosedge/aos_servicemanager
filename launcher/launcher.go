@@ -452,6 +452,22 @@ func (launcher *Launcher) startService(id string, serviceDir string) (err error)
 		return err
 	}
 
+	console, err := consoleSocket.ReceiveMaster()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		buffer := make([]byte, 1024)
+
+		for {
+			_, err := console.Read(buffer)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	// create container
 	if err := launcher.runtime.Start(ctx, id); err != nil {
 		consoleSocket.Close()
