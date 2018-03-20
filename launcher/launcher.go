@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -181,7 +182,7 @@ func (launcher *Launcher) InstallService(image string) (status <-chan error) {
 		}
 
 		// update config.json
-		if err := updateServiceSpec(&spec); err != nil {
+		if err := launcher.updateServiceSpec(&spec); err != nil {
 			panic(err)
 		}
 
@@ -288,7 +289,7 @@ func (launcher *Launcher) GetServicesInfo() (info []ServiceInfo, err error) {
  * Private
  ******************************************************************************/
 
-func updateServiceSpec(spec *specs.Spec) (err error) {
+func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	mounts := []specs.Mount{
 		specs.Mount{"/etc/resolv.conf", "bind", "/etc/resolv.conf", []string{"bind", "ro"}},
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
@@ -299,6 +300,11 @@ func updateServiceSpec(spec *specs.Spec) (err error) {
 	// add lib64 if exists
 	if _, err := os.Stat("/lib64"); err == nil {
 		spec.Mounts = append(spec.Mounts, specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}})
+	}
+	// add hosts if exists
+	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "hosts"))
+	if _, err := os.Stat(hosts); err == nil {
+		spec.Mounts = append(spec.Mounts, specs.Mount{"/etc/hosts/", "bind", hosts, []string{"bind", "ro"}})
 	}
 
 	// add netns hook
@@ -312,7 +318,7 @@ func updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func getServiceInfo(spec *specs.Spec) (id string, version uint, err error) {
-	id, isPresent := spec.Annotations["packageName"]
+	id, isPresent := spec.Annotations["id"]
 	if !isPresent {
 		return id, version, errors.New("No service id provided")
 	}
@@ -413,7 +419,10 @@ func (launcher *Launcher) startService(id string, serviceDir string) (err error)
 		switch container.Status {
 		case "running":
 			log.WithField(id, "id").Warning("Service is already running")
-			if err := launcher.runtime.Delete(ctx, id, &runc.DeleteOpts{}); err != nil {
+			if err := launcher.runtime.Kill(ctx, id, int(syscall.SIGKILL), &runc.KillOpts{}); err != nil {
+				return err
+			}
+			if err := waitProcessFinished(container.Pid); err != nil {
 				return err
 			}
 		}
@@ -492,6 +501,8 @@ func (launcher *Launcher) stopService(id string) (err error) {
 			return err
 		}
 	}
+
+	service.socket.Close()
 
 	delete(launcher.services, id)
 
