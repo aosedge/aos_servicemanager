@@ -452,6 +452,22 @@ func (launcher *Launcher) startService(id string, serviceDir string) (err error)
 		return err
 	}
 
+	console, err := consoleSocket.ReceiveMaster()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		buffer := make([]byte, 1024)
+
+		for {
+			_, err := console.Read(buffer)
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	// create container
 	if err := launcher.runtime.Start(ctx, id); err != nil {
 		consoleSocket.Close()
@@ -477,10 +493,10 @@ func (launcher *Launcher) stopService(id string) (err error) {
 		return errors.New("Service is not started")
 	}
 
-	if err := launcher.runtime.Kill(service.context, id, int(syscall.SIGKILL), &runc.KillOpts{}); err != nil {
-		if !strings.Contains(err.Error(), "does not exist") {
-			return err
-		}
+	err = launcher.runtime.Kill(service.context, id, int(syscall.SIGKILL), &runc.KillOpts{})
+	if err != nil && !(strings.Contains(err.Error(), "does not exist") ||
+		strings.Contains(err.Error(), "process already finished")) {
+		return err
 	}
 
 	// check current status of the container
@@ -493,7 +509,9 @@ func (launcher *Launcher) stopService(id string) (err error) {
 
 	if container != nil && container.Status == "running" {
 		log.WithField("id", id).Debugf("Wait for service finished, pid: %d", container.Pid)
-		waitProcessFinished(container.Pid)
+		if err := waitProcessFinished(container.Pid); err != nil {
+			log.Errorf("Error wait process finished: %s", err)
+		}
 	}
 
 	if err := launcher.runtime.Delete(service.context, id, &runc.DeleteOpts{}); err != nil {
