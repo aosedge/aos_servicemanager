@@ -98,8 +98,6 @@ type ServiceInfoFromCloud struct {
 	UpdateType             string `json:"updateType"`
 	DownloadUrl            string `json:"downloadUrl"`
 	UrlExpiration          string `json:"urlExpiration"`
-	Hash                   uint   `json:"hash"`
-	Size                   uint   `json:"size"`
 	SignatureAlgorithm     string `json:"signatureAlgorithm"`
 	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
 	SignatureScheme        string `json:"signatureScheme"`
