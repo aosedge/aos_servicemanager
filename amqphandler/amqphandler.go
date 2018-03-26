@@ -29,6 +29,13 @@ import (
  * Types
  ******************************************************************************/
 
+type AmqpHandler struct {
+	sendChan       chan []byte
+	exchangeInfo   amqpLocalSenderConnectionInfo
+	consumerInfo   amqpLocalConsumerConnectionInfo
+	localSessionID string
+}
+
 type ServiceInfoFromCloud struct {
 	Id                     string `json:"id"`
 	Version                uint   `json:"version"`
@@ -149,7 +156,13 @@ var localSessionID string
  * Public
  ******************************************************************************/
 
-func InitAmqphandler(sdURL string) (chan interface{}, error) {
+// New creates new launcher object
+func New() (handler *AmqpHandler, err error) {
+	handler = &AmqpHandler{}
+	return handler, nil
+}
+
+func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	//TODO:do get VIn users form VIS
 	servRequst := serviseDiscoveryRequest{
@@ -164,7 +177,7 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 	}
 	log.Debug("Results: \n", amqpConn)
 
-	exchangeInfo, err = getSendConnectionInfo(amqpConn.SendParam)
+	handler.exchangeInfo, err = getSendConnectionInfo(amqpConn.SendParam)
 	if err != nil {
 		log.Error("error get exchage info ", err)
 		return amqpChan, err
@@ -172,20 +185,22 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	log.Info("exchange ", exchangeInfo.valid)
 
-	consumerInfo, err = getConsumerConnectionInfo(amqpConn.ReceiveParams)
+	handler.consumerInfo, err = getConsumerConnectionInfo(amqpConn.ReceiveParams)
 	if err != nil {
-		if exchangeInfo.valid == true {
-			exchangeInfo.conn.Close()
-			exchangeInfo.valid = false
+		//TODO: call CloseAllConnections
+		if handler.exchangeInfo.valid == true {
+			handler.exchangeInfo.conn.Close()
+			handler.exchangeInfo.valid = false
 		}
 		log.Error("error get consumer info ", err)
 		return amqpChan, err
 	}
 
-	log.Info("consumer ", consumerInfo.valid)
+	handler.localSessionID = amqpConn.SessionId
+	log.Info("Current SessionID  ", handler.localSessionID)
 
-	go startConsumer(&consumerInfo)
-	go startSender(&exchangeInfo)
+	go startConsumer(&handler.consumerInfo)
+	go startSender(&handler.exchangeInfo)
 
 	log.Debug(" [.] Got ")
 
@@ -193,35 +208,37 @@ func InitAmqphandler(sdURL string) (chan interface{}, error) {
 }
 
 //todo add return errors
-func SendInitialSetup(serviceList []launcher.ServiceInfo) {
+func (handler *AmqpHandler) SendInitialSetup(serviceList []launcher.ServiceInfo) {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: localSessionID, Sevices: serviceList}
+	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: handler.localSessionID, Sevices: serviceList}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("erroe :%v", err)
 		return
 	}
-	sendChan <- reqJson
+	handler.sendChan <- reqJson
 	return
 }
 
-func CloseAllConnections() {
+func (handler *AmqpHandler) CloseAllConnections() {
 	log.Info("CloseAllConnections")
 	switch {
-	case exchangeInfo.valid == true:
-		exchangeInfo.valid = false
+	case handler.exchangeInfo.valid == true:
+		handler.exchangeInfo.valid = false
 		fallthrough
 
-	case exchangeInfo.conn != nil:
-		exchangeInfo.conn.Close()
+	case handler.exchangeInfo.conn != nil:
+		handler.exchangeInfo.conn.Close()
+		handler.exchangeInfo.conn = nil
 		fallthrough
 
-	case consumerInfo.valid == true:
-		consumerInfo.valid = false
+	case handler.consumerInfo.valid == true:
+		handler.consumerInfo.valid = false
 		fallthrough
 
-	case consumerInfo.conn != nil:
-		consumerInfo.conn.Close()
+	case handler.consumerInfo.conn != nil:
+		handler.consumerInfo.conn.Close()
+		handler.consumerInfo.conn = nil
 
 	}
 }
@@ -275,14 +292,6 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 	}
 	localSessionID = jsonResp.Connection.SessionId
 	return jsonResp.Connection, nil
-}
-
-func (a amqpExtAuth) Mechanism() string {
-	return "EXTERNAL"
-}
-
-func (a amqpExtAuth) Response() string {
-	return ""
 }
 
 func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
@@ -471,4 +480,12 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		amqpChan <- servInfoArray
 	}
 	log.Warning("END listen") //TODO: add return error to channel
+}
+
+func (a amqpExtAuth) Mechanism() string {
+	return "EXTERNAL"
+}
+
+func (a amqpExtAuth) Response() string {
+	return ""
 }

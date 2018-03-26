@@ -30,20 +30,20 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(launcher *launcher.Launcher) {
+func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
 		log.Error("Error getting initial list ", err)
 		//TODO: return
 	}
-	amqp.SendInitialSetup(initialList)
+	handler.SendInitialSetup(initialList)
 }
 
-func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output chan string) bool {
+func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher, output chan string) bool {
 	switch data := data.(type) {
 	case error:
 		log.Warning("Received error from AMQP channel: ", data)
-		amqp.CloseAllConnections()
+		handler.CloseAllConnections()
 		return false
 	case amqp.ServiceInfoFromCloud:
 		version, err := launcher.GetServiceVersion(data.Id)
@@ -111,6 +111,10 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
+	amqpHandler, err := amqp.New()
+	if err != nil {
+		log.Fatal("Can't amqpHandler: ", err)
+	}
 
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -122,7 +126,7 @@ func main() {
 
 	for {
 		log.Debug("start connection")
-		amqpChan, err := amqp.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
+		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
 
 		if err != nil {
 			log.Error("Can't esablish connection ", err)
@@ -130,12 +134,12 @@ func main() {
 			continue
 		}
 		connectionOK := true
-		sendInitalSetup(launcher)
+		sendInitalSetup(launcher, amqpHandler)
 		for connectionOK != false {
 			log.Debug("start select ")
 			select {
 			case amqpReturn := <-amqpChan:
-				stop := !processAmqpReturn(amqpReturn, launcher, out)
+				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher, out)
 				if stop == true {
 					connectionOK = false
 					break
