@@ -13,10 +13,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
-//TODO:
-//- add tls to downloadmanager
-//- add encript image
-
 type appInfo struct {
 	Name string
 }
@@ -36,7 +32,9 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) {
 		log.Error("Error getting initial list ", err)
 		//TODO: return
 	}
-	handler.SendInitialSetup(initialList)
+	if handler.SendInitialSetup(initialList) != nil {
+		log.Error("Error send sendInitalSetup", err)
+	}
 }
 
 func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher, output chan string) bool {
@@ -121,6 +119,7 @@ func main() {
 	go func() {
 		<-c
 		launcher.Close()
+		amqpHandler.CloseAllConnections()
 		os.Exit(1)
 	}()
 
