@@ -46,20 +46,20 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 	case amqp.ServiceInfoFromCloud:
 		version, err := launcher.GetServiceVersion(data.Id)
 		if err != nil {
-			log.Warning("error get version ", err)
+			log.Warning("Error get version ", err)
 			break
 		}
 		if data.Version > version {
-			log.Debug("send download request url ", data.DownloadUrl)
+			log.Debug("Send download request url ", data.DownloadUrl)
 			go downloadmanager.DownloadPkg(data, output)
 		}
 
 		return true
 	case []amqp.ServiceInfoFromCloud:
-		log.Info("recive array of services len ", len(data))
+		log.Info("Recive array of services len ", len(data))
 		currenList, err := launcher.GetServicesInfo()
 		if err != nil {
-			log.Warning("error get GetServicesInfo ", err)
+			log.Warning("Error get GetServicesInfo ", err)
 			break
 		}
 		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
@@ -77,7 +77,7 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 			}
 		}
 		for _, deleteElemnt := range currenList {
-			log.Info("delete ID ", deleteElemnt.Id)
+			log.Info("Delete ID ", deleteElemnt.Id)
 			launcher.RemoveService(deleteElemnt.Id) //TODO ADD CHECK ERROR
 		}
 
@@ -87,7 +87,7 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 		}
 		return true
 	default:
-		log.Info("receive some data amqp")
+		log.Info("Receive some data amqp")
 
 		return true
 	}
@@ -135,7 +135,7 @@ func main() {
 		connectionOK := true
 		sendInitalSetup(launcher, amqpHandler)
 		for connectionOK != false {
-			log.Debug("start select ")
+			log.Debug("Start select ")
 			select {
 			case amqpReturn := <-amqpChan:
 				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher, out)
