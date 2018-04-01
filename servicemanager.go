@@ -13,10 +13,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
-//TODO:
-//- add tls to downloadmanager
-//- add encript image
-
 type appInfo struct {
 	Name string
 }
@@ -30,38 +26,40 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(launcher *launcher.Launcher) {
+func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
 		log.Error("Error getting initial list ", err)
 		//TODO: return
 	}
-	amqp.SendInitialSetup(initialList)
+	if handler.SendInitialSetup(initialList) != nil {
+		log.Error("Error send sendInitalSetup", err)
+	}
 }
 
-func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output chan string) bool {
+func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher, output chan string) bool {
 	switch data := data.(type) {
 	case error:
 		log.Warning("Received error from AMQP channel: ", data)
-		amqp.CloseAllConnections()
+		handler.CloseAllConnections()
 		return false
 	case amqp.ServiceInfoFromCloud:
 		version, err := launcher.GetServiceVersion(data.Id)
 		if err != nil {
-			log.Warning("error get version ", err)
+			log.Warning("Error get version ", err)
 			break
 		}
 		if data.Version > version {
-			log.Debug("send download request url ", data.DownloadUrl)
+			log.Debug("Send download request url ", data.DownloadUrl)
 			go downloadmanager.DownloadPkg(data, output)
 		}
 
 		return true
 	case []amqp.ServiceInfoFromCloud:
-		log.Info("recive array of services len ", len(data))
+		log.Info("Recive array of services len ", len(data))
 		currenList, err := launcher.GetServicesInfo()
 		if err != nil {
-			log.Warning("error get GetServicesInfo ", err)
+			log.Warning("Error get GetServicesInfo ", err)
 			break
 		}
 		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
@@ -79,7 +77,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 			}
 		}
 		for _, deleteElemnt := range currenList {
-			log.Info("delete ID ", deleteElemnt.Id)
+			log.Info("Delete ID ", deleteElemnt.Id)
 			launcher.RemoveService(deleteElemnt.Id) //TODO ADD CHECK ERROR
 		}
 
@@ -89,7 +87,7 @@ func processAmqpReturn(data interface{}, launcher *launcher.Launcher, output cha
 		}
 		return true
 	default:
-		log.Info("receive some data amqp")
+		log.Info("Receive some data amqp")
 
 		return true
 	}
@@ -111,18 +109,23 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
+	amqpHandler, err := amqp.New()
+	if err != nil {
+		log.Fatal("Can't amqpHandler: ", err)
+	}
 
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
 		launcher.Close()
+		amqpHandler.CloseAllConnections()
 		os.Exit(1)
 	}()
 
 	for {
 		log.Debug("start connection")
-		amqpChan, err := amqp.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
+		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
 
 		if err != nil {
 			log.Error("Can't esablish connection ", err)
@@ -130,12 +133,12 @@ func main() {
 			continue
 		}
 		connectionOK := true
-		sendInitalSetup(launcher)
+		sendInitalSetup(launcher, amqpHandler)
 		for connectionOK != false {
-			log.Debug("start select ")
+			log.Debug("Start select ")
 			select {
 			case amqpReturn := <-amqpChan:
-				stop := !processAmqpReturn(amqpReturn, launcher, out)
+				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher, out)
 				if stop == true {
 					connectionOK = false
 					break

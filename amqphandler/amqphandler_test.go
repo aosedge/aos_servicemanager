@@ -54,7 +54,7 @@ func Test_seviceDiscovery(t *testing.T) {
 	servRequst := serviseDiscoveryRequest{
 		Version: 1,
 		VIN:     "12345ZXCVBNMA1234",
-		Users:   []string{"user1", "vendor2"}}
+		Users:   []string{"user1", "OEM2"}}
 
 	amqpConn, err := getAmqpConnInfo("someurl", servRequst)
 	if err != nil {

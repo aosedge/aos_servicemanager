@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"net/http"
 	//	"net/url"
@@ -19,15 +18,36 @@ import (
 
 //TODO: list
 // - close/erase channel
-// - add cahnnel for send data
-// - remove global variables
-// - change ServiceInfoFromCloud according to KB when will be available
-// - sessionID
-// - coleration ID
-// - erro ahndling
+// - correlation ID
 // - reconnect 3 times for each connection
 
-const DEFAULT_CONFIG_FILE = "/etc/demo-application/demo_config.json"
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type AmqpHandler struct {
+	//sendChan       chan []byte
+	exchangeInfo   amqpLocalSenderConnectionInfo   // connection for sending data
+	consumerInfo   amqpLocalConsumerConnectionInfo // connection for receiving data
+	localSessionID string
+}
+
+type ServiceInfoFromCloud struct {
+	Id                     string `json:"id"`
+	Version                uint   `json:"version"`
+	UpdateType             string `json:"updateType"`
+	DownloadUrl            string `json:"downloadUrl"`
+	UrlExpiration          string `json:"urlExpiration"`
+	SignatureAlgorithm     string `json:"signatureAlgorithm"`
+	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
+	SignatureScheme        string `json:"signatureScheme"`
+	ImageSignature         string `json:"imageSignature"`
+	CertificateChain       string `json:"certificateChain"`
+	EncryptionKey          string `json:"encryptionKey"`
+	EncryptionAlgorythm    string `json:"encryptionAlgorythm"`
+	EncryptionMode         string `json:"encryptionMode"`
+	EncryptionModeParams   string `json:"encryptionModeParams"`
+}
 
 ///API structures
 type serviseDiscoveryRequest struct {
@@ -92,25 +112,6 @@ type queueInfo struct {
 	NoWait           bool   `json:"noWait"`
 }
 
-type ServiceInfoFromCloud struct {
-	Id                     string `json:"id"`
-	Version                uint   `json:"version"`
-	UpdateType             string `json:"updateType"`
-	DownloadUrl            string `json:"downloadUrl"`
-	UrlExpiration          string `json:"urlExpiration"`
-	Hash                   uint   `json:"hash"`
-	Size                   uint   `json:"size"`
-	SignatureAlgorithm     string `json:"signatureAlgorithm"`
-	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
-	SignatureScheme        string `json:"signatureScheme"`
-	ImageSignature         string `json:"imageSignature"`
-	CertificateChain       string `json:"certificateChain"`
-	EncryptionKey          string `json:"encryptionKey"`
-	EncryptionAlgorythm    string `json:"encryptionAlgorythm"`
-	EncryptionMode         string `json:"encryptionMode"`
-	EncryptionModeParams   string `json:"encryptionModeParams"`
-}
-
 /// internal structures
 type amqpLocalSenderConnectionInfo struct {
 	conn         *amqp.Connection
@@ -127,41 +128,127 @@ type amqpLocalConsumerConnectionInfo struct {
 	valid bool
 }
 
-type PackageInfo struct {
-	Name        string
-	Version     string
-	DownloadUrl string
-}
+type amqpExtAuth struct{}
+
+/*******************************************************************************
+ * Variables
+ ******************************************************************************/
 
 // channel for return packages
 var amqpChan = make(chan interface{}, 100)
 
-// connection for sending data
-var exchangeInfo amqpLocalSenderConnectionInfo
+var sendChan = make(chan []byte, 100)
 
-// connection for receiving data
-var consumerInfo amqpLocalConsumerConnectionInfo
+/*******************************************************************************
+ * Public
+ ******************************************************************************/
 
-//TODO: redmove from global
-var localSessionID string
+// New creates new launcher object
+func New() (handler *AmqpHandler, err error) {
+	handler = &AmqpHandler{}
+	return handler, nil
+}
+
+func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, error) {
+
+	//TODO:do get VIN users form VIS
+	servRequst := serviseDiscoveryRequest{
+		Version: 1,
+		VIN:     "12345ZXCVBNMA1234",
+		Users:   []string{"user1", "OEM2"}}
+
+	amqpConn, err := getAmqpConnInfo(sdURL, servRequst)
+	if err != nil {
+		log.Error("NO connection info: ", err)
+		return amqpChan, err
+	}
+	log.Debug("Results: \n", amqpConn)
+
+	handler.exchangeInfo, err = handler.getSendConnectionInfo(&amqpConn.SendParam)
+	if err != nil {
+		log.Error("Error get exchange info ", err)
+		return amqpChan, err
+	}
+
+	log.Info("Exchange ", handler.exchangeInfo.valid)
+
+	handler.consumerInfo, err = handler.getConsumerConnectionInfo(&amqpConn.ReceiveParams)
+	if err != nil {
+		//TODO: call CloseAllConnections
+		if handler.exchangeInfo.valid == true {
+			handler.exchangeInfo.conn.Close()
+			handler.exchangeInfo.valid = false
+		}
+		log.Error("Error get consumer info ", err)
+		return amqpChan, err
+	}
+
+	handler.localSessionID = amqpConn.SessionId
+	log.Info("Current SessionID  ", handler.localSessionID)
+
+	go startConsumer(&handler.consumerInfo)
+	go startSender(&handler.exchangeInfo)
+
+	return amqpChan, nil
+}
+
+//todo add return errors
+func (handler *AmqpHandler) SendInitialSetup(serviceList []launcher.ServiceInfo) error {
+	log.Info("SendInitialSetup ", serviceList)
+	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: handler.localSessionID, Sevices: serviceList}
+	reqJson, err := json.Marshal(msg)
+	if err != nil {
+		log.Warn("Error :%v", err)
+		return err
+	}
+	sendChan <- reqJson
+	return nil
+}
+
+func (handler *AmqpHandler) CloseAllConnections() {
+	log.Info("CloseAllConnections")
+	switch {
+	case handler.exchangeInfo.valid == true:
+		handler.exchangeInfo.valid = false
+		fallthrough
+
+	case handler.exchangeInfo.conn != nil:
+		handler.exchangeInfo.conn.Close()
+		handler.exchangeInfo.conn = nil
+		fallthrough
+
+	case handler.consumerInfo.valid == true:
+		handler.consumerInfo.valid = false
+		fallthrough
+
+	case handler.consumerInfo.conn != nil:
+		handler.consumerInfo.conn.Close()
+		handler.consumerInfo.conn = nil
+
+	}
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
 
 //service discovery implementation
-func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnectioninfo, error) {
+func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (connection reqbbitConnectioninfo, err error) {
 
 	var jsonResp serviseDiscoveryResp
 
 	reqJson, err := json.Marshal(request)
 	if err != nil {
-		log.Warn("erroe :", err)
-		return jsonResp.Connection, err
+		log.Warn("Error :", err)
+		return connection, err
 	}
 
-	log.Info("request :", string(reqJson))
+	log.Info("Request :", string(reqJson))
 
 	tlsConfig, err := fcrypt.GetTlsConfig()
 	if err != nil {
 		log.Warn("GetTlsConfig error : ", err)
-		return jsonResp.Connection, err
+		return connection, err
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
@@ -170,41 +257,28 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (reqbbitConnec
 
 	if err != nil {
 		log.Warn("Post error : ", err)
-		return jsonResp.Connection, err
+		return connection, err
 	}
 	defer resp.Body.Close()
 
-	log.Info("Send OK: \n")
+	log.Info("HTTP POST Send OK: \n")
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Error("error Read ", err)
-		return jsonResp.Connection, err
+		log.Error("Error Read ", err)
+		return connection, err
 	}
 	defer resp.Body.Close()
 
 	err = json.Unmarshal(htmlData, &jsonResp) // TODO: add check
 	if err != nil {
-		log.Error("receive ", string(htmlData), err)
-		return jsonResp.Connection, err
+		log.Error("Receive ", string(htmlData), err)
+		return connection, err
 	}
-	localSessionID = jsonResp.Connection.SessionId
 	return jsonResp.Connection, nil
 }
 
-type amqpExtAuth struct{}
-
-func (a amqpExtAuth) Mechanism() string {
-	return "EXTERNAL"
-}
-
-func (a amqpExtAuth) Response() string {
-	return ""
-}
-
-func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, error) {
-	//TODO: map input params to configs
-	var retData amqpLocalSenderConnectionInfo
+func (handler *AmqpHandler) getSendConnectionInfo(params *sendParam) (retData amqpLocalSenderConnectionInfo, err error) {
 
 	tlsConfig, err := fcrypt.GetTlsConfig()
 	if err != nil {
@@ -215,10 +289,10 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 	authentication := []amqp.Authentication{amqpExtAuth{}}
 	config := amqp.Config{TLSClientConfig: tlsConfig,
 		SASL: authentication}
-	//conn, err := amqp.Dial("amqp://localhost:5672/")
+
 	conn, err := amqp.DialConfig("amqps://"+params.Host+"/", config)
 	if err != nil {
-		log.Warning("amqp.Dial to exchange ", err)
+		log.Warning("Amqp.Dial to exchange ", err)
 		return retData, err
 	}
 
@@ -238,15 +312,15 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 		nil, // arguments
 	)
 	if err != nil {
-		log.Warning("Failed to declare an exchangel", err)
+		log.Warning("Failed to declare an exchange", err)
 		return retData, err
 	}
 
 	go func() {
 		err := <-conn.NotifyClose(make(chan *amqp.Error))
-		log.Warning("Excahnge connection closing: ", err)
-		if exchangeInfo.valid != false {
-			exchangeInfo.valid = false
+		log.Warning("Exchange connection closing: ", err)
+		if handler.exchangeInfo.valid != false {
+			handler.exchangeInfo.valid = false
 			amqpChan <- err
 		}
 	}()
@@ -259,12 +333,11 @@ func getSendConnectionInfo(params sendParam) (amqpLocalSenderConnectionInfo, err
 	retData.immediate = params.Immediate
 	retData.exchangeName = params.Exchange.Name
 
-	log.Info("create excahnge OK\n")
+	log.Info("Create exchange OK")
 	return retData, nil
 }
 
-func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnectionInfo, error) {
-	var retData amqpLocalConsumerConnectionInfo
+func (handler *AmqpHandler) getConsumerConnectionInfo(param *receiveParams) (retData amqpLocalConsumerConnectionInfo, err error) {
 
 	tlsConfig, err := fcrypt.GetTlsConfig()
 	if err != nil {
@@ -277,7 +350,7 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 
 	conn, err := amqp.DialConfig("amqps://"+param.Host+"/", config)
 	if err != nil {
-		log.Warning("amqp.Dial to exchange ", err)
+		log.Warning("Amqp.Dial to exchange ", err)
 		return retData, err
 	}
 
@@ -303,8 +376,8 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 	go func() {
 		err := <-conn.NotifyClose(make(chan *amqp.Error))
 		log.Warning("Consumer connection closing: ", err)
-		if consumerInfo.valid != false {
-			consumerInfo.valid = false
+		if handler.consumerInfo.valid != false {
+			handler.consumerInfo.valid = false
 			amqpChan <- err
 		}
 	}()
@@ -315,29 +388,29 @@ func getConsumerConnectionInfo(param receiveParams) (amqpLocalConsumerConnection
 	return retData, nil
 }
 
-func publishMessage(data []byte, correlationId string) error {
-
-	if exchangeInfo.valid != true {
-		log.Error("invalid Sender connection", string(data))
-		return errors.New("invalid Sender connection")
+func startSender(info *amqpLocalSenderConnectionInfo) {
+	log.Info("Start Sender ")
+	for sendData := range sendChan {
+		if info.valid != true {
+			log.Error("Invalid Sender connection")
+			return
+		}
+		if err := info.ch.Publish(
+			info.exchangeName, // exchange
+			"",                // routing key
+			info.mandatory,    // mandatory
+			info.immediate,    // immediate
+			amqp.Publishing{
+				ContentType:   "application/json",
+				DeliveryMode:  2,
+				CorrelationId: "100", //TODO: add processing CorelationID
+				Body:          sendData,
+			}); err != nil {
+			log.Warning("Error publish", err)
+			return
+		}
+		log.Info("SNED OK ", string(sendData))
 	}
-
-	if err := exchangeInfo.ch.Publish(
-		exchangeInfo.exchangeName, // exchange
-		"", // routing key
-		exchangeInfo.mandatory, // mandatory
-		exchangeInfo.immediate, // immediate
-		amqp.Publishing{
-			ContentType:   "application/json",
-			DeliveryMode:  2,
-			CorrelationId: correlationId,
-			Body:          data,
-		}); err != nil {
-		log.Warning("error publish", err)
-		return err
-	}
-	log.Info("SNED OK ", string(data))
-	return nil
 }
 
 func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
@@ -345,19 +418,20 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		log.Error("Invalid consumer connection ")
 		return
 	}
-	log.Info("start listen")
+	log.Info("Start listen")
 	for d := range consumerInfo.ch {
-		log.Printf("Received a message: %s", d.Body)
+		log.Info("Received a message: ", string(d.Body))
+		log.Info("CorrelationId: ", d.CorrelationId)
 		var ecriptList desiredStatus
 
 		err := json.Unmarshal(d.Body, &ecriptList) // TODO: add check
 		if err != nil {
-			log.Error("receive ", string(d.Body), err)
+			log.Error("Receive ", string(d.Body), err)
 			continue
 		}
 
 		if ecriptList.MessageType != "desiredStatus" {
-			log.Warning("incorrect msg type ", ecriptList.MessageType)
+			log.Warning("Incorrect msg type ", ecriptList.MessageType)
 			continue
 		}
 
@@ -371,7 +445,7 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			}
 			decriptData, err := fcrypt.DecryptMetadata(cms_data)
 			if err != nil {
-				log.Warning(" decript metadta erroe")
+				log.Warning("Decryption metadata error")
 				continue
 			}
 
@@ -379,88 +453,20 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			var servInfo ServiceInfoFromCloud
 			err = json.Unmarshal(decriptData, &servInfo) // TODO: add check
 			if err != nil {
-				log.Error("Cand make json from decripted data", string(decriptData), err)
+				log.Error("Can't make json from decrypt data", string(decriptData), err)
 				continue
 			}
 			servInfoArray = append(servInfoArray, servInfo)
 		}
 		amqpChan <- servInfoArray
 	}
-	log.Warning("END listen") //TODO: add return errro to cahnnel
+	log.Warning("END listen") //TODO: add return error to channel
 }
 
-func SendInitialSetup(serviceList []launcher.ServiceInfo) {
-	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: localSessionID, Sevices: serviceList}
-	reqJson, err := json.Marshal(msg)
-	if err != nil {
-		log.Warn("erroe :%v", err)
-		return
-	}
-	publishMessage(reqJson, "100")
+func (a amqpExtAuth) Mechanism() string {
+	return "EXTERNAL"
 }
 
-func CloseAllConnections() {
-	log.Info("CloseAllConnections")
-	switch {
-	case exchangeInfo.valid == true:
-		exchangeInfo.valid = false
-		fallthrough
-
-	case exchangeInfo.conn != nil:
-		exchangeInfo.conn.Close()
-		fallthrough
-
-	case consumerInfo.valid == true:
-		consumerInfo.valid = false
-		fallthrough
-
-	case consumerInfo.conn != nil:
-		consumerInfo.conn.Close()
-
-	}
-}
-
-//TODO: add return error
-func InitAmqphandler(sdURL string) (chan interface{}, error) {
-
-	//TODO:do get VIn users form VIS
-	servRequst := serviseDiscoveryRequest{
-		Version: 1,
-		VIN:     "12345ZXCVBNMA1234",
-		Users:   []string{"user1", "vendor2"}}
-
-	amqpConn, err := getAmqpConnInfo(sdURL, servRequst)
-	if err != nil {
-		log.Error("NO connection info: ", err)
-		return amqpChan, err
-	}
-	log.Printf("Results: \n", amqpConn)
-
-	exchangeInfo, err = getSendConnectionInfo(amqpConn.SendParam)
-	if err != nil {
-		log.Error("error get exchage info ", err)
-		return amqpChan, err
-	}
-
-	log.Info("exchange ", exchangeInfo.valid)
-
-	consumerInfo, err = getConsumerConnectionInfo(amqpConn.ReceiveParams)
-	if err != nil {
-		if exchangeInfo.valid == true {
-			exchangeInfo.conn.Close()
-			exchangeInfo.valid = false
-		}
-		log.Error("error get consumer info ", err)
-		return amqpChan, err
-	}
-
-	log.Info("consumer ", consumerInfo.valid)
-
-	go startConsumer(&consumerInfo)
-
-	//TODO: implment closeAll
-	log.Printf(" [.] Got ")
-
-	return amqpChan, nil
+func (a amqpExtAuth) Response() string {
+	return ""
 }
