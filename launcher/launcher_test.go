@@ -52,7 +52,7 @@ func setup() (err error) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		spec.Annotations["packageName"] = fmt.Sprintf("service%d", i)
+		spec.Annotations["id"] = fmt.Sprintf("service%d", i)
 		spec.Annotations["version"] = fmt.Sprintf("%d", i)
 
 		if err := launcher.WriteServiceSpec(&spec, specFile); err != nil {
