@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
-	//	"net/url"
+	"net/url"
 	//"os"
 	//"time"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +81,8 @@ type reqbbitConnectioninfo struct {
 
 type sendParam struct {
 	Host      string        `json:"host"`
+	User      string        `json:"user"`
+	Password  string        `json:"password"`
 	Mandatory bool          `json:"mandatory"`
 	Immediate bool          `json:"immediate"`
 	Exchange  excahngeParam `json:"exchange"`
@@ -96,6 +98,8 @@ type excahngeParam struct {
 
 type receiveParams struct {
 	Host      string    `json:"host"`
+	User      string    `json:"user"`
+	Password  string    `json:"password"`
 	Consumer  string    `json:"consumer"`
 	AutoAck   bool      `json:"autoAck"`
 	Exclusive bool      `json:"exclusive"`
@@ -290,7 +294,13 @@ func (handler *AmqpHandler) getSendConnectionInfo(params *sendParam) (retData am
 	config := amqp.Config{TLSClientConfig: tlsConfig,
 		SASL: authentication}
 
-	conn, err := amqp.DialConfig("amqps://"+params.Host+"/", config)
+	urlRabbitMQ := url.URL{Scheme: "amqps",
+		User: url.UserPassword(params.User, params.Password),
+		Host: params.Host,
+	}
+	log.Info("Connection url: ", urlRabbitMQ.String())
+
+	conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 	if err != nil {
 		log.Warning("Amqp.Dial to exchange ", err)
 		return retData, err
@@ -348,7 +358,13 @@ func (handler *AmqpHandler) getConsumerConnectionInfo(param *receiveParams) (ret
 	config := amqp.Config{TLSClientConfig: tlsConfig,
 		SASL: authentication}
 
-	conn, err := amqp.DialConfig("amqps://"+param.Host+"/", config)
+	urlRabbitMQ := url.URL{Scheme: "amqps",
+		User: url.UserPassword(param.User, param.Password),
+		Host: param.Host,
+	}
+	log.Info("Connection url: ", urlRabbitMQ.String())
+
+	conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 	if err != nil {
 		log.Warning("Amqp.Dial to exchange ", err)
 		return retData, err
