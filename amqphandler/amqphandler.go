@@ -64,10 +64,10 @@ type vehicleStatus struct {
 }
 
 type desiredStatus struct {
-	Version     uint     `json:"version"`
-	MessageType string   `json:"messageType"`
-	SessionId   string   `json:"sessionId"`
-	Sevices     []string `json:"services"`
+	Version     uint   `json:"version"`
+	MessageType string `json:"messageType"`
+	SessionId   string `json:"sessionId"`
+	Sevices     string `json:"services"`
 }
 type serviseDiscoveryResp struct {
 	Version    uint                  `json:"version"`
@@ -452,27 +452,23 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		}
 
 		var servInfoArray []ServiceInfoFromCloud
+		cms_data, err := base64.StdEncoding.DecodeString(ecriptList.Sevices)
+		if err != nil {
+			log.Error("Can't decode base64 data from element: ", err)
+			continue
+		}
 
-		for _, element := range ecriptList.Sevices {
-			cms_data, err := base64.StdEncoding.DecodeString(element)
-			if err != nil {
-				log.Error("Can't decode base64 data from element: ", err)
-				continue
-			}
-			decriptData, err := fcrypt.DecryptMetadata(cms_data)
-			if err != nil {
-				log.Warning("Decryption metadata error")
-				continue
-			}
+		decriptData, err := fcrypt.DecryptMetadata(cms_data)
+		if err != nil {
+			log.Error("Decryption metadata error")
+			continue
+		}
+		log.Info("Decrypted data:", string(decriptData))
 
-			log.Info("Decrypted data:", string(decriptData))
-			var servInfo ServiceInfoFromCloud
-			err = json.Unmarshal(decriptData, &servInfo) // TODO: add check
-			if err != nil {
-				log.Error("Can't make json from decrypt data", string(decriptData), err)
-				continue
-			}
-			servInfoArray = append(servInfoArray, servInfo)
+		err = json.Unmarshal(decriptData, &servInfoArray)
+		if err != nil {
+			log.Error("Can't make json from decrypt data", string(decriptData), err)
+			continue
 		}
 		amqpChan <- servInfoArray
 	}
