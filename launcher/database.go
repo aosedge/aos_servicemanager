@@ -159,6 +159,7 @@ func (db *database) setServiceState(id string, state serviceState) (err error) {
 
 // close closes database
 func (db *database) close() {
+	db.sql.Close()
 }
 
 /*******************************************************************************
