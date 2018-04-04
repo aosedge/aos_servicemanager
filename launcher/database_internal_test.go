@@ -88,7 +88,7 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("Can't get service: %s", err)
 	}
 	if service.status != statusError {
-		t.Errorf("Service status mismatch: %s", err)
+		t.Errorf("Service status mismatch")
 	}
 
 	// setServiceState
@@ -102,7 +102,7 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("Can't get service: %s", err)
 	}
 	if service.state != stateRunning {
-		t.Errorf("Service status mismatch: %s", err)
+		t.Errorf("Service state mismatch")
 	}
 
 	// removeService
