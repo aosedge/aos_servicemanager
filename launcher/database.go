@@ -140,7 +140,12 @@ func (db *database) setServiceStatus(id string, status serviceStatus) (err error
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(status, id)
+	result, err := stmt.Exec(status, id)
+	count, err := result.RowsAffected()
+
+	if count == 0 {
+		return errors.New("Service does not exist")
+	}
 
 	return err
 }
@@ -153,9 +158,14 @@ func (db *database) setServiceState(id string, state serviceState) (err error) {
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(state, id)
+	result, err := stmt.Exec(state, id)
+	count, err := result.RowsAffected()
 
-	return nil
+	if count == 0 {
+		return errors.New("Service does not exist")
+	}
+
+	return err
 }
 
 // close closes database
