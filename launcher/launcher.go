@@ -11,7 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync"
+	"time"
 
 	"github.com/coreos/go-systemd/dbus"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -31,6 +32,7 @@ const (
 
 var (
 	statusStr []string = []string{"OK", "Error"}
+	stateStr  []string = []string{"Init", "Running", "Stopped"}
 )
 
 // Service status
@@ -63,6 +65,7 @@ type ServiceInfo struct {
 type Launcher struct {
 	db              *database
 	systemd         *dbus.Conn
+	services        sync.Map
 	serviceTemplate string
 	workingDir      string
 	runcPath        string
@@ -95,11 +98,84 @@ func New(workingDir string) (launcher *Launcher, err error) {
 		return launcher, err
 	}
 
+	// Load all installed services
+	services, err := localLauncher.db.getServices()
+	if err != nil {
+		return launcher, err
+	}
+	for _, service := range services {
+		localLauncher.services.Store(service.serviceName, service.id)
+	}
+
 	// Create systemd connection
 	localLauncher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
 		return launcher, err
 	}
+	if err = localLauncher.systemd.Subscribe(); err != nil {
+		return launcher, err
+	}
+	serviceChannel, errorChannel := localLauncher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
+		2,
+		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
+		func(serviceName string) bool {
+			if _, exist := localLauncher.services.Load(serviceName); exist {
+				return false
+			}
+			return true
+		})
+	go func() {
+		for {
+			select {
+			case services := <-serviceChannel:
+				for _, service := range services {
+					var (
+						state  serviceState
+						status serviceStatus
+					)
+
+					if service == nil {
+						continue
+					}
+
+					log.WithField("name", service.Name).Debugf(
+						"Service state changed. Load state: %s, active state: %s, sub state: %s",
+						service.LoadState,
+						service.ActiveState,
+						service.SubState)
+
+					switch service.SubState {
+					case "running":
+						state = stateRunning
+						status = statusOk
+					default:
+						state = stateStopped
+						status = statusError
+					}
+
+					log.WithField("name", service.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
+
+					id, exist := localLauncher.services.Load(service.Name)
+
+					if exist {
+						if err := localLauncher.db.setServiceState(id.(string), state); err != nil {
+							log.WithField("name", service.Name).Error("Can't set service state: ", err)
+						}
+
+						if err := localLauncher.db.setServiceStatus(id.(string), status); err != nil {
+							log.WithField("name", service.Name).Error("Can't set service status: ", err)
+						}
+					} else {
+						log.WithField("name", service.Name).Warning("Can't update state or status. Service is not installed.")
+					}
+				}
+			case err := <-errorChannel:
+				log.Error("Subscription error: ", err)
+			case <-localLauncher.closeChannel:
+				return
+			}
+		}
+	}()
 
 	// Get systemd service template
 	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
@@ -121,6 +197,10 @@ func New(workingDir string) (launcher *Launcher, err error) {
 // Close closes launcher
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
+
+	if err := launcher.systemd.Unsubscribe(); err != nil {
+		log.Warn("Can't unsubscribe from systemd: ", err)
+	}
 
 	launcher.systemd.Close()
 	launcher.db.close()
@@ -457,6 +537,8 @@ func (launcher *Launcher) installService(installDir string) (err error) {
 		return err
 	}
 
+	launcher.services.Store(serviceName, id)
+
 	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
 
 	return nil
@@ -468,6 +550,8 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		return err
 	}
 	log.WithFields(log.Fields{"id": service.id, "version": service.version}).Debug("Remove service")
+
+	launcher.services.Delete(service.serviceName)
 
 	if err := launcher.stopService(service.serviceName); err != nil {
 		log.WithField("name", service.serviceName).Warn("Can't stop service: ", err)
