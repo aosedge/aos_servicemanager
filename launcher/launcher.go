@@ -65,6 +65,7 @@ type ServiceInfo struct {
 type Launcher struct {
 	db              *database
 	systemd         *dbus.Conn
+	closeChannel    chan bool
 	services        sync.Map
 	serviceTemplate string
 	workingDir      string
@@ -79,7 +80,10 @@ type Launcher struct {
 func New(workingDir string) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	var localLauncher Launcher = Launcher{workingDir: workingDir}
+	var localLauncher Launcher
+
+	localLauncher.workingDir = workingDir
+	localLauncher.closeChannel = make(chan bool)
 
 	// Check and create service dir
 	dir := path.Join(workingDir, serviceDir)
@@ -201,6 +205,8 @@ func (launcher *Launcher) Close() {
 	if err := launcher.systemd.Unsubscribe(); err != nil {
 		log.Warn("Can't unsubscribe from systemd: ", err)
 	}
+
+	launcher.closeChannel <- true
 
 	launcher.systemd.Close()
 	launcher.db.close()
