@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -286,6 +287,8 @@ func TestAutoStart(t *testing.T) {
 	}
 	defer launcher.Close()
 
+	time.Sleep(time.Second * 3)
+
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
@@ -304,4 +307,22 @@ func TestAutoStart(t *testing.T) {
 			t.Errorf("Bad service status: %s", service.Status)
 		}
 	}
+
+	result := list.New()
+	result.PushBack(launcher.RemoveService("service1"))
+	result.PushBack(launcher.RemoveService("service2"))
+	result.PushBack(launcher.RemoveService("service3"))
+	result.PushBack(launcher.RemoveService("service4"))
+	result.PushBack(launcher.RemoveService("service5"))
+
+	for r := result.Front(); r != nil; r = r.Next() {
+		status, ok := r.Value.(<-chan error)
+		if !ok {
+			t.Error("Invalid interface")
+		}
+		if err = <-status; err != nil {
+			t.Errorf("Can't install/remove service: %s", err)
+		}
+	}
+
 }
