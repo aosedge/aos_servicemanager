@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -52,7 +53,11 @@ func setup() (err error) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		spec.Annotations["id"] = fmt.Sprintf("service%d", i)
+		serviceName := fmt.Sprintf("service%d", i)
+
+		spec.Process.Args = []string{"python3", "/home/service.py", serviceName}
+
+		spec.Annotations["id"] = serviceName
 		spec.Annotations["version"] = fmt.Sprintf("%d", i)
 
 		if err := launcher.WriteServiceSpec(&spec, specFile); err != nil {
@@ -78,7 +83,25 @@ func cleanup() (err error) {
 
 func generateImage(imagePath string) (err error) {
 	// create dir
-	if err := os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
+	if err := os.MkdirAll(path.Join(imagePath, "rootfs", "home"), 0755); err != nil {
+		return err
+	}
+
+	serviceContent := `#!/usr/bin/python
+
+import time
+import sys
+
+i = 0
+serviceName = sys.argv[1]
+
+print(">>>> Start", serviceName)
+while True:
+	print(">>>> aos", serviceName, "count", i)
+	i = i + 1
+	time.sleep(5)`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
 		return err
 	}
 
