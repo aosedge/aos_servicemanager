@@ -119,67 +119,8 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	if err = localLauncher.systemd.Subscribe(); err != nil {
 		return launcher, err
 	}
-	serviceChannel, errorChannel := localLauncher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
-		2,
-		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
-		func(serviceName string) bool {
-			if _, exist := localLauncher.services.Load(serviceName); exist {
-				return false
-			}
-			return true
-		})
-	go func() {
-		for {
-			select {
-			case services := <-serviceChannel:
-				for _, service := range services {
-					var (
-						state  serviceState
-						status serviceStatus
-					)
 
-					if service == nil {
-						continue
-					}
-
-					log.WithField("name", service.Name).Debugf(
-						"Service state changed. Load state: %s, active state: %s, sub state: %s",
-						service.LoadState,
-						service.ActiveState,
-						service.SubState)
-
-					switch service.SubState {
-					case "running":
-						state = stateRunning
-						status = statusOk
-					default:
-						state = stateStopped
-						status = statusError
-					}
-
-					log.WithField("name", service.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
-
-					id, exist := localLauncher.services.Load(service.Name)
-
-					if exist {
-						if err := localLauncher.db.setServiceState(id.(string), state); err != nil {
-							log.WithField("name", service.Name).Error("Can't set service state: ", err)
-						}
-
-						if err := localLauncher.db.setServiceStatus(id.(string), status); err != nil {
-							log.WithField("name", service.Name).Error("Can't set service status: ", err)
-						}
-					} else {
-						log.WithField("name", service.Name).Warning("Can't update state or status. Service is not installed.")
-					}
-				}
-			case err := <-errorChannel:
-				log.Error("Subscription error: ", err)
-			case <-localLauncher.closeChannel:
-				return
-			}
-		}
-	}()
+	localLauncher.handleSystemdSubscription()
 
 	// Get systemd service template
 	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
@@ -335,6 +276,70 @@ WantedBy=multi-user.target
 	}
 
 	return template, nil
+}
+
+func (launcher *Launcher) handleSystemdSubscription() {
+	serviceChannel, errorChannel := launcher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
+		2,
+		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
+		func(serviceName string) bool {
+			if _, exist := launcher.services.Load(serviceName); exist {
+				return false
+			}
+			return true
+		})
+	go func() {
+		for {
+			select {
+			case services := <-serviceChannel:
+				for _, service := range services {
+					var (
+						state  serviceState
+						status serviceStatus
+					)
+
+					if service == nil {
+						continue
+					}
+
+					log.WithField("name", service.Name).Debugf(
+						"Service state changed. Load state: %s, active state: %s, sub state: %s",
+						service.LoadState,
+						service.ActiveState,
+						service.SubState)
+
+					switch service.SubState {
+					case "running":
+						state = stateRunning
+						status = statusOk
+					default:
+						state = stateStopped
+						status = statusError
+					}
+
+					log.WithField("name", service.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
+
+					id, exist := launcher.services.Load(service.Name)
+
+					if exist {
+						if err := launcher.db.setServiceState(id.(string), state); err != nil {
+							log.WithField("name", service.Name).Error("Can't set service state: ", err)
+						}
+
+						if err := launcher.db.setServiceStatus(id.(string), status); err != nil {
+							log.WithField("name", service.Name).Error("Can't set service status: ", err)
+						}
+					} else {
+						log.WithField("name", service.Name).Warning("Can't update state or status. Service is not installed.")
+					}
+				}
+			case err := <-errorChannel:
+				log.Error("Subscription error: ", err)
+			case <-launcher.closeChannel:
+				return
+			}
+		}
+	}()
 }
 
 func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
