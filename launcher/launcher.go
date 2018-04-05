@@ -338,6 +338,9 @@ WantedBy=multi-user.target
 }
 
 func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
+	// disable terminal
+	spec.Process.Terminal = false
+
 	mounts := []specs.Mount{
 		specs.Mount{"/etc/resolv.conf", "bind", "/etc/resolv.conf", []string{"bind", "ro"}},
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
