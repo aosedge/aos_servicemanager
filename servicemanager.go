@@ -109,6 +109,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
+	defer launcher.Close()
+
 	amqpHandler, err := amqp.New()
 	if err != nil {
 		log.Fatal("Can't amqpHandler: ", err)
