@@ -347,7 +347,6 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	spec.Process.Terminal = false
 
 	mounts := []specs.Mount{
-		specs.Mount{"/etc/resolv.conf", "bind", "/etc/resolv.conf", []string{"bind", "ro"}},
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
 		specs.Mount{"/sbin", "bind", "/sbin", []string{"bind", "ro"}},
 		specs.Mount{"/lib", "bind", "/lib", []string{"bind", "ro"}},
@@ -357,11 +356,24 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	if _, err := os.Stat("/lib64"); err == nil {
 		spec.Mounts = append(spec.Mounts, specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}})
 	}
-	// add hosts if exists
-	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "hosts"))
-	if _, err := os.Stat(hosts); err == nil {
-		spec.Mounts = append(spec.Mounts, specs.Mount{"/etc/hosts/", "bind", hosts, []string{"bind", "ro"}})
+	// add hosts
+	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "hosts"))
+	if _, err := os.Stat(hosts); err != nil {
+		hosts = "/etc/hosts"
 	}
+	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "hosts"), "bind", hosts, []string{"bind", "ro"}})
+	// add resolv.conf
+	resolvConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "resolv.conf"))
+	if _, err := os.Stat(resolvConf); err != nil {
+		resolvConf = "/etc/resolv.conf"
+	}
+	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "resolv.conf"), "bind", resolvConf, []string{"bind", "ro"}})
+	// add nsswitch.conf
+	nsswitchConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "nsswitch.conf"))
+	if _, err := os.Stat(nsswitchConf); err != nil {
+		nsswitchConf = "/etc/nsswitch.conf"
+	}
+	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "nsswitch.conf"), "bind", nsswitchConf, []string{"bind", "ro"}})
 
 	// add netns hook
 	// TODO: consider env variable or config to netns path
