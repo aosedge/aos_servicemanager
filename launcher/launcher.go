@@ -70,6 +70,7 @@ type Launcher struct {
 	serviceTemplate string
 	workingDir      string
 	runcPath        string
+	netnsPath       string
 }
 
 /*******************************************************************************
@@ -132,6 +133,16 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	localLauncher.runcPath, err = exec.LookPath("runc")
 	if err != nil {
 		return launcher, err
+	}
+
+	// Retreive netns abs path
+	localLauncher.netnsPath, _ = filepath.Abs(path.Join(workingDir, "netns"))
+	if _, err := os.Stat(localLauncher.netnsPath); err != nil {
+		// check system PATH
+		localLauncher.netnsPath, err = exec.LookPath("netns")
+		if err != nil {
+			return launcher, err
+		}
 	}
 
 	launcher = &localLauncher
@@ -376,11 +387,10 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "nsswitch.conf"), "bind", nsswitchConf, []string{"bind", "ro"}})
 
 	// add netns hook
-	// TODO: consider env variable or config to netns path
 	if spec.Hooks == nil {
 		spec.Hooks = &specs.Hooks{}
 	}
-	spec.Hooks.Prestart = append(spec.Hooks.Prestart, specs.Hook{Path: "/usr/local/bin/netns"})
+	spec.Hooks.Prestart = append(spec.Hooks.Prestart, specs.Hook{Path: launcher.netnsPath})
 
 	return nil
 }
