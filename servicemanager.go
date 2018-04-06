@@ -37,7 +37,20 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) {
 	}
 }
 
-func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher, output chan string) bool {
+func installService(launcher *launcher.Launcher, servInfo amqp.ServiceInfoFromCloud) {
+	downloadChannel := make(chan string)
+	downloadmanager.DownloadPkg(servInfo, downloadChannel)
+
+	imageFile := <- downloadChannel
+	defer os.Remove(imageFile)
+
+	err := <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
+	if err != nil {
+		log.WithFields(log.Fields{"id": servInfo.Id, "version": servInfo.Version}).Error("Can't install service")
+	}
+}
+
+func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) bool {
 	switch data := data.(type) {
 	case error:
 		log.Warning("Received error from AMQP channel: ", data)
@@ -51,7 +64,7 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 		}
 		if data.Version > version {
 			log.Debug("Send download request url ", data.DownloadUrl)
-			go downloadmanager.DownloadPkg(data, output)
+			go installService(launcher, data)
 		}
 
 		return true
@@ -69,7 +82,7 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 					if data[iDes].Version > currenList[iCur].Version {
 						log.Info("Update ", data[iDes].Id, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
 
-						go downloadmanager.DownloadPkg(data[iDes], output)
+						go installService(launcher, data[iDes])
 					}
 					data = append(data[:iDes], data[iDes+1:]...)
 					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
@@ -81,9 +94,9 @@ func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *la
 			launcher.RemoveService(deleteElemnt.Id) //TODO ADD CHECK ERROR
 		}
 
-		for _, newElemnt := range data {
-			log.Info("Download new serv Id ", newElemnt.Id, " version ", newElemnt.Version)
-			go downloadmanager.DownloadPkg(newElemnt, output)
+		for _, newElement := range data {
+			log.Info("Download new serv Id ", newElement.Id, " version ", newElement.Version)
+			go installService(launcher, newElement)
 		}
 		return true
 	default:
@@ -99,8 +112,6 @@ func main() {
 	defer func() {
 		log.Info("Stop service manager")
 	}()
-
-	out := make(chan string)
 
 	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
 	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
@@ -140,21 +151,10 @@ func main() {
 			log.Debug("Start select ")
 			select {
 			case amqpReturn := <-amqpChan:
-				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher, out)
+				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher)
 				if stop == true {
 					connectionOK = false
 					break
-				}
-			case msg := <-out:
-				if msg != "" {
-					log.Debug("Save file here: ", msg)
-					err = <-launcher.InstallService(msg)
-					if err != nil {
-						log.Error("Can't install service: ", err)
-					}
-					if err := os.Remove(msg); err != nil {
-						log.Errorf("Can't remove file %s: %s", msg, err)
-					}
 				}
 			}
 		}

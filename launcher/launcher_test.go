@@ -154,9 +154,9 @@ func TestInstallRemove(t *testing.T) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
+	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
+	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -189,9 +189,9 @@ func TestInstallRemove(t *testing.T) {
 	result.Init()
 
 	result.PushBack(launcher.RemoveService("service1"))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
 	result.PushBack(launcher.RemoveService("service2"))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
 	result.PushBack(launcher.RemoveService("service3"))
 
 	for r := result.Front(); r != nil; r = r.Next() {
@@ -257,11 +257,11 @@ func installAllServices() (err error) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
+	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
+	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
+	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
+	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)

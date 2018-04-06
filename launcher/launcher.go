@@ -2,14 +2,12 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -179,8 +177,8 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error)
 }
 
 // InstallService installs and runs service
-func (launcher *Launcher) InstallService(image string) (status <-chan error) {
-	log.WithField("path", image).Debug("Install service")
+func (launcher *Launcher) InstallService(image string, id string, version uint) (status <-chan error) {
+	log.WithFields(log.Fields{"path": image, "id": id, "version": version}).Debug("Install service")
 
 	statusChannel := make(chan error, 1)
 
@@ -203,7 +201,7 @@ func (launcher *Launcher) InstallService(image string) (status <-chan error) {
 			return
 		}
 
-		if err := launcher.installService(installDir); err != nil {
+		if err := launcher.installService(installDir, id, version); err != nil {
 			statusChannel <- err
 			return
 		}
@@ -395,25 +393,6 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	return nil
 }
 
-func getServiceInfo(spec *specs.Spec) (id string, version uint, err error) {
-	id, isPresent := spec.Annotations["id"]
-	if !isPresent {
-		return id, version, errors.New("No service id provided")
-	}
-
-	strVersion, isPresent := spec.Annotations["version"]
-	if !isPresent {
-		return id, version, errors.New("No service version provided")
-	}
-	result, err := strconv.ParseUint(strVersion, 10, 32)
-	if err != nil {
-		return id, version, err
-	}
-	version = uint(result)
-
-	return id, version, nil
-}
-
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
@@ -504,7 +483,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return fileName, nil
 }
 
-func (launcher *Launcher) installService(installDir string) (err error) {
+func (launcher *Launcher) installService(installDir string, id string, version uint) (err error) {
 	configFile := path.Join(installDir, "config.json")
 
 	// get service spec
@@ -522,13 +501,6 @@ func (launcher *Launcher) installService(installDir string) (err error) {
 	if err := WriteServiceSpec(&spec, configFile); err != nil {
 		return err
 	}
-
-	// get id and version from config.json
-	id, version, err := getServiceInfo(&spec)
-	if err != nil {
-		return err
-	}
-	log.WithFields(log.Fields{"id": id, "version": version}).Debug("Install service")
 
 	// check if service already installed
 	// TODO: check version?
