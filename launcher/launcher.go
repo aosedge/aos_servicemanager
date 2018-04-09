@@ -359,7 +359,13 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
 		specs.Mount{"/sbin", "bind", "/sbin", []string{"bind", "ro"}},
 		specs.Mount{"/lib", "bind", "/lib", []string{"bind", "ro"}},
-		specs.Mount{"/usr", "bind", "/usr", []string{"bind", "ro"}}}
+		specs.Mount{"/usr", "bind", "/usr", []string{"bind", "ro"}},
+		// TODO: mount individual tmp
+		// "destination": "/tmp",
+		// "type": "tmpfs",
+		// "source": "tmpfs",
+		// "options": ["nosuid","strictatime","mode=755","size=65536k"]
+		specs.Mount{"/tmp", "bind", "/tmp", []string{"bind", "rw"}}}
 	spec.Mounts = append(spec.Mounts, mounts...)
 	// add lib64 if exists
 	if _, err := os.Stat("/lib64"); err == nil {
