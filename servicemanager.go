@@ -63,22 +63,6 @@ func removeService(launcher *launcher.Launcher, id string) {
 
 func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
 	switch data := data.(type) {
-	case amqp.ServiceInfoFromCloud:
-		log.Info("Recive service info")
-
-		version, err := launcher.GetServiceVersion(data.Id)
-		if err != nil {
-			log.Error("Error getting service version: ", err)
-			return err
-		}
-
-		if data.Version > version {
-			log.Debug("Send download request url ", data.DownloadUrl)
-			go installService(launcher, data)
-		}
-
-		return nil
-
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Recive services info")
 
