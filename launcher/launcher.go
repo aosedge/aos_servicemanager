@@ -177,56 +177,118 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error)
 }
 
 // InstallService installs and runs service
-func (launcher *Launcher) InstallService(image string, id string, version uint) (status <-chan error) {
+func (launcher *Launcher) InstallService(image string, id string, version uint) (err error) {
 	log.WithFields(log.Fields{"path": image, "id": id, "version": version}).Debug("Install service")
 
-	statusChannel := make(chan error, 1)
+	// TODO: do we need install to /tmp dir first?
+	// In case something wrong, artifacts will be removed after system reboot
+	// but it will introduce additional io operations.
 
-	go func() {
-		// TODO: do we need install to /tmp dir first?
-		// In case something wrong, artifacts will be removed after system reboot
-		// but it will introduce additional io operations.
+	// create install dir
+	installDir, err := ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
+	if err != nil {
+		return err
+	}
+	log.WithField("dir", installDir).Debug("Create install dir")
 
-		// create install dir
-		installDir, err := ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
-		if err != nil {
-			statusChannel <- err
-			return
+	// unpack image there
+	if err := UnpackImage(image, installDir); err != nil {
+		return err
+	}
+
+	configFile := path.Join(installDir, "config.json")
+
+	// get service spec
+	spec, err := GetServiceSpec(configFile)
+	if err != nil {
+		return err
+	}
+
+	// update config.json
+	if err := launcher.updateServiceSpec(&spec); err != nil {
+		return err
+	}
+
+	// update config.json
+	if err := WriteServiceSpec(&spec, configFile); err != nil {
+		return err
+	}
+
+	// check if service already installed
+	// TODO: check version?
+	service, err := launcher.db.getService(id)
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return err
+	}
+
+	// remove if exists
+	if err == nil {
+		log.WithField("name", id).Debug("Service exists.")
+
+		if err := launcher.RemoveService(id); err != nil {
+			return err
 		}
-		log.WithField("dir", installDir).Debug("Create install dir")
+	}
 
-		// unpack image there
-		if err := UnpackImage(image, installDir); err != nil {
-			statusChannel <- err
-			return
+	serviceName := "aos_" + id + ".service"
+
+	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
+	if err != nil {
+		return err
+	}
+
+	if err := launcher.startService(serviceFile, serviceName); err != nil {
+		return err
+	}
+
+	service = serviceEntry{
+		id:          id,
+		version:     version,
+		path:        installDir,
+		serviceName: serviceName,
+		state:       stateInit,
+		status:      statusOk}
+
+	// add to database
+	if err := launcher.db.addService(service); err != nil {
+		if err := launcher.stopService(serviceName); err != nil {
+			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
+		return err
+	}
 
-		if err := launcher.installService(installDir, id, version); err != nil {
-			statusChannel <- err
-			return
-		}
+	launcher.services.Store(serviceName, id)
 
-		statusChannel <- nil
-	}()
+	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
 
-	return statusChannel
+	return nil
 }
 
 // RemoveService stops and removes service
-func (launcher *Launcher) RemoveService(id string) (status <-chan error) {
-	statusChannel := make(chan error, 1)
+func (launcher *Launcher) RemoveService(id string) (err error) {
+	service, err := launcher.db.getService(id)
+	if err != nil {
+		return err
+	}
+	log.WithFields(log.Fields{"id": service.id, "version": service.version}).Debug("Remove service")
 
-	go func() {
-		// remove service
-		if err := launcher.removeService(id); err != nil {
-			statusChannel <- err
-			return
-		}
+	launcher.services.Delete(service.serviceName)
 
-		statusChannel <- nil
-	}()
+	if err := launcher.stopService(service.serviceName); err != nil {
+		log.WithField("name", service.serviceName).Warn("Can't stop service: ", err)
+	}
 
-	return statusChannel
+	if err := launcher.db.removeService(service.id); err != nil {
+		log.WithField("name", service.serviceName).Warn("Can't remove service from db: ", err)
+	}
+
+	if err := os.RemoveAll(service.path); err != nil {
+		log.WithField("path", service.path).Error("Can't remove service path")
+	}
+
+	log.WithFields(log.Fields{"id": id, "version": service.version}).Info("Service successfully removed")
+
+	return nil
 }
 
 // GetServicesInfo returns informaion about all installed services
@@ -492,99 +554,4 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	}
 
 	return fileName, nil
-}
-
-func (launcher *Launcher) installService(installDir string, id string, version uint) (err error) {
-	configFile := path.Join(installDir, "config.json")
-
-	// get service spec
-	spec, err := GetServiceSpec(configFile)
-	if err != nil {
-		return err
-	}
-
-	// update config.json
-	if err := launcher.updateServiceSpec(&spec); err != nil {
-		return err
-	}
-
-	// update config.json
-	if err := WriteServiceSpec(&spec, configFile); err != nil {
-		return err
-	}
-
-	// check if service already installed
-	// TODO: check version?
-	service, err := launcher.db.getService(id)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return err
-	}
-
-	// remove if exists
-	if err == nil {
-		log.WithField("name", id).Debug("Service exists.")
-
-		if err := launcher.removeService(id); err != nil {
-			return err
-		}
-	}
-
-	serviceName := "aos_" + id + ".service"
-
-	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
-	if err != nil {
-		return err
-	}
-
-	if err := launcher.startService(serviceFile, serviceName); err != nil {
-		return err
-	}
-
-	service = serviceEntry{
-		id:          id,
-		version:     version,
-		path:        installDir,
-		serviceName: serviceName,
-		state:       stateInit,
-		status:      statusOk}
-
-	// add to database
-	if err := launcher.db.addService(service); err != nil {
-		if err := launcher.stopService(serviceName); err != nil {
-			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
-		}
-		return err
-	}
-
-	launcher.services.Store(serviceName, id)
-
-	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
-
-	return nil
-}
-
-func (launcher *Launcher) removeService(id string) (err error) {
-	service, err := launcher.db.getService(id)
-	if err != nil {
-		return err
-	}
-	log.WithFields(log.Fields{"id": service.id, "version": service.version}).Debug("Remove service")
-
-	launcher.services.Delete(service.serviceName)
-
-	if err := launcher.stopService(service.serviceName); err != nil {
-		log.WithField("name", service.serviceName).Warn("Can't stop service: ", err)
-	}
-
-	if err := launcher.db.removeService(service.id); err != nil {
-		log.WithField("name", service.serviceName).Warn("Can't remove service from db: ", err)
-	}
-
-	if err := os.RemoveAll(service.path); err != nil {
-		log.WithField("path", service.path).Error("Can't remove service path")
-	}
-
-	log.WithFields(log.Fields{"id": id, "version": service.version}).Info("Service successfully removed")
-
-	return nil
 }

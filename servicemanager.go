@@ -52,14 +52,13 @@ func installService(launcher *launcher.Launcher, servInfo amqp.ServiceInfoFromCl
 		return
 	}
 
-	err = <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
-	if err != nil {
+	if err := launcher.InstallService(imageFile, servInfo.Id, servInfo.Version); err != nil {
 		log.WithFields(log.Fields{"id": servInfo.Id, "version": servInfo.Version}).Error("Can't install service: ", err)
 	}
 }
 
 func removeService(launcher *launcher.Launcher, id string) {
-	if err := <-launcher.RemoveService(id); err != nil {
+	if err := launcher.RemoveService(id); err != nil {
 		log.WithField("id", id).Error("Can't remove service: ", err)
 	}
 }
