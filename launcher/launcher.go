@@ -390,6 +390,11 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	}
 	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "nsswitch.conf"), "bind", nsswitchConf, []string{"bind", "ro"}})
 
+	// TODO: all services should have their own certificates
+	// this mound for demo only and should be removed 
+	// mount /etc/ssl 
+	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "ssl"), "bind", path.Join("/etc", "ssl"), []string{"bind", "ro"}})
+
 	// add netns hook
 	if spec.Hooks == nil {
 		spec.Hooks = &specs.Hooks{}
