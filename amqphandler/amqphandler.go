@@ -132,8 +132,6 @@ type amqpLocalConsumerConnectionInfo struct {
 	valid bool
 }
 
-type amqpExtAuth struct{}
-
 /*******************************************************************************
  * Variables
  ******************************************************************************/
@@ -290,9 +288,8 @@ func (handler *AmqpHandler) getSendConnectionInfo(params *sendParam) (retData am
 		return retData, err
 	}
 
-	authentication := []amqp.Authentication{amqpExtAuth{}}
 	config := amqp.Config{TLSClientConfig: tlsConfig,
-		SASL: authentication}
+		SASL: nil}
 
 	urlRabbitMQ := url.URL{Scheme: "amqps",
 		User: url.UserPassword(params.User, params.Password),
@@ -354,9 +351,8 @@ func (handler *AmqpHandler) getConsumerConnectionInfo(param *receiveParams) (ret
 		log.Warn("GetTlsConfig error : ", err)
 		return retData, err
 	}
-	authentication := []amqp.Authentication{amqpExtAuth{}}
 	config := amqp.Config{TLSClientConfig: tlsConfig,
-		SASL: authentication}
+		SASL: nil}
 
 	urlRabbitMQ := url.URL{Scheme: "amqps",
 		User: url.UserPassword(param.User, param.Password),
@@ -473,12 +469,4 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		amqpChan <- servInfoArray
 	}
 	log.Warning("END listen") //TODO: add return error to channel
-}
-
-func (a amqpExtAuth) Mechanism() string {
-	return "EXTERNAL"
-}
-
-func (a amqpExtAuth) Response() string {
-	return ""
 }
