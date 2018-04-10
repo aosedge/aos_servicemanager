@@ -145,6 +145,24 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
+func installService(launcher *launcher.Launcher, image, id string, version uint) (status <-chan error) {
+	statusChannel := make(chan error, 1)
+	go func() {
+		statusChannel <- launcher.InstallService(image, id, version)
+	}()
+
+	return statusChannel
+}
+
+func removeService(launcher *launcher.Launcher, id string) (status <-chan error) {
+	statusChannel := make(chan error, 1)
+	go func() {
+		statusChannel <- launcher.RemoveService(id)
+	}()
+
+	return statusChannel
+}
+
 func TestInstallRemove(t *testing.T) {
 	launcher, err := launcher.New("tmp")
 	if err != nil {
@@ -154,9 +172,9 @@ func TestInstallRemove(t *testing.T) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
+	result.PushBack(installService(launcher, "tmp/image1.tgz", "service1", 1))
+	result.PushBack(installService(launcher, "tmp/image2.tgz", "service2", 1))
+	result.PushBack(installService(launcher, "tmp/image3.tgz", "service3", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -188,11 +206,11 @@ func TestInstallRemove(t *testing.T) {
 
 	result.Init()
 
-	result.PushBack(launcher.RemoveService("service1"))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
-	result.PushBack(launcher.RemoveService("service2"))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
-	result.PushBack(launcher.RemoveService("service3"))
+	result.PushBack(removeService(launcher, "service1"))
+	result.PushBack(installService(launcher, "tmp/image4.tgz", "service4", 1))
+	result.PushBack(removeService(launcher, "service2"))
+	result.PushBack(installService(launcher, "tmp/image5.tgz", "service5", 1))
+	result.PushBack(removeService(launcher, "service3"))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -224,8 +242,8 @@ func TestInstallRemove(t *testing.T) {
 
 	result.Init()
 
-	result.PushBack(launcher.RemoveService("service4"))
-	result.PushBack(launcher.RemoveService("service5"))
+	result.PushBack(removeService(launcher, "service4"))
+	result.PushBack(removeService(launcher, "service5"))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -257,11 +275,11 @@ func installAllServices() (err error) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
+	result.PushBack(installService(launcher, "tmp/image1.tgz", "service1", 1))
+	result.PushBack(installService(launcher, "tmp/image2.tgz", "service2", 1))
+	result.PushBack(installService(launcher, "tmp/image3.tgz", "service3", 1))
+	result.PushBack(installService(launcher, "tmp/image4.tgz", "service4", 1))
+	result.PushBack(installService(launcher, "tmp/image5.tgz", "service5", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -309,11 +327,11 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	result := list.New()
-	result.PushBack(launcher.RemoveService("service1"))
-	result.PushBack(launcher.RemoveService("service2"))
-	result.PushBack(launcher.RemoveService("service3"))
-	result.PushBack(launcher.RemoveService("service4"))
-	result.PushBack(launcher.RemoveService("service5"))
+	result.PushBack(removeService(launcher, "service1"))
+	result.PushBack(removeService(launcher, "service2"))
+	result.PushBack(removeService(launcher, "service3"))
+	result.PushBack(removeService(launcher, "service4"))
+	result.PushBack(removeService(launcher, "service5"))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)

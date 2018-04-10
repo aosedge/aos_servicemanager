@@ -43,42 +43,28 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (er
 }
 
 func installService(launcher *launcher.Launcher, servInfo amqp.ServiceInfoFromCloud) {
-	downloadChannel := make(chan string)
-	go downloadmanager.DownloadPkg(servInfo, downloadChannel)
-
-	imageFile := <-downloadChannel
-	defer os.Remove(imageFile)
-
-	err := <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
+	imageFile, err := downloadmanager.DownloadPkg(servInfo)
+	if imageFile != "" {
+		defer os.Remove(imageFile)
+	}
 	if err != nil {
+		log.Error("Can't download package: ", err)
+		return
+	}
+
+	if err := launcher.InstallService(imageFile, servInfo.Id, servInfo.Version); err != nil {
 		log.WithFields(log.Fields{"id": servInfo.Id, "version": servInfo.Version}).Error("Can't install service: ", err)
 	}
 }
 
 func removeService(launcher *launcher.Launcher, id string) {
-	if err := <-launcher.RemoveService(id); err != nil {
+	if err := launcher.RemoveService(id); err != nil {
 		log.WithField("id", id).Error("Can't remove service: ", err)
 	}
 }
 
 func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
 	switch data := data.(type) {
-	case amqp.ServiceInfoFromCloud:
-		log.Info("Recive service info")
-
-		version, err := launcher.GetServiceVersion(data.Id)
-		if err != nil {
-			log.Error("Error getting service version: ", err)
-			return err
-		}
-
-		if data.Version > version {
-			log.Debug("Send download request url ", data.DownloadUrl)
-			go installService(launcher, data)
-		}
-
-		return nil
-
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Recive services info")
 
