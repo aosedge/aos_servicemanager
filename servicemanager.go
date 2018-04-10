@@ -43,13 +43,16 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (er
 }
 
 func installService(launcher *launcher.Launcher, servInfo amqp.ServiceInfoFromCloud) {
-	downloadChannel := make(chan string)
-	go downloadmanager.DownloadPkg(servInfo, downloadChannel)
+	imageFile, err := downloadmanager.DownloadPkg(servInfo)
+	if imageFile != "" {
+		defer os.Remove(imageFile)
+	}
+	if err != nil {
+		log.Error("Can't download package: ", err)
+		return
+	}
 
-	imageFile := <-downloadChannel
-	defer os.Remove(imageFile)
-
-	err := <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
+	err = <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
 	if err != nil {
 		log.WithFields(log.Fields{"id": servInfo.Id, "version": servInfo.Version}).Error("Can't install service: ", err)
 	}
