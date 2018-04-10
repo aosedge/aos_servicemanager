@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"reflect"
 	"syscall"
 	"time"
 
@@ -13,9 +14,9 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
-type appInfo struct {
-	Name string
-}
+const (
+	aosReconnectTimeSec = 3
+)
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -26,94 +27,114 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) {
+func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
-		log.Error("Error getting initial list ", err)
-		//TODO: return
+		log.Error("Error getting initial list: ", err)
+		return err
 	}
+
 	if handler.SendInitialSetup(initialList) != nil {
-		log.Error("Error send sendInitalSetup", err)
+		log.Error("Error sending initial setup: ", err)
+		return err
+	}
+
+	return nil
+}
+
+func installService(launcher *launcher.Launcher, servInfo amqp.ServiceInfoFromCloud) {
+	downloadChannel := make(chan string)
+	go downloadmanager.DownloadPkg(servInfo, downloadChannel)
+
+	imageFile := <-downloadChannel
+	defer os.Remove(imageFile)
+
+	err := <-launcher.InstallService(imageFile, servInfo.Id, servInfo.Version)
+	if err != nil {
+		log.WithFields(log.Fields{"id": servInfo.Id, "version": servInfo.Version}).Error("Can't install service: ", err)
 	}
 }
 
-func processAmqpReturn(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher, output chan string) bool {
+func removeService(launcher *launcher.Launcher, id string) {
+	if err := <-launcher.RemoveService(id); err != nil {
+		log.WithField("id", id).Error("Can't remove service: ", err)
+	}
+}
+
+func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
 	switch data := data.(type) {
-	case error:
-		log.Warning("Received error from AMQP channel: ", data)
-		handler.CloseAllConnections()
-		return false
 	case amqp.ServiceInfoFromCloud:
+		log.Info("Recive service info")
+
 		version, err := launcher.GetServiceVersion(data.Id)
 		if err != nil {
-			log.Warning("Error get version ", err)
-			break
+			log.Error("Error getting service version: ", err)
+			return err
 		}
+
 		if data.Version > version {
 			log.Debug("Send download request url ", data.DownloadUrl)
-			go downloadmanager.DownloadPkg(data, output)
+			go installService(launcher, data)
 		}
 
-		return true
+		return nil
+
 	case []amqp.ServiceInfoFromCloud:
-		log.Info("Recive array of services len ", len(data))
+		log.WithField("len", len(data)).Info("Recive services info")
+
 		currenList, err := launcher.GetServicesInfo()
 		if err != nil {
-			log.Warning("Error get GetServicesInfo ", err)
-			break
+			log.Error("Error getting services info: ", err)
+			return err
 		}
+
 		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
 			for iDes := len(data) - 1; iDes >= 0; iDes-- {
-
 				if data[iDes].Id == currenList[iCur].Id {
 					if data[iDes].Version > currenList[iCur].Version {
 						log.Info("Update ", data[iDes].Id, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
 
-						go downloadmanager.DownloadPkg(data[iDes], output)
+						go installService(launcher, data[iDes])
 					}
+
 					data = append(data[:iDes], data[iDes+1:]...)
 					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
 				}
 			}
 		}
+
 		for _, deleteElemnt := range currenList {
-			log.Info("Delete ID ", deleteElemnt.Id)
-			launcher.RemoveService(deleteElemnt.Id) //TODO ADD CHECK ERROR
+			go removeService(launcher, deleteElemnt.Id)
 		}
 
-		for _, newElemnt := range data {
-			log.Info("Download new serv Id ", newElemnt.Id, " version ", newElemnt.Version)
-			go downloadmanager.DownloadPkg(newElemnt, output)
+		for _, newElement := range data {
+			go installService(launcher, newElement)
 		}
-		return true
+
+		return nil
+
 	default:
-		log.Info("Receive some data amqp")
-
-		return true
+		log.Warn("Receive unsupported amqp message: ", reflect.TypeOf(data))
+		return nil
 	}
-	return true
 }
 
 func main() {
 	log.Info("Start service manager")
-	defer func() {
-		log.Info("Stop service manager")
-	}()
-
-	out := make(chan string)
-
-	//go downloadmanager.DownloadPkg("./", "https://kor.ill.in.ua/m/610x385/2122411.jpg", out)
-	//go downloadmanager.DownloadPkg("./test/", "http://speedtest.tele2.net/100MB.zip", out)
 
 	launcher, err := launcher.New("data")
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
+	defer launcher.Close()
+
 	amqpHandler, err := amqp.New()
 	if err != nil {
-		log.Fatal("Can't amqpHandler: ", err)
+		log.Fatal("Can't create amqpHandler: ", err)
 	}
+	defer amqpHandler.CloseAllConnections()
 
+	// handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -124,38 +145,31 @@ func main() {
 	}()
 
 	for {
-		log.Debug("start connection")
-		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
+		log.Debug("Start connection")
 
+		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
 		if err != nil {
-			log.Error("Can't esablish connection ", err)
-			time.Sleep(3 * time.Second)
+			log.Error("Can't esablish connection: ", err)
+			log.Debug("Reconnecting...")
+			time.Sleep(time.Second * aosReconnectTimeSec)
 			continue
 		}
-		connectionOK := true
+
 		sendInitalSetup(launcher, amqpHandler)
-		for connectionOK != false {
-			log.Debug("Start select ")
-			select {
-			case amqpReturn := <-amqpChan:
-				stop := !processAmqpReturn(amqpReturn, amqpHandler, launcher, out)
-				if stop == true {
-					connectionOK = false
-					break
-				}
-			case msg := <-out:
-				if msg != "" {
-					log.Debug("Save file here: ", msg)
-					err = <-launcher.InstallService(msg)
-					if err != nil {
-						log.Error("Can't install service: ", err)
-					}
-					if err := os.Remove(msg); err != nil {
-						log.Errorf("Can't remove file %s: %s", msg, err)
-					}
-				}
+
+		for {
+			amqpMessage := <-amqpChan
+
+			// check for error
+			if err, ok := amqpMessage.(error); ok {
+				log.Error("Receive amqp error: ", err)
+				log.Debug("Reconnecting...")
+				break
+			}
+
+			if err := processAmqpMessage(amqpMessage, amqpHandler, launcher); err != nil {
+				log.Error("Error processing amqp result: ", err)
 			}
 		}
-		log.Warning("StartReconect")
 	}
 }

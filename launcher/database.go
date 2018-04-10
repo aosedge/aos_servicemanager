@@ -27,11 +27,12 @@ type database struct {
 
 // serviceEntry describes entry structure
 type serviceEntry struct {
-	id      string
-	version uint
-	path    string
-	state   serviceState
-	status  serviceStatus
+	id          string        // service id
+	version     uint          // service version
+	path        string        // path to service bundle
+	serviceName string        // systemd service name
+	state       serviceState  // service state
+	status      serviceStatus // service status
 }
 
 /*******************************************************************************
@@ -66,13 +67,13 @@ func newDatabase(name string) (db *database, err error) {
 
 // addService adds new service entry
 func (db *database) addService(entry serviceEntry) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services(id, version, path, state, status) values(?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services(id, version, path, service, state, status) values(?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(entry.id, entry.version, entry.path, entry.state, entry.status)
+	_, err = stmt.Exec(entry.id, entry.version, entry.path, entry.serviceName, entry.state, entry.status)
 
 	return err
 }
@@ -98,7 +99,7 @@ func (db *database) getService(id string) (entry serviceEntry, err error) {
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(id).Scan(&entry.id, &entry.version, &entry.path, &entry.state, &entry.status)
+	err = stmt.QueryRow(id).Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName, &entry.state, &entry.status)
 	if err == sql.ErrNoRows {
 		return entry, errors.New("Service does not exist")
 	}
@@ -121,7 +122,7 @@ func (db *database) getServices() (entries []serviceEntry, err error) {
 
 	for rows.Next() {
 		var entry serviceEntry
-		err = rows.Scan(&entry.id, &entry.version, &entry.path, &entry.state, &entry.status)
+		err = rows.Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName, &entry.state, &entry.status)
 		if err != nil {
 			return entries, err
 		}
@@ -139,7 +140,12 @@ func (db *database) setServiceStatus(id string, status serviceStatus) (err error
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(status, id)
+	result, err := stmt.Exec(status, id)
+	count, err := result.RowsAffected()
+
+	if count == 0 {
+		return errors.New("Service does not exist")
+	}
 
 	return err
 }
@@ -152,13 +158,19 @@ func (db *database) setServiceState(id string, state serviceState) (err error) {
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(state, id)
+	result, err := stmt.Exec(state, id)
+	count, err := result.RowsAffected()
 
-	return nil
+	if count == 0 {
+		return errors.New("Service does not exist")
+	}
+
+	return err
 }
 
 // close closes database
 func (db *database) close() {
+	db.sql.Close()
 }
 
 /*******************************************************************************
@@ -183,6 +195,7 @@ func (db *database) createServiceTable() (err error) {
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
 															   version INTEGER,
 															   path TEXT,
+															   service TEXT,
 															   state INTEGER,
 															   status INTEGER);`)
 

@@ -4,10 +4,12 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -52,7 +54,11 @@ func setup() (err error) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		spec.Annotations["packageName"] = fmt.Sprintf("service%d", i)
+		serviceName := fmt.Sprintf("service%d", i)
+
+		spec.Process.Args = []string{"python3", "/home/service.py", serviceName}
+
+		spec.Annotations["id"] = serviceName
 		spec.Annotations["version"] = fmt.Sprintf("%d", i)
 
 		if err := launcher.WriteServiceSpec(&spec, specFile); err != nil {
@@ -78,7 +84,25 @@ func cleanup() (err error) {
 
 func generateImage(imagePath string) (err error) {
 	// create dir
-	if err := os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
+	if err := os.MkdirAll(path.Join(imagePath, "rootfs", "home"), 0755); err != nil {
+		return err
+	}
+
+	serviceContent := `#!/usr/bin/python
+
+import time
+import sys
+
+i = 0
+serviceName = sys.argv[1]
+
+print(">>>> Start", serviceName)
+while True:
+	print(">>>> aos", serviceName, "count", i)
+	i = i + 1
+	time.sleep(5)`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
 		return err
 	}
 
@@ -130,9 +154,9 @@ func TestInstallRemove(t *testing.T) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
+	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
+	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -165,9 +189,9 @@ func TestInstallRemove(t *testing.T) {
 	result.Init()
 
 	result.PushBack(launcher.RemoveService("service1"))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
 	result.PushBack(launcher.RemoveService("service2"))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
 	result.PushBack(launcher.RemoveService("service3"))
 
 	for r := result.Front(); r != nil; r = r.Next() {
@@ -233,11 +257,11 @@ func installAllServices() (err error) {
 
 	result := list.New()
 
-	result.PushBack(launcher.InstallService("tmp/image1.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image2.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image3.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image4.tgz"))
-	result.PushBack(launcher.InstallService("tmp/image5.tgz"))
+	result.PushBack(launcher.InstallService("tmp/image1.tgz", "service1", 1))
+	result.PushBack(launcher.InstallService("tmp/image2.tgz", "service2", 1))
+	result.PushBack(launcher.InstallService("tmp/image3.tgz", "service3", 1))
+	result.PushBack(launcher.InstallService("tmp/image4.tgz", "service4", 1))
+	result.PushBack(launcher.InstallService("tmp/image5.tgz", "service5", 1))
 
 	for r := result.Front(); r != nil; r = r.Next() {
 		status, ok := r.Value.(<-chan error)
@@ -263,6 +287,8 @@ func TestAutoStart(t *testing.T) {
 	}
 	defer launcher.Close()
 
+	time.Sleep(time.Second * 3)
+
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
@@ -281,4 +307,22 @@ func TestAutoStart(t *testing.T) {
 			t.Errorf("Bad service status: %s", service.Status)
 		}
 	}
+
+	result := list.New()
+	result.PushBack(launcher.RemoveService("service1"))
+	result.PushBack(launcher.RemoveService("service2"))
+	result.PushBack(launcher.RemoveService("service3"))
+	result.PushBack(launcher.RemoveService("service4"))
+	result.PushBack(launcher.RemoveService("service5"))
+
+	for r := result.Front(); r != nil; r = r.Next() {
+		status, ok := r.Value.(<-chan error)
+		if !ok {
+			t.Error("Invalid interface")
+		}
+		if err = <-status; err != nil {
+			t.Errorf("Can't install/remove service: %s", err)
+		}
+	}
+
 }
