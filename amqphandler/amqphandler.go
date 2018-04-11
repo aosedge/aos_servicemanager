@@ -328,6 +328,8 @@ func (handler *AmqpHandler) getSendConnectionInfo(params *sendParam) (retData am
 		log.Warning("Exchange connection closing: ", err)
 		if handler.exchangeInfo.valid != false {
 			handler.exchangeInfo.valid = false
+			handler.exchangeInfo.conn = nil
+			handler.CloseAllConnections()
 			amqpChan <- err
 		}
 	}()
@@ -390,6 +392,8 @@ func (handler *AmqpHandler) getConsumerConnectionInfo(param *receiveParams) (ret
 		log.Warning("Consumer connection closing: ", err)
 		if handler.consumerInfo.valid != false {
 			handler.consumerInfo.valid = false
+			handler.consumerInfo.conn = nil
+			handler.CloseAllConnections()
 			amqpChan <- err
 		}
 	}()
