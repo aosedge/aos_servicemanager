@@ -162,7 +162,7 @@ func removeService(launcher *Launcher, id string) (status <-chan error) {
 }
 
 func TestInstallRemove(t *testing.T) {
-	launcher, err := New("tmp")
+	launcher, _, _, err := New("tmp")
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -265,7 +265,7 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func installAllServices() (err error) {
-	launcher, err := New("tmp")
+	launcher, _, _, err := New("tmp")
 	if err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't install services: %s", err)
 	}
 
-	launcher, err := New("tmp")
+	launcher, _, _, err := New("tmp")
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}

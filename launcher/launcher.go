@@ -27,10 +27,9 @@ import (
  ******************************************************************************/
 
 const (
-	// services database name
-	serviceDatabase = "services.db"
-	// services directory
-	serviceDir = "services"
+	serviceDatabase    = "services.db" // services database name
+	serviceDir         = "services"    // services directory
+	maxExecutedActions = 10            // max number of actions processed simulanteously
 )
 
 var (
@@ -51,6 +50,12 @@ const (
 	stateStopped
 )
 
+// Action
+const (
+	ActionInstall = iota
+	ActionRemove
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -58,11 +63,21 @@ const (
 type serviceStatus int
 type serviceState int
 
+type action int
+
+type ActionStatus struct {
+	Action  action
+	Id      string
+	Version uint
+	Err     error
+}
+
 // Launcher instance
 type Launcher struct {
 	db              *database
 	systemd         *dbus.Conn
 	closeChannel    chan bool
+	statusChannel   chan ActionStatus
 	services        sync.Map
 	serviceTemplate string
 	workingDir      string
@@ -79,35 +94,36 @@ type download interface {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(workingDir string) (launcher *Launcher, err error) {
+func New(workingDir string) (launcher *Launcher, executeChannel <-chan ActionStatus, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
 
 	localLauncher.workingDir = workingDir
 	localLauncher.closeChannel = make(chan bool)
+	localLauncher.statusChannel = make(chan ActionStatus, maxExecutedActions)
 
 	// Check and create service dir
 	dir := path.Join(workingDir, serviceDir)
 	if _, err := os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 	}
 
 	// Create new database instance
 	localLauncher.db, err = newDatabase(path.Join(workingDir, serviceDatabase))
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Load all installed services
 	services, err := localLauncher.db.getServices()
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 	for _, service := range services {
 		localLauncher.services.Store(service.serviceName, service.id)
@@ -116,10 +132,10 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	// Create systemd connection
 	localLauncher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 	if err = localLauncher.systemd.Subscribe(); err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	localLauncher.handleSystemdSubscription()
@@ -127,13 +143,13 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	// Get systemd service template
 	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Retreive runc abs path
 	localLauncher.runcPath, err = exec.LookPath("runc")
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Retreive netns abs path
@@ -142,13 +158,13 @@ func New(workingDir string) (launcher *Launcher, err error) {
 		// check system PATH
 		localLauncher.netnsPath, err = exec.LookPath("netns")
 		if err != nil {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 	}
 
 	launcher = &localLauncher
 
-	return launcher, nil
+	return launcher, launcher.statusChannel, nil
 }
 
 // Close closes launcher

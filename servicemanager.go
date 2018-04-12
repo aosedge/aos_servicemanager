@@ -86,11 +86,11 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 func main() {
 	log.Info("Start service manager")
 
-	launcher, err := launcher.New("data")
+	launcherHandler, launcherChan, err := launcher.New("data")
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
-	defer launcher.Close()
+	defer launcherHandler.Close()
 
 	amqpHandler, err := amqp.New()
 	if err != nil {
@@ -103,7 +103,7 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		launcher.Close()
+		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
 		os.Exit(1)
 	}()
@@ -119,20 +119,44 @@ func main() {
 			continue
 		}
 
-		sendInitalSetup(launcher, amqpHandler)
+		sendInitalSetup(launcherHandler, amqpHandler)
 
 		for {
-			amqpMessage := <-amqpChan
+			select {
+			case amqpMessage := <-amqpChan:
+				// check for error
+				if err, ok := amqpMessage.(error); ok {
+					log.Error("Receive amqp error: ", err)
+					log.Debug("Reconnecting...")
+					break
+				}
 
-			// check for error
-			if err, ok := amqpMessage.(error); ok {
-				log.Error("Receive amqp error: ", err)
-				log.Debug("Reconnecting...")
-				break
-			}
+				if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
+					log.Error("Error processing amqp result: ", err)
+				}
+			case serviceStatus := <-launcherChan:
+				switch serviceStatus.Action {
+				case launcher.ActionInstall:
+					if serviceStatus.Err != nil {
+						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Error("Can't install service: ", serviceStatus.Err)
+						break
+					}
+					log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully installed")
 
-			if err := processAmqpMessage(amqpMessage, amqpHandler, launcher); err != nil {
-				log.Error("Error processing amqp result: ", err)
+				case launcher.ActionRemove:
+					if serviceStatus.Err != nil {
+						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Error("Can't remove service: ", serviceStatus.Err)
+						break
+					}
+					log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully removed")
+				}
+				/*
+					if serviceStatus.Err != nil {
+						log.WithFields(log.Fields{"id": installStatus.Id, "version": installStatus.Version}).Error("Can't install service: ", installStatus.Err)
+						break
+					}
+					log.WithFields(log.Fields{"id": installStatus.Id, "version": installStatus.Version}).Info("Service successfully installed")
+				*/
 			}
 		}
 	}
