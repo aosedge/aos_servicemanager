@@ -1,4 +1,4 @@
-package launcher_test
+package launcher
 
 import (
 	"container/list"
@@ -12,8 +12,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -44,7 +42,7 @@ func setup() (err error) {
 
 	specFile := path.Join("tmp/tmp_image", "config.json")
 
-	spec, err := launcher.GetServiceSpec(specFile)
+	spec, err := getServiceSpec(specFile)
 	if err != nil {
 		return err
 	}
@@ -61,11 +59,11 @@ func setup() (err error) {
 		spec.Annotations["id"] = serviceName
 		spec.Annotations["version"] = fmt.Sprintf("%d", i)
 
-		if err := launcher.WriteServiceSpec(&spec, specFile); err != nil {
+		if err := writeServiceSpec(&spec, specFile); err != nil {
 			return err
 		}
 
-		err = launcher.PackImage("tmp/tmp_image", fmt.Sprintf("tmp/image%d.tgz", i))
+		err = packImage("tmp/tmp_image", fmt.Sprintf("tmp/image%d.tgz", i))
 		if err != nil {
 			return err
 		}
@@ -145,26 +143,26 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func installService(launcher *launcher.Launcher, image, id string, version uint) (status <-chan error) {
+func installService(launcher *Launcher, image, id string, version uint) (status <-chan error) {
 	statusChannel := make(chan error, 1)
 	go func() {
-		statusChannel <- launcher.InstallService(image, id, version)
+		statusChannel <- launcher.installService(image, id, version)
 	}()
 
 	return statusChannel
 }
 
-func removeService(launcher *launcher.Launcher, id string) (status <-chan error) {
+func removeService(launcher *Launcher, id string) (status <-chan error) {
 	statusChannel := make(chan error, 1)
 	go func() {
-		statusChannel <- launcher.RemoveService(id)
+		statusChannel <- launcher.removeService(id)
 	}()
 
 	return statusChannel
 }
 
 func TestInstallRemove(t *testing.T) {
-	launcher, err := launcher.New("tmp")
+	launcher, err := New("tmp")
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -267,7 +265,7 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func installAllServices() (err error) {
-	launcher, err := launcher.New("tmp")
+	launcher, err := New("tmp")
 	if err != nil {
 		return err
 	}
@@ -299,7 +297,7 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't install services: %s", err)
 	}
 
-	launcher, err := launcher.New("tmp")
+	launcher, err := New("tmp")
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}

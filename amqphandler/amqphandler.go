@@ -15,7 +15,6 @@ import (
 	"github.com/streadway/amqp"
 
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
 //TODO: list
@@ -51,6 +50,12 @@ type ServiceInfoFromCloud struct {
 	EncryptionModeParams   string `json:"encryptionModeParams"`
 }
 
+type ServiceInfo struct {
+	Id      string `json:id`
+	Version uint   `json:version`
+	Status  string `json:status`
+}
+
 ///API structures
 type serviseDiscoveryRequest struct {
 	Version int      `json:"version"`
@@ -59,10 +64,10 @@ type serviseDiscoveryRequest struct {
 }
 
 type vehicleStatus struct {
-	Version     uint                   `json:"version"`
-	MessageType string                 `json:"messageType"`
-	SessionId   string                 `json:"sessionId"`
-	Sevices     []launcher.ServiceInfo `json:"services"`
+	Version     uint          `json:"version"`
+	MessageType string        `json:"messageType"`
+	SessionId   string        `json:"sessionId"`
+	Sevices     []ServiceInfo `json:"services"`
 }
 
 type desiredStatus struct {
@@ -151,7 +156,7 @@ const (
  * Public
  ******************************************************************************/
 
-// New creates new launcher object
+// New creates new amqp object
 func New() (handler *AmqpHandler, err error) {
 	handler = &AmqpHandler{}
 	return handler, nil
@@ -188,7 +193,7 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 }
 
 //todo add return errors
-func (handler *AmqpHandler) SendInitialSetup(serviceList []launcher.ServiceInfo) (err error) {
+func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 	log.Info("SendInitialSetup ", serviceList)
 	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: handler.localSessionID, Sevices: serviceList}
 	reqJson, err := json.Marshal(msg)
