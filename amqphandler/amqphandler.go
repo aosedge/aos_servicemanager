@@ -2,17 +2,18 @@ package amqphandler
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	//"os"
-	log "github.com/sirupsen/logrus"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
+
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
@@ -169,13 +170,19 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 		log.Error("NO connection info: ", err)
 		return amqpChan, err
 	}
-	log.Debug("Results: \n", amqpConn)
+	log.Debug("Results: ", amqpConn)
 
 	handler.localSessionID = amqpConn.SessionId
 	log.Info("Current SessionID  ", handler.localSessionID)
 
-	go handler.startSendConnection(&amqpConn.SendParam)
-	go handler.startConsumerConnection(&amqpConn.ReceiveParams)
+	tlsConfig, err := fcrypt.GetTlsConfig()
+	if err != nil {
+		log.Error("GetTlsConfig error : ", err)
+		return amqpChan, err
+	}
+
+	go handler.startSendConnection(&amqpConn.SendParam, tlsConfig)
+	go handler.startConsumerConnection(&amqpConn.ReceiveParams, tlsConfig)
 
 	return amqpChan, nil
 }
@@ -186,7 +193,7 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []launcher.ServiceInfo)
 	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: handler.localSessionID, Sevices: serviceList}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
-		log.Warn("Error :%v", err)
+		log.Warn("Error marshall json: ", err)
 		return err
 	}
 	sendChan <- reqJson
@@ -199,13 +206,13 @@ func (handler *AmqpHandler) CloseAllConnections() {
 	handler.consumerInfo.valid = false
 
 	if handler.exchangeInfo.conn != nil {
-		log.Info("exchangeInfo.conn.Close()")
+		log.Debug("Close exchange connection")
 		handler.exchangeInfo.conn.Close()
 		handler.exchangeInfo.conn = nil
 	}
 
 	if handler.consumerInfo.conn != nil {
-		log.Info("handler.consumerInfo.conn.Close()")
+		log.Debug("Close consumer connection")
 		handler.consumerInfo.conn.Close()
 		handler.consumerInfo.conn = nil
 	}
@@ -261,13 +268,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (connection re
 	return jsonResp.Connection, nil
 }
 
-func (handler *AmqpHandler) startSendConnection(params *sendParam) {
-
-	tlsConfig, err := fcrypt.GetTlsConfig()
-	if err != nil {
-		log.Fatal("GetTlsConfig error : ", err)
-		return
-	}
+func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tls.Config) {
 
 	config := amqp.Config{TLSClientConfig: tlsConfig,
 		SASL:      nil,
@@ -357,18 +358,12 @@ func startSender(info *amqpLocalSenderConnectionInfo) {
 				log.Warning("Error publish", err)
 				return
 			}
-			log.Info("SNED OK ", string(sendData))
+			log.Info("Send OK ", string(sendData))
 		}
 	}
 }
 
-func (handler *AmqpHandler) startConsumerConnection(param *receiveParams) {
-
-	tlsConfig, err := fcrypt.GetTlsConfig()
-	if err != nil {
-		log.Fatal("GetTlsConfig error : ", err)
-		return
-	}
+func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsConfig *tls.Config) {
 
 	config := amqp.Config{TLSClientConfig: tlsConfig,
 		SASL:      nil,
