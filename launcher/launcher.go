@@ -360,8 +360,9 @@ func (launcher *Launcher) processAction(item *list.Element) {
 			break
 		}
 
-		if err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
+		if installDir, err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
 			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
+			os.RemoveAll(installDir)
 			status.Err = err
 			break
 		}
@@ -392,7 +393,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 }
 
 // InstallService installs and runs service
-func (launcher *Launcher) installService(image string, id string, version uint) (err error) {
+func (launcher *Launcher) installService(image string, id string, version uint) (installDir string, err error) {
 	log.WithFields(log.Fields{"path": image, "id": id, "version": version}).Debug("Install service")
 
 	// TODO: do we need install to /tmp dir first?
@@ -400,15 +401,15 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	// but it will introduce additional io operations.
 
 	// create install dir
-	installDir, err := ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
+	installDir, err = ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
 	if err != nil {
-		return err
+		return installDir, err
 	}
 	log.WithField("dir", installDir).Debug("Create install dir")
 
 	// unpack image there
 	if err := unpackImage(image, installDir); err != nil {
-		return err
+		return installDir, err
 	}
 
 	configFile := path.Join(installDir, "config.json")
@@ -416,24 +417,24 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	// get service spec
 	spec, err := getServiceSpec(configFile)
 	if err != nil {
-		return err
+		return installDir, err
 	}
 
 	// update config.json
 	if err := launcher.updateServiceSpec(&spec); err != nil {
-		return err
+		return installDir, err
 	}
 
 	// update config.json
 	if err := writeServiceSpec(&spec, configFile); err != nil {
-		return err
+		return installDir, err
 	}
 
 	// check if service already installed
 	// TODO: check version?
 	service, err := launcher.db.getService(id)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return err
+		return installDir, err
 	}
 
 	// remove if exists
@@ -441,7 +442,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		log.WithField("name", id).Debug("Service exists.")
 
 		if err := launcher.removeService(id); err != nil {
-			return err
+			return installDir, err
 		}
 	}
 
@@ -449,11 +450,11 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 
 	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
 	if err != nil {
-		return err
+		return installDir, err
 	}
 
 	if err := launcher.startService(serviceFile, serviceName); err != nil {
-		return err
+		return installDir, err
 	}
 
 	service = serviceEntry{
@@ -469,14 +470,14 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		if err := launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
-		return err
+		return installDir, err
 	}
 
 	launcher.services.Store(serviceName, id)
 
 	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
 
-	return nil
+	return installDir, nil
 }
 
 // RemoveService stops and removes service
