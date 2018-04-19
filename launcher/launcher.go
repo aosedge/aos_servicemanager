@@ -4,6 +4,7 @@ package launcher
 import (
 	"container/list"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -350,6 +351,14 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		serviceInfo := action.data.(amqp.ServiceInfoFromCloud)
 		status.Version = serviceInfo.Version
 
+		// check installed service version
+		if service, err := launcher.db.getService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.version {
+			err = errors.New("Version mistmatch")
+			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
+			status.Err = err
+			break
+		}
+
 		imageFile, err := launcher.downloader.downloadService(serviceInfo)
 		if imageFile != "" {
 			defer os.Remove(imageFile)
@@ -431,7 +440,6 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	}
 
 	// check if service already installed
-	// TODO: check version?
 	service, err := launcher.db.getService(id)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
 		return installDir, err

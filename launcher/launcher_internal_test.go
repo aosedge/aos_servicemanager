@@ -294,3 +294,46 @@ func TestAutoStart(t *testing.T) {
 		t.Errorf("Wrong service quantity")
 	}
 }
+
+func TestErrors(t *testing.T) {
+	launcher, statusChan, err := newTestLauncher()
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	// test version mistmatch
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 5})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 4})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 6})
+
+	for i := 0; i < 3; i++ {
+		status := <-statusChan
+		switch {
+		case status.Version == 5 && status.Err != nil:
+			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+		case status.Version == 4 && status.Err == nil:
+			t.Errorf("Service version %d should not be installed", status.Version)
+		case status.Version == 6 && status.Err != nil:
+			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+		}
+	}
+
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		t.Error("Can't get services info: ", err)
+	}
+	if len(services) != 1 {
+		t.Errorf("Wrong service quantity")
+	}
+	if services[0].Version != 6 {
+		t.Errorf("Wrong service version")
+	}
+
+	launcher.RemoveService("service0")
+
+	if status := <-statusChan; status.Err != nil {
+		t.Error("Can't remove service: ", status.Err)
+	}
+}
