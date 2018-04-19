@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -12,7 +11,17 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 )
+
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type TestLauncher struct {
+	*Launcher
+}
 
 /*******************************************************************************
  * Init
@@ -31,42 +40,57 @@ func init() {
  * Private
  ******************************************************************************/
 
-func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
+func newTestLauncher() (testLauncher *TestLauncher, statusChannel <-chan ActionStatus, err error) {
+	instance, statusChannel, err := New("tmp")
+
+	testLauncher = &TestLauncher{instance}
+	testLauncher.downloader = testLauncher
+
+	return testLauncher, statusChannel, err
+}
+
+func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	if err := generateImage(imageDir); err != nil {
+		return outputFile, err
 	}
 
-	if err := generateImage("tmp/tmp_image"); err != nil {
-		return err
-	}
-
-	specFile := path.Join("tmp/tmp_image", "config.json")
+	specFile := path.Join(imageDir, "config.json")
 
 	spec, err := getServiceSpec(specFile)
 	if err != nil {
+		return outputFile, err
+	}
+
+	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id}
+
+	if err := writeServiceSpec(&spec, specFile); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func setup() (err error) {
+	if err := os.MkdirAll("tmp", 0755); err != nil {
 		return err
-	}
-
-	if spec.Annotations == nil {
-		spec.Annotations = make(map[string]string)
-	}
-
-	for i := 1; i <= 5; i++ {
-		serviceName := fmt.Sprintf("service%d", i)
-
-		spec.Process.Args = []string{"python3", "/home/service.py", serviceName}
-
-		spec.Annotations["id"] = serviceName
-		spec.Annotations["version"] = fmt.Sprintf("%d", i)
-
-		if err := writeServiceSpec(&spec, specFile); err != nil {
-			return err
-		}
-
-		err = packImage("tmp/tmp_image", fmt.Sprintf("tmp/image%d.tgz", i))
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -143,202 +167,130 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func installService(launcher *Launcher, image, id string, version uint) (status <-chan error) {
-	statusChannel := make(chan error, 1)
-	go func() {
-		statusChannel <- launcher.installService(image, id, version)
-	}()
-
-	return statusChannel
-}
-
-func removeService(launcher *Launcher, id string) (status <-chan error) {
-	statusChannel := make(chan error, 1)
-	go func() {
-		statusChannel <- launcher.removeService(id)
-	}()
-
-	return statusChannel
-}
-
 func TestInstallRemove(t *testing.T) {
-	launcher, _, _, err := New("tmp")
+	launcher, statusChan, err := newTestLauncher()
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
 
-	result := list.New()
+	numInstallServices := 30
+	numRemoveServices := 10
 
-	result.PushBack(installService(launcher, "tmp/image1.tgz", "service1", 1))
-	result.PushBack(installService(launcher, "tmp/image2.tgz", "service2", 1))
-	result.PushBack(installService(launcher, "tmp/image3.tgz", "service3", 1))
+	// install services
+	for i := 0; i < numInstallServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{Id: fmt.Sprintf("service%d", i)})
+	}
+	// remove services
+	for i := 0; i < numRemoveServices; i++ {
+		launcher.RemoveService(fmt.Sprintf("service%d", i))
+	}
 
-	for r := result.Front(); r != nil; r = r.Next() {
-		status, ok := r.Value.(<-chan error)
-		if !ok {
-			t.Error("Invalid interface")
-		}
-		if err = <-status; err != nil {
-			t.Fatalf("Can't install/remove service: %s", err)
+	for i := 0; i < numInstallServices+numRemoveServices; i++ {
+		if status := <-statusChan; status.Err != nil {
+			if status.Action == ActionInstall {
+				t.Error("Can't install service: ", status.Err)
+			} else {
+				t.Error("Can't remove service: ", status.Err)
+			}
 		}
 	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Errorf("Can't get services info: %s", err)
+		t.Error("Can't get services info: ", err)
 	}
-
-	if len(services) != 3 {
-		t.Error("Wrong service number")
+	if len(services) != numInstallServices-numRemoveServices {
+		t.Errorf("Wrong service quantity")
 	}
-
 	for _, service := range services {
-		if service.Id != "service1" && service.Id != "service2" && service.Id != "service3" {
-			t.Error("Wrong services installed")
-		}
 		if service.Status != "OK" {
-			t.Errorf("Bad service status: %s", service.Status)
+			t.Errorf("Service %s error status: %s", service.Id, service.Status)
 		}
 	}
 
-	result.Init()
+	time.Sleep(time.Second * 5)
 
-	result.PushBack(removeService(launcher, "service1"))
-	result.PushBack(installService(launcher, "tmp/image4.tgz", "service4", 1))
-	result.PushBack(removeService(launcher, "service2"))
-	result.PushBack(installService(launcher, "tmp/image5.tgz", "service5", 1))
-	result.PushBack(removeService(launcher, "service3"))
+	// remove remaining services
+	for i := numRemoveServices; i < numInstallServices; i++ {
+		launcher.RemoveService(fmt.Sprintf("service%d", i))
+	}
 
-	for r := result.Front(); r != nil; r = r.Next() {
-		status, ok := r.Value.(<-chan error)
-		if !ok {
-			t.Error("Invalid interface")
-		}
-		if err = <-status; err != nil {
-			t.Errorf("Can't install/remove service: %s", err)
+	for i := 0; i < numInstallServices-numRemoveServices; i++ {
+		if status := <-statusChan; status.Err != nil {
+			t.Error("Can't remove service: ", status.Err)
 		}
 	}
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
-		t.Errorf("Can't get services info: %s", err)
-	}
-
-	if len(services) != 2 {
-		t.Errorf("Wrong service number")
-	}
-
-	for _, service := range services {
-		if service.Id != "service4" && service.Id != "service5" {
-			t.Errorf("Wrong services installed")
-		}
-		if service.Status != "OK" {
-			t.Errorf("Bad service status: %s", service.Status)
-		}
-	}
-
-	result.Init()
-
-	result.PushBack(removeService(launcher, "service4"))
-	result.PushBack(removeService(launcher, "service5"))
-
-	for r := result.Front(); r != nil; r = r.Next() {
-		status, ok := r.Value.(<-chan error)
-		if !ok {
-			t.Error("Invalid interface")
-		}
-		if err = <-status; err != nil {
-			t.Errorf("Can't install/remove service: %s", err)
-		}
-	}
-
-	result.Init()
-
-	services, err = launcher.GetServicesInfo()
-	if err != nil {
-		t.Errorf("Can't get services info: %s", err)
+		t.Error("Can't get services info: ", err)
 	}
 	if len(services) != 0 {
-		t.Errorf("Wrong service number")
+		t.Errorf("Wrong service quantity")
 	}
-}
-
-func installAllServices() (err error) {
-	launcher, _, _, err := New("tmp")
-	if err != nil {
-		return err
-	}
-	defer launcher.Close()
-
-	result := list.New()
-
-	result.PushBack(installService(launcher, "tmp/image1.tgz", "service1", 1))
-	result.PushBack(installService(launcher, "tmp/image2.tgz", "service2", 1))
-	result.PushBack(installService(launcher, "tmp/image3.tgz", "service3", 1))
-	result.PushBack(installService(launcher, "tmp/image4.tgz", "service4", 1))
-	result.PushBack(installService(launcher, "tmp/image5.tgz", "service5", 1))
-
-	for r := result.Front(); r != nil; r = r.Next() {
-		status, ok := r.Value.(<-chan error)
-		if !ok {
-			return errors.New("Invalid interface")
-		}
-		if err = <-status; err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func TestAutoStart(t *testing.T) {
-	if err := installAllServices(); err != nil {
-		t.Fatalf("Can't install services: %s", err)
+	launcher, statusChan, err := newTestLauncher()
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	launcher, _, _, err := New("tmp")
+	numServices := 10
+
+	// install services
+	for i := 0; i < numServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{Id: fmt.Sprintf("service%d", i)})
+	}
+
+	for i := 0; i < numServices; i++ {
+		if status := <-statusChan; status.Err != nil {
+			t.Error("Can't install service: ", status.Err)
+		}
+	}
+
+	launcher.Close()
+
+	time.Sleep(time.Second * 5)
+
+	launcher, statusChan, err = newTestLauncher()
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
 
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second * 5)
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Errorf("Can't get services info: %s", err)
+		t.Error("Can't get services info: ", err)
 	}
-
-	if len(services) != 5 {
-		t.Error("Wrong service number")
+	if len(services) != numServices {
+		t.Errorf("Wrong service quantity")
 	}
-
 	for _, service := range services {
-		if service.Id != "service1" && service.Id != "service2" && service.Id != "service3" &&
-			service.Id != "service4" && service.Id != "service5" {
-			t.Error("Wrong services installed")
-		}
 		if service.Status != "OK" {
-			t.Errorf("Bad service status: %s", service.Status)
+			t.Errorf("Service %s error status: %s", service.Id, service.Status)
 		}
 	}
 
-	result := list.New()
-	result.PushBack(removeService(launcher, "service1"))
-	result.PushBack(removeService(launcher, "service2"))
-	result.PushBack(removeService(launcher, "service3"))
-	result.PushBack(removeService(launcher, "service4"))
-	result.PushBack(removeService(launcher, "service5"))
+	// remove services
+	for i := 0; i < numServices; i++ {
+		launcher.RemoveService(fmt.Sprintf("service%d", i))
+	}
 
-	for r := result.Front(); r != nil; r = r.Next() {
-		status, ok := r.Value.(<-chan error)
-		if !ok {
-			t.Error("Invalid interface")
-		}
-		if err = <-status; err != nil {
-			t.Errorf("Can't install/remove service: %s", err)
+	for i := 0; i < numServices; i++ {
+		if status := <-statusChan; status.Err != nil {
+			t.Error("Can't remove service: ", status.Err)
 		}
 	}
 
+	services, err = launcher.GetServicesInfo()
+	if err != nil {
+		t.Error("Can't get services info: ", err)
+	}
+	if len(services) != 0 {
+		t.Errorf("Wrong service quantity")
+	}
 }
