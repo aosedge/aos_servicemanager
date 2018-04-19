@@ -2,6 +2,7 @@
 package launcher
 
 import (
+	"container/list"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
@@ -72,21 +73,31 @@ type ActionStatus struct {
 	Err     error
 }
 
+type downloadItf interface {
+	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
+}
+
 // Launcher instance
 type Launcher struct {
 	db              *database
 	systemd         *dbus.Conn
+	downloader      downloadItf
 	closeChannel    chan bool
 	statusChannel   chan ActionStatus
 	services        sync.Map
+	mutex           sync.Mutex
+	waitQueue       *list.List
+	workQueue       *list.List
 	serviceTemplate string
 	workingDir      string
 	runcPath        string
 	netnsPath       string
 }
 
-type download interface {
-	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
+type serviceAction struct {
+	action action
+	id     string
+	data   interface{}
 }
 
 /*******************************************************************************
@@ -100,8 +111,14 @@ func New(workingDir string) (launcher *Launcher, executeChannel <-chan ActionSta
 	var localLauncher Launcher
 
 	localLauncher.workingDir = workingDir
+
 	localLauncher.closeChannel = make(chan bool)
 	localLauncher.statusChannel = make(chan ActionStatus, maxExecutedActions)
+
+	localLauncher.waitQueue = list.New()
+	localLauncher.workQueue = list.New()
+
+	localLauncher.downloader = &localLauncher
 
 	// Check and create service dir
 	dir := path.Join(workingDir, serviceDir)
@@ -197,27 +214,12 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error)
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	imageFile, err := launcher.downloadService(serviceInfo)
-	if imageFile != "" {
-		defer os.Remove(imageFile)
-	}
-	if err != nil {
-		log.Error("Can't download service: ", err)
-		return
-	}
-
-	if err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
-		log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
-		return
-	}
+	launcher.putInQueue(serviceAction{ActionInstall, serviceInfo.Id, serviceInfo})
 }
 
 // RemoveService stops and removes service
 func (launcher *Launcher) RemoveService(id string) {
-	if err := launcher.removeService(id); err != nil {
-		log.WithField("id", id).Error("Can't remove service: ", err)
-		return
-	}
+	launcher.putInQueue(serviceAction{ActionRemove, id, nil})
 }
 
 // GetServicesInfo returns informaion about all installed services
@@ -246,7 +248,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
 	client := grab.NewClient()
 
-	destDir, err := ioutil.TempDir("", "blob")
+	destDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create tmp dir : ", err)
 		return outputFile, err
@@ -312,7 +314,84 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 	return outputFile, nil
 }
 
-// installService installs and runs service
+func (launcher *Launcher) isIdInWorkQueue(id string) (result bool) {
+	for item := launcher.workQueue.Front(); item != nil; item = item.Next() {
+		if item.Value.(serviceAction).id == id {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (launcher *Launcher) putInQueue(action serviceAction) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
+	if launcher.isIdInWorkQueue(action.id) {
+		launcher.waitQueue.PushBack(action)
+		return
+	}
+
+	if launcher.workQueue.Len() >= maxExecutedActions {
+		launcher.waitQueue.PushBack(action)
+		return
+	}
+
+	go launcher.processAction(launcher.workQueue.PushBack(action))
+}
+
+func (launcher *Launcher) processAction(item *list.Element) {
+	action := item.Value.(serviceAction)
+	status := ActionStatus{Action: action.action, Id: action.id}
+
+	switch action.action {
+	case ActionInstall:
+		serviceInfo := action.data.(amqp.ServiceInfoFromCloud)
+		status.Version = serviceInfo.Version
+
+		imageFile, err := launcher.downloader.downloadService(serviceInfo)
+		if imageFile != "" {
+			defer os.Remove(imageFile)
+		}
+		if err != nil {
+			log.WithField("url", serviceInfo.DownloadUrl).Error("Can't download image: ", err)
+			status.Err = err
+			break
+		}
+
+		if err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
+			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
+			status.Err = err
+			break
+		}
+
+	case ActionRemove:
+		if err := launcher.removeService(status.Id); err != nil {
+			log.WithField("id", status.Id).Error("Can't remove service: ", err)
+			status.Err = err
+			break
+		}
+	}
+
+	launcher.statusChannel <- status
+
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
+	launcher.workQueue.Remove(item)
+
+	for item := launcher.waitQueue.Front(); item != nil; item = item.Next() {
+		if launcher.isIdInWorkQueue(item.Value.(serviceAction).id) {
+			continue
+		}
+
+		go launcher.processAction(launcher.workQueue.PushBack(launcher.waitQueue.Remove(item)))
+		break
+	}
+}
+
+// InstallService installs and runs service
 func (launcher *Launcher) installService(image string, id string, version uint) (err error) {
 	log.WithFields(log.Fields{"path": image, "id": id, "version": version}).Debug("Install service")
 
@@ -581,6 +660,9 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
 	}
@@ -601,6 +683,9 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 }
 
 func (launcher *Launcher) stopService(serviceName string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err
