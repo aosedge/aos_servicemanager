@@ -2,6 +2,9 @@
 package launcher
 
 import (
+	"container/list"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,9 +15,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cavaliercoder/grab"
 	"github.com/coreos/go-systemd/dbus"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************
@@ -22,10 +29,9 @@ import (
  ******************************************************************************/
 
 const (
-	// services database name
-	serviceDatabase = "services.db"
-	// services directory
-	serviceDir = "services"
+	serviceDatabase    = "services.db" // services database name
+	serviceDir         = "services"    // services directory
+	maxExecutedActions = 10            // max number of actions processed simulanteously
 )
 
 var (
@@ -46,6 +52,12 @@ const (
 	stateStopped
 )
 
+// Action
+const (
+	ActionInstall = iota
+	ActionRemove
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -53,22 +65,40 @@ const (
 type serviceStatus int
 type serviceState int
 
-type ServiceInfo struct {
-	Id      string `json:id`
-	Version uint   `json:version`
-	Status  string `json:status`
+type action int
+
+type ActionStatus struct {
+	Action  action
+	Id      string
+	Version uint
+	Err     error
+}
+
+type downloadItf interface {
+	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
 }
 
 // Launcher instance
 type Launcher struct {
 	db              *database
 	systemd         *dbus.Conn
+	downloader      downloadItf
 	closeChannel    chan bool
+	statusChannel   chan ActionStatus
 	services        sync.Map
+	mutex           sync.Mutex
+	waitQueue       *list.List
+	workQueue       *list.List
 	serviceTemplate string
 	workingDir      string
 	runcPath        string
 	netnsPath       string
+}
+
+type serviceAction struct {
+	action action
+	id     string
+	data   interface{}
 }
 
 /*******************************************************************************
@@ -76,35 +106,42 @@ type Launcher struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(workingDir string) (launcher *Launcher, err error) {
+func New(workingDir string) (launcher *Launcher, executeChannel <-chan ActionStatus, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
 
 	localLauncher.workingDir = workingDir
+
 	localLauncher.closeChannel = make(chan bool)
+	localLauncher.statusChannel = make(chan ActionStatus, maxExecutedActions)
+
+	localLauncher.waitQueue = list.New()
+	localLauncher.workQueue = list.New()
+
+	localLauncher.downloader = &localLauncher
 
 	// Check and create service dir
 	dir := path.Join(workingDir, serviceDir)
 	if _, err := os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 	}
 
 	// Create new database instance
 	localLauncher.db, err = newDatabase(path.Join(workingDir, serviceDatabase))
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Load all installed services
 	services, err := localLauncher.db.getServices()
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 	for _, service := range services {
 		localLauncher.services.Store(service.serviceName, service.id)
@@ -113,10 +150,10 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	// Create systemd connection
 	localLauncher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 	if err = localLauncher.systemd.Subscribe(); err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	localLauncher.handleSystemdSubscription()
@@ -124,13 +161,13 @@ func New(workingDir string) (launcher *Launcher, err error) {
 	// Get systemd service template
 	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Retreive runc abs path
 	localLauncher.runcPath, err = exec.LookPath("runc")
 	if err != nil {
-		return launcher, err
+		return launcher, executeChannel, err
 	}
 
 	// Retreive netns abs path
@@ -139,13 +176,13 @@ func New(workingDir string) (launcher *Launcher, err error) {
 		// check system PATH
 		localLauncher.netnsPath, err = exec.LookPath("netns")
 		if err != nil {
-			return launcher, err
+			return launcher, executeChannel, err
 		}
 	}
 
 	launcher = &localLauncher
 
-	return launcher, nil
+	return launcher, launcher.statusChannel, nil
 }
 
 // Close closes launcher
@@ -177,7 +214,195 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error)
 }
 
 // InstallService installs and runs service
-func (launcher *Launcher) InstallService(image string, id string, version uint) (err error) {
+func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
+	launcher.putInQueue(serviceAction{ActionInstall, serviceInfo.Id, serviceInfo})
+}
+
+// RemoveService stops and removes service
+func (launcher *Launcher) RemoveService(id string) {
+	launcher.putInQueue(serviceAction{ActionRemove, id, nil})
+}
+
+// GetServicesInfo returns informaion about all installed services
+func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
+	log.Debug("Get services info")
+
+	services, err := launcher.db.getServices()
+	if err != nil {
+		return info, err
+	}
+
+	info = make([]amqp.ServiceInfo, len(services))
+
+	for i, service := range services {
+		info[i] = amqp.ServiceInfo{service.id, service.version, statusStr[service.status]}
+	}
+
+	return info, nil
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+// downloadService downloads service
+func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	client := grab.NewClient()
+
+	destDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create tmp dir : ", err)
+		return outputFile, err
+	}
+	req, err := grab.NewRequest(destDir, serviceInfo.DownloadUrl)
+	if err != nil {
+		log.Error("Can't download package: ", err)
+		return outputFile, err
+	}
+
+	// start download
+	resp := client.Do(req)
+	defer os.RemoveAll(destDir)
+
+	log.WithField("filename", resp.Filename).Debug("Start downloading")
+
+	// wait when finished
+	resp.Wait()
+
+	if err := resp.Err(); err != nil {
+		log.Error("Can't download package: ", err)
+		return outputFile, err
+	}
+
+	imageSignature, err := hex.DecodeString(serviceInfo.ImageSignature)
+	if err != nil {
+		log.Error("Error decoding HEX string for signature: ", err)
+		return outputFile, err
+	}
+
+	encryptionKey, err := hex.DecodeString(serviceInfo.EncryptionKey)
+	if err != nil {
+		log.Error("Error decoding HEX string for key: ", err)
+		return outputFile, err
+	}
+
+	encryptionModeParams, err := hex.DecodeString(serviceInfo.EncryptionModeParams)
+	if err != nil {
+		log.Error("Error decoding HEX string for IV: ", err)
+		return outputFile, err
+	}
+
+	certificateChain := strings.Replace(serviceInfo.CertificateChain, "\\n", "", -1)
+	outputFile, err = fcrypt.DecryptImage(
+		resp.Filename,
+		imageSignature,
+		encryptionKey,
+		encryptionModeParams,
+		serviceInfo.SignatureAlgorithm,
+		serviceInfo.SignatureAlgorithmHash,
+		serviceInfo.SignatureScheme,
+		serviceInfo.EncryptionAlgorythm,
+		serviceInfo.EncryptionMode,
+		certificateChain)
+
+	if err != nil {
+		log.Error("Can't decrypt image: ", err)
+		return outputFile, err
+	}
+
+	log.WithField("filename", outputFile).Debug("Decrypt image")
+
+	return outputFile, nil
+}
+
+func (launcher *Launcher) isIdInWorkQueue(id string) (result bool) {
+	for item := launcher.workQueue.Front(); item != nil; item = item.Next() {
+		if item.Value.(serviceAction).id == id {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (launcher *Launcher) putInQueue(action serviceAction) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
+	if launcher.isIdInWorkQueue(action.id) {
+		launcher.waitQueue.PushBack(action)
+		return
+	}
+
+	if launcher.workQueue.Len() >= maxExecutedActions {
+		launcher.waitQueue.PushBack(action)
+		return
+	}
+
+	go launcher.processAction(launcher.workQueue.PushBack(action))
+}
+
+func (launcher *Launcher) processAction(item *list.Element) {
+	action := item.Value.(serviceAction)
+	status := ActionStatus{Action: action.action, Id: action.id}
+
+	switch action.action {
+	case ActionInstall:
+		serviceInfo := action.data.(amqp.ServiceInfoFromCloud)
+		status.Version = serviceInfo.Version
+
+		// check installed service version
+		if service, err := launcher.db.getService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.version {
+			err = errors.New("Version mistmatch")
+			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
+			status.Err = err
+			break
+		}
+
+		imageFile, err := launcher.downloader.downloadService(serviceInfo)
+		if imageFile != "" {
+			defer os.Remove(imageFile)
+		}
+		if err != nil {
+			log.WithField("url", serviceInfo.DownloadUrl).Error("Can't download image: ", err)
+			status.Err = err
+			break
+		}
+
+		if installDir, err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
+			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
+			os.RemoveAll(installDir)
+			status.Err = err
+			break
+		}
+
+	case ActionRemove:
+		if err := launcher.removeService(status.Id); err != nil {
+			log.WithField("id", status.Id).Error("Can't remove service: ", err)
+			status.Err = err
+			break
+		}
+	}
+
+	launcher.statusChannel <- status
+
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
+	launcher.workQueue.Remove(item)
+
+	for item := launcher.waitQueue.Front(); item != nil; item = item.Next() {
+		if launcher.isIdInWorkQueue(item.Value.(serviceAction).id) {
+			continue
+		}
+
+		go launcher.processAction(launcher.workQueue.PushBack(launcher.waitQueue.Remove(item)))
+		break
+	}
+}
+
+// InstallService installs and runs service
+func (launcher *Launcher) installService(image string, id string, version uint) (installDir string, err error) {
 	log.WithFields(log.Fields{"path": image, "id": id, "version": version}).Debug("Install service")
 
 	// TODO: do we need install to /tmp dir first?
@@ -185,48 +410,47 @@ func (launcher *Launcher) InstallService(image string, id string, version uint) 
 	// but it will introduce additional io operations.
 
 	// create install dir
-	installDir, err := ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
+	installDir, err = ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
 	if err != nil {
-		return err
+		return installDir, err
 	}
 	log.WithField("dir", installDir).Debug("Create install dir")
 
 	// unpack image there
-	if err := UnpackImage(image, installDir); err != nil {
-		return err
+	if err := unpackImage(image, installDir); err != nil {
+		return installDir, err
 	}
 
 	configFile := path.Join(installDir, "config.json")
 
 	// get service spec
-	spec, err := GetServiceSpec(configFile)
+	spec, err := getServiceSpec(configFile)
 	if err != nil {
-		return err
+		return installDir, err
 	}
 
 	// update config.json
 	if err := launcher.updateServiceSpec(&spec); err != nil {
-		return err
+		return installDir, err
 	}
 
 	// update config.json
-	if err := WriteServiceSpec(&spec, configFile); err != nil {
-		return err
+	if err := writeServiceSpec(&spec, configFile); err != nil {
+		return installDir, err
 	}
 
 	// check if service already installed
-	// TODO: check version?
 	service, err := launcher.db.getService(id)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return err
+		return installDir, err
 	}
 
 	// remove if exists
 	if err == nil {
 		log.WithField("name", id).Debug("Service exists.")
 
-		if err := launcher.RemoveService(id); err != nil {
-			return err
+		if err := launcher.removeService(id); err != nil {
+			return installDir, err
 		}
 	}
 
@@ -234,11 +458,11 @@ func (launcher *Launcher) InstallService(image string, id string, version uint) 
 
 	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
 	if err != nil {
-		return err
+		return installDir, err
 	}
 
 	if err := launcher.startService(serviceFile, serviceName); err != nil {
-		return err
+		return installDir, err
 	}
 
 	service = serviceEntry{
@@ -254,18 +478,18 @@ func (launcher *Launcher) InstallService(image string, id string, version uint) 
 		if err := launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
-		return err
+		return installDir, err
 	}
 
 	launcher.services.Store(serviceName, id)
 
 	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
 
-	return nil
+	return installDir, nil
 }
 
 // RemoveService stops and removes service
-func (launcher *Launcher) RemoveService(id string) (err error) {
+func (launcher *Launcher) removeService(id string) (err error) {
 	service, err := launcher.db.getService(id)
 	if err != nil {
 		return err
@@ -290,28 +514,6 @@ func (launcher *Launcher) RemoveService(id string) (err error) {
 
 	return nil
 }
-
-// GetServicesInfo returns informaion about all installed services
-func (launcher *Launcher) GetServicesInfo() (info []ServiceInfo, err error) {
-	log.Debug("Get services info")
-
-	services, err := launcher.db.getServices()
-	if err != nil {
-		return info, err
-	}
-
-	info = make([]ServiceInfo, len(services))
-
-	for i, service := range services {
-		info[i] = ServiceInfo{service.id, service.version, statusStr[service.status]}
-	}
-
-	return info, nil
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	template = `[Unit]
@@ -453,8 +655,8 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "nsswitch.conf"), "bind", nsswitchConf, []string{"bind", "ro"}})
 
 	// TODO: all services should have their own certificates
-	// this mound for demo only and should be removed 
-	// mount /etc/ssl 
+	// this mound for demo only and should be removed
+	// mount /etc/ssl
 	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "ssl"), "bind", path.Join("/etc", "ssl"), []string{"bind", "ro"}})
 
 	// add netns hook
@@ -467,6 +669,9 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
 	}
@@ -487,6 +692,9 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 }
 
 func (launcher *Launcher) stopService(serviceName string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err

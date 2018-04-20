@@ -14,7 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func PackImage(source, name string) (err error) {
+func packImage(source, name string) (err error) {
 	log.WithFields(log.Fields{"source": source, "name": name}).Debug("Pack image")
 
 	_, err = os.Stat(source)
@@ -67,7 +67,7 @@ func PackImage(source, name string) (err error) {
 	})
 }
 
-func UnpackImage(name, destination string) (err error) {
+func unpackImage(name, destination string) (err error) {
 	log.WithFields(log.Fields{"name": name, "destination": destination}).Debug("Unpack image")
 
 	reader, err := os.Open(name)
@@ -132,7 +132,7 @@ func UnpackImage(name, destination string) (err error) {
 	}
 }
 
-func GetServiceSpec(configFile string) (spec specs.Spec, err error) {
+func getServiceSpec(configFile string) (spec specs.Spec, err error) {
 	raw, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		return spec, err
@@ -145,7 +145,7 @@ func GetServiceSpec(configFile string) (spec specs.Spec, err error) {
 	return spec, nil
 }
 
-func WriteServiceSpec(spec *specs.Spec, configFile string) (err error) {
+func writeServiceSpec(spec *specs.Spec, configFile string) (err error) {
 	f, err := os.Create(configFile)
 	if err != nil {
 		return err
