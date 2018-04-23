@@ -439,21 +439,6 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
-	// check if service already installed
-	service, err := launcher.db.getService(id)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return installDir, err
-	}
-
-	// remove if exists
-	if err == nil {
-		log.WithField("name", id).Debug("Service exists.")
-
-		if err := launcher.removeService(id); err != nil {
-			return installDir, err
-		}
-	}
-
 	serviceName := "aos_" + id + ".service"
 
 	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
@@ -463,6 +448,23 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 
 	if err := launcher.startService(serviceFile, serviceName); err != nil {
 		return installDir, err
+	}
+
+	// check if service already installed
+	service, err := launcher.db.getService(id)
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return installDir, err
+	}
+
+	// remove if exists
+	if err == nil {
+		if err := launcher.db.removeService(service.id); err != nil {
+			log.WithField("name", service.serviceName).Error("Can't remove service from db: ", err)
+		}
+
+		if err := os.RemoveAll(service.path); err != nil {
+			log.WithField("path", service.path).Error("Can't remove service path")
+		}
 	}
 
 	service = serviceEntry{
@@ -681,6 +683,25 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 	}
 
 	channel := make(chan string)
+
+	// stop already startes service
+	unitStatuses, err := launcher.systemd.ListUnitsByNames([]string{serviceName})
+	if err != nil {
+		return err
+	}
+	if unitStatuses[0].LoadState == "loaded" {
+		log.WithField("name", serviceName).Debug("Already loaded. Stop it.")
+
+		launcher.services.Delete(serviceName)
+
+		if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
+			return err
+		}
+		status := <-channel
+
+		log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
+	}
+
 	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
 		return err
 	}
