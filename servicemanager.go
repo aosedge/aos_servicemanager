@@ -150,13 +150,6 @@ func main() {
 					}
 					log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully removed")
 				}
-				/*
-					if serviceStatus.Err != nil {
-						log.WithFields(log.Fields{"id": installStatus.Id, "version": installStatus.Version}).Error("Can't install service: ", installStatus.Err)
-						break
-					}
-					log.WithFields(log.Fields{"id": installStatus.Id, "version": installStatus.Version}).Info("Service successfully installed")
-				*/
 			}
 		}
 	}
