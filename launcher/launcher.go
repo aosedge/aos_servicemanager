@@ -353,9 +353,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 
 		// check installed service version
 		if service, err := launcher.db.getService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.version {
-			err = errors.New("Version mistmatch")
-			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
-			status.Err = err
+			status.Err = errors.New("Version mistmatch")
 			break
 		}
 
@@ -364,13 +362,11 @@ func (launcher *Launcher) processAction(item *list.Element) {
 			defer os.Remove(imageFile)
 		}
 		if err != nil {
-			log.WithField("url", serviceInfo.DownloadUrl).Error("Can't download image: ", err)
 			status.Err = err
 			break
 		}
 
 		if installDir, err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
-			log.WithFields(log.Fields{"id": serviceInfo.Id, "version": serviceInfo.Version}).Error("Can't install service: ", err)
 			os.RemoveAll(installDir)
 			status.Err = err
 			break
@@ -378,7 +374,6 @@ func (launcher *Launcher) processAction(item *list.Element) {
 
 	case ActionRemove:
 		if err := launcher.removeService(status.Id); err != nil {
-			log.WithField("id", status.Id).Error("Can't remove service: ", err)
 			status.Err = err
 			break
 		}
@@ -447,6 +442,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	}
 
 	if err := launcher.startService(serviceFile, serviceName); err != nil {
+		// TODO: try to restore old service
 		return installDir, err
 	}
 
@@ -455,14 +451,13 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
 		return installDir, err
 	}
-
 	// remove if exists
 	if err == nil {
 		if err := launcher.db.removeService(service.id); err != nil {
-			log.WithField("name", service.serviceName).Error("Can't remove service from db: ", err)
+			return installDir, err
 		}
-
 		if err := os.RemoveAll(service.path); err != nil {
+			// indicate error, can continue
 			log.WithField("path", service.path).Error("Can't remove service path")
 		}
 	}
@@ -480,17 +475,18 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		if err := launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
+		// TODO: try to restore old
 		return installDir, err
 	}
 
 	launcher.services.Store(serviceName, id)
 
-	log.WithFields(log.Fields{"id": id, "version": version}).Info("Service successfully installed")
-
 	return installDir, nil
 }
 
 // RemoveService stops and removes service
+// TODO: consider what to do with errors on remove: pass it to servicemanager or
+// just display
 func (launcher *Launcher) removeService(id string) (err error) {
 	service, err := launcher.db.getService(id)
 	if err != nil {
@@ -501,11 +497,11 @@ func (launcher *Launcher) removeService(id string) (err error) {
 	launcher.services.Delete(service.serviceName)
 
 	if err := launcher.stopService(service.serviceName); err != nil {
-		log.WithField("name", service.serviceName).Warn("Can't stop service: ", err)
+		log.WithField("name", service.serviceName).Error("Can't stop service: ", err)
 	}
 
 	if err := launcher.db.removeService(service.id); err != nil {
-		log.WithField("name", service.serviceName).Warn("Can't remove service from db: ", err)
+		log.WithField("name", service.serviceName).Error("Can't remove service from db: ", err)
 	}
 
 	if err := os.RemoveAll(service.path); err != nil {
