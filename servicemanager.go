@@ -137,18 +137,35 @@ func main() {
 			case serviceStatus := <-launcherChan:
 				switch serviceStatus.Action {
 				case launcher.ActionInstall:
+					info := amqp.ServiceInfo{Id: serviceStatus.Id, Version: serviceStatus.Version}
 					if serviceStatus.Err != nil {
+						info.Status = "error"
+						errorMsg := amqp.ServiceError{Id: -1, Message: "Can't install service"}
+						info.Error = &errorMsg
 						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Error("Can't install service: ", serviceStatus.Err)
-						break
+					} else {
+						info.Status = "installed"
+						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully installed")
 					}
-					log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully installed")
-
+					err := amqpHandler.SendServiceStatusMsg(info)
+					if err != nil {
+						log.Error("Error send service status message: ", err)
+					}
 				case launcher.ActionRemove:
+					info := amqp.ServiceInfo{Id: serviceStatus.Id, Version: serviceStatus.Version}
 					if serviceStatus.Err != nil {
+						info.Status = "error"
+						errorMsg := amqp.ServiceError{Id: -1, Message: "Can't remove service"}
+						info.Error = &errorMsg
 						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Error("Can't remove service: ", serviceStatus.Err)
-						break
+					} else {
+						info.Status = "removed"
+						log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully removed")
 					}
-					log.WithFields(log.Fields{"id": serviceStatus.Id, "version": serviceStatus.Version}).Info("Service successfully removed")
+					err := amqpHandler.SendServiceStatusMsg(info)
+					if err != nil {
+						log.Error("Error send service status message: ", err)
+					}
 				}
 			}
 		}

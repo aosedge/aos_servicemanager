@@ -51,9 +51,15 @@ type ServiceInfoFromCloud struct {
 }
 
 type ServiceInfo struct {
-	Id      string `json:id`
-	Version uint   `json:version`
-	Status  string `json:status`
+	Id      string        `json:"id"`
+	Version uint          `json:"version"`
+	Status  string        `json:"status"`
+	Error   *ServiceError `json:"error"`
+}
+
+type ServiceError struct {
+	Id      int    `json:"id"`
+	Message string `json:"message"`
 }
 
 ///API structures
@@ -150,6 +156,8 @@ var sendChan = make(chan []byte, 100)
 
 const (
 	CONNECTION_RETRY = 3
+	VEHICLE_STATUS   = "vehicleStatus"
+	SERVICE_STATUS   = "serviceStatus"
 )
 
 /*******************************************************************************
@@ -192,10 +200,23 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 	return amqpChan, nil
 }
 
-//todo add return errors
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: "vehicleStatus", SessionId: handler.localSessionID, Sevices: serviceList}
+	msg := vehicleStatus{Version: 1, MessageType: VEHICLE_STATUS, SessionId: handler.localSessionID, Sevices: serviceList}
+	reqJson, err := json.Marshal(msg)
+	if err != nil {
+		log.Warn("Error marshall json: ", err)
+		return err
+	}
+	sendChan <- reqJson
+	return nil
+}
+
+func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) error {
+	log.Info("SendServiceStatusMsg ", serviceStatus)
+	var list []ServiceInfo
+	list = append(list, serviceStatus)
+	msg := vehicleStatus{Version: 1, MessageType: SERVICE_STATUS, SessionId: handler.localSessionID, Sevices: list}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
