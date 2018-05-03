@@ -235,7 +235,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	info = make([]amqp.ServiceInfo, len(services))
 
 	for i, service := range services {
-		info[i] = amqp.ServiceInfo{service.id, service.version, statusStr[service.status]}
+		info[i] = amqp.ServiceInfo{Id: service.id, Version: service.version, Status: statusStr[service.status]}
 	}
 
 	return info, nil
