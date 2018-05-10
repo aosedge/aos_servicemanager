@@ -670,32 +670,25 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 	launcher.mutex.Lock()
 	defer launcher.mutex.Unlock()
 
+	channel := make(chan string)
+
+	launcher.services.Delete(serviceName)
+
+	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err == nil {
+		// stop already startes service
+		log.WithField("name", serviceName).Debug("Already loaded. Stop it.")
+
+		status := <-channel
+
+		log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
+	}
+
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
 	}
 
 	if err := launcher.systemd.Reload(); err != nil {
 		return err
-	}
-
-	channel := make(chan string)
-
-	// stop already startes service
-	unitStatuses, err := launcher.systemd.ListUnitsByNames([]string{serviceName})
-	if err != nil {
-		return err
-	}
-	if unitStatuses[0].LoadState == "loaded" {
-		log.WithField("name", serviceName).Debug("Already loaded. Stop it.")
-
-		launcher.services.Delete(serviceName)
-
-		if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
-			return err
-		}
-		status := <-channel
-
-		log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
 	}
 
 	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
