@@ -738,8 +738,8 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 
 	pidFile := path.Join(absServicePath, id+".pid")
 	execStartString := launcher.runcPath + " run -d --pid-file " + pidFile + " -b " + absServicePath + " " + id
-	execStopString := launcher.runcPath + " kill -a " + id + " SIGKILL"
-	execStopPostString := launcher.runcPath + " delete " + id
+	execStopString := launcher.runcPath + " kill " + id + " SIGKILL"
+	execStopPostString := launcher.runcPath + " delete -f " + id
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
