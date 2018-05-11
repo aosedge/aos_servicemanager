@@ -666,21 +666,7 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
-
-	channel := make(chan string)
-
 	launcher.services.Delete(serviceName)
-
-	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err == nil {
-		// stop already startes service
-		log.WithField("name", serviceName).Debug("Already loaded. Stop it.")
-
-		status := <-channel
-
-		log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
-	}
 
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
@@ -690,7 +676,8 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 		return err
 	}
 
-	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
+	channel := make(chan string)
+	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
@@ -701,9 +688,6 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 }
 
 func (launcher *Launcher) stopService(serviceName string) (err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
-
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err
