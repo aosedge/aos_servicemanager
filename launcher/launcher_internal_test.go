@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -68,7 +69,7 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id}
+	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id, fmt.Sprintf("%d", serviceInfo.Version)}
 
 	if err := writeServiceSpec(&spec, specFile); err != nil {
 		return outputFile, err
@@ -113,14 +114,21 @@ func generateImage(imagePath string) (err error) {
 	serviceContent := `#!/usr/bin/python
 
 import time
+import socket
 import sys
 
 i = 0
 serviceName = sys.argv[1]
+serviceVersion = sys.argv[2]
 
-print(">>>> Start", serviceName)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+message = serviceName + ", version: " + serviceVersion
+sock.sendto(str.encode(message), ("172.19.0.1", 10001))
+sock.close()
+
+print(">>>> Start", serviceName, "version", serviceVersion)
 while True:
-	print(">>>> aos", serviceName, "count", i)
+	print(">>>> aos", serviceName, "version", serviceVersion, "count", i)
 	i = i + 1
 	time.sleep(5)`
 
@@ -335,5 +343,70 @@ func TestErrors(t *testing.T) {
 
 	if status := <-statusChan; status.Err != nil {
 		t.Error("Can't remove service: ", status.Err)
+	}
+}
+
+func TestUpdate(t *testing.T) {
+	launcher, statusChan, err := newTestLauncher()
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	serverAddr, err := net.ResolveUDPAddr("udp", ":10001")
+	if err != nil {
+		t.Fatalf("Can't create resolve UDP address: %s", err)
+	}
+
+	serverConn, err := net.ListenUDP("udp", serverAddr)
+	if err != nil {
+		t.Fatalf("Can't listen UDP: %s", err)
+	}
+	defer serverConn.Close()
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 0})
+
+	if status := <-statusChan; status.Err != nil {
+		t.Fatalf("Can't install service: %s", status.Err)
+	}
+
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
+		t.Fatalf("Can't set read dead line: %s", err)
+	}
+
+	buf := make([]byte, 1024)
+
+	n, _, err := serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	} else {
+		message := string(buf[:n])
+
+		if message != "service0, version: 0" {
+			t.Fatalf("Wrong service content: %s", message)
+		}
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 1})
+
+	if status := <-statusChan; status.Err != nil {
+		t.Fatalf("Can't install service: %s", status.Err)
+	}
+
+	n, _, err = serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	} else {
+		message := string(buf[:n])
+
+		if message != "service0, version: 1" {
+			t.Fatalf("Wrong service content: %s", message)
+		}
+	}
+
+	launcher.RemoveService("service0")
+
+	if status := <-statusChan; status.Err != nil {
+		t.Errorf("Can't remove service: %s", status.Err)
 	}
 }
