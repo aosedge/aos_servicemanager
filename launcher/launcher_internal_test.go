@@ -234,16 +234,16 @@ func TestInstallRemove(t *testing.T) {
 	for i := 0; i < numInstallServices+numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
 			if status.Action == ActionInstall {
-				t.Error("Can't install service: ", status.Err)
+				t.Errorf("Can't install service %s: %s", status.Id, status.Err)
 			} else {
-				t.Error("Can't remove service: ", status.Err)
+				t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 			}
 		}
 	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != numInstallServices-numRemoveServices {
 		t.Errorf("Wrong service quantity")
@@ -263,13 +263,13 @@ func TestInstallRemove(t *testing.T) {
 
 	for i := 0; i < numInstallServices-numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't remove service: ", status.Err)
+			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 		}
 	}
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
@@ -291,7 +291,7 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't install service: ", status.Err)
+			t.Errorf("Can't install service %s: %s", status.Id, status.Err)
 		}
 	}
 
@@ -309,7 +309,7 @@ func TestAutoStart(t *testing.T) {
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != numServices {
 		t.Errorf("Wrong service quantity")
@@ -327,13 +327,13 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't remove service: ", status.Err)
+			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 		}
 	}
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
@@ -357,17 +357,17 @@ func TestErrors(t *testing.T) {
 		status := <-statusChan
 		switch {
 		case status.Version == 5 && status.Err != nil:
-			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
 		case status.Version == 4 && status.Err == nil:
-			t.Errorf("Service version %d should not be installed", status.Version)
+			t.Errorf("Service %s version %d should not be installed", status.Id, status.Version)
 		case status.Version == 6 && status.Err != nil:
-			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
 		}
 	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 1 {
 		t.Errorf("Wrong service quantity")
@@ -401,11 +401,11 @@ func TestUpdate(t *testing.T) {
 	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 0})
 
 	if status := <-statusChan; status.Err != nil {
-		t.Fatalf("Can't install service: %s", status.Err)
+		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
 	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
-		t.Fatalf("Can't set read dead line: %s", err)
+		t.Fatalf("Can't set read deadline: %s", err)
 	}
 
 	buf := make([]byte, 1024)
@@ -424,7 +424,7 @@ func TestUpdate(t *testing.T) {
 	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 1})
 
 	if status := <-statusChan; status.Err != nil {
-		t.Fatalf("Can't install service: %s", status.Err)
+		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
 	}
 
 	n, _, err = serverConn.ReadFromUDP(buf)
