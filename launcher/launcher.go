@@ -520,6 +520,7 @@ After=network.target
 Type=forking
 Restart=always
 RestartSec=1
+ExecStartPre=%s
 ExecStart=%s
 ExecStop=%s
 ExecStopPost=%s
@@ -735,6 +736,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	}
 
 	pidFile := path.Join(absServicePath, id+".pid")
+	execStartPreString := launcher.runcPath + " delete -f " + id
 	execStartString := launcher.runcPath + " run -d --pid-file " + pidFile + " -b " + absServicePath + " " + id
 	execStopString := launcher.runcPath + " kill " + id + " SIGKILL"
 	execStopPostString := launcher.runcPath + " delete -f " + id
@@ -744,6 +746,10 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		switch {
 		// the order is important for example: execstoppost should be evaluated
 		// before execstop as execstop is substring of execstoppost
+		case strings.Contains(strings.ToLower(line), "execstartpre"):
+			if _, err := fmt.Fprintf(f, line, execStartPreString); err != nil {
+				return fileName, err
+			}
 		case strings.Contains(strings.ToLower(line), "execstart"):
 			if _, err := fmt.Fprintf(f, line, execStartString); err != nil {
 				return fileName, err
