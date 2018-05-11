@@ -10,8 +10,8 @@ import (
  * Consts
  ******************************************************************************/
 const (
-	OBJECT_PATH    = "/com/aosservicemanager/vistoken"
-	INTERFACE_NAME = "com.aosservicemanager.vistoken"
+	ObjectPath   = "/com/aosservicemanager/vistoken"
+	IntrfaceName = "com.aosservicemanager.vistoken"
 )
 
 /*******************************************************************************
@@ -30,12 +30,12 @@ type AosDbusInterface struct {
 func New() (dbusHandler *AosDbusInterface, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
-		log.Error("can't Create session connection %v", err)
+		log.Error("Can't create session dbus connection %v", err)
 		return dbusHandler, err
 	}
-	reply, err := conn.RequestName(INTERFACE_NAME, dbus.NameFlagDoNotQueue)
+	reply, err := conn.RequestName(IntrfaceName, dbus.NameFlagDoNotQueue)
 	if err != nil {
-		log.Error("can't RequestName ", err)
+		log.Error("Can't reques dbus inerface name ", err)
 		return dbusHandler, err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {
@@ -45,21 +45,22 @@ func New() (dbusHandler *AosDbusInterface, err error) {
 
 	log.Info("Start D-BUS server")
 	server := AosDbusInterface{dbusConn: conn}
-	conn.Export(server, OBJECT_PATH, INTERFACE_NAME)
+	conn.Export(server, ObjectPath, IntrfaceName)
 
 	dbusHandler = &server
 	return dbusHandler, nil
 }
+
 func (dbusHandler *AosDbusInterface) StopServer() error {
 	log.Info("Stop d-bus server")
-	reply, err := dbusHandler.dbusConn.ReleaseName(INTERFACE_NAME)
+	reply, err := dbusHandler.dbusConn.ReleaseName(IntrfaceName)
 	if err != nil {
-		log.Error("ReleaseName error ", err)
+		log.Error("Error release dbus interface name", err)
 		return err
 	}
 	if reply != dbus.ReleaseNameReplyReleased {
-		log.Error("ReleaseName error ")
-		return errors.New("ReleaseName error")
+		log.Error("Error release dbus interface name ")
+		return errors.New("Error release dbus interface name")
 	}
 	return nil
 }
