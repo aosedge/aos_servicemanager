@@ -508,8 +508,6 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		log.WithField("path", service.path).Error("Can't remove service path")
 	}
 
-	log.WithFields(log.Fields{"id": id, "version": service.version}).Info("Service successfully removed")
-
 	return nil
 }
 
