@@ -89,6 +89,33 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 	return outputFile, nil
 }
 
+func (launcher *TestLauncher) removeAllServices() (err error) {
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		launcher.RemoveService(service.Id)
+	}
+
+	for i := 0; i < len(services); i++ {
+		if status := <-launcher.statusChannel; status.Err != nil {
+			err = status.Err
+		}
+	}
+
+	services, err = launcher.GetServicesInfo()
+	if err != nil {
+		return err
+	}
+	if len(services) != 0 {
+		return errors.New("Can't remove all services")
+	}
+
+	return err
+}
+
 func setup() (err error) {
 	if err := os.MkdirAll("tmp", 0755); err != nil {
 		return err
@@ -98,6 +125,16 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
+	launcher, _, err := newTestLauncher()
+	if err != nil {
+		return err
+	}
+	defer launcher.Close()
+
+	if err := launcher.removeAllServices(); err != nil {
+		return err
+	}
+
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err
 	}
@@ -338,10 +375,8 @@ func TestErrors(t *testing.T) {
 		t.Errorf("Wrong service version")
 	}
 
-	launcher.RemoveService("service0")
-
-	if status := <-statusChan; status.Err != nil {
-		t.Error("Can't remove service: ", status.Err)
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
 
@@ -403,9 +438,7 @@ func TestUpdate(t *testing.T) {
 		}
 	}
 
-	launcher.RemoveService("service0")
-
-	if status := <-statusChan; status.Err != nil {
-		t.Errorf("Can't remove service: %s", status.Err)
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
