@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
 
@@ -98,6 +99,15 @@ func main() {
 	}
 	defer amqpHandler.CloseAllConnections()
 
+	dbusServer, err := dbushandler.New()
+
+	if err != nil {
+		log.Fatal("Can't create D-BUS server %v", err)
+	}
+	if dbusServer == nil {
+		log.Fatal("Can't create D-BUS server")
+	}
+
 	// handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -105,6 +115,7 @@ func main() {
 		<-c
 		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
+		dbusServer.StopServer()
 		os.Exit(1)
 	}()
 
