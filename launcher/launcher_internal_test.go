@@ -334,8 +334,7 @@ func TestErrors(t *testing.T) {
 	}
 	if len(services) != 1 {
 		t.Errorf("Wrong service quantity")
-	}
-	if services[0].Version != 6 {
+	} else if services[0].Version != 6 {
 		t.Errorf("Wrong service version")
 	}
 
