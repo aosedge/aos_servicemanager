@@ -25,13 +25,13 @@ func TestDatabase(t *testing.T) {
 
 	// addService
 
-	service1 := serviceEntry{"service1", 1, "to/service1", "service1.service", stateInit, statusOk}
+	service1 := serviceEntry{"service1", 1, "to/service1", "service1.service", "user1", stateInit, statusOk}
 	err = db.addService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
 	}
 
-	service2 := serviceEntry{"service2", 2, "to/service2", "service2.service", stateInit, statusOk}
+	service2 := serviceEntry{"service2", 2, "to/service2", "service2.service", "user2", stateInit, statusOk}
 	err = db.addService(service2)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)

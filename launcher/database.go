@@ -31,6 +31,7 @@ type serviceEntry struct {
 	version     uint          // service version
 	path        string        // path to service bundle
 	serviceName string        // systemd service name
+	userName    string        // user used to run this service
 	state       serviceState  // service state
 	status      serviceStatus // service status
 }
@@ -67,13 +68,14 @@ func newDatabase(name string) (db *database, err error) {
 
 // addService adds new service entry
 func (db *database) addService(entry serviceEntry) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services(id, version, path, service, state, status) values(?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services(id, version, path, service, user, state, status) values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(entry.id, entry.version, entry.path, entry.serviceName, entry.state, entry.status)
+	_, err = stmt.Exec(entry.id, entry.version, entry.path, entry.serviceName,
+		entry.userName, entry.state, entry.status)
 
 	return err
 }
@@ -99,7 +101,8 @@ func (db *database) getService(id string) (entry serviceEntry, err error) {
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(id).Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName, &entry.state, &entry.status)
+	err = stmt.QueryRow(id).Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName,
+		&entry.userName, &entry.state, &entry.status)
 	if err == sql.ErrNoRows {
 		return entry, errors.New("Service does not exist")
 	}
@@ -122,7 +125,8 @@ func (db *database) getServices() (entries []serviceEntry, err error) {
 
 	for rows.Next() {
 		var entry serviceEntry
-		err = rows.Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName, &entry.state, &entry.status)
+		err = rows.Scan(&entry.id, &entry.version, &entry.path, &entry.serviceName,
+			&entry.userName, &entry.state, &entry.status)
 		if err != nil {
 			return entries, err
 		}
@@ -196,6 +200,7 @@ func (db *database) createServiceTable() (err error) {
 															   version INTEGER,
 															   path TEXT,
 															   service TEXT,
+															   user TEXT,
 															   state INTEGER,
 															   status INTEGER);`)
 
