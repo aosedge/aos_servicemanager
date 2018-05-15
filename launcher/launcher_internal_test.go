@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -68,7 +69,7 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id}
+	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id, fmt.Sprintf("%d", serviceInfo.Version)}
 
 	if err := writeServiceSpec(&spec, specFile); err != nil {
 		return outputFile, err
@@ -88,6 +89,33 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 	return outputFile, nil
 }
 
+func (launcher *TestLauncher) removeAllServices() (err error) {
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		launcher.RemoveService(service.Id)
+	}
+
+	for i := 0; i < len(services); i++ {
+		if status := <-launcher.statusChannel; status.Err != nil {
+			err = status.Err
+		}
+	}
+
+	services, err = launcher.GetServicesInfo()
+	if err != nil {
+		return err
+	}
+	if len(services) != 0 {
+		return errors.New("Can't remove all services")
+	}
+
+	return err
+}
+
 func setup() (err error) {
 	if err := os.MkdirAll("tmp", 0755); err != nil {
 		return err
@@ -97,6 +125,16 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
+	launcher, _, err := newTestLauncher()
+	if err != nil {
+		return err
+	}
+	defer launcher.Close()
+
+	if err := launcher.removeAllServices(); err != nil {
+		return err
+	}
+
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err
 	}
@@ -113,14 +151,21 @@ func generateImage(imagePath string) (err error) {
 	serviceContent := `#!/usr/bin/python
 
 import time
+import socket
 import sys
 
 i = 0
 serviceName = sys.argv[1]
+serviceVersion = sys.argv[2]
 
-print(">>>> Start", serviceName)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+message = serviceName + ", version: " + serviceVersion
+sock.sendto(str.encode(message), ("172.19.0.1", 10001))
+sock.close()
+
+print(">>>> Start", serviceName, "version", serviceVersion)
 while True:
-	print(">>>> aos", serviceName, "count", i)
+	print(">>>> aos", serviceName, "version", serviceVersion, "count", i)
 	i = i + 1
 	time.sleep(5)`
 
@@ -189,16 +234,16 @@ func TestInstallRemove(t *testing.T) {
 	for i := 0; i < numInstallServices+numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
 			if status.Action == ActionInstall {
-				t.Error("Can't install service: ", status.Err)
+				t.Errorf("Can't install service %s: %s", status.Id, status.Err)
 			} else {
-				t.Error("Can't remove service: ", status.Err)
+				t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 			}
 		}
 	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != numInstallServices-numRemoveServices {
 		t.Errorf("Wrong service quantity")
@@ -218,13 +263,13 @@ func TestInstallRemove(t *testing.T) {
 
 	for i := 0; i < numInstallServices-numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't remove service: ", status.Err)
+			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 		}
 	}
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
@@ -246,7 +291,7 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't install service: ", status.Err)
+			t.Errorf("Can't install service %s: %s", status.Id, status.Err)
 		}
 	}
 
@@ -264,7 +309,7 @@ func TestAutoStart(t *testing.T) {
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != numServices {
 		t.Errorf("Wrong service quantity")
@@ -282,13 +327,13 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Error("Can't remove service: ", status.Err)
+			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
 		}
 	}
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
@@ -312,28 +357,88 @@ func TestErrors(t *testing.T) {
 		status := <-statusChan
 		switch {
 		case status.Version == 5 && status.Err != nil:
-			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
 		case status.Version == 4 && status.Err == nil:
-			t.Errorf("Service version %d should not be installed", status.Version)
+			t.Errorf("Service %s version %d should not be installed", status.Id, status.Version)
 		case status.Version == 6 && status.Err != nil:
-			t.Errorf("Can't install service version %d: %s", status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
 		}
 	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
-		t.Error("Can't get services info: ", err)
+		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 1 {
 		t.Errorf("Wrong service quantity")
-	}
-	if services[0].Version != 6 {
+	} else if services[0].Version != 6 {
 		t.Errorf("Wrong service version")
 	}
 
-	launcher.RemoveService("service0")
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestUpdate(t *testing.T) {
+	launcher, statusChan, err := newTestLauncher()
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	serverAddr, err := net.ResolveUDPAddr("udp", ":10001")
+	if err != nil {
+		t.Fatalf("Can't create resolve UDP address: %s", err)
+	}
+
+	serverConn, err := net.ListenUDP("udp", serverAddr)
+	if err != nil {
+		t.Fatalf("Can't listen UDP: %s", err)
+	}
+	defer serverConn.Close()
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 0})
 
 	if status := <-statusChan; status.Err != nil {
-		t.Error("Can't remove service: ", status.Err)
+		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
+	}
+
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
+		t.Fatalf("Can't set read deadline: %s", err)
+	}
+
+	buf := make([]byte, 1024)
+
+	n, _, err := serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	} else {
+		message := string(buf[:n])
+
+		if message != "service0, version: 0" {
+			t.Fatalf("Wrong service content: %s", message)
+		}
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 1})
+
+	if status := <-statusChan; status.Err != nil {
+		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
+	}
+
+	n, _, err = serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	} else {
+		message := string(buf[:n])
+
+		if message != "service0, version: 1" {
+			t.Fatalf("Wrong service content: %s", message)
+		}
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }

@@ -9,8 +9,10 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -416,6 +418,29 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
+	// check if service already installed
+	service, err := launcher.db.getService(id)
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return installDir, err
+	}
+	serviceExists := err == nil
+
+	// create user
+	userName := "user_" + id
+	// if user exists
+	if _, err := user.Lookup(userName); err != nil {
+		log.WithField("user", userName).Debug("Create user")
+
+		launcher.mutex.Lock()
+		if err := exec.Command("useradd", "-M", userName).Run(); err != nil {
+			launcher.mutex.Unlock()
+			return installDir, err
+		}
+		launcher.mutex.Unlock()
+	} else if !serviceExists {
+		log.WithField("user", userName).Warning("User already exists")
+	}
+
 	configFile := path.Join(installDir, "config.json")
 
 	// get service spec
@@ -425,7 +450,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	}
 
 	// update config.json
-	if err := launcher.updateServiceSpec(&spec); err != nil {
+	if err := launcher.updateServiceSpec(&spec, userName); err != nil {
 		return installDir, err
 	}
 
@@ -446,13 +471,8 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
-	// check if service already installed
-	service, err := launcher.db.getService(id)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return installDir, err
-	}
 	// remove if exists
-	if err == nil {
+	if serviceExists {
 		if err := launcher.db.removeService(service.id); err != nil {
 			return installDir, err
 		}
@@ -467,6 +487,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		version:     version,
 		path:        installDir,
 		serviceName: serviceName,
+		userName:    userName,
 		state:       stateInit,
 		status:      statusOk}
 
@@ -492,6 +513,7 @@ func (launcher *Launcher) removeService(id string) (err error) {
 	if err != nil {
 		return err
 	}
+
 	log.WithFields(log.Fields{"id": service.id, "version": service.version}).Debug("Remove service")
 
 	launcher.services.Delete(service.serviceName)
@@ -508,7 +530,13 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		log.WithField("path", service.path).Error("Can't remove service path")
 	}
 
-	log.WithFields(log.Fields{"id": id, "version": service.version}).Info("Service successfully removed")
+	log.WithField("user", service.userName).Debug("Delete user")
+
+	launcher.mutex.Lock()
+	if err := exec.Command("userdel", service.userName).Run(); err != nil {
+		log.WithField("user", service.userName).Error("Can't remove user")
+	}
+	launcher.mutex.Unlock()
 
 	return nil
 }
@@ -522,6 +550,7 @@ After=network.target
 Type=forking
 Restart=always
 RestartSec=1
+ExecStartPre=%s
 ExecStart=%s
 ExecStop=%s
 ExecStopPost=%s
@@ -613,9 +642,28 @@ func (launcher *Launcher) handleSystemdSubscription() {
 	}()
 }
 
-func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
+func (launcher *Launcher) updateServiceSpec(spec *specs.Spec, userName string) (err error) {
 	// disable terminal
 	spec.Process.Terminal = false
+
+	// assign UID, GID
+	user, err := user.Lookup(userName)
+	if err != nil {
+		return err
+	}
+
+	uid, err := strconv.ParseUint(user.Uid, 10, 32)
+	if err != nil {
+		return err
+	}
+
+	gid, err := strconv.ParseUint(user.Gid, 10, 32)
+	if err != nil {
+		return err
+	}
+
+	spec.Process.User.UID = uint32(uid)
+	spec.Process.User.GID = uint32(gid)
 
 	mounts := []specs.Mount{
 		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
@@ -667,21 +715,7 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec) (err error) {
 }
 
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
-
-	channel := make(chan string)
-
 	launcher.services.Delete(serviceName)
-
-	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err == nil {
-		// stop already startes service
-		log.WithField("name", serviceName).Debug("Already loaded. Stop it.")
-
-		status := <-channel
-
-		log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
-	}
 
 	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
@@ -691,7 +725,8 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 		return err
 	}
 
-	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
+	channel := make(chan string)
+	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
@@ -702,9 +737,6 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 }
 
 func (launcher *Launcher) stopService(serviceName string) (err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
-
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err
@@ -737,6 +769,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	}
 
 	pidFile := path.Join(absServicePath, id+".pid")
+	execStartPreString := launcher.runcPath + " delete -f " + id
 	execStartString := launcher.runcPath + " run -d --pid-file " + pidFile + " -b " + absServicePath + " " + id
 	execStopString := launcher.runcPath + " kill " + id + " SIGKILL"
 	execStopPostString := launcher.runcPath + " delete -f " + id
@@ -746,6 +779,10 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		switch {
 		// the order is important for example: execstoppost should be evaluated
 		// before execstop as execstop is substring of execstoppost
+		case strings.Contains(strings.ToLower(line), "execstartpre"):
+			if _, err := fmt.Fprintf(f, line, execStartPreString); err != nil {
+				return fileName, err
+			}
 		case strings.Contains(strings.ToLower(line), "execstart"):
 			if _, err := fmt.Fprintf(f, line, execStartString); err != nil {
 				return fileName, err
