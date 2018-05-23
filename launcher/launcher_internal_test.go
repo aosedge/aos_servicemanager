@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
 /*******************************************************************************
@@ -23,6 +24,12 @@ import (
 type TestLauncher struct {
 	*Launcher
 }
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var db *database.Database
 
 /*******************************************************************************
  * Init
@@ -42,7 +49,7 @@ func init() {
  ******************************************************************************/
 
 func newTestLauncher() (testLauncher *TestLauncher, statusChannel <-chan ActionStatus, err error) {
-	instance, statusChannel, err := New("tmp")
+	instance, statusChannel, err := New("tmp", db)
 
 	testLauncher = &TestLauncher{instance}
 	testLauncher.downloader = testLauncher
@@ -121,6 +128,11 @@ func setup() (err error) {
 		return err
 	}
 
+	db, err = database.New("tmp/servicemanager.db")
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -134,6 +146,8 @@ func cleanup() (err error) {
 	if err := launcher.removeAllServices(); err != nil {
 		return err
 	}
+
+	db.Close()
 
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err

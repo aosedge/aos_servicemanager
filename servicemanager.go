@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
@@ -87,7 +88,13 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 func main() {
 	log.Info("Start service manager")
 
-	launcherHandler, launcherChan, err := launcher.New("data")
+	db, err := database.New("data/servicemanager.db")
+	if err != nil {
+		log.Fatal("Can't open database: ", err)
+	}
+	defer db.Close()
+
+	launcherHandler, launcherChan, err := launcher.New("data", db)
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}

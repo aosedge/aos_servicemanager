@@ -23,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
@@ -31,9 +32,8 @@ import (
  ******************************************************************************/
 
 const (
-	serviceDatabase    = "services.db" // services database name
-	serviceDir         = "services"    // services directory
-	maxExecutedActions = 10            // max number of actions processed simulanteously
+	serviceDir         = "services" // services directory
+	maxExecutedActions = 10         // max number of actions processed simulanteously
 )
 
 var (
@@ -64,9 +64,6 @@ const (
  * Types
  ******************************************************************************/
 
-type serviceStatus int
-type serviceState int
-
 type action int
 
 type ActionStatus struct {
@@ -82,7 +79,7 @@ type downloadItf interface {
 
 // Launcher instance
 type Launcher struct {
-	db              *database
+	db              *database.Database
 	systemd         *dbus.Conn
 	downloader      downloadItf
 	closeChannel    chan bool
@@ -108,11 +105,12 @@ type serviceAction struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(workingDir string) (launcher *Launcher, executeChannel <-chan ActionStatus, err error) {
+func New(workingDir string, db *database.Database) (launcher *Launcher, executeChannel <-chan ActionStatus, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
 
+	localLauncher.db = db
 	localLauncher.workingDir = workingDir
 
 	localLauncher.closeChannel = make(chan bool)
@@ -134,19 +132,13 @@ func New(workingDir string) (launcher *Launcher, executeChannel <-chan ActionSta
 		}
 	}
 
-	// Create new database instance
-	localLauncher.db, err = newDatabase(path.Join(workingDir, serviceDatabase))
-	if err != nil {
-		return launcher, executeChannel, err
-	}
-
 	// Load all installed services
-	services, err := localLauncher.db.getServices()
+	services, err := localLauncher.db.GetServices()
 	if err != nil {
 		return launcher, executeChannel, err
 	}
 	for _, service := range services {
-		localLauncher.services.Store(service.serviceName, service.id)
+		localLauncher.services.Store(service.ServiceName, service.Id)
 	}
 
 	// Create systemd connection
@@ -198,19 +190,18 @@ func (launcher *Launcher) Close() {
 	launcher.closeChannel <- true
 
 	launcher.systemd.Close()
-	launcher.db.close()
 }
 
 // GetServiceVersion returns installed version of requested service
 func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error) {
 	log.WithField("id", id).Debug("Get service version")
 
-	service, err := launcher.db.getService(id)
+	service, err := launcher.db.GetService(id)
 	if err != nil {
 		return version, err
 	}
 
-	version = service.version
+	version = service.Version
 
 	return version, nil
 }
@@ -229,7 +220,7 @@ func (launcher *Launcher) RemoveService(id string) {
 func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
 	log.Debug("Get services info")
 
-	services, err := launcher.db.getServices()
+	services, err := launcher.db.GetServices()
 	if err != nil {
 		return info, err
 	}
@@ -237,7 +228,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	info = make([]amqp.ServiceInfo, len(services))
 
 	for i, service := range services {
-		info[i] = amqp.ServiceInfo{Id: service.id, Version: service.version, Status: statusStr[service.status]}
+		info[i] = amqp.ServiceInfo{Id: service.Id, Version: service.Version, Status: statusStr[service.Status]}
 	}
 
 	return info, nil
@@ -354,7 +345,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		status.Version = serviceInfo.Version
 
 		// check installed service version
-		if service, err := launcher.db.getService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.version {
+		if service, err := launcher.db.GetService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.Version {
 			status.Err = errors.New("Version mistmatch")
 			break
 		}
@@ -419,7 +410,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	}
 
 	// check if service already installed
-	service, err := launcher.db.getService(id)
+	service, err := launcher.db.GetService(id)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
 		return installDir, err
 	}
@@ -473,26 +464,26 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 
 	// remove if exists
 	if serviceExists {
-		if err := launcher.db.removeService(service.id); err != nil {
+		if err := launcher.db.RemoveService(service.Id); err != nil {
 			return installDir, err
 		}
-		if err := os.RemoveAll(service.path); err != nil {
+		if err := os.RemoveAll(service.Path); err != nil {
 			// indicate error, can continue
-			log.WithField("path", service.path).Error("Can't remove service path")
+			log.WithField("path", service.Path).Error("Can't remove service path")
 		}
 	}
 
-	service = serviceEntry{
-		id:          id,
-		version:     version,
-		path:        installDir,
-		serviceName: serviceName,
-		userName:    userName,
-		state:       stateInit,
-		status:      statusOk}
+	service = database.ServiceEntry{
+		Id:          id,
+		Version:     version,
+		Path:        installDir,
+		ServiceName: serviceName,
+		UserName:    userName,
+		State:       stateInit,
+		Status:      statusOk}
 
 	// add to database
-	if err := launcher.db.addService(service); err != nil {
+	if err := launcher.db.AddService(service); err != nil {
 		if err := launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
@@ -509,32 +500,32 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 // TODO: consider what to do with errors on remove: pass it to servicemanager or
 // just display
 func (launcher *Launcher) removeService(id string) (err error) {
-	service, err := launcher.db.getService(id)
+	service, err := launcher.db.GetService(id)
 	if err != nil {
 		return err
 	}
 
-	log.WithFields(log.Fields{"id": service.id, "version": service.version}).Debug("Remove service")
+	log.WithFields(log.Fields{"id": service.Id, "version": service.Version}).Debug("Remove service")
 
-	launcher.services.Delete(service.serviceName)
+	launcher.services.Delete(service.ServiceName)
 
-	if err := launcher.stopService(service.serviceName); err != nil {
-		log.WithField("name", service.serviceName).Error("Can't stop service: ", err)
+	if err := launcher.stopService(service.ServiceName); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't stop service: ", err)
 	}
 
-	if err := launcher.db.removeService(service.id); err != nil {
-		log.WithField("name", service.serviceName).Error("Can't remove service from db: ", err)
+	if err := launcher.db.RemoveService(service.Id); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't remove service from db: ", err)
 	}
 
-	if err := os.RemoveAll(service.path); err != nil {
-		log.WithField("path", service.path).Error("Can't remove service path")
+	if err := os.RemoveAll(service.Path); err != nil {
+		log.WithField("path", service.Path).Error("Can't remove service path")
 	}
 
-	log.WithField("user", service.userName).Debug("Delete user")
+	log.WithField("user", service.UserName).Debug("Delete user")
 
 	launcher.mutex.Lock()
-	if err := exec.Command("userdel", service.userName).Run(); err != nil {
-		log.WithField("user", service.userName).Error("Can't remove user")
+	if err := exec.Command("userdel", service.UserName).Run(); err != nil {
+		log.WithField("user", service.UserName).Error("Can't remove user")
 	}
 	launcher.mutex.Unlock()
 
@@ -594,8 +585,8 @@ func (launcher *Launcher) handleSystemdSubscription() {
 			case services := <-serviceChannel:
 				for _, service := range services {
 					var (
-						state  serviceState
-						status serviceStatus
+						state  int
+						status int
 					)
 
 					if service == nil {
@@ -622,11 +613,11 @@ func (launcher *Launcher) handleSystemdSubscription() {
 					id, exist := launcher.services.Load(service.Name)
 
 					if exist {
-						if err := launcher.db.setServiceState(id.(string), state); err != nil {
+						if err := launcher.db.SetServiceState(id.(string), state); err != nil {
 							log.WithField("name", service.Name).Error("Can't set service state: ", err)
 						}
 
-						if err := launcher.db.setServiceStatus(id.(string), status); err != nil {
+						if err := launcher.db.SetServiceStatus(id.(string), status); err != nil {
 							log.WithField("name", service.Name).Error("Can't set service status: ", err)
 						}
 					} else {
