@@ -1,20 +1,41 @@
-package launcher
+package database
 
 import (
+	"log"
+	"os"
 	"strings"
 	"testing"
 )
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		log.Fatalf("Error creating service images: %s", err)
+	}
+
+	ret := m.Run()
+
+	if err := os.RemoveAll("tmp"); err != nil {
+		log.Fatalf("Error cleaning up: %s", err)
+	}
+
+	os.Exit(ret)
+}
 
 /*******************************************************************************
  * Tests
  ******************************************************************************/
 
 func TestDatabase(t *testing.T) {
-	db, err := newDatabase("tmp/test.db")
+	db, err := New("tmp/test.db")
 	if err != nil {
 		t.Fatalf("Can't create databse: %s", err)
 	}
-	defer db.close()
+	defer db.Close()
 
 	// removeAllServices
 
@@ -23,23 +44,23 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("Can't delete service table: %s", err)
 	}
 
-	// addService
+	// AddService
 
-	service1 := serviceEntry{"service1", 1, "to/service1", "service1.service", "user1", stateInit, statusOk}
-	err = db.addService(service1)
+	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", 0, 0}
+	err = db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
 	}
 
-	service2 := serviceEntry{"service2", 2, "to/service2", "service2.service", "user2", stateInit, statusOk}
-	err = db.addService(service2)
+	service2 := ServiceEntry{"service2", 2, "to/service2", "service2.service", "user2", 0, 0}
+	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
 	}
 
-	// getService
+	// GetService
 
-	service, err := db.getService("service1")
+	service, err := db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
@@ -47,7 +68,7 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("service1 doesn't match stored one")
 	}
 
-	service, err = db.getService("service2")
+	service, err = db.GetService("service2")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
@@ -55,16 +76,16 @@ func TestDatabase(t *testing.T) {
 		t.Errorf("service2 doesn't match stored one")
 	}
 
-	service, err = db.getService("service3")
+	service, err = db.GetService("service3")
 	if err == nil {
 		t.Errorf("Error in non existed service")
 	} else if !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("Can't get service: %s", err)
 	}
 
-	// getServices
+	// GetServices
 
-	services, err := db.getServices()
+	services, err := db.GetServices()
 	if err != nil {
 		t.Errorf("Can't get services: %s", err)
 	}
@@ -77,54 +98,54 @@ func TestDatabase(t *testing.T) {
 		}
 	}
 
-	// setServiceStatus
+	// SetServiceStatus
 
-	err = db.setServiceStatus("service1", statusError)
+	err = db.SetServiceStatus("service1", 1)
 	if err != nil {
 		t.Errorf("Can't set service status: %s", err)
 	}
-	service, err = db.getService("service1")
+	service, err = db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
-	if service.status != statusError {
+	if service.Status != 1 {
 		t.Errorf("Service status mismatch")
 	}
 
-	// setServiceState
+	// SetServiceState
 
-	err = db.setServiceState("service1", stateRunning)
+	err = db.SetServiceState("service1", 1)
 	if err != nil {
 		t.Errorf("Can't set service state: %s", err)
 	}
-	service, err = db.getService("service1")
+	service, err = db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
-	if service.state != stateRunning {
+	if service.State != 1 {
 		t.Errorf("Service state mismatch")
 	}
 
-	// removeService
+	// RemoveService
 
-	err = db.removeService("service1")
+	err = db.RemoveService("service1")
 	if err != nil {
 		t.Errorf("Can't remove entry: %s", err)
 	}
-	service, err = db.getService("service1")
+	service, err = db.GetService("service1")
 	if err == nil {
 		t.Errorf("Error deleteing service")
 	}
 
-	err = db.removeService("service2")
+	err = db.RemoveService("service2")
 	if err != nil {
 		t.Errorf("Can't remove entry: %s", err)
 	}
-	service, err = db.getService("service2")
+	service, err = db.GetService("service2")
 	if err == nil {
 		t.Errorf("Error deleteing service")
 	}
-	services, err = db.getServices()
+	services, err = db.GetServices()
 	if err != nil {
 		t.Errorf("Can't get services: %s", err)
 	}
