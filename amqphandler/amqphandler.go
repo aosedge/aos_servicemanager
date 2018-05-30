@@ -319,20 +319,6 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 			continue
 		}
 
-		err = ch.ExchangeDeclare(
-			params.Exchange.Name,       // name
-			"fanout",                   // type
-			params.Exchange.Durable,    // durable
-			params.Exchange.AutoDetect, // auto-deleted
-			params.Exchange.Internal,   // internal
-			params.Exchange.NoWait,     // no-wait
-			nil, // arguments
-		)
-		if err != nil {
-			log.Warning("Failed to declare an exchange #", i, err)
-			continue
-		}
-
 		handler.exchangeInfo.conn = conn
 		handler.exchangeInfo.ch = ch
 		handler.exchangeInfo.valid = true
