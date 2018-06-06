@@ -137,6 +137,7 @@ type amqpLocalSenderConnectionInfo struct {
 	exchangeName string
 	mandatory    bool
 	immediate    bool
+	userID       string
 }
 
 type amqpLocalConsumerConnectionInfo struct {
@@ -325,6 +326,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 		handler.exchangeInfo.mandatory = params.Mandatory
 		handler.exchangeInfo.immediate = params.Immediate
 		handler.exchangeInfo.exchangeName = params.Exchange.Name
+		handler.exchangeInfo.userID = params.User
 
 		log.Info("Create exchange OK")
 
@@ -365,6 +367,7 @@ func startSender(info *amqpLocalSenderConnectionInfo) {
 					ContentType:   "application/json",
 					DeliveryMode:  2,
 					CorrelationId: "100", //TODO: add processing CorelationID
+					UserId:        info.userID,
 					Body:          sendData,
 				}); err != nil {
 				log.Warning("Error publish", err)
