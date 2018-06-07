@@ -28,9 +28,8 @@ import (
 
 type AmqpHandler struct {
 	//sendChan       chan []byte
-	exchangeInfo   amqpLocalSenderConnectionInfo   // connection for sending data
-	consumerInfo   amqpLocalConsumerConnectionInfo // connection for receiving data
-	localSessionID string
+	exchangeInfo amqpLocalSenderConnectionInfo   // connection for sending data
+	consumerInfo amqpLocalConsumerConnectionInfo // connection for receiving data
 }
 
 type ServiceInfoFromCloud struct {
@@ -72,14 +71,12 @@ type serviseDiscoveryRequest struct {
 type vehicleStatus struct {
 	Version     uint          `json:"version"`
 	MessageType string        `json:"messageType"`
-	SessionId   string        `json:"sessionId"`
 	Sevices     []ServiceInfo `json:"services"`
 }
 
 type desiredStatus struct {
 	Version     uint   `json:"version"`
 	MessageType string `json:"messageType"`
-	SessionId   string `json:"sessionId"`
 	Sevices     string `json:"services"`
 }
 type serviseDiscoveryResp struct {
@@ -87,7 +84,6 @@ type serviseDiscoveryResp struct {
 	Connection reqbbitConnectioninfo `json:"connection"`
 }
 type reqbbitConnectioninfo struct {
-	SessionId     string        `json:"sessionId"`
 	SendParam     sendParam     `json:"sendParams"`
 	ReceiveParams receiveParams `json:"receiveParams"`
 }
@@ -186,9 +182,6 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 	}
 	log.Debug("Results: ", amqpConn)
 
-	handler.localSessionID = amqpConn.SessionId
-	log.Info("Current SessionID  ", handler.localSessionID)
-
 	tlsConfig, err := fcrypt.GetTlsConfig()
 	if err != nil {
 		log.Error("GetTlsConfig error : ", err)
@@ -203,7 +196,7 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: VEHICLE_STATUS, SessionId: handler.localSessionID, Sevices: serviceList}
+	msg := vehicleStatus{Version: 1, MessageType: VEHICLE_STATUS, Sevices: serviceList}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
@@ -217,7 +210,7 @@ func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) erro
 	log.Info("SendServiceStatusMsg ", serviceStatus)
 	var list []ServiceInfo
 	list = append(list, serviceStatus)
-	msg := vehicleStatus{Version: 1, MessageType: SERVICE_STATUS, SessionId: handler.localSessionID, Sevices: list}
+	msg := vehicleStatus{Version: 1, MessageType: SERVICE_STATUS, Sevices: list}
 	reqJson, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
@@ -305,7 +298,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 		User: url.UserPassword(params.User, params.Password),
 		Host: params.Host,
 	}
-	log.Info("Connection url: ", urlRabbitMQ.String())
+	log.Info("Sender connection url: ", urlRabbitMQ.String())
 
 	for i := 0; i < CONNECTION_RETRY; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
@@ -387,7 +380,7 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 		User: url.UserPassword(param.User, param.Password),
 		Host: param.Host,
 	}
-	log.Info("Connection url: ", urlRabbitMQ.String())
+	log.Info("Consumer connection url: ", urlRabbitMQ.String())
 
 	for i := 0; i < CONNECTION_RETRY; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
