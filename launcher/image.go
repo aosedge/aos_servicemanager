@@ -45,7 +45,7 @@ func packImage(source, name string) (err error) {
 			return nil
 		}
 
-		if err := tarWriter.WriteHeader(header); err != nil {
+		if err = tarWriter.WriteHeader(header); err != nil {
 			return err
 		}
 
@@ -59,11 +59,8 @@ func packImage(source, name string) (err error) {
 		}
 		defer file.Close()
 
-		if _, err := io.Copy(tarWriter, file); err != nil {
-			return err
-		}
-
-		return nil
+		_, err = io.Copy(tarWriter, file)
+		return err
 	})
 }
 
@@ -75,7 +72,7 @@ func unpackImage(name, destination string) (err error) {
 		return err
 	}
 
-	if err := os.MkdirAll(destination, 0755); err != nil {
+	if err = os.MkdirAll(destination, 0755); err != nil {
 		return err
 	}
 
@@ -155,9 +152,6 @@ func writeServiceSpec(spec *specs.Spec, configFile string) (err error) {
 	encoder := json.NewEncoder(f)
 	encoder.SetIndent("", "\t")
 
-	if err := encoder.Encode(spec); err != nil {
-		return err
-	}
-
-	return nil
+	err = encoder.Encode(spec)
+	return err
 }

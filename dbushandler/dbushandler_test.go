@@ -2,10 +2,11 @@ package dbushandler_test
 
 import (
 	"encoding/json"
-	"github.com/godbus/dbus"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"testing"
+
+	"github.com/godbus/dbus"
+	log "github.com/sirupsen/logrus"
 
 	dbusServer "gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 )

@@ -1,4 +1,4 @@
-// Provides cryptographic interfaces for Fusion
+//Package fcrypt Provides cryptographic interfaces for Fusion
 package fcrypt
 
 import (
@@ -18,7 +18,7 @@ import (
 	"os"
 )
 
-type Configuration struct {
+type configuration struct {
 	CACert         string
 	ClientCert     string
 	ClientKey      string
@@ -26,7 +26,7 @@ type Configuration struct {
 	OfflineCert    string
 }
 
-var config = Configuration{}
+var config = configuration{}
 
 func init() {
 	file, err := os.Open("fcrypt.json")
@@ -47,7 +47,7 @@ func init() {
 	log.Println("OfflineCert:    ", config.OfflineCert)
 }
 
-func verify_cert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 	return nil
 }
 
@@ -64,8 +64,8 @@ func getCaCertPool() (*x509.CertPool, error) {
 	return caCertPool, nil
 }
 
-// Provides TLS configuration which can be used with HTTPS client
-func GetTlsConfig() (*tls.Config, error) {
+//GetTLSConfig Provides TLS configuration which can be used with HTTPS client
+func GetTLSConfig() (*tls.Config, error) {
 	// Load client cert
 	cert, err := tls.LoadX509KeyPair(config.ClientCert, config.ClientKey)
 	if err != nil {
@@ -80,7 +80,7 @@ func GetTlsConfig() (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		Certificates:          []tls.Certificate{cert},
 		RootCAs:               caCertPool,
-		VerifyPeerCertificate: verify_cert,
+		VerifyPeerCertificate: verifyCert,
 	}
 
 	tlsConfig.BuildNameToCertificate()
@@ -104,7 +104,7 @@ func getOfflineCert() (*x509.Certificate, error) {
 	}
 
 	var block *pem.Block
-	block, pemCert = pem.Decode(pemCert)
+	block, _ = pem.Decode(pemCert)
 	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
 		return nil, errors.New("Invalid PEM Block")
 	}
@@ -166,9 +166,9 @@ func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 	return nil
 }
 
-func parseCertificates(pem_data string) (ret []*x509.Certificate, err error) {
+func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
 
-	for block, remainder := pem.Decode([]byte(pem_data)); block != nil; block, remainder = pem.Decode(remainder) {
+	for block, remainder := pem.Decode([]byte(pemData)); block != nil; block, remainder = pem.Decode(remainder) {
 		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
 			return nil, errors.New("Invalid PEM Block")
 		}
@@ -211,7 +211,7 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	}
 	_, err = signCertificate.Verify(verifyOptions)
 	if err != nil {
-		log.Println("Error verifying certificate chain\n")
+		log.Println("Error verifying certificate chain")
 		return
 	}
 
@@ -273,8 +273,6 @@ func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
 	default:
 		return errors.New("Unknown signature alg: " + signatureAlg)
 	}
-
-	return nil
 }
 
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
@@ -297,6 +295,7 @@ func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	return in[0 : l-pl], nil
 }
 
+//DecryptMetadata decrypt service metadata
 func DecryptMetadata(der []byte) ([]byte, error) {
 	cert, err := getOfflineCert()
 	if err != nil {
@@ -311,7 +310,7 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 	return DecryptMessage(der, key, cert)
 }
 
-// Decrypts given image into temprorary file
+//DecryptImage Decrypts given image into temprorary file
 func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	signatureAlg, hashAlg, signatureScheme,
 	cryptoAlg, cryptoMode, certificates string) (outfname string, err error) {

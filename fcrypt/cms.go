@@ -30,53 +30,53 @@ type asnOriginatorInfo struct {
 	Crls  asn1.RawValue `asn1:"optional,implicit,tag:1"`
 }
 
-// User-friendly structures
+//EncryptedContentInfo User-friendly structures
 type EncryptedContentInfo struct {
 	ContentType                asn1.ObjectIdentifier
 	ContentEncryptionAlgorithm pkix.AlgorithmIdentifier
 	EncryptedContent           []byte `asn1:"optional,implicit,tag:0"`
 }
 
-type IssuerAndSerialNumber struct {
+type issuerAndSerialNumber struct {
 	Issuer       pkix.RDNSequence
 	SerialNumber *big.Int
 }
 
-type ContentInfo struct {
+type contentInfo struct {
 	OID           asn1.ObjectIdentifier
-	EnvelopedData EnvelopedData
+	EnvelopedData envelopedData
 }
 
-type EnvelopedData struct {
+type envelopedData struct {
 	Version              int
-	OriginatorInfo       OriginatorInfo
+	OriginatorInfo       originatorInfo
 	RecipientInfos       []interface{}
 	EncryptedContentInfo EncryptedContentInfo
 	UnprotectedAttrs     interface{}
 }
 
-type OriginatorInfo struct {
+type originatorInfo struct {
 	Certs []interface{}
 	Crls  []interface{}
 }
 
-type KeyTransRecipientInfo struct {
+type keyTransRecipientInfo struct {
 	Version                int
-	Rid                    IssuerAndSerialNumber
+	Rid                    issuerAndSerialNumber
 	KeyEncryptionAlgorithm pkix.AlgorithmIdentifier
 	EncryptedKey           []byte
 }
 
 var (
-	EnvelopedDataOid = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 3}
-	RsaEncryptionOid = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	Aes256CbcOid     = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 42}
+	envelopedDataOid = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 3}
+	rsaEncryptionOid = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	aes256CbcOid     = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 42}
 )
 
 func getRecipientInfo(raw asn1.RawValue) (interface{}, error) {
 	switch raw.Tag {
 	case 16:
-		var ktri KeyTransRecipientInfo
+		var ktri keyTransRecipientInfo
 		_, err := asn1.Unmarshal(raw.FullBytes, &ktri)
 		if err != nil {
 			return nil, err
@@ -86,17 +86,16 @@ func getRecipientInfo(raw asn1.RawValue) (interface{}, error) {
 	default:
 		return nil, errors.New("getRecipientInfo: unknown tag")
 	}
-	return nil, nil
 }
 
-func getOriginatorInfo(oi asnOriginatorInfo) (*OriginatorInfo, error) {
-	var ret OriginatorInfo
+func getOriginatorInfo(oi asnOriginatorInfo) (*originatorInfo, error) {
+	var ret originatorInfo
 
 	return &ret, nil
 }
 
-func getEnvelopedData(ed asnEnvelopedData) (*EnvelopedData, error) {
-	var ret EnvelopedData
+func getEnvelopedData(ed asnEnvelopedData) (*envelopedData, error) {
+	var ret envelopedData
 
 	ret.Version = ed.Version
 	oi, err := getOriginatorInfo(ed.OriginatorInfo)
@@ -117,8 +116,8 @@ func getEnvelopedData(ed asnEnvelopedData) (*EnvelopedData, error) {
 	return &ret, nil
 }
 
-func getContentInfo(ci asnContentInfo) (*ContentInfo, error) {
-	var ret ContentInfo
+func getContentInfo(ci asnContentInfo) (*contentInfo, error) {
+	var ret contentInfo
 
 	ret.OID = ci.OID
 	ed, err := getEnvelopedData(ci.EnvelopedData)
@@ -131,10 +130,10 @@ func getContentInfo(ci asnContentInfo) (*ContentInfo, error) {
 	return &ret, nil
 }
 
-func decryptCMSKey(ktri *KeyTransRecipientInfo,
+func decryptCMSKey(ktri *keyTransRecipientInfo,
 	privKey *rsa.PrivateKey) ([]byte, error) {
 	switch {
-	case ktri.KeyEncryptionAlgorithm.Algorithm.Equal(RsaEncryptionOid):
+	case ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid):
 		if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
 			return nil, errors.New("Extra paramaters for RSA algorithm found")
 		}
@@ -153,7 +152,7 @@ func decryptCMSKey(ktri *KeyTransRecipientInfo,
 
 func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 	switch {
-	case eci.ContentEncryptionAlgorithm.Algorithm.Equal(Aes256CbcOid):
+	case eci.ContentEncryptionAlgorithm.Algorithm.Equal(aes256CbcOid):
 		if eci.ContentEncryptionAlgorithm.Parameters.Tag != asn1.TagOctetString {
 			return nil, errors.New("Can't find IV in extended params")
 		}
@@ -180,7 +179,7 @@ func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 	}
 }
 
-func UnmarshallCMS(der []byte) (*ContentInfo, error) {
+func unmarshallCMS(der []byte) (*contentInfo, error) {
 	var ci asnContentInfo
 
 	_, err := asn1.Unmarshal(der, &ci)
@@ -189,21 +188,22 @@ func UnmarshallCMS(der []byte) (*ContentInfo, error) {
 		return nil, err
 	}
 
-	if !ci.OID.Equal(EnvelopedDataOid) {
+	if !ci.OID.Equal(envelopedDataOid) {
 		return nil, errors.New("Unknown object identifier in ContentInfo")
 	}
 
 	return getContentInfo(ci)
 }
 
+//DecryptMessage decrypt message
 func DecryptMessage(der []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
-	ci, err := UnmarshallCMS(der)
+	ci, err := unmarshallCMS(der)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, recipient := range ci.EnvelopedData.RecipientInfos {
-		r := recipient.(KeyTransRecipientInfo)
+		r := recipient.(keyTransRecipientInfo)
 		if cert.SerialNumber.Cmp(r.Rid.SerialNumber) == 0 {
 			dkey, err := decryptCMSKey(&r, key)
 			if err != nil {

@@ -2,6 +2,7 @@ package dbushandler
 
 import (
 	"errors"
+
 	"github.com/godbus/dbus"
 	log "github.com/sirupsen/logrus"
 )
@@ -17,6 +18,8 @@ const (
 /*******************************************************************************
  * Types
  ******************************************************************************/
+
+//AosDbusInterface d-bus interface structure
 type AosDbusInterface struct {
 	//TODO: add reference to internal DB
 	dbusConn *dbus.Conn
@@ -26,7 +29,7 @@ type AosDbusInterface struct {
  * Public
  ******************************************************************************/
 
-// New creates and launch d-bus server
+//New creates and launch d-bus server
 func New() (dbusHandler *AosDbusInterface, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -51,6 +54,7 @@ func New() (dbusHandler *AosDbusInterface, err error) {
 	return dbusHandler, nil
 }
 
+//StopServer stop d-bus server
 func (dbusHandler *AosDbusInterface) StopServer() error {
 	log.Info("Stop d-bus server")
 	reply, err := dbusHandler.dbusConn.ReleaseName(IntrfaceName)
@@ -69,7 +73,8 @@ func (dbusHandler *AosDbusInterface) StopServer() error {
  * D-BUS interface
  ******************************************************************************/
 
-func (server AosDbusInterface) GetPermission(token string) (string, string, *dbus.Error) {
+//GetPermission get permossion d-bus method
+func (dbusHandler AosDbusInterface) GetPermission(token string) (string, string, *dbus.Error) {
 	log.Info("GetPermission token: ", token)
 	//TODO: make select from DB
 	return `{"*": "rw", "123": "rw"}`, "OK", nil

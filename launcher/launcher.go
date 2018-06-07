@@ -37,8 +37,8 @@ const (
 )
 
 var (
-	statusStr []string = []string{"OK", "Error"}
-	stateStr  []string = []string{"Init", "Running", "Stopped"}
+	statusStr = []string{"OK", "Error"}
+	stateStr  = []string{"Init", "Running", "Stopped"}
 )
 
 // Service status
@@ -66,9 +66,10 @@ const (
 
 type action int
 
+//ActionStatus status of performed action
 type ActionStatus struct {
 	Action  action
-	Id      string
+	ID      string
 	Version uint
 	Err     error
 }
@@ -123,11 +124,11 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 
 	// Check and create service dir
 	dir := path.Join(workingDir, serviceDir)
-	if _, err := os.Stat(dir); err != nil {
+	if _, err = os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
 			return launcher, executeChannel, err
 		}
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err = os.MkdirAll(dir, 0755); err != nil {
 			return launcher, executeChannel, err
 		}
 	}
@@ -138,7 +139,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		return launcher, executeChannel, err
 	}
 	for _, service := range services {
-		localLauncher.services.Store(service.ServiceName, service.Id)
+		localLauncher.services.Store(service.ServiceName, service.ID)
 	}
 
 	// Create systemd connection
@@ -208,7 +209,7 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error)
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	launcher.putInQueue(serviceAction{ActionInstall, serviceInfo.Id, serviceInfo})
+	launcher.putInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo})
 }
 
 // RemoveService stops and removes service
@@ -228,7 +229,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	info = make([]amqp.ServiceInfo, len(services))
 
 	for i, service := range services {
-		info[i] = amqp.ServiceInfo{Id: service.Id, Version: service.Version, Status: statusStr[service.Status]}
+		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: statusStr[service.Status]}
 	}
 
 	return info, nil
@@ -247,7 +248,7 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 		log.Error("Can't create tmp dir : ", err)
 		return outputFile, err
 	}
-	req, err := grab.NewRequest(destDir, serviceInfo.DownloadUrl)
+	req, err := grab.NewRequest(destDir, serviceInfo.DownloadURL)
 	if err != nil {
 		log.Error("Can't download package: ", err)
 		return outputFile, err
@@ -262,7 +263,7 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 	// wait when finished
 	resp.Wait()
 
-	if err := resp.Err(); err != nil {
+	if err = resp.Err(); err != nil {
 		log.Error("Can't download package: ", err)
 		return outputFile, err
 	}
@@ -308,7 +309,7 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 	return outputFile, nil
 }
 
-func (launcher *Launcher) isIdInWorkQueue(id string) (result bool) {
+func (launcher *Launcher) isIDInWorkQueue(id string) (result bool) {
 	for item := launcher.workQueue.Front(); item != nil; item = item.Next() {
 		if item.Value.(serviceAction).id == id {
 			return true
@@ -322,7 +323,7 @@ func (launcher *Launcher) putInQueue(action serviceAction) {
 	launcher.mutex.Lock()
 	defer launcher.mutex.Unlock()
 
-	if launcher.isIdInWorkQueue(action.id) {
+	if launcher.isIDInWorkQueue(action.id) {
 		launcher.waitQueue.PushBack(action)
 		return
 	}
@@ -337,7 +338,7 @@ func (launcher *Launcher) putInQueue(action serviceAction) {
 
 func (launcher *Launcher) processAction(item *list.Element) {
 	action := item.Value.(serviceAction)
-	status := ActionStatus{Action: action.action, Id: action.id}
+	status := ActionStatus{Action: action.action, ID: action.id}
 
 	switch action.action {
 	case ActionInstall:
@@ -345,7 +346,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		status.Version = serviceInfo.Version
 
 		// check installed service version
-		if service, err := launcher.db.GetService(serviceInfo.Id); err == nil && serviceInfo.Version <= service.Version {
+		if service, err := launcher.db.GetService(serviceInfo.ID); err == nil && serviceInfo.Version <= service.Version {
 			status.Err = errors.New("Version mistmatch")
 			break
 		}
@@ -359,14 +360,14 @@ func (launcher *Launcher) processAction(item *list.Element) {
 			break
 		}
 
-		if installDir, err := launcher.installService(imageFile, serviceInfo.Id, serviceInfo.Version); err != nil {
+		if installDir, err := launcher.installService(imageFile, serviceInfo.ID, serviceInfo.Version); err != nil {
 			os.RemoveAll(installDir)
 			status.Err = err
 			break
 		}
 
 	case ActionRemove:
-		if err := launcher.removeService(status.Id); err != nil {
+		if err := launcher.removeService(status.ID); err != nil {
 			status.Err = err
 			break
 		}
@@ -380,7 +381,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 	launcher.workQueue.Remove(item)
 
 	for item := launcher.waitQueue.Front(); item != nil; item = item.Next() {
-		if launcher.isIdInWorkQueue(item.Value.(serviceAction).id) {
+		if launcher.isIDInWorkQueue(item.Value.(serviceAction).id) {
 			continue
 		}
 
@@ -405,7 +406,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	log.WithField("dir", installDir).Debug("Create install dir")
 
 	// unpack image there
-	if err := unpackImage(image, installDir); err != nil {
+	if err = unpackImage(image, installDir); err != nil {
 		return installDir, err
 	}
 
@@ -419,11 +420,11 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	// create user
 	userName := "user_" + id
 	// if user exists
-	if _, err := user.Lookup(userName); err != nil {
+	if _, err = user.Lookup(userName); err != nil {
 		log.WithField("user", userName).Debug("Create user")
 
 		launcher.mutex.Lock()
-		if err := exec.Command("useradd", "-M", userName).Run(); err != nil {
+		if err = exec.Command("useradd", "-M", userName).Run(); err != nil {
 			launcher.mutex.Unlock()
 			return installDir, err
 		}
@@ -441,12 +442,12 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 	}
 
 	// update config.json
-	if err := launcher.updateServiceSpec(&spec, userName); err != nil {
+	if err = launcher.updateServiceSpec(&spec, userName); err != nil {
 		return installDir, err
 	}
 
 	// update config.json
-	if err := writeServiceSpec(&spec, configFile); err != nil {
+	if err = writeServiceSpec(&spec, configFile); err != nil {
 		return installDir, err
 	}
 
@@ -457,24 +458,24 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
-	if err := launcher.startService(serviceFile, serviceName); err != nil {
+	if err = launcher.startService(serviceFile, serviceName); err != nil {
 		// TODO: try to restore old service
 		return installDir, err
 	}
 
 	// remove if exists
 	if serviceExists {
-		if err := launcher.db.RemoveService(service.Id); err != nil {
+		if err = launcher.db.RemoveService(service.ID); err != nil {
 			return installDir, err
 		}
-		if err := os.RemoveAll(service.Path); err != nil {
+		if err = os.RemoveAll(service.Path); err != nil {
 			// indicate error, can continue
 			log.WithField("path", service.Path).Error("Can't remove service path")
 		}
 	}
 
 	service = database.ServiceEntry{
-		Id:          id,
+		ID:          id,
 		Version:     version,
 		Path:        installDir,
 		ServiceName: serviceName,
@@ -483,8 +484,8 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		Status:      statusOk}
 
 	// add to database
-	if err := launcher.db.AddService(service); err != nil {
-		if err := launcher.stopService(serviceName); err != nil {
+	if err = launcher.db.AddService(service); err != nil {
+		if err = launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
 		// TODO: try to restore old
@@ -505,7 +506,7 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		return err
 	}
 
-	log.WithFields(log.Fields{"id": service.Id, "version": service.Version}).Debug("Remove service")
+	log.WithFields(log.Fields{"id": service.ID, "version": service.Version}).Debug("Remove service")
 
 	launcher.services.Delete(service.ServiceName)
 
@@ -513,7 +514,7 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		log.WithField("name", service.ServiceName).Error("Can't stop service: ", err)
 	}
 
-	if err := launcher.db.RemoveService(service.Id); err != nil {
+	if err := launcher.db.RemoveService(service.ID); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't remove service from db: ", err)
 	}
 
@@ -657,44 +658,44 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec, userName string) (
 	spec.Process.User.GID = uint32(gid)
 
 	mounts := []specs.Mount{
-		specs.Mount{"/bin", "bind", "/bin", []string{"bind", "ro"}},
-		specs.Mount{"/sbin", "bind", "/sbin", []string{"bind", "ro"}},
-		specs.Mount{"/lib", "bind", "/lib", []string{"bind", "ro"}},
-		specs.Mount{"/usr", "bind", "/usr", []string{"bind", "ro"}},
+		specs.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
+		specs.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
+		specs.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
+		specs.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
 		// TODO: mount individual tmp
 		// "destination": "/tmp",
 		// "type": "tmpfs",
 		// "source": "tmpfs",
 		// "options": ["nosuid","strictatime","mode=755","size=65536k"]
-		specs.Mount{"/tmp", "bind", "/tmp", []string{"bind", "rw"}}}
+		specs.Mount{Destination: "/tmp", Type: "bind", Source: "/tmp", Options: []string{"bind", "rw"}}}
 	spec.Mounts = append(spec.Mounts, mounts...)
 	// add lib64 if exists
 	if _, err := os.Stat("/lib64"); err == nil {
-		spec.Mounts = append(spec.Mounts, specs.Mount{"/lib64", "bind", "/lib64", []string{"bind", "ro"}})
+		spec.Mounts = append(spec.Mounts, specs.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
 	}
 	// add hosts
 	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "hosts"))
 	if _, err := os.Stat(hosts); err != nil {
 		hosts = "/etc/hosts"
 	}
-	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "hosts"), "bind", hosts, []string{"bind", "ro"}})
+	spec.Mounts = append(spec.Mounts, specs.Mount{Destination: path.Join("/etc", "hosts"), Type: "bind", Source: hosts, Options: []string{"bind", "ro"}})
 	// add resolv.conf
 	resolvConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "resolv.conf"))
 	if _, err := os.Stat(resolvConf); err != nil {
 		resolvConf = "/etc/resolv.conf"
 	}
-	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "resolv.conf"), "bind", resolvConf, []string{"bind", "ro"}})
+	spec.Mounts = append(spec.Mounts, specs.Mount{Destination: path.Join("/etc", "resolv.conf"), Type: "bind", Source: resolvConf, Options: []string{"bind", "ro"}})
 	// add nsswitch.conf
 	nsswitchConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "nsswitch.conf"))
 	if _, err := os.Stat(nsswitchConf); err != nil {
 		nsswitchConf = "/etc/nsswitch.conf"
 	}
-	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "nsswitch.conf"), "bind", nsswitchConf, []string{"bind", "ro"}})
+	spec.Mounts = append(spec.Mounts, specs.Mount{Destination: path.Join("/etc", "nsswitch.conf"), Type: "bind", Source: nsswitchConf, Options: []string{"bind", "ro"}})
 
 	// TODO: all services should have their own certificates
 	// this mound for demo only and should be removed
 	// mount /etc/ssl
-	spec.Mounts = append(spec.Mounts, specs.Mount{path.Join("/etc", "ssl"), "bind", path.Join("/etc", "ssl"), []string{"bind", "ro"}})
+	spec.Mounts = append(spec.Mounts, specs.Mount{Destination: path.Join("/etc", "ssl"), Type: "bind", Source: path.Join("/etc", "ssl"), Options: []string{"bind", "ro"}})
 
 	// add netns hook
 	if spec.Hooks == nil {
@@ -708,11 +709,11 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec, userName string) (
 func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
 	launcher.services.Delete(serviceName)
 
-	if _, _, err := launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
+	if _, _, err = launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
 		return err
 	}
 
-	if err := launcher.systemd.Reload(); err != nil {
+	if err = launcher.systemd.Reload(); err != nil {
 		return err
 	}
 
@@ -771,23 +772,23 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		// the order is important for example: execstoppost should be evaluated
 		// before execstop as execstop is substring of execstoppost
 		case strings.Contains(strings.ToLower(line), "execstartpre"):
-			if _, err := fmt.Fprintf(f, line, execStartPreString); err != nil {
+			if _, err = fmt.Fprintf(f, line, execStartPreString); err != nil {
 				return fileName, err
 			}
 		case strings.Contains(strings.ToLower(line), "execstart"):
-			if _, err := fmt.Fprintf(f, line, execStartString); err != nil {
+			if _, err = fmt.Fprintf(f, line, execStartString); err != nil {
 				return fileName, err
 			}
 		case strings.Contains(strings.ToLower(line), "execstoppost"):
-			if _, err := fmt.Fprintf(f, line, execStopPostString); err != nil {
+			if _, err = fmt.Fprintf(f, line, execStopPostString); err != nil {
 				return fileName, err
 			}
 		case strings.Contains(strings.ToLower(line), "execstop"):
-			if _, err := fmt.Fprintf(f, line, execStopString); err != nil {
+			if _, err = fmt.Fprintf(f, line, execStopString); err != nil {
 				return fileName, err
 			}
 		case strings.Contains(strings.ToLower(line), "pidfile"):
-			if _, err := fmt.Fprintf(f, line, pidFile); err != nil {
+			if _, err = fmt.Fprintf(f, line, pidFile); err != nil {
 				return fileName, err
 			}
 		default:
@@ -795,9 +796,6 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		}
 	}
 
-	if fileName, err = filepath.Abs(f.Name()); err != nil {
-		return fileName, err
-	}
-
-	return fileName, nil
+	fileName, err = filepath.Abs(f.Name())
+	return fileName, err
 }
