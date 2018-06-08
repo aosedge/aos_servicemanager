@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"errors"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,13 +20,14 @@ const (
  * Types
  ******************************************************************************/
 
+//Database struncture with database informatoin
 type Database struct {
 	sql *sql.DB
 }
 
-// serviceEntry describes entry structure
+//ServiceEntry describes entry structure
 type ServiceEntry struct {
-	Id          string // service id
+	ID          string // service id
 	Version     uint   // service version
 	Path        string // path to service bundle
 	ServiceName string // systemd service name
@@ -52,13 +53,13 @@ func New(name string) (db *Database, err error) {
 
 	exist, err := db.isTableExist(serviceTableName)
 	if err != nil {
-		return  db, err
+		return db, err
 	}
 
 	if !exist {
 		log.Warning("Service table doesn't exist. Either it is first start or something bad happened.")
 		if err := db.createServiceTable(); err != nil {
-			return  db, err
+			return db, err
 		}
 	}
 
@@ -73,7 +74,7 @@ func (db *Database) AddService(entry ServiceEntry) (err error) {
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(entry.Id, entry.Version, entry.Path, entry.ServiceName,
+	_, err = stmt.Exec(entry.ID, entry.Version, entry.Path, entry.ServiceName,
 		entry.UserName, entry.State, entry.Status)
 
 	return err
@@ -100,7 +101,7 @@ func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(id).Scan(&entry.Id, &entry.Version, &entry.Path, &entry.ServiceName,
+	err = stmt.QueryRow(id).Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 		&entry.UserName, &entry.State, &entry.Status)
 	if err == sql.ErrNoRows {
 		return entry, errors.New("Service does not exist")
@@ -124,7 +125,7 @@ func (db *Database) GetServices() (entries []ServiceEntry, err error) {
 
 	for rows.Next() {
 		var entry ServiceEntry
-		err = rows.Scan(&entry.Id, &entry.Version, &entry.Path, &entry.ServiceName,
+		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 			&entry.UserName, &entry.State, &entry.Status)
 		if err != nil {
 			return entries, err

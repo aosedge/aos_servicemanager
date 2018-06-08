@@ -76,7 +76,7 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.Id, fmt.Sprintf("%d", serviceInfo.Version)}
+	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
 
 	if err := writeServiceSpec(&spec, specFile); err != nil {
 		return outputFile, err
@@ -103,7 +103,7 @@ func (launcher *TestLauncher) removeAllServices() (err error) {
 	}
 
 	for _, service := range services {
-		launcher.RemoveService(service.Id)
+		launcher.RemoveService(service.ID)
 	}
 
 	for i := 0; i < len(services); i++ {
@@ -238,7 +238,7 @@ func TestInstallRemove(t *testing.T) {
 
 	// install services
 	for i := 0; i < numInstallServices; i++ {
-		launcher.InstallService(amqp.ServiceInfoFromCloud{Id: fmt.Sprintf("service%d", i)})
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
 	}
 	// remove services
 	for i := 0; i < numRemoveServices; i++ {
@@ -248,9 +248,9 @@ func TestInstallRemove(t *testing.T) {
 	for i := 0; i < numInstallServices+numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
 			if status.Action == ActionInstall {
-				t.Errorf("Can't install service %s: %s", status.Id, status.Err)
+				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 			} else {
-				t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
+				t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 			}
 		}
 	}
@@ -264,7 +264,7 @@ func TestInstallRemove(t *testing.T) {
 	}
 	for _, service := range services {
 		if service.Status != "OK" {
-			t.Errorf("Service %s error status: %s", service.Id, service.Status)
+			t.Errorf("Service %s error status: %s", service.ID, service.Status)
 		}
 	}
 
@@ -277,7 +277,7 @@ func TestInstallRemove(t *testing.T) {
 
 	for i := 0; i < numInstallServices-numRemoveServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
+			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 		}
 	}
 
@@ -300,12 +300,12 @@ func TestAutoStart(t *testing.T) {
 
 	// install services
 	for i := 0; i < numServices; i++ {
-		launcher.InstallService(amqp.ServiceInfoFromCloud{Id: fmt.Sprintf("service%d", i)})
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
 	}
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Errorf("Can't install service %s: %s", status.Id, status.Err)
+			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 		}
 	}
 
@@ -330,7 +330,7 @@ func TestAutoStart(t *testing.T) {
 	}
 	for _, service := range services {
 		if service.Status != "OK" {
-			t.Errorf("Service %s error status: %s", service.Id, service.Status)
+			t.Errorf("Service %s error status: %s", service.ID, service.Status)
 		}
 	}
 
@@ -341,7 +341,7 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-statusChan; status.Err != nil {
-			t.Errorf("Can't remove service %s: %s", status.Id, status.Err)
+			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 		}
 	}
 
@@ -363,19 +363,19 @@ func TestErrors(t *testing.T) {
 
 	// test version mistmatch
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 5})
-	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 4})
-	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 6})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 5})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 4})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 6})
 
 	for i := 0; i < 3; i++ {
 		status := <-statusChan
 		switch {
 		case status.Version == 5 && status.Err != nil:
-			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.ID, status.Version, status.Err)
 		case status.Version == 4 && status.Err == nil:
-			t.Errorf("Service %s version %d should not be installed", status.Id, status.Version)
+			t.Errorf("Service %s version %d should not be installed", status.ID, status.Version)
 		case status.Version == 6 && status.Err != nil:
-			t.Errorf("Can't install service %s version %d: %s", status.Id, status.Version, status.Err)
+			t.Errorf("Can't install service %s version %d: %s", status.ID, status.Version, status.Err)
 		}
 	}
 
@@ -412,10 +412,10 @@ func TestUpdate(t *testing.T) {
 	}
 	defer serverConn.Close()
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 0})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
 	if status := <-statusChan; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
 	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
@@ -435,10 +435,10 @@ func TestUpdate(t *testing.T) {
 		}
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{Id: "service0", Version: 1})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
 
 	if status := <-statusChan; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.Id, status.Err)
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
 	}
 
 	n, _, err = serverConn.ReadFromUDP(buf)

@@ -1,1 +1,7 @@
 servicemanager
+aos_servicemanager
+data/servicemanager.db
+data/services.db
+fcrypt.json
+data/services/
+data/template.service

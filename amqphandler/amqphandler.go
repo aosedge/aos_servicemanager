@@ -20,24 +20,24 @@ import (
 //TODO: list
 // - close/erase channel
 // - correlation ID
-// - reconnect 3 times for each connection
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
+// AmqpHandler structur with all amqp connection infor
 type AmqpHandler struct {
-	//sendChan       chan []byte
 	exchangeInfo amqpLocalSenderConnectionInfo   // connection for sending data
 	consumerInfo amqpLocalConsumerConnectionInfo // connection for receiving data
 }
 
+// ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
-	Id                     string `json:"id"`
+	ID                     string `json:"id"`
 	Version                uint   `json:"version"`
 	UpdateType             string `json:"updateType"`
-	DownloadUrl            string `json:"downloadUrl"`
-	UrlExpiration          string `json:"urlExpiration"`
+	DownloadURL            string `json:"downloadUrl"`
+	URLExpiration          string `json:"urlExpiration"`
 	SignatureAlgorithm     string `json:"signatureAlgorithm"`
 	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
 	SignatureScheme        string `json:"signatureScheme"`
@@ -49,15 +49,17 @@ type ServiceInfoFromCloud struct {
 	EncryptionModeParams   string `json:"encryptionModeParams"`
 }
 
+// ServiceInfo struct with service information
 type ServiceInfo struct {
-	Id      string        `json:"id"`
+	ID      string        `json:"id"`
 	Version uint          `json:"version"`
 	Status  string        `json:"status"`
 	Error   *ServiceError `json:"error"`
 }
 
+// ServiceError error structure
 type ServiceError struct {
-	Id      int    `json:"id"`
+	ID      int    `json:"id"`
 	Message string `json:"message"`
 }
 
@@ -152,9 +154,9 @@ var amqpChan = make(chan interface{}, 100)
 var sendChan = make(chan []byte, 100)
 
 const (
-	CONNECTION_RETRY = 3
-	VEHICLE_STATUS   = "vehicleStatus"
-	SERVICE_STATUS   = "serviceStatus"
+	connectionRety   = 3
+	vehicleStatusStr = "vehicleStatus"
+	servoceSatusStr  = "serviceStatus"
 )
 
 /*******************************************************************************
@@ -167,6 +169,7 @@ func New() (handler *AmqpHandler, err error) {
 	return handler, nil
 }
 
+// InitAmqphandler initialisation of rabbit amqp handler
 func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	//TODO:do get VIN users form VIS
@@ -182,7 +185,7 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 	}
 	log.Debug("Results: ", amqpConn)
 
-	tlsConfig, err := fcrypt.GetTlsConfig()
+	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
 		log.Error("GetTlsConfig error : ", err)
 		return amqpChan, err
@@ -194,32 +197,35 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 	return amqpChan, nil
 }
 
+// SendInitialSetup send initila list oaf available servises
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: VEHICLE_STATUS, Sevices: serviceList}
-	reqJson, err := json.Marshal(msg)
+	msg := vehicleStatus{Version: 1, MessageType: vehicleStatusStr, Sevices: serviceList}
+	reqJSON, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
 		return err
 	}
-	sendChan <- reqJson
+	sendChan <- reqJSON
 	return nil
 }
 
+// SendServiceStatusMsg send message with service status
 func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) error {
 	log.Info("SendServiceStatusMsg ", serviceStatus)
 	var list []ServiceInfo
 	list = append(list, serviceStatus)
-	msg := vehicleStatus{Version: 1, MessageType: SERVICE_STATUS, Sevices: list}
-	reqJson, err := json.Marshal(msg)
+	msg := vehicleStatus{Version: 1, MessageType: servoceSatusStr, Sevices: list}
+	reqJSON, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
 		return err
 	}
-	sendChan <- reqJson
+	sendChan <- reqJSON
 	return nil
 }
 
+// CloseAllConnections cloase all amqp connection
 func (handler *AmqpHandler) CloseAllConnections() {
 	log.Info("CloseAllConnections")
 	handler.exchangeInfo.valid = false
@@ -242,20 +248,20 @@ func (handler *AmqpHandler) CloseAllConnections() {
  * Private
  ******************************************************************************/
 
-//service discovery implementation
+// service discovery implementation
 func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (connection reqbbitConnectioninfo, err error) {
 
 	var jsonResp serviseDiscoveryResp
 
-	reqJson, err := json.Marshal(request)
+	reqJSON, err := json.Marshal(request)
 	if err != nil {
 		log.Warn("Error :", err)
 		return connection, err
 	}
 
-	log.Info("Request :", string(reqJson))
+	log.Info("Request :", string(reqJSON))
 
-	tlsConfig, err := fcrypt.GetTlsConfig()
+	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
 		log.Warn("GetTlsConfig error : ", err)
 		return connection, err
@@ -263,7 +269,7 @@ func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (connection re
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
 
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJson))
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJSON))
 
 	if err != nil {
 		log.Warn("Post error : ", err)
@@ -300,7 +306,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 	}
 	log.Info("Sender connection url: ", urlRabbitMQ.String())
 
-	for i := 0; i < CONNECTION_RETRY; i++ {
+	for i := 0; i < connectionRety; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 		if err != nil {
 			log.Warning("Amqp.Dial to exchange #", i, err)
@@ -382,7 +388,7 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 	}
 	log.Info("Consumer connection url: ", urlRabbitMQ.String())
 
-	for i := 0; i < CONNECTION_RETRY; i++ {
+	for i := 0; i < connectionRety; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 		if err != nil {
 			log.Warning("Fail Amqp.Dial to Consumer #", i, err)
@@ -446,13 +452,13 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 		}
 
 		var servInfoArray []ServiceInfoFromCloud
-		cms_data, err := base64.StdEncoding.DecodeString(ecriptList.Sevices)
+		cmsData, err := base64.StdEncoding.DecodeString(ecriptList.Sevices)
 		if err != nil {
 			log.Error("Can't decode base64 data from element: ", err)
 			continue
 		}
 
-		decriptData, err := fcrypt.DecryptMetadata(cms_data)
+		decriptData, err := fcrypt.DecryptMetadata(cmsData)
 		if err != nil {
 			log.Error("Decryption metadata error")
 			continue
