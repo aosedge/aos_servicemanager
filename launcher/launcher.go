@@ -34,6 +34,10 @@ import (
 const (
 	serviceDir         = "services" // services directory
 	maxExecutedActions = 10         // max number of actions processed simulanteously
+
+	runcName         = "runc"         // runc file name
+	netnsName        = "netns"        // netns file name
+	wonderShaperName = "wondershaper" // wondershaper name
 )
 
 var (
@@ -80,19 +84,20 @@ type downloadItf interface {
 
 // Launcher instance
 type Launcher struct {
-	db              *database.Database
-	systemd         *dbus.Conn
-	downloader      downloadItf
-	closeChannel    chan bool
-	statusChannel   chan ActionStatus
-	services        sync.Map
-	mutex           sync.Mutex
-	waitQueue       *list.List
-	workQueue       *list.List
-	serviceTemplate string
-	workingDir      string
-	runcPath        string
-	netnsPath       string
+	db               *database.Database
+	systemd          *dbus.Conn
+	downloader       downloadItf
+	closeChannel     chan bool
+	statusChannel    chan ActionStatus
+	services         sync.Map
+	mutex            sync.Mutex
+	waitQueue        *list.List
+	workQueue        *list.List
+	serviceTemplate  string
+	workingDir       string
+	runcPath         string
+	netnsPath        string
+	wonderShaperPath string
 }
 
 type serviceAction struct {
@@ -160,16 +165,26 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 	}
 
 	// Retreive runc abs path
-	localLauncher.runcPath, err = exec.LookPath("runc")
+	localLauncher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
 		return launcher, executeChannel, err
 	}
 
 	// Retreive netns abs path
-	localLauncher.netnsPath, _ = filepath.Abs(path.Join(workingDir, "netns"))
+	localLauncher.netnsPath, _ = filepath.Abs(path.Join(workingDir, netnsName))
 	if _, err := os.Stat(localLauncher.netnsPath); err != nil {
 		// check system PATH
-		localLauncher.netnsPath, err = exec.LookPath("netns")
+		localLauncher.netnsPath, err = exec.LookPath(netnsName)
+		if err != nil {
+			return launcher, executeChannel, err
+		}
+	}
+
+	// Retreive wondershaper abs path
+	localLauncher.wonderShaperPath, _ = filepath.Abs(path.Join(workingDir, wonderShaperName))
+	if _, err := os.Stat(localLauncher.wonderShaperPath); err != nil {
+		// check system PATH
+		localLauncher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
 		if err != nil {
 			return launcher, executeChannel, err
 		}
@@ -233,6 +248,25 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	}
 
 	return info, nil
+}
+
+// GetServiceIPAddress returns service ip address
+func (launcher *Launcher) GetServiceIPAddress(id string) (address string, err error) {
+	service, err := launcher.db.GetService(id)
+	if err != nil {
+		return address, err
+	}
+
+	data, err := ioutil.ReadFile(path.Join(service.Path, ".ip"))
+	if err != nil {
+		return address, err
+	}
+
+	address = string(data)
+
+	log.WithField("id", id).Debugf("Get ip address: %s", address)
+
+	return address, nil
 }
 
 /*******************************************************************************
@@ -453,7 +487,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 
 	serviceName := "aos_" + id + ".service"
 
-	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id)
+	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id, &spec)
 	if err != nil {
 		return installDir, err
 	}
@@ -488,6 +522,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		if err = launcher.stopService(serviceName); err != nil {
 			log.WithField("name", serviceName).Warn("Can't stop service: ", err)
 		}
+		// TODO: delete linux user?
 		// TODO: try to restore old
 		return installDir, err
 	}
@@ -534,7 +569,14 @@ func (launcher *Launcher) removeService(id string) (err error) {
 }
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
-	template = `[Unit]
+	template = `# This is template file used to launch AOS services
+# Known variables:
+# * ${ID}            - service id
+# * ${SERVICEPATH}   - path to service dir
+# * ${RUNC}          - path to runc
+# * ${SETNETLIMIT}   - command to set net limit
+# * ${CLEARNETLIMIT} - command to clear net limit
+[Unit]
 Description=AOS Service
 After=network.target
 
@@ -542,11 +584,14 @@ After=network.target
 Type=forking
 Restart=always
 RestartSec=1
-ExecStartPre=%s
-ExecStart=%s
-ExecStop=%s
-ExecStopPost=%s
-PIDFile=%s
+ExecStartPre=${RUNC} delete -f ${ID}
+ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/${ID}.pid -b ${SERVICEPATH} ${ID}
+ExecStartPost=${SETNETLIMIT}
+
+ExecStopPre=${CLEARNETLIMIT}
+ExecStop=${RUNC} kill ${ID} SIGKILL
+ExecStopPost=${RUNC} delete -f ${ID}
+PIDFile=${SERVICEPATH}/${ID}.pid
 
 [Install]
 WantedBy=multi-user.target
@@ -748,7 +793,27 @@ func (launcher *Launcher) stopService(serviceName string) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string) (fileName string, err error) {
+func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {
+	value, exist := spec.Annotations["network.download"]
+	if exist {
+		setCmd = setCmd + " -d " + value
+	}
+	value, exist = spec.Annotations["network.upload"]
+	if exist {
+		setCmd = setCmd + " -u " + value
+	}
+	if setCmd != "" {
+		setCmd = launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
+		clearCmd = launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
+
+		log.Debugf("Set net limit cmd: %s", setCmd)
+		log.Debugf("Clear net limit cmd: %s", clearCmd)
+	}
+
+	return setCmd, clearCmd
+}
+
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *specs.Spec) (fileName string, err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return fileName, err
@@ -760,40 +825,23 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		return fileName, err
 	}
 
-	pidFile := path.Join(absServicePath, id+".pid")
-	execStartPreString := launcher.runcPath + " delete -f " + id
-	execStartString := launcher.runcPath + " run -d --pid-file " + pidFile + " -b " + absServicePath + " " + id
-	execStopString := launcher.runcPath + " kill " + id + " SIGKILL"
-	execStopPostString := launcher.runcPath + " delete -f " + id
+	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmds(spec)
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
-		switch {
-		// the order is important for example: execstoppost should be evaluated
-		// before execstop as execstop is substring of execstoppost
-		case strings.Contains(strings.ToLower(line), "execstartpre"):
-			if _, err = fmt.Fprintf(f, line, execStartPreString); err != nil {
-				return fileName, err
-			}
-		case strings.Contains(strings.ToLower(line), "execstart"):
-			if _, err = fmt.Fprintf(f, line, execStartString); err != nil {
-				return fileName, err
-			}
-		case strings.Contains(strings.ToLower(line), "execstoppost"):
-			if _, err = fmt.Fprintf(f, line, execStopPostString); err != nil {
-				return fileName, err
-			}
-		case strings.Contains(strings.ToLower(line), "execstop"):
-			if _, err = fmt.Fprintf(f, line, execStopString); err != nil {
-				return fileName, err
-			}
-		case strings.Contains(strings.ToLower(line), "pidfile"):
-			if _, err = fmt.Fprintf(f, line, pidFile); err != nil {
-				return fileName, err
-			}
-		default:
-			fmt.Fprint(f, line)
+		// skip comments
+		if strings.HasPrefix(line, "#") {
+			continue
 		}
+
+		// replaces variables with values
+		line = strings.Replace(line, "${RUNC}", launcher.runcPath, -1)
+		line = strings.Replace(line, "${ID}", id, -1)
+		line = strings.Replace(line, "${SERVICEPATH}", absServicePath, -1)
+		line = strings.Replace(line, "${SETNETLIMIT}", setNetLimitCmd, -1)
+		line = strings.Replace(line, "${CLEARNETLIMIT}", clearNetLimitCmd, -1)
+
+		fmt.Fprint(f, line)
 	}
 
 	fileName, err = filepath.Abs(f.Name())

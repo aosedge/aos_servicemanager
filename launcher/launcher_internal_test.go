@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,8 +23,12 @@ import (
  * Types
  ******************************************************************************/
 
-type TestLauncher struct {
-	*Launcher
+// Generates test image with python script
+type pythonImage struct {
+}
+
+// Generates test image with iperf server
+type iperfImage struct {
 }
 
 /*******************************************************************************
@@ -48,16 +54,18 @@ func init() {
  * Private
  ******************************************************************************/
 
-func newTestLauncher() (testLauncher *TestLauncher, statusChannel <-chan ActionStatus, err error) {
-	instance, statusChannel, err := New("tmp", db)
+func newTestLauncher(downloader downloadItf) (launcher *Launcher, statusChannel <-chan ActionStatus, err error) {
+	launcher, statusChannel, err = New("tmp", db)
+	if err != nil {
+		return launcher, statusChannel, err
+	}
 
-	testLauncher = &TestLauncher{instance}
-	testLauncher.downloader = testLauncher
+	launcher.downloader = downloader
 
-	return testLauncher, statusChannel, err
+	return launcher, statusChannel, err
 }
 
-func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -65,7 +73,16 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 	}
 	defer os.RemoveAll(imageDir)
 
-	if err := generateImage(imageDir); err != nil {
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generatePythonContent(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
 		return outputFile, err
 	}
 
@@ -96,7 +113,57 @@ func (launcher *TestLauncher) downloadService(serviceInfo amqp.ServiceInfoFromCl
 	return outputFile, nil
 }
 
-func (launcher *TestLauncher) removeAllServices() (err error) {
+func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	specFile := path.Join(imageDir, "config.json")
+
+	spec, err := getServiceSpec(specFile)
+	if err != nil {
+		return outputFile, err
+	}
+
+	spec.Process.Args = []string{"iperf", "-s"}
+
+	if spec.Annotations == nil {
+		spec.Annotations = make(map[string]string)
+	}
+	spec.Annotations["network.upload"] = "4096"
+	spec.Annotations["network.download"] = "8192"
+
+	if err := writeServiceSpec(&spec, specFile); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func (launcher *Launcher) removeAllServices() (err error) {
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
 		return err
@@ -137,7 +204,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, _, err := newTestLauncher()
+	launcher, _, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		return err
 	}
@@ -156,12 +223,7 @@ func cleanup() (err error) {
 	return nil
 }
 
-func generateImage(imagePath string) (err error) {
-	// create dir
-	if err := os.MkdirAll(path.Join(imagePath, "rootfs", "home"), 0755); err != nil {
-		return err
-	}
-
+func generatePythonContent(imagePath string) (err error) {
 	serviceContent := `#!/usr/bin/python
 
 import time
@@ -187,6 +249,10 @@ while True:
 		return err
 	}
 
+	return nil
+}
+
+func generateConfig(imagePath string) (err error) {
 	// remove json
 	if err := os.Remove(path.Join(imagePath, "config.json")); err != nil {
 		if !os.IsNotExist(err) {
@@ -227,7 +293,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemove(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher()
+	launcher, statusChan, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -291,7 +357,7 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func TestAutoStart(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher()
+	launcher, statusChan, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -313,7 +379,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 5)
 
-	launcher, statusChan, err = newTestLauncher()
+	launcher, statusChan, err = newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -355,7 +421,7 @@ func TestAutoStart(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher()
+	launcher, statusChan, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -395,7 +461,7 @@ func TestErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher()
+	launcher, statusChan, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -449,6 +515,78 @@ func TestUpdate(t *testing.T) {
 
 		if message != "service0, version: 1" {
 			t.Fatalf("Wrong service content: %s", message)
+		}
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestNetworkSpeed(t *testing.T) {
+	launcher, statusChan, err := newTestLauncher(new(iperfImage))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	numServices := 2
+
+	for i := 0; i < numServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
+	}
+
+	for i := 0; i < numServices; i++ {
+		if status := <-statusChan; status.Err != nil {
+			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		}
+	}
+
+	for i := 0; i < numServices; i++ {
+		serviceID := fmt.Sprintf("service%d", i)
+
+		addr, err := launcher.GetServiceIPAddress(serviceID)
+		if err != nil {
+			t.Errorf("Can't get ip address: %s", err)
+			continue
+		}
+		output, err := exec.Command("iperf", "-c"+addr, "-d", "-r", "-t2", "-yc").Output()
+		if err != nil {
+			t.Errorf("Iperf failed: %s", err)
+			continue
+		}
+
+		ulSpeed := -1
+		dlSpeed := -1
+
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			result := strings.Split(line, ",")
+			if len(result) >= 9 {
+				if result[4] == "5001" {
+					value, err := strconv.ParseInt(result[8], 10, 64)
+					if err != nil {
+						t.Errorf("Can't parse ul speed: %s", err)
+						continue
+					}
+					ulSpeed = int(value) / 1000
+				} else {
+					value, err := strconv.ParseUint(result[8], 10, 64)
+					if err != nil {
+						t.Errorf("Can't parse ul speed: %s", err)
+						continue
+					}
+					dlSpeed = int(value) / 1000
+				}
+			}
+		}
+
+		if ulSpeed == -1 || dlSpeed == -1 {
+			t.Error("Can't determine ul/dl speed")
+		}
+
+		if ulSpeed > 4096*1.5 || dlSpeed > 8192*1.5 {
+			t.Errorf("Speed limit exeeds: dl %d, ul %d", dlSpeed, ulSpeed)
 		}
 	}
 
