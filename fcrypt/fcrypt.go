@@ -31,13 +31,13 @@ var config = configuration{}
 func init() {
 	file, err := os.Open("fcrypt.json")
 	if err != nil {
-		log.Fatal("Error while opening fcrypt configurataion file: ", err)
+		log.Fatal("Error while opening fcrypt configuration file: ", err)
 	}
 
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&config)
 	if err != nil {
-		log.Fatal("Erro while parsing fcrypt.json: ", err)
+		log.Fatal("Error while parsing fcrypt.json: ", err)
 	}
 
 	log.Println("CAcert:         ", config.CACert)
@@ -99,7 +99,7 @@ func getPrivKey() (*rsa.PrivateKey, error) {
 func getOfflineCert() (*x509.Certificate, error) {
 	pemCert, err := ioutil.ReadFile(config.OfflineCert)
 	if err != nil {
-		log.Println("Error reading offlinie certificate", err)
+		log.Println("Error reading offline certificate", err)
 		return nil, err
 	}
 
@@ -174,7 +174,7 @@ func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			log.Println("Error parsing certifiate: ", err)
+			log.Println("Error parsing certificate: ", err)
 			return nil, err
 		}
 		ret = append(ret, cert)
@@ -310,7 +310,7 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 	return DecryptMessage(der, key, cert)
 }
 
-//DecryptImage Decrypts given image into temprorary file
+//DecryptImage Decrypts given image into temporary file
 func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	signatureAlg, hashAlg, signatureScheme,
 	cryptoAlg, cryptoMode, certificates string) (outfname string, err error) {
@@ -327,7 +327,7 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	// Open file
 	f, err := os.Open(fname)
 	if err != nil {
-		log.Println("Error openinng encrypted image:", err)
+		log.Println("Error opening encrypted image:", err)
 		return outfname, err
 	}
 	defer f.Close()

@@ -28,7 +28,7 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
+func sendInitialSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
 		log.Error("Error getting initial list: ", err)
@@ -46,31 +46,31 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (er
 func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
 	switch data := data.(type) {
 	case []amqp.ServiceInfoFromCloud:
-		log.WithField("len", len(data)).Info("Recive services info")
+		log.WithField("len", len(data)).Info("Receive services info")
 
-		currenList, err := launcher.GetServicesInfo()
+		currentList, err := launcher.GetServicesInfo()
 		if err != nil {
 			log.Error("Error getting services info: ", err)
 			return err
 		}
 
-		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
+		for iCur := len(currentList) - 1; iCur >= 0; iCur-- {
 			for iDes := len(data) - 1; iDes >= 0; iDes-- {
-				if data[iDes].ID == currenList[iCur].ID {
-					if data[iDes].Version > currenList[iCur].Version {
-						log.Info("Update ", data[iDes].ID, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
+				if data[iDes].ID == currentList[iCur].ID {
+					if data[iDes].Version > currentList[iCur].Version {
+						log.Info("Update ", data[iDes].ID, " from ", currentList[iCur].Version, " to ", data[iDes].Version)
 
 						go launcher.InstallService(data[iDes])
 					}
 
 					data = append(data[:iDes], data[iDes+1:]...)
-					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
+					currentList = append(currentList[:iCur], currentList[iCur+1:]...)
 				}
 			}
 		}
 
-		for _, deleteElemnt := range currenList {
-			go launcher.RemoveService(deleteElemnt.ID)
+		for _, deleteElement := range currentList {
+			go launcher.RemoveService(deleteElement.ID)
 		}
 
 		for _, newElement := range data {
@@ -131,13 +131,13 @@ func main() {
 
 		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
 		if err != nil {
-			log.Error("Can't esablish connection: ", err)
+			log.Error("Can't establish connection: ", err)
 			log.Debug("Reconnecting...")
 			time.Sleep(time.Second * aosReconnectTimeSec)
 			continue
 		}
 
-		sendInitalSetup(launcherHandler, amqpHandler)
+		sendInitialSetup(launcherHandler, amqpHandler)
 
 		for {
 			select {

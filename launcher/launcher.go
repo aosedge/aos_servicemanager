@@ -33,7 +33,7 @@ import (
 
 const (
 	serviceDir         = "services" // services directory
-	maxExecutedActions = 10         // max number of actions processed simulanteously
+	maxExecutedActions = 10         // max number of actions processed simultaneously
 
 	runcName         = "runc"         // runc file name
 	netnsName        = "netns"        // netns file name
@@ -170,7 +170,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		return launcher, executeChannel, err
 	}
 
-	// Retreive netns abs path
+	// Retrieve netns abs path
 	localLauncher.netnsPath, _ = filepath.Abs(path.Join(workingDir, netnsName))
 	if _, err := os.Stat(localLauncher.netnsPath); err != nil {
 		// check system PATH
@@ -180,7 +180,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		}
 	}
 
-	// Retreive wondershaper abs path
+	// Retrieve wondershaper abs path
 	localLauncher.wonderShaperPath, _ = filepath.Abs(path.Join(workingDir, wonderShaperName))
 	if _, err := os.Stat(localLauncher.wonderShaperPath); err != nil {
 		// check system PATH
@@ -232,7 +232,7 @@ func (launcher *Launcher) RemoveService(id string) {
 	launcher.putInQueue(serviceAction{ActionRemove, id, nil})
 }
 
-// GetServicesInfo returns informaion about all installed services
+// GetServicesInfo returns information about all installed services
 func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
 	log.Debug("Get services info")
 

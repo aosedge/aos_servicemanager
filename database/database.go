@@ -20,7 +20,7 @@ const (
  * Types
  ******************************************************************************/
 
-//Database struncture with database informatoin
+//Database structure with database information
 type Database struct {
 	sql *sql.DB
 }
