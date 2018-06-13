@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -18,7 +17,8 @@ import (
 	"os"
 )
 
-type configuration struct {
+// Configuration structure with certificates info
+type Configuration struct {
 	CACert         string
 	ClientCert     string
 	ClientKey      string
@@ -26,20 +26,12 @@ type configuration struct {
 	OfflineCert    string
 }
 
-var config = configuration{}
+var config Configuration
 
-func init() {
-	file, err := os.Open("fcrypt.json")
-	if err != nil {
-		log.Fatal("Error while opening fcrypt configuration file: ", err)
-	}
+//Init initialization of fcrypt package
+func Init(conf Configuration) {
 
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		log.Fatal("Error while parsing fcrypt.json: ", err)
-	}
-
+	config = conf
 	log.Println("CAcert:         ", config.CACert)
 	log.Println("ClientCert:     ", config.ClientCert)
 	log.Println("ClientKey:      ", config.ClientKey)

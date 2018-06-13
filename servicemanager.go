@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/signal"
 	"reflect"
@@ -12,8 +13,14 @@ import (
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
+
+type aosConfiguration struct {
+	FcryptCfg        fcrypt.Configuration `json:"fcrypt"`
+	ServDiscoveryURL string               `json:"serviceDiscovery"`
+}
 
 const (
 	aosReconnectTimeSec = 3
@@ -88,6 +95,31 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 func main() {
 	log.Info("Start service manager")
 
+	configPath := ""
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
+	}
+
+	if configPath == "" {
+		log.Info("use dafault path servicemanager.conf")
+		configPath = "servicemanager.conf"
+	} else {
+		log.Info("Confing file ", configPath)
+	}
+
+	file, err := os.Open(configPath)
+	if err != nil {
+		log.Fatal("Error while opening configuration file: ", err)
+	}
+	config := aosConfiguration{}
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		log.Fatal("Error while parsing configuration ", err)
+	}
+
+	fcrypt.Init(config.FcryptCfg)
+
 	db, err := database.New("data/servicemanager.db")
 	if err != nil {
 		log.Fatal("Can't open database: ", err)
@@ -127,9 +159,9 @@ func main() {
 	}()
 
 	for {
-		log.Debug("Start connection")
+		log.Debug("Start connection url ", config.ServDiscoveryURL)
 
-		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
+		amqpChan, err := amqpHandler.InitAmqphandler(config.ServDiscoveryURL)
 		if err != nil {
 			log.Error("Can't establish connection: ", err)
 			log.Debug("Reconnecting...")
