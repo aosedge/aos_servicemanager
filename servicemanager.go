@@ -65,7 +65,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 					if data[iDes].Version > currentList[iCur].Version {
 						log.Info("Update ", data[iDes].ID, " from ", currentList[iCur].Version, " to ", data[iDes].Version)
 
-						go launcherHandler.InstallService(data[iDes])
+						launcherHandler.InstallService(data[iDes])
 					}
 
 					data = append(data[:iDes], data[iDes+1:]...)
@@ -75,11 +75,11 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 		}
 
 		for _, deleteElement := range currentList {
-			go launcherHandler.RemoveService(deleteElement.ID)
+			launcherHandler.RemoveService(deleteElement.ID)
 		}
 
 		for _, newElement := range data {
-			go launcherHandler.InstallService(newElement)
+			launcherHandler.InstallService(newElement)
 		}
 
 		return nil
