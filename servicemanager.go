@@ -154,7 +154,7 @@ func main() {
 		<-c
 		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
-		dbusServer.StopServer()
+		dbusServer.Close()
 		os.Exit(1)
 	}()
 
