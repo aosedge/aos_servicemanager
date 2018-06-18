@@ -797,11 +797,11 @@ func (launcher *Launcher) stopService(serviceName string) (err error) {
 }
 
 func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {
-	value, exist := spec.Annotations["network.download"]
+	value, exist := spec.Annotations[aosProductPrefix+"network.download"]
 	if exist {
 		setCmd = setCmd + " -d " + value
 	}
-	value, exist = spec.Annotations["network.upload"]
+	value, exist = spec.Annotations[aosProductPrefix+"network.upload"]
 	if exist {
 		setCmd = setCmd + " -u " + value
 	}

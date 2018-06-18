@@ -147,8 +147,8 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	if spec.Annotations == nil {
 		spec.Annotations = make(map[string]string)
 	}
-	spec.Annotations["network.upload"] = "4096"
-	spec.Annotations["network.download"] = "8192"
+	spec.Annotations[aosProductPrefix+"network.upload"] = "4096"
+	spec.Annotations[aosProductPrefix+"network.download"] = "8192"
 
 	if err := writeServiceSpec(&spec, specFile); err != nil {
 		return outputFile, err
