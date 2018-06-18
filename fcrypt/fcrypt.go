@@ -15,28 +15,21 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
 
-// Configuration structure with certificates info
-type Configuration struct {
-	CACert         string
-	ClientCert     string
-	ClientKey      string
-	OfflinePrivKey string
-	OfflineCert    string
-}
+var fcryptCfg config.Crypt
 
-var config Configuration
+// Init initializes of fcrypt package
+func Init(conf config.Crypt) {
+	fcryptCfg = conf
 
-//Init initialization of fcrypt package
-func Init(conf Configuration) {
-
-	config = conf
-	log.Println("CAcert:         ", config.CACert)
-	log.Println("ClientCert:     ", config.ClientCert)
-	log.Println("ClientKey:      ", config.ClientKey)
-	log.Println("OfflinePrivKey: ", config.OfflinePrivKey)
-	log.Println("OfflineCert:    ", config.OfflineCert)
+	log.Println("CAcert:         ", fcryptCfg.CACert)
+	log.Println("ClientCert:     ", fcryptCfg.ClientCert)
+	log.Println("ClientKey:      ", fcryptCfg.ClientKey)
+	log.Println("OfflinePrivKey: ", fcryptCfg.OfflinePrivKey)
+	log.Println("OfflineCert:    ", fcryptCfg.OfflineCert)
 }
 
 func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
@@ -45,7 +38,7 @@ func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 
 func getCaCertPool() (*x509.CertPool, error) {
 	// Load CA cert
-	caCert, err := ioutil.ReadFile(config.CACert)
+	caCert, err := ioutil.ReadFile(fcryptCfg.CACert)
 	if err != nil {
 		log.Println("Error reading CA certificate", err)
 		return nil, err
@@ -59,7 +52,7 @@ func getCaCertPool() (*x509.CertPool, error) {
 //GetTLSConfig Provides TLS configuration which can be used with HTTPS client
 func GetTLSConfig() (*tls.Config, error) {
 	// Load client cert
-	cert, err := tls.LoadX509KeyPair(config.ClientCert, config.ClientKey)
+	cert, err := tls.LoadX509KeyPair(fcryptCfg.ClientCert, fcryptCfg.ClientKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,7 +73,7 @@ func GetTLSConfig() (*tls.Config, error) {
 }
 
 func getPrivKey() (*rsa.PrivateKey, error) {
-	keydata, err := ioutil.ReadFile(config.OfflinePrivKey)
+	keydata, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
 	if err != nil {
 		log.Println("Error reading private key:", err)
 		return nil, err
@@ -89,7 +82,7 @@ func getPrivKey() (*rsa.PrivateKey, error) {
 }
 
 func getOfflineCert() (*x509.Certificate, error) {
-	pemCert, err := ioutil.ReadFile(config.OfflineCert)
+	pemCert, err := ioutil.ReadFile(fcryptCfg.OfflineCert)
 	if err != nil {
 		log.Println("Error reading offline certificate", err)
 		return nil, err
