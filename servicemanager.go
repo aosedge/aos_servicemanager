@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"os/signal"
 	"reflect"
@@ -147,21 +148,13 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 }
 
 func main() {
-	log.Info("Start service manager")
+	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
 
-	configPath := ""
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
-	}
+	flag.Parse()
 
-	if configPath == "" {
-		log.Info("Use dafault path aos_servicemanager.conf")
-		configPath = "aos_servicemanager.conf"
-	} else {
-		log.Info("Confing file ", configPath)
-	}
+	log.WithField("configFile", *configFile).Info("Start service manager")
 
-	file, err := os.Open(configPath)
+	file, err := os.Open(*configFile)
 	if err != nil {
 		log.Fatal("Error while opening configuration file: ", err)
 	}
