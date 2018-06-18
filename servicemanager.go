@@ -32,7 +32,6 @@ func init() {
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
 		FullTimestamp:    true})
-	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
 
@@ -149,8 +148,16 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 
 func main() {
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
+	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
 
 	flag.Parse()
+
+	logLevel, err := log.ParseLevel(*strLogLevel)
+	if err != nil {
+		log.Fatalf("Error: %s", err)
+	}
+
+	log.SetLevel(logLevel)
 
 	log.WithField("configFile", *configFile).Info("Start service manager")
 
