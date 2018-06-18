@@ -5,6 +5,8 @@ import (
 
 	"github.com/godbus/dbus"
 	log "github.com/sirupsen/logrus"
+
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
 /*******************************************************************************
@@ -24,7 +26,7 @@ const (
 
 // DBusHandler d-bus interface structure
 type DBusHandler struct {
-	// TODO: add reference to internal DB
+	db       *database.Database
 	dbusConn *dbus.Conn
 }
 
@@ -33,7 +35,7 @@ type DBusHandler struct {
  ******************************************************************************/
 
 // New creates and launch d-bus server
-func New() (dbusHandler *DBusHandler, err error) {
+func New(db *database.Database) (dbusHandler *DBusHandler, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
 		return dbusHandler, err
@@ -49,7 +51,7 @@ func New() (dbusHandler *DBusHandler, err error) {
 
 	log.Debug("Start D-Bus server")
 
-	server := DBusHandler{dbusConn: conn}
+	server := DBusHandler{dbusConn: conn, db: db}
 
 	// TODO: add introspect
 	conn.Export(server, ObjectPath, IntrfaceName)
@@ -79,8 +81,13 @@ func (dbusHandler *DBusHandler) Close() (err error) {
  ******************************************************************************/
 
 // GetPermission get permossion d-bus method
-func (dbusHandler DBusHandler) GetPermission(token string) (result, status string, err *dbus.Error) {
-	log.WithField("token", token).Debug("Get permissions")
-	//TODO: make select from DB
-	return `{"*": "rw", "123": "rw"}`, "OK", nil
+func (dbusHandler DBusHandler) GetPermission(token string) (result, status string, dbusErr *dbus.Error) {
+	service, err := dbusHandler.db.GetService(token)
+	if err != nil {
+		return "", err.Error(), nil
+	}
+
+	log.WithFields(log.Fields{"token": token, "perm": service.Permissions}).Debug("Get permissions")
+
+	return service.Permissions, "OK", nil
 }

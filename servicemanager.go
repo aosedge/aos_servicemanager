@@ -192,7 +192,7 @@ func main() {
 	}
 	defer amqpHandler.CloseAllConnections()
 
-	dbusServer, err := dbushandler.New()
+	dbusServer, err := dbushandler.New(db)
 
 	if err != nil {
 		log.Fatal("Can't create D-BUS server %v", err)
