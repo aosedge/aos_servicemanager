@@ -146,7 +146,7 @@ func decryptCMSKey(ktri *keyTransRecipientInfo,
 		log.Printf("AES KEY: %#v\n", key)
 		return key, nil
 	default:
-		return nil, errors.New("Unknow public encryption OID")
+		return nil, errors.New("Unknown public encryption OID")
 	}
 }
 

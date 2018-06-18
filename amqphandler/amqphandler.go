@@ -25,7 +25,7 @@ import (
  * Types
  ******************************************************************************/
 
-// AmqpHandler structur with all amqp connection infor
+// AmqpHandler structure with all amqp connection info
 type AmqpHandler struct {
 	exchangeInfo amqpLocalSenderConnectionInfo   // connection for sending data
 	consumerInfo amqpLocalConsumerConnectionInfo // connection for receiving data
@@ -64,7 +64,7 @@ type ServiceError struct {
 }
 
 ///API structures
-type serviseDiscoveryRequest struct {
+type serviceDiscoveryRequest struct {
 	Version int      `json:"version"`
 	VIN     string   `json:"VIN"`
 	Users   []string `json:"users"`
@@ -73,19 +73,19 @@ type serviseDiscoveryRequest struct {
 type vehicleStatus struct {
 	Version     uint          `json:"version"`
 	MessageType string        `json:"messageType"`
-	Sevices     []ServiceInfo `json:"services"`
+	Services    []ServiceInfo `json:"services"`
 }
 
 type desiredStatus struct {
 	Version     uint   `json:"version"`
 	MessageType string `json:"messageType"`
-	Sevices     string `json:"services"`
+	Services    string `json:"services"`
 }
-type serviseDiscoveryResp struct {
-	Version    uint                  `json:"version"`
-	Connection reqbbitConnectioninfo `json:"connection"`
+type serviceDiscoveryResp struct {
+	Version    uint                 `json:"version"`
+	Connection rabbitConnectioninfo `json:"connection"`
 }
-type reqbbitConnectioninfo struct {
+type rabbitConnectioninfo struct {
 	SendParam     sendParam     `json:"sendParams"`
 	ReceiveParams receiveParams `json:"receiveParams"`
 }
@@ -96,10 +96,10 @@ type sendParam struct {
 	Password  string        `json:"password"`
 	Mandatory bool          `json:"mandatory"`
 	Immediate bool          `json:"immediate"`
-	Exchange  excahngeParam `json:"exchange"`
+	Exchange  exchangeParam `json:"exchange"`
 }
 
-type excahngeParam struct {
+type exchangeParam struct {
 	Name       string `json:"name"`
 	Durable    bool   `json:"durable"`
 	AutoDetect bool   `json:"autoDetect"`
@@ -154,9 +154,9 @@ var amqpChan = make(chan interface{}, 100)
 var sendChan = make(chan []byte, 100)
 
 const (
-	connectionRety   = 3
+	connectionRetry  = 3
 	vehicleStatusStr = "vehicleStatus"
-	servoceSatusStr  = "serviceStatus"
+	serviceStatusStr = "serviceStatus"
 )
 
 /*******************************************************************************
@@ -173,12 +173,12 @@ func New() (handler *AmqpHandler, err error) {
 func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, error) {
 
 	//TODO:do get VIN users form VIS
-	servRequst := serviseDiscoveryRequest{
+	servRequest := serviceDiscoveryRequest{
 		Version: 1,
 		VIN:     "12345ZXCVBNMA1234",
 		Users:   []string{"user1", "OEM2"}}
 
-	amqpConn, err := getAmqpConnInfo(sdURL, servRequst)
+	amqpConn, err := getAmqpConnInfo(sdURL, servRequest)
 	if err != nil {
 		log.Error("NO connection info: ", err)
 		return amqpChan, err
@@ -197,10 +197,10 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, err
 	return amqpChan, nil
 }
 
-// SendInitialSetup send initila list oaf available servises
+// SendInitialSetup send initial list oaf available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: vehicleStatusStr, Sevices: serviceList}
+	msg := vehicleStatus{Version: 1, MessageType: vehicleStatusStr, Services: serviceList}
 	reqJSON, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
@@ -215,7 +215,7 @@ func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) erro
 	log.Info("SendServiceStatusMsg ", serviceStatus)
 	var list []ServiceInfo
 	list = append(list, serviceStatus)
-	msg := vehicleStatus{Version: 1, MessageType: servoceSatusStr, Sevices: list}
+	msg := vehicleStatus{Version: 1, MessageType: serviceStatusStr, Services: list}
 	reqJSON, err := json.Marshal(msg)
 	if err != nil {
 		log.Warn("Error marshall json: ", err)
@@ -225,7 +225,7 @@ func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) erro
 	return nil
 }
 
-// CloseAllConnections cloase all amqp connection
+// CloseAllConnections close all amqp connection
 func (handler *AmqpHandler) CloseAllConnections() {
 	log.Info("CloseAllConnections")
 	handler.exchangeInfo.valid = false
@@ -249,9 +249,9 @@ func (handler *AmqpHandler) CloseAllConnections() {
  ******************************************************************************/
 
 // service discovery implementation
-func getAmqpConnInfo(url string, request serviseDiscoveryRequest) (connection reqbbitConnectioninfo, err error) {
+func getAmqpConnInfo(url string, request serviceDiscoveryRequest) (connection rabbitConnectioninfo, err error) {
 
-	var jsonResp serviseDiscoveryResp
+	var jsonResp serviceDiscoveryResp
 
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
@@ -306,7 +306,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 	}
 	log.Info("Sender connection url: ", urlRabbitMQ.String())
 
-	for i := 0; i < connectionRety; i++ {
+	for i := 0; i < connectionRetry; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 		if err != nil {
 			log.Warning("Amqp.Dial to exchange #", i, err)
@@ -388,7 +388,7 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 	}
 	log.Info("Consumer connection url: ", urlRabbitMQ.String())
 
-	for i := 0; i < connectionRety; i++ {
+	for i := 0; i < connectionRetry; i++ {
 		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
 		if err != nil {
 			log.Warning("Fail Amqp.Dial to Consumer #", i, err)
@@ -438,36 +438,36 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 	for d := range consumerInfo.ch {
 		log.Info("Received a message: ", string(d.Body))
 		log.Info("CorrelationId: ", d.CorrelationId)
-		var ecriptList desiredStatus
+		var encryptList desiredStatus
 
-		err := json.Unmarshal(d.Body, &ecriptList) // TODO: add check
+		err := json.Unmarshal(d.Body, &encryptList) // TODO: add check
 		if err != nil {
 			log.Error("Receive ", string(d.Body), err)
 			continue
 		}
 
-		if ecriptList.MessageType != "desiredStatus" {
-			log.Warning("Incorrect msg type ", ecriptList.MessageType)
+		if encryptList.MessageType != "desiredStatus" {
+			log.Warning("Incorrect msg type ", encryptList.MessageType)
 			continue
 		}
 
 		var servInfoArray []ServiceInfoFromCloud
-		cmsData, err := base64.StdEncoding.DecodeString(ecriptList.Sevices)
+		cmsData, err := base64.StdEncoding.DecodeString(encryptList.Services)
 		if err != nil {
 			log.Error("Can't decode base64 data from element: ", err)
 			continue
 		}
 
-		decriptData, err := fcrypt.DecryptMetadata(cmsData)
+		decryptData, err := fcrypt.DecryptMetadata(cmsData)
 		if err != nil {
 			log.Error("Decryption metadata error")
 			continue
 		}
-		log.Info("Decrypted data:", string(decriptData))
+		log.Info("Decrypted data:", string(decryptData))
 
-		err = json.Unmarshal(decriptData, &servInfoArray)
+		err = json.Unmarshal(decryptData, &servInfoArray)
 		if err != nil {
-			log.Error("Can't make json from decrypt data", string(decriptData), err)
+			log.Error("Can't make json from decrypt data", string(decryptData), err)
 			continue
 		}
 		amqpChan <- servInfoArray

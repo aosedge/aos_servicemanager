@@ -38,7 +38,7 @@ func New() (dbusHandler *AosDbusInterface, err error) {
 	}
 	reply, err := conn.RequestName(IntrfaceName, dbus.NameFlagDoNotQueue)
 	if err != nil {
-		log.Error("Can't reques dbus inerface name ", err)
+		log.Error("Can't request dbus interface name ", err)
 		return dbusHandler, err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {

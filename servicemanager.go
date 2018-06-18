@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/signal"
 	"reflect"
@@ -12,8 +13,14 @@ import (
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
+
+type aosConfiguration struct {
+	FcryptCfg        fcrypt.Configuration `json:"fcrypt"`
+	ServDiscoveryURL string               `json:"serviceDiscovery"`
+}
 
 const (
 	aosReconnectTimeSec = 3
@@ -28,7 +35,7 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
+func sendInitialSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
 	initialList, err := launcher.GetServicesInfo()
 	if err != nil {
 		log.Error("Error getting initial list: ", err)
@@ -46,31 +53,31 @@ func sendInitalSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (er
 func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
 	switch data := data.(type) {
 	case []amqp.ServiceInfoFromCloud:
-		log.WithField("len", len(data)).Info("Recive services info")
+		log.WithField("len", len(data)).Info("Receive services info")
 
-		currenList, err := launcher.GetServicesInfo()
+		currentList, err := launcher.GetServicesInfo()
 		if err != nil {
 			log.Error("Error getting services info: ", err)
 			return err
 		}
 
-		for iCur := len(currenList) - 1; iCur >= 0; iCur-- {
+		for iCur := len(currentList) - 1; iCur >= 0; iCur-- {
 			for iDes := len(data) - 1; iDes >= 0; iDes-- {
-				if data[iDes].ID == currenList[iCur].ID {
-					if data[iDes].Version > currenList[iCur].Version {
-						log.Info("Update ", data[iDes].ID, " from ", currenList[iCur].Version, " to ", data[iDes].Version)
+				if data[iDes].ID == currentList[iCur].ID {
+					if data[iDes].Version > currentList[iCur].Version {
+						log.Info("Update ", data[iDes].ID, " from ", currentList[iCur].Version, " to ", data[iDes].Version)
 
 						go launcher.InstallService(data[iDes])
 					}
 
 					data = append(data[:iDes], data[iDes+1:]...)
-					currenList = append(currenList[:iCur], currenList[iCur+1:]...)
+					currentList = append(currentList[:iCur], currentList[iCur+1:]...)
 				}
 			}
 		}
 
-		for _, deleteElemnt := range currenList {
-			go launcher.RemoveService(deleteElemnt.ID)
+		for _, deleteElement := range currentList {
+			go launcher.RemoveService(deleteElement.ID)
 		}
 
 		for _, newElement := range data {
@@ -87,6 +94,31 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 
 func main() {
 	log.Info("Start service manager")
+
+	configPath := ""
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
+	}
+
+	if configPath == "" {
+		log.Info("use dafault path servicemanager.conf")
+		configPath = "servicemanager.conf"
+	} else {
+		log.Info("Confing file ", configPath)
+	}
+
+	file, err := os.Open(configPath)
+	if err != nil {
+		log.Fatal("Error while opening configuration file: ", err)
+	}
+	config := aosConfiguration{}
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		log.Fatal("Error while parsing configuration ", err)
+	}
+
+	fcrypt.Init(config.FcryptCfg)
 
 	db, err := database.New("data/servicemanager.db")
 	if err != nil {
@@ -127,17 +159,17 @@ func main() {
 	}()
 
 	for {
-		log.Debug("Start connection")
+		log.Debug("Start connection url ", config.ServDiscoveryURL)
 
-		amqpChan, err := amqpHandler.InitAmqphandler("https://fusion-poc-2.cloudapp.net:9000")
+		amqpChan, err := amqpHandler.InitAmqphandler(config.ServDiscoveryURL)
 		if err != nil {
-			log.Error("Can't esablish connection: ", err)
+			log.Error("Can't establish connection: ", err)
 			log.Debug("Reconnecting...")
 			time.Sleep(time.Second * aosReconnectTimeSec)
 			continue
 		}
 
-		sendInitalSetup(launcherHandler, amqpHandler)
+		sendInitialSetup(launcherHandler, amqpHandler)
 
 		for {
 			select {

@@ -2,6 +2,6 @@ servicemanager
 aos_servicemanager
 data/servicemanager.db
 data/services.db
-fcrypt.json
+servicemanager.conf
 data/services/
 data/template.service
