@@ -95,6 +95,11 @@ func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCl
 
 	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
 
+	if spec.Annotations == nil {
+		spec.Annotations = make(map[string]string)
+	}
+	spec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
+
 	if err := writeServiceSpec(&spec, specFile); err != nil {
 		return outputFile, err
 	}
@@ -588,6 +593,33 @@ func TestNetworkSpeed(t *testing.T) {
 		if ulSpeed > 4096*1.5 || dlSpeed > 8192*1.5 {
 			t.Errorf("Speed limit exeeds: dl %d, ul %d", dlSpeed, ulSpeed)
 		}
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestVisPermissions(t *testing.T) {
+	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
+
+	if status := <-statusChan; status.Err != nil {
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	}
+
+	service, err := db.GetService("service0")
+	if err != nil {
+		t.Fatalf("Can't get service: %s", err)
+	}
+
+	if service.Permissions != `{"*": "rw", "123": "rw"}` {
+		t.Fatalf("Permissions mismatch")
 	}
 
 	if err := launcher.removeAllServices(); err != nil {

@@ -38,6 +38,8 @@ const (
 	runcName         = "runc"         // runc file name
 	netnsName        = "netns"        // netns file name
 	wonderShaperName = "wondershaper" // wondershaper name
+
+	aosProductPrefix = "com.epam.aos." //prefix used in annotations to get aos related entries
 )
 
 var (
@@ -514,6 +516,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		Path:        installDir,
 		ServiceName: serviceName,
 		UserName:    userName,
+		Permissions: spec.Annotations[aosProductPrefix+"vis.permissions"],
 		State:       stateInit,
 		Status:      statusOk}
 
