@@ -23,7 +23,8 @@ func createConfigFile() (err error) {
 		"OfflinePrivKey" : "OfflinePrivKey",
 		"OfflineCert" : "OfflineCert"	
 	},
-	"serviceDiscovery" : "www.aos.com"
+	"serviceDiscovery" : "www.aos.com",
+	"workingDir" : "workingDir"
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -110,5 +111,16 @@ func TestGetServerURL(t *testing.T) {
 
 	if config.ServiceDiscoveryURL != "www.aos.com" {
 		t.Errorf("Wrong server URL value: %s", config.ServiceDiscoveryURL)
+	}
+}
+
+func TestGetWorkingDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.WorkingDir != "workingDir" {
+		t.Errorf("Wrong workingDir value: %s", config.WorkingDir)
 	}
 }

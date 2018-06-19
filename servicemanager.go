@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"path"
 	"reflect"
 	"syscall"
 	"time"
@@ -30,7 +31,7 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
+func sendInitialSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
 	initialList, err := launcherHandler.GetServicesInfo()
 	if err != nil {
 		log.Fatalf("Can't get services: %s", err)
@@ -86,7 +87,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 }
 
 func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHandler *launcher.Launcher, launcherChannel <-chan launcher.ActionStatus) {
-	if err := sendInitalSetup(amqpHandler, launcherHandler); err != nil {
+	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
 		return
@@ -167,14 +168,14 @@ func main() {
 	fcrypt.Init(config.Crypt)
 
 	// Create DB
-	db, err := database.New("data/servicemanager.db")
+	db, err := database.New(path.Join(config.WorkingDir, "servicemanager.db"))
 	if err != nil {
 		log.Fatal("Can't open database: ", err)
 	}
 	defer db.Close()
 
 	// Create launcher
-	launcherHandler, launcherChannel, err := launcher.New("data", db)
+	launcherHandler, launcherChannel, err := launcher.New(config.WorkingDir, db)
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
@@ -212,7 +213,7 @@ func main() {
 		if err == nil {
 			run(amqpHandler, amqpChan, launcherHandler, launcherChannel)
 		} else {
-			log.Error("Can't esablish connection: ", err)
+			log.Error("Can't establish connection: ", err)
 
 			time.Sleep(time.Second * aosReconnectTimeSec)
 		}
