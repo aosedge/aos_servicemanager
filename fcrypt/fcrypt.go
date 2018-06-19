@@ -1,4 +1,4 @@
-//Package fcrypt Provides cryptographic interfaces for Fusion
+// Package fcrypt Provides cryptographic interfaces for Fusion
 package fcrypt
 
 import (
@@ -13,9 +13,9 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 
+	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
 
@@ -25,11 +25,11 @@ var fcryptCfg config.Crypt
 func Init(conf config.Crypt) {
 	fcryptCfg = conf
 
-	log.Println("CAcert:         ", fcryptCfg.CACert)
-	log.Println("ClientCert:     ", fcryptCfg.ClientCert)
-	log.Println("ClientKey:      ", fcryptCfg.ClientKey)
-	log.Println("OfflinePrivKey: ", fcryptCfg.OfflinePrivKey)
-	log.Println("OfflineCert:    ", fcryptCfg.OfflineCert)
+	log.Debug("CAcert:         ", fcryptCfg.CACert)
+	log.Debug("ClientCert:     ", fcryptCfg.ClientCert)
+	log.Debug("ClientKey:      ", fcryptCfg.ClientKey)
+	log.Debug("OfflinePrivKey: ", fcryptCfg.OfflinePrivKey)
+	log.Debug("OfflineCert:    ", fcryptCfg.OfflineCert)
 }
 
 func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
@@ -40,7 +40,7 @@ func getCaCertPool() (*x509.CertPool, error) {
 	// Load CA cert
 	caCert, err := ioutil.ReadFile(fcryptCfg.CACert)
 	if err != nil {
-		log.Println("Error reading CA certificate", err)
+		log.Errorf("Error reading CA certificate: %s", err)
 		return nil, err
 	}
 
@@ -49,12 +49,12 @@ func getCaCertPool() (*x509.CertPool, error) {
 	return caCertPool, nil
 }
 
-//GetTLSConfig Provides TLS configuration which can be used with HTTPS client
+// GetTLSConfig Provides TLS configuration which can be used with HTTPS client
 func GetTLSConfig() (*tls.Config, error) {
 	// Load client cert
 	cert, err := tls.LoadX509KeyPair(fcryptCfg.ClientCert, fcryptCfg.ClientKey)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Can't load key pair: %s", err)
 	}
 
 	caCertPool, err := getCaCertPool()
@@ -75,7 +75,7 @@ func GetTLSConfig() (*tls.Config, error) {
 func getPrivKey() (*rsa.PrivateKey, error) {
 	keydata, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
 	if err != nil {
-		log.Println("Error reading private key:", err)
+		log.Errorf("Error reading private key: %s", err)
 		return nil, err
 	}
 	return x509.ParsePKCS1PrivateKey(keydata)
@@ -84,7 +84,7 @@ func getPrivKey() (*rsa.PrivateKey, error) {
 func getOfflineCert() (*x509.Certificate, error) {
 	pemCert, err := ioutil.ReadFile(fcryptCfg.OfflineCert)
 	if err != nil {
-		log.Println("Error reading offline certificate", err)
+		log.Errorf("Error reading offline certificate: %s", err)
 		return nil, err
 	}
 
@@ -110,8 +110,8 @@ func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
 func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 	cryptoAlg string, cryptoMode string) (err error) {
 
-	log.Printf("IV: %v", iv)
-	log.Printf("Key: %v", key)
+	log.Debugf("IV: %v", iv)
+	log.Debugf("Key: %v", key)
 
 	var mode cipher.BlockMode
 	var block cipher.Block
@@ -120,7 +120,7 @@ func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 	case "AES128", "AES192", "AES256":
 		block, err = aes.NewCipher(key)
 		if err != nil {
-			log.Println("Can't create cipher: ", err)
+			log.Errorf("Can't create cipher: %s", err)
 			return err
 		}
 	default:
@@ -136,7 +136,7 @@ func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 
 	indata, err := ioutil.ReadAll(fin)
 	if err != nil {
-		log.Println("Can't read image file: ", err)
+		log.Errorf("Can't read image file: %s", err)
 		return err
 	}
 
@@ -159,7 +159,7 @@ func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			log.Println("Error parsing certificate: ", err)
+			log.Errorf("Error parsing certificate: %s", err)
 			return nil, err
 		}
 		ret = append(ret, cert)
@@ -196,7 +196,7 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	}
 	_, err = signCertificate.Verify(verifyOptions)
 	if err != nil {
-		log.Println("Error verifying certificate chain")
+		log.Error("Error verifying certificate chain")
 		return
 	}
 
@@ -235,11 +235,12 @@ func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
 	hash := hashFunc.New()
 	_, err = io.Copy(hash, f)
 	if err != nil {
-		log.Println("Error hashing file: ", err)
+		log.Error("Error hashing file: %s", err)
 		return err
 	}
 	h := hash.Sum(nil)
-	log.Println("Hash: ", hex.EncodeToString(h))
+
+	log.Debugf("Hash: %s", hex.EncodeToString(h))
 
 	switch signatureAlg {
 	case "RSA":
@@ -303,7 +304,7 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	// Create tmp file with output data
 	fout, err := ioutil.TempFile("", "fcrypt")
 	if err != nil {
-		log.Println("Can't create temp file for image:", err)
+		log.Errorf("Can't create temp file for image: %s", err)
 		return outfname, err
 	}
 	defer fout.Close()
@@ -312,7 +313,7 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	// Open file
 	f, err := os.Open(fname)
 	if err != nil {
-		log.Println("Error opening encrypted image:", err)
+		log.Errorf("Error opening encrypted image:%s", err)
 		return outfname, err
 	}
 	defer f.Close()
@@ -320,13 +321,13 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 	// Decrypt file into fout
 	err = decrypt(f, fout, key, iv, cryptoAlg, cryptoMode)
 	if err != nil {
-		log.Println("Error decrypting file:", err)
+		log.Errorf("Error decrypting file: %s", err)
 		return outfname, err
 	}
 
 	err = checkSign(fout, signatureAlg, hashAlg, signatureScheme, signature, certificates)
 	if err != nil {
-		log.Println("Signature verify error:", err)
+		log.Errorf("Signature verify error: %s", err)
 		return outfname, err
 	}
 	return fout.Name(), nil

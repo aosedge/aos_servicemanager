@@ -8,8 +8,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
-	"log"
 	"math/big"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type asnContentInfo struct {
@@ -143,7 +144,8 @@ func decryptCMSKey(ktri *keyTransRecipientInfo,
 			return nil, err
 		}
 
-		log.Printf("AES KEY: %#v\n", key)
+		log.Debugf("AES KEY: %#v", key)
+
 		return key, nil
 	default:
 		return nil, errors.New("Unknown public encryption OID")
@@ -164,7 +166,7 @@ func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 
 		block, err := aes.NewCipher(key)
 		if err != nil {
-			log.Println("Can't create cipher: ", err)
+			log.Errorf("Can't create cipher: %s", err)
 			return nil, err
 		}
 
@@ -184,7 +186,7 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 
 	_, err := asn1.Unmarshal(der, &ci)
 	if err != nil {
-		log.Println("Error parsing CMS container:", err)
+		log.Errorf("Error parsing CMS container: %s", err)
 		return nil, err
 	}
 
