@@ -12,7 +12,6 @@ import (
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-
 	if err := os.MkdirAll("tmp", 0755); err != nil {
 		log.Fatalf("Error creating service images: %s", err)
 	}
@@ -33,7 +32,7 @@ func TestMain(m *testing.M) {
 func TestAddService(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
@@ -62,7 +61,7 @@ func TestAddService(t *testing.T) {
 func TestNotExistService(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
@@ -78,7 +77,7 @@ func TestNotExistService(t *testing.T) {
 func TestSetServiceStatus(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
@@ -111,7 +110,7 @@ func TestSetServiceStatus(t *testing.T) {
 func TestSetServiceState(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
@@ -143,7 +142,7 @@ func TestSetServiceState(t *testing.T) {
 func TestRemoveService(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
@@ -168,7 +167,7 @@ func TestRemoveService(t *testing.T) {
 func TestGetServices(t *testing.T) {
 	db, err := New("tmp/test.db")
 	if err != nil {
-		t.Fatalf("Can't create databse: %s", err)
+		t.Fatalf("Can't create database: %s", err)
 	}
 	defer db.Close()
 
