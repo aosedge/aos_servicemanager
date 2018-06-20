@@ -166,7 +166,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		return launcher, executeChannel, err
 	}
 
-	// Retreive runc abs path
+	// Retrieve runc abs path
 	localLauncher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
 		return launcher, executeChannel, err

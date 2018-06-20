@@ -1,9 +1,10 @@
 package main
 
 import (
-	"encoding/json"
+	"flag"
 	"os"
 	"os/signal"
+	"path"
 	"reflect"
 	"syscall"
 	"time"
@@ -11,16 +12,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 )
-
-type aosConfiguration struct {
-	FcryptCfg        fcrypt.Configuration `json:"fcrypt"`
-	ServDiscoveryURL string               `json:"serviceDiscovery"`
-}
 
 const (
 	aosReconnectTimeSec = 3
@@ -31,11 +28,10 @@ func init() {
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
 		FullTimestamp:    true})
-	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitalSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
+func sendInitialSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
 	initialList, err := launcherHandler.GetServicesInfo()
 	if err != nil {
 		log.Fatalf("Can't get services: %s", err)
@@ -91,7 +87,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 }
 
 func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHandler *launcher.Launcher, launcherChannel <-chan launcher.ActionStatus) {
-	if err := sendInitalSetup(amqpHandler, launcherHandler); err != nil {
+	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
 		return
@@ -147,61 +143,58 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 }
 
 func main() {
-	log.Info("Start service manager")
+	// Initialize command line flags
+	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
+	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
 
-	configPath := ""
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
+	flag.Parse()
+
+	// Set log level
+	logLevel, err := log.ParseLevel(*strLogLevel)
+	if err != nil {
+		log.Fatalf("Error: %s", err)
 	}
+	log.SetLevel(logLevel)
 
-	if configPath == "" {
-		log.Info("Use dafault path aos_servicemanager.conf")
-		configPath = "aos_servicemanager.conf"
-	} else {
-		log.Info("Confing file ", configPath)
-	}
+	log.WithField("configFile", *configFile).Info("Start service manager")
 
-	file, err := os.Open(configPath)
+	// Create config
+	config, err := config.New(*configFile)
 	if err != nil {
 		log.Fatal("Error while opening configuration file: ", err)
 	}
-	config := aosConfiguration{}
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		log.Fatal("Error while parsing configuration ", err)
-	}
 
-	fcrypt.Init(config.FcryptCfg)
+	// Initialize fcrypt
+	fcrypt.Init(config.Crypt)
 
-	db, err := database.New("data/servicemanager.db")
+	// Create DB
+	db, err := database.New(path.Join(config.WorkingDir, "servicemanager.db"))
 	if err != nil {
 		log.Fatal("Can't open database: ", err)
 	}
 	defer db.Close()
 
-	launcherHandler, launcherChannel, err := launcher.New("data", db)
+	// Create launcher
+	launcherHandler, launcherChannel, err := launcher.New(config.WorkingDir, db)
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
 	defer launcherHandler.Close()
 
+	// Create amqp
 	amqpHandler, err := amqp.New()
 	if err != nil {
 		log.Fatal("Can't create amqpHandler: ", err)
 	}
 	defer amqpHandler.CloseAllConnections()
 
+	// Create D-Bus server
 	dbusServer, err := dbushandler.New(db)
-
 	if err != nil {
 		log.Fatal("Can't create D-BUS server %v", err)
 	}
-	if dbusServer == nil {
-		log.Fatal("Can't create D-BUS server")
-	}
 
-	// handle SIGTERM
+	// Handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -212,14 +205,15 @@ func main() {
 		os.Exit(1)
 	}()
 
-	log.WithField("url", config.ServDiscoveryURL).Debug("Start connection")
+	// Run all systems
+	log.WithField("url", config.ServiceDiscoveryURL).Debug("Start connection")
 
 	for {
-		amqpChan, err := amqpHandler.InitAmqphandler(config.ServDiscoveryURL)
+		amqpChan, err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL)
 		if err == nil {
 			run(amqpHandler, amqpChan, launcherHandler, launcherChannel)
 		} else {
-			log.Error("Can't esablish connection: ", err)
+			log.Error("Can't establish connection: ", err)
 
 			time.Sleep(time.Second * aosReconnectTimeSec)
 		}

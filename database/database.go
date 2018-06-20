@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
@@ -44,6 +46,16 @@ type ServiceEntry struct {
 // New creates new database handle
 func New(name string) (db *Database, err error) {
 	log.WithField("name", name).Debug("Open database")
+
+	// Check and create db path
+	if _, err = os.Stat(filepath.Dir(name)); err != nil {
+		if !os.IsNotExist(err) {
+			return db, err
+		}
+		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
+			return db, err
+		}
+	}
 
 	sqlite, err := sql.Open("sqlite3", name)
 	if err != nil {
