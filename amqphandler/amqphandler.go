@@ -44,7 +44,7 @@ type ServiceInfoFromCloud struct {
 	ImageSignature         string `json:"imageSignature"`
 	CertificateChain       string `json:"certificateChain"`
 	EncryptionKey          string `json:"encryptionKey"`
-	EncryptionAlgorythm    string `json:"encryptionAlgorythm"`
+	EncryptionAlgorithm    string `json:"encryptionAlgorithm"`
 	EncryptionMode         string `json:"encryptionMode"`
 	EncryptionModeParams   string `json:"encryptionModeParams"`
 }

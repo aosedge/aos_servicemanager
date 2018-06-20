@@ -331,7 +331,7 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 		serviceInfo.SignatureAlgorithm,
 		serviceInfo.SignatureAlgorithmHash,
 		serviceInfo.SignatureScheme,
-		serviceInfo.EncryptionAlgorythm,
+		serviceInfo.EncryptionAlgorithm,
 		serviceInfo.EncryptionMode,
 		certificateChain)
 
