@@ -32,6 +32,7 @@ type ServiceEntry struct {
 	Path        string // path to service bundle
 	ServiceName string // systemd service name
 	UserName    string // user used to run this service
+	Permissions string // VIS permissions
 	State       int    // service state
 	Status      int    // service status
 }
@@ -68,14 +69,14 @@ func New(name string) (db *Database, err error) {
 
 // AddService adds new service entry
 func (db *Database) AddService(entry ServiceEntry) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services(id, version, path, service, user, state, status) values(?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(entry.ID, entry.Version, entry.Path, entry.ServiceName,
-		entry.UserName, entry.State, entry.Status)
+		entry.UserName, entry.Permissions, entry.State, entry.Status)
 
 	return err
 }
@@ -102,7 +103,7 @@ func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
 	defer stmt.Close()
 
 	err = stmt.QueryRow(id).Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
-		&entry.UserName, &entry.State, &entry.Status)
+		&entry.UserName, &entry.Permissions, &entry.State, &entry.Status)
 	if err == sql.ErrNoRows {
 		return entry, errors.New("Service does not exist")
 	}
@@ -126,7 +127,7 @@ func (db *Database) GetServices() (entries []ServiceEntry, err error) {
 	for rows.Next() {
 		var entry ServiceEntry
 		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
-			&entry.UserName, &entry.State, &entry.Status)
+			&entry.UserName, &entry.Permissions, &entry.State, &entry.Status)
 		if err != nil {
 			return entries, err
 		}
@@ -215,6 +216,7 @@ func (db *Database) createServiceTable() (err error) {
 															   path TEXT,
 															   service TEXT,
 															   user TEXT,
+															   permissions TEXT,
 															   state INTEGER,
 															   status INTEGER);`)
 

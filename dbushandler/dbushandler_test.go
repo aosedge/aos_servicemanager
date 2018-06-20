@@ -3,19 +3,25 @@ package dbushandler_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/godbus/dbus"
 	log "github.com/sirupsen/logrus"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	dbusServer "gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 )
 
-const (
-	OBJECT_PATH    = "/com/aosservicemanager/vistoken"
-	INTERFACE_NAME = "com.aosservicemanager.vistoken"
-	TEST_TOKEN     = "APPUID"
-)
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var db *database.Database
+
+/*******************************************************************************
+ * Init
+ ******************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -26,54 +32,99 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func TestGetPermission(t *testing.T) {
-	log.Debug("[TEST] TestGetPermission")
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
 
-	server, err := dbusServer.New()
-	if server == nil {
-		t.Fatalf("Can't create D-BUS server")
-		return
+func setup() (err error) {
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		return err
 	}
+
+	db, err = database.New("tmp/servicemanager.db")
 	if err != nil {
-		t.Fatalf("Can't create D-BUS server %v", err)
-		return
+		return err
 	}
 
-	defer server.StopServer()
+	return nil
+}
 
-	var permissionJson string
-	var dbusErr string
-	var permissions map[string]string
+func cleanup() (err error) {
+	db.Close()
+
+	if err := os.RemoveAll("tmp"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Error creating service images: %s", err)
+	}
+
+	ret := m.Run()
+
+	if err := cleanup(); err != nil {
+		log.Fatalf("Error cleaning up: %s", err)
+	}
+
+	os.Exit(ret)
+}
+
+/*******************************************************************************
+ * Tests
+ ******************************************************************************/
+
+func TestGetPermission(t *testing.T) {
+	if err := db.AddService(database.ServiceEntry{ID: "Service1",
+		Permissions: `{"*": "rw", "123": "rw"}`}); err != nil {
+		t.Fatalf("Can't add service: %s", err)
+	}
+
+	server, err := dbusServer.New(db)
+	if err != nil {
+		t.Fatalf("Can't create D-Bus server: %s", err)
+	}
+	defer server.Close()
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
-		t.Fatalf("No session bus conn %v", err)
-		return
+		t.Fatalf("Can't connect to session bus: %s", err)
 	}
 
-	obj := conn.Object(INTERFACE_NAME, OBJECT_PATH)
+	var (
+		permissionJson string
+		status         string
+		permissions    map[string]string
+	)
 
-	err = obj.Call(INTERFACE_NAME+".GetPermission", 0, TEST_TOKEN).Store(&permissionJson, &dbusErr)
+	obj := conn.Object(dbusServer.IntrfaceName, dbusServer.ObjectPath)
+
+	err = obj.Call(dbusServer.IntrfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
 	if err != nil {
-		t.Fatalf("Can't make d-bus call %v", err)
-		return
+		t.Fatalf("Can't make D-Bus call: %s", err)
+	}
+
+	if strings.ToUpper(status) != "OK" {
+		t.Fatalf("Can't get permissions: %s", status)
 	}
 
 	err = json.Unmarshal([]byte(permissionJson), &permissions)
 	if err != nil {
-		t.Fatalf("Error Unmarshal  %v", err)
-		return
+		t.Fatalf("Can't decode permissions: %s", err)
 	}
 
-	log.Info("[TEST]: ", permissionJson)
-
 	if len(permissions) != 2 {
-		t.Fatalf("Permission list length !=2 ")
-		return
+		t.Fatal("Permission list length !=2")
 	}
 
 	if permissions["*"] != "rw" {
-		t.Fatalf("Incorrect permission")
-		return
+		t.Fatal("Incorrect permission")
 	}
 }

@@ -5,23 +5,28 @@ import (
 
 	"github.com/godbus/dbus"
 	log "github.com/sirupsen/logrus"
+
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
 /*******************************************************************************
  * Consts
  ******************************************************************************/
+
 const (
-	ObjectPath   = "/com/aosservicemanager/vistoken"
-	IntrfaceName = "com.aosservicemanager.vistoken"
+	// ObjectPath object path
+	ObjectPath = "/com/epam/aos/vis"
+	// IntrfaceName insterface name
+	IntrfaceName = "com.epam.aos.vis"
 )
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-//AosDbusInterface d-bus interface structure
-type AosDbusInterface struct {
-	//TODO: add reference to internal DB
+// DBusHandler d-bus interface structure
+type DBusHandler struct {
+	db       *database.Database
 	dbusConn *dbus.Conn
 }
 
@@ -29,43 +34,45 @@ type AosDbusInterface struct {
  * Public
  ******************************************************************************/
 
-//New creates and launch d-bus server
-func New() (dbusHandler *AosDbusInterface, err error) {
+// New creates and launch d-bus server
+func New(db *database.Database) (dbusHandler *DBusHandler, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
-		log.Error("Can't create session dbus connection %v", err)
 		return dbusHandler, err
 	}
+
 	reply, err := conn.RequestName(IntrfaceName, dbus.NameFlagDoNotQueue)
 	if err != nil {
-		log.Error("Can't request dbus interface name ", err)
 		return dbusHandler, err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {
-		log.Error("D-Bus name already taken")
 		return dbusHandler, errors.New("D-Bus name already taken")
 	}
 
-	log.Info("Start D-BUS server")
-	server := AosDbusInterface{dbusConn: conn}
+	log.Debug("Start D-Bus server")
+
+	server := DBusHandler{dbusConn: conn, db: db}
+
+	// TODO: add introspect
 	conn.Export(server, ObjectPath, IntrfaceName)
 
 	dbusHandler = &server
+
 	return dbusHandler, nil
 }
 
-//StopServer stop d-bus server
-func (dbusHandler *AosDbusInterface) StopServer() error {
-	log.Info("Stop d-bus server")
+// Close closes d-bus server
+func (dbusHandler *DBusHandler) Close() (err error) {
+	log.Debug("Close D-Bus server")
+
 	reply, err := dbusHandler.dbusConn.ReleaseName(IntrfaceName)
 	if err != nil {
-		log.Error("Error release dbus interface name", err)
 		return err
 	}
 	if reply != dbus.ReleaseNameReplyReleased {
-		log.Error("Error release dbus interface name ")
-		return errors.New("Error release dbus interface name")
+		return errors.New("Can't release D-Bus interface name")
 	}
+
 	return nil
 }
 
@@ -73,9 +80,14 @@ func (dbusHandler *AosDbusInterface) StopServer() error {
  * D-BUS interface
  ******************************************************************************/
 
-//GetPermission get permossion d-bus method
-func (dbusHandler AosDbusInterface) GetPermission(token string) (string, string, *dbus.Error) {
-	log.Info("GetPermission token: ", token)
-	//TODO: make select from DB
-	return `{"*": "rw", "123": "rw"}`, "OK", nil
+// GetPermission get permossion d-bus method
+func (dbusHandler DBusHandler) GetPermission(token string) (result, status string, dbusErr *dbus.Error) {
+	service, err := dbusHandler.db.GetService(token)
+	if err != nil {
+		return "", err.Error(), nil
+	}
+
+	log.WithFields(log.Fields{"token": token, "perm": service.Permissions}).Debug("Get permissions")
+
+	return service.Permissions, "OK", nil
 }

@@ -35,27 +35,25 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitialSetup(launcher *launcher.Launcher, handler *amqp.AmqpHandler) (err error) {
-	initialList, err := launcher.GetServicesInfo()
+func sendInitalSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
+	initialList, err := launcherHandler.GetServicesInfo()
 	if err != nil {
-		log.Error("Error getting initial list: ", err)
-		return err
+		log.Fatalf("Can't get services: %s", err)
 	}
 
-	if handler.SendInitialSetup(initialList) != nil {
-		log.Error("Error sending initial setup: ", err)
+	if err = amqpHandler.SendInitialSetup(initialList); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *launcher.Launcher) (err error) {
+func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
 	switch data := data.(type) {
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Receive services info")
 
-		currentList, err := launcher.GetServicesInfo()
+		currentList, err := launcherHandler.GetServicesInfo()
 		if err != nil {
 			log.Error("Error getting services info: ", err)
 			return err
@@ -67,7 +65,7 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 					if data[iDes].Version > currentList[iCur].Version {
 						log.Info("Update ", data[iDes].ID, " from ", currentList[iCur].Version, " to ", data[iDes].Version)
 
-						go launcher.InstallService(data[iDes])
+						launcherHandler.InstallService(data[iDes])
 					}
 
 					data = append(data[:iDes], data[iDes+1:]...)
@@ -77,11 +75,11 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 		}
 
 		for _, deleteElement := range currentList {
-			go launcher.RemoveService(deleteElement.ID)
+			launcherHandler.RemoveService(deleteElement.ID)
 		}
 
 		for _, newElement := range data {
-			go launcher.InstallService(newElement)
+			launcherHandler.InstallService(newElement)
 		}
 
 		return nil
@@ -89,6 +87,62 @@ func processAmqpMessage(data interface{}, handler *amqp.AmqpHandler, launcher *l
 	default:
 		log.Warn("Receive unsupported amqp message: ", reflect.TypeOf(data))
 		return nil
+	}
+}
+
+func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHandler *launcher.Launcher, launcherChannel <-chan launcher.ActionStatus) {
+	if err := sendInitalSetup(amqpHandler, launcherHandler); err != nil {
+		log.Errorf("Can't send initial setup: %s", err)
+		// reconnect
+		return
+	}
+
+	for {
+		select {
+		case amqpMessage := <-amqpChan:
+			// check for error
+			if err, ok := amqpMessage.(error); ok {
+				log.Error("Receive amqp error: ", err)
+				// reconnect
+				return
+			}
+
+			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
+				log.Error("Error processing amqp result: ", err)
+			}
+
+		case serviceStatus := <-launcherChannel:
+			info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
+
+			switch serviceStatus.Action {
+			case launcher.ActionInstall:
+				if serviceStatus.Err != nil {
+					info.Status = "error"
+					errorMsg := amqp.ServiceError{ID: -1, Message: "Can't install service"}
+					info.Error = &errorMsg
+					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't install service: ", serviceStatus.Err)
+				} else {
+					info.Status = "installed"
+					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully installed")
+				}
+
+			case launcher.ActionRemove:
+				if serviceStatus.Err != nil {
+					info.Status = "error"
+					errorMsg := amqp.ServiceError{ID: -1, Message: "Can't remove service"}
+					info.Error = &errorMsg
+					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't remove service: ", serviceStatus.Err)
+				} else {
+					info.Status = "removed"
+					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully removed")
+				}
+			}
+
+			err := amqpHandler.SendServiceStatusMsg(info)
+			if err != nil {
+				log.Error("Error send service status message: ", err)
+			}
+		}
 	}
 }
 
@@ -101,8 +155,8 @@ func main() {
 	}
 
 	if configPath == "" {
-		log.Info("use dafault path servicemanager.conf")
-		configPath = "servicemanager.conf"
+		log.Info("Use dafault path aos_servicemanager.conf")
+		configPath = "aos_servicemanager.conf"
 	} else {
 		log.Info("Confing file ", configPath)
 	}
@@ -126,7 +180,7 @@ func main() {
 	}
 	defer db.Close()
 
-	launcherHandler, launcherChan, err := launcher.New("data", db)
+	launcherHandler, launcherChannel, err := launcher.New("data", db)
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
@@ -138,7 +192,7 @@ func main() {
 	}
 	defer amqpHandler.CloseAllConnections()
 
-	dbusServer, err := dbushandler.New()
+	dbusServer, err := dbushandler.New(db)
 
 	if err != nil {
 		log.Fatal("Can't create D-BUS server %v", err)
@@ -154,70 +208,24 @@ func main() {
 		<-c
 		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
-		dbusServer.StopServer()
+		dbusServer.Close()
 		os.Exit(1)
 	}()
 
+	log.WithField("url", config.ServDiscoveryURL).Debug("Start connection")
+
 	for {
-		log.Debug("Start connection url ", config.ServDiscoveryURL)
-
 		amqpChan, err := amqpHandler.InitAmqphandler(config.ServDiscoveryURL)
-		if err != nil {
-			log.Error("Can't establish connection: ", err)
-			log.Debug("Reconnecting...")
+		if err == nil {
+			run(amqpHandler, amqpChan, launcherHandler, launcherChannel)
+		} else {
+			log.Error("Can't esablish connection: ", err)
+
 			time.Sleep(time.Second * aosReconnectTimeSec)
-			continue
 		}
 
-		sendInitialSetup(launcherHandler, amqpHandler)
+		amqpHandler.CloseAllConnections()
 
-		for {
-			select {
-			case amqpMessage := <-amqpChan:
-				// check for error
-				if err, ok := amqpMessage.(error); ok {
-					log.Error("Receive amqp error: ", err)
-					log.Debug("Reconnecting...")
-					break
-				}
-
-				if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
-					log.Error("Error processing amqp result: ", err)
-				}
-			case serviceStatus := <-launcherChan:
-				switch serviceStatus.Action {
-				case launcher.ActionInstall:
-					info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
-					if serviceStatus.Err != nil {
-						info.Status = "error"
-						errorMsg := amqp.ServiceError{ID: -1, Message: "Can't install service"}
-						info.Error = &errorMsg
-						log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't install service: ", serviceStatus.Err)
-					} else {
-						info.Status = "installed"
-						log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully installed")
-					}
-					err := amqpHandler.SendServiceStatusMsg(info)
-					if err != nil {
-						log.Error("Error send service status message: ", err)
-					}
-				case launcher.ActionRemove:
-					info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
-					if serviceStatus.Err != nil {
-						info.Status = "error"
-						errorMsg := amqp.ServiceError{ID: -1, Message: "Can't remove service"}
-						info.Error = &errorMsg
-						log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't remove service: ", serviceStatus.Err)
-					} else {
-						info.Status = "removed"
-						log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully removed")
-					}
-					err := amqpHandler.SendServiceStatusMsg(info)
-					if err != nil {
-						log.Error("Error send service status message: ", err)
-					}
-				}
-			}
-		}
+		log.Debug("Reconnecting...")
 	}
 }
