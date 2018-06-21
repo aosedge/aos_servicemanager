@@ -17,6 +17,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
 const (
@@ -164,20 +165,27 @@ func main() {
 		log.Fatal("Error while opening configuration file: ", err)
 	}
 
+	// Create VIS client
+	vis, err := visclient.New(config.VISServerURL)
+	if err != nil {
+		log.Fatalf("Can't connect to VIS: %s", err)
+	}
+	defer vis.Close()
+
 	// Initialize fcrypt
 	fcrypt.Init(config.Crypt)
 
 	// Create DB
 	db, err := database.New(path.Join(config.WorkingDir, "servicemanager.db"))
 	if err != nil {
-		log.Fatal("Can't open database: ", err)
+		log.Fatalf("Can't open database: %s", err)
 	}
 	defer db.Close()
 
 	// Create launcher
 	launcherHandler, err := launcher.New(config.WorkingDir, db)
 	if err != nil {
-		log.Fatal("Can't create launcher: ", err)
+		log.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcherHandler.Close()
 
@@ -202,6 +210,7 @@ func main() {
 		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
 		dbusServer.Close()
+		vis.Close()
 		os.Exit(1)
 	}()
 
