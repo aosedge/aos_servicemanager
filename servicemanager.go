@@ -224,7 +224,13 @@ func main() {
 	}
 
 	for {
-		err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin)
+		// Get vin code
+		users, err := vis.GetUsers()
+		if err != nil {
+			log.Fatalf("Can't get vin: %s", err)
+		}
+
+		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
 			run(amqpHandler, launcherHandler)
 		} else {

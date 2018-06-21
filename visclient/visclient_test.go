@@ -63,3 +63,14 @@ func TestGetVIN(t *testing.T) {
 		t.Fatalf("Wrong VIN value: %s", vin)
 	}
 }
+
+func TestGetUsers(t *testing.T) {
+	users, err := vis.GetUsers()
+	if err != nil {
+		t.Fatalf("Error getting users: %s", err)
+	}
+
+	if users == nil {
+		t.Fatalf("Wrong users value: %s", users)
+	}
+}

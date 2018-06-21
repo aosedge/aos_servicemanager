@@ -173,11 +173,11 @@ func New() (handler *AmqpHandler, err error) {
 }
 
 // InitAmqphandler initialisation of rabbit amqp handler
-func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string) error {
+func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []string) error {
 	servRequest := serviceDiscoveryRequest{
 		Version: 1,
 		VIN:     vin,
-		Users:   []string{"user1", "OEM2"}}
+		Users:   users}
 
 	amqpConn, err := getAmqpConnInfo(sdURL, servRequest)
 	if err != nil {

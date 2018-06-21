@@ -106,6 +106,36 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 	return vis.vin, err
 }
 
+// GetUsers returns user list
+func (vis *VisClient) GetUsers() (users []string, err error) {
+	if vis.users == nil {
+		resp, err := vis.processRequest(&visRequest{Action: "get",
+			Path: "Attribute.Vehicle.UserIdentification.Users"})
+		if err != nil {
+			return users, err
+		}
+
+		itfs, ok := resp.Value.([]interface{})
+		if !ok {
+			return users, errors.New("Wrong users type")
+		}
+
+		vis.users = make([]string, len(itfs))
+
+		for i, itf := range itfs {
+			value, ok := itf.(string)
+			if !ok {
+				return users, errors.New("Wrong users type")
+			}
+			vis.users[i] = value
+		}
+	}
+
+	log.WithField("users", vis.users).Debug("Get users")
+
+	return vis.users, err
+}
+
 // Close closes vis client
 func (vis *VisClient) Close() (err error) {
 	log.Debug("Close VIS client")
