@@ -23,6 +23,7 @@ type Crypt struct {
 type Config struct {
 	Crypt               Crypt  `json:"fcrypt"`
 	ServiceDiscoveryURL string `json:"serviceDiscovery"`
+	VISServerURL        string `json:"visServer"`
 	WorkingDir          string `json:"workingDir"`
 }
 

@@ -24,6 +24,7 @@ func createConfigFile() (err error) {
 		"OfflineCert" : "OfflineCert"	
 	},
 	"serviceDiscovery" : "www.aos.com",
+	"visServer" : "wss://localhost:8088",
 	"workingDir" : "workingDir"
 }`
 
@@ -103,7 +104,7 @@ func TestGetCrypt(t *testing.T) {
 	}
 }
 
-func TestGetServerURL(t *testing.T) {
+func TestGetServiceDiscoveryURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
@@ -122,5 +123,16 @@ func TestGetWorkingDir(t *testing.T) {
 
 	if config.WorkingDir != "workingDir" {
 		t.Errorf("Wrong workingDir value: %s", config.WorkingDir)
+	}
+}
+
+func TestGetVisServerURL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.VISServerURL != "wss://localhost:8088" {
+		t.Errorf("Wrong VIS server value: %s", config.VISServerURL)
 	}
 }
