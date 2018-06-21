@@ -165,13 +165,6 @@ func main() {
 		log.Fatal("Error while opening configuration file: ", err)
 	}
 
-	// Create VIS client
-	vis, err := visclient.New(config.VISServerURL)
-	if err != nil {
-		log.Fatalf("Can't connect to VIS: %s", err)
-	}
-	defer vis.Close()
-
 	// Initialize fcrypt
 	fcrypt.Init(config.Crypt)
 
@@ -202,6 +195,13 @@ func main() {
 		log.Fatal("Can't create D-BUS server %v", err)
 	}
 
+	// Create VIS client
+	vis, err := visclient.New(config.VISServerURL)
+	if err != nil {
+		log.Fatalf("Can't connect to VIS: %s", err)
+	}
+	defer vis.Close()
+
 	// Handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -217,8 +217,14 @@ func main() {
 	// Run all systems
 	log.WithField("url", config.ServiceDiscoveryURL).Debug("Start connection")
 
+	// Get vin code
+	vin, err := vis.GetVIN()
+	if err != nil {
+		log.Fatalf("Can't get vin: %s", err)
+	}
+
 	for {
-		err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL)
+		err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin)
 		if err == nil {
 			run(amqpHandler, launcherHandler)
 		} else {
