@@ -54,15 +54,15 @@ func init() {
  * Private
  ******************************************************************************/
 
-func newTestLauncher(downloader downloadItf) (launcher *Launcher, statusChannel <-chan ActionStatus, err error) {
-	launcher, statusChannel, err = New("tmp", db)
+func newTestLauncher(downloader downloadItf) (launcher *Launcher, err error) {
+	launcher, err = New("tmp", db)
 	if err != nil {
-		return launcher, statusChannel, err
+		return launcher, err
 	}
 
 	launcher.downloader = downloader
 
-	return launcher, statusChannel, err
+	return launcher, err
 }
 
 func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
@@ -179,7 +179,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 	}
 
 	for i := 0; i < len(services); i++ {
-		if status := <-launcher.statusChannel; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			err = status.Err
 		}
 	}
@@ -209,7 +209,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, _, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemove(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -317,7 +317,7 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices+numRemoveServices; i++ {
-		if status := <-statusChan; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			if status.Action == ActionInstall {
 				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 			} else {
@@ -347,7 +347,7 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices-numRemoveServices; i++ {
-		if status := <-statusChan; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 		}
 	}
@@ -362,7 +362,7 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func TestAutoStart(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -375,7 +375,7 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-statusChan; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 		}
 	}
@@ -384,7 +384,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 5)
 
-	launcher, statusChan, err = newTestLauncher(new(pythonImage))
+	launcher, err = newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -411,7 +411,7 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-statusChan; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 		}
 	}
@@ -426,7 +426,7 @@ func TestAutoStart(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -439,7 +439,7 @@ func TestErrors(t *testing.T) {
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 6})
 
 	for i := 0; i < 3; i++ {
-		status := <-statusChan
+		status := <-launcher.StatusChannel
 		switch {
 		case status.Version == 5 && status.Err != nil:
 			t.Errorf("Can't install service %s version %d: %s", status.ID, status.Version, status.Err)
@@ -466,7 +466,7 @@ func TestErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -485,7 +485,7 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-statusChan; status.Err != nil {
+	if status := <-launcher.StatusChannel; status.Err != nil {
 		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
 	}
 
@@ -508,7 +508,7 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
 
-	if status := <-statusChan; status.Err != nil {
+	if status := <-launcher.StatusChannel; status.Err != nil {
 		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
 	}
 
@@ -529,7 +529,7 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestNetworkSpeed(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(iperfImage))
+	launcher, err := newTestLauncher(new(iperfImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -542,7 +542,7 @@ func TestNetworkSpeed(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-statusChan; status.Err != nil {
+		if status := <-launcher.StatusChannel; status.Err != nil {
 			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 		}
 	}
@@ -591,7 +591,7 @@ func TestNetworkSpeed(t *testing.T) {
 		}
 
 		if ulSpeed > 4096*1.5 || dlSpeed > 8192*1.5 {
-			t.Errorf("Speed limit exeeds: dl %d, ul %d", dlSpeed, ulSpeed)
+			t.Errorf("Speed limit exceeds: dl %d, ul %d", dlSpeed, ulSpeed)
 		}
 	}
 
@@ -601,7 +601,7 @@ func TestNetworkSpeed(t *testing.T) {
 }
 
 func TestVisPermissions(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -609,7 +609,7 @@ func TestVisPermissions(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-statusChan; status.Err != nil {
+	if status := <-launcher.StatusChannel; status.Err != nil {
 		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
 	}
 

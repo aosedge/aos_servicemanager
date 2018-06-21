@@ -86,7 +86,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 	}
 }
 
-func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHandler *launcher.Launcher, launcherChannel <-chan launcher.ActionStatus) {
+func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) {
 	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
@@ -95,7 +95,7 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 
 	for {
 		select {
-		case amqpMessage := <-amqpChan:
+		case amqpMessage := <-amqpHandler.MessageChannel:
 			// check for error
 			if err, ok := amqpMessage.(error); ok {
 				log.Error("Receive amqp error: ", err)
@@ -107,7 +107,7 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 				log.Error("Error processing amqp result: ", err)
 			}
 
-		case serviceStatus := <-launcherChannel:
+		case serviceStatus := <-launcherHandler.StatusChannel:
 			info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
 
 			switch serviceStatus.Action {
@@ -175,7 +175,7 @@ func main() {
 	defer db.Close()
 
 	// Create launcher
-	launcherHandler, launcherChannel, err := launcher.New(config.WorkingDir, db)
+	launcherHandler, err := launcher.New(config.WorkingDir, db)
 	if err != nil {
 		log.Fatal("Can't create launcher: ", err)
 	}
@@ -209,9 +209,9 @@ func main() {
 	log.WithField("url", config.ServiceDiscoveryURL).Debug("Start connection")
 
 	for {
-		amqpChan, err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL)
+		err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL)
 		if err == nil {
-			run(amqpHandler, amqpChan, launcherHandler, launcherChannel)
+			run(amqpHandler, launcherHandler)
 		} else {
 			log.Error("Can't establish connection: ", err)
 
