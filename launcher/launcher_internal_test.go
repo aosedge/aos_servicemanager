@@ -169,7 +169,7 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 }
 
 func (launcher *Launcher) removeAllServices() (err error) {
-	services, err := launcher.GetServicesInfo()
+	services, err := launcher.db.GetServices()
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		}
 	}
 
-	services, err = launcher.GetServicesInfo()
+	services, err = launcher.db.GetServices()
 	if err != nil {
 		return err
 	}
@@ -304,6 +304,10 @@ func TestInstallRemove(t *testing.T) {
 	}
 	defer launcher.Close()
 
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
 	numInstallServices := 30
 	numRemoveServices := 10
 
@@ -367,6 +371,10 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
 	numServices := 10
 
 	// install services
@@ -389,6 +397,10 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	time.Sleep(time.Second * 5)
 
@@ -432,6 +444,10 @@ func TestErrors(t *testing.T) {
 	}
 	defer launcher.Close()
 
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
 	// test version mistmatch
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 5})
@@ -471,6 +487,10 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	serverAddr, err := net.ResolveUDPAddr("udp", ":10001")
 	if err != nil {
@@ -534,6 +554,10 @@ func TestNetworkSpeed(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	numServices := 2
 
@@ -606,6 +630,10 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 

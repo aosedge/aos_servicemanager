@@ -186,9 +186,6 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 		}
 	}
 
-	// Start all installed services
-	localLauncher.startServices()
-
 	launcher = &localLauncher
 
 	return launcher, nil
@@ -235,7 +232,7 @@ func (launcher *Launcher) RemoveService(id string) {
 func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
 	log.Debug("Get services info")
 
-	services, err := launcher.db.GetServices()
+	services, err := launcher.db.GetUsersServices(launcher.users)
 	if err != nil {
 		return info, err
 	}
@@ -538,6 +535,9 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		if err = launcher.db.RemoveService(service.ID); err != nil {
 			return installDir, err
 		}
+		if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
+			return installDir, err
+		}
 		if err = os.RemoveAll(service.Path); err != nil {
 			// indicate error, can continue
 			log.WithField("path", service.Path).Error("Can't remove service path")
@@ -561,6 +561,9 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		}
 		// TODO: delete linux user?
 		// TODO: try to restore old
+		return installDir, err
+	}
+	if err = launcher.db.AddUsersService(launcher.users, service.ID); err != nil {
 		return installDir, err
 	}
 
@@ -592,6 +595,10 @@ func (launcher *Launcher) removeService(id string) (err error) {
 
 	if err := launcher.db.RemoveService(service.ID); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't remove service from db: ", err)
+	}
+
+	if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't remove users service from db: ", err)
 	}
 
 	if err := os.RemoveAll(service.Path); err != nil {
