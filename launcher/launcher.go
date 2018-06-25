@@ -142,15 +142,6 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 		}
 	}
 
-	// Load all installed services
-	services, err := localLauncher.db.GetServices()
-	if err != nil {
-		return launcher, err
-	}
-	for _, service := range services {
-		localLauncher.services.Store(service.ServiceName, service.ID)
-	}
-
 	// Create systemd connection
 	localLauncher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
@@ -193,6 +184,9 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 			return launcher, err
 		}
 	}
+
+	// Start all installed services
+	localLauncher.startServices()
 
 	launcher = &localLauncher
 
@@ -491,12 +485,12 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 
 	serviceName := "aos_" + id + ".service"
 
-	serviceFile, err := launcher.createSystemdService(installDir, serviceName, id, &spec)
+	err = launcher.createSystemdService(installDir, serviceName, id, &spec)
 	if err != nil {
 		return installDir, err
 	}
 
-	if err = launcher.startService(serviceFile, serviceName); err != nil {
+	if err = launcher.startService(id, serviceName); err != nil {
 		// TODO: try to restore old service
 		return installDir, err
 	}
@@ -532,8 +526,6 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
-	launcher.services.Store(serviceName, id)
-
 	return installDir, nil
 }
 
@@ -548,10 +540,16 @@ func (launcher *Launcher) removeService(id string) (err error) {
 
 	log.WithFields(log.Fields{"id": service.ID, "version": service.Version}).Debug("Remove service")
 
-	launcher.services.Delete(service.ServiceName)
-
 	if err := launcher.stopService(service.ServiceName); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't stop service: ", err)
+	}
+
+	if _, err := launcher.systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't disable systemd unit: ", err)
+	}
+
+	if err := launcher.systemd.Reload(); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't reload systemd: ", err)
 	}
 
 	if err := launcher.db.RemoveService(service.ID); err != nil {
@@ -756,16 +754,8 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec, userName string) (
 	return nil
 }
 
-func (launcher *Launcher) startService(serviceFile, serviceName string) (err error) {
+func (launcher *Launcher) startService(id, serviceName string) (err error) {
 	launcher.services.Delete(serviceName)
-
-	if _, _, err = launcher.systemd.EnableUnitFiles([]string{serviceFile}, false, true); err != nil {
-		return err
-	}
-
-	if err = launcher.systemd.Reload(); err != nil {
-		return err
-	}
 
 	channel := make(chan string)
 	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
@@ -775,10 +765,41 @@ func (launcher *Launcher) startService(serviceFile, serviceName string) (err err
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Start service")
 
+	launcher.services.Store(serviceName, id)
+
 	return nil
 }
 
+func (launcher *Launcher) startServices() {
+	log.Debug("Start all services")
+
+	services, err := launcher.db.GetServices()
+	if err != nil {
+		log.Errorf("Can't start services: %s", err)
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	// Start all services in parallel
+	for _, service := range services {
+		go func(service database.ServiceEntry) {
+			err := launcher.startService(service.ID, service.ServiceName)
+			if err != nil {
+				log.Errorf("Can't start service %s: %s", service.ID, err)
+			}
+			statusChannel <- err
+		}(service)
+	}
+
+	// Wait all services are started
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
+}
+
 func (launcher *Launcher) stopService(serviceName string) (err error) {
+	launcher.services.Delete(serviceName)
+
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err
@@ -786,14 +807,6 @@ func (launcher *Launcher) stopService(serviceName string) (err error) {
 	status := <-channel
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
-
-	if _, err := launcher.systemd.DisableUnitFiles([]string{serviceName}, false); err != nil {
-		return err
-	}
-
-	if err := launcher.systemd.Reload(); err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -818,16 +831,16 @@ func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clear
 	return setCmd, clearCmd
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *specs.Spec) (fileName string, err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *specs.Spec) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
-		return fileName, err
+		return err
 	}
 	defer f.Close()
 
 	absServicePath, err := filepath.Abs(installDir)
 	if err != nil {
-		return fileName, err
+		return err
 	}
 
 	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmds(spec)
@@ -849,6 +862,20 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		fmt.Fprint(f, line)
 	}
 
-	fileName, err = filepath.Abs(f.Name())
-	return fileName, err
+	fileName, err := filepath.Abs(f.Name())
+	if err != nil {
+		return err
+	}
+
+	// Use launcher.systemd.EnableUnitFiles if services should be started automatically
+	// on system restart
+	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+		return err
+	}
+
+	if err = launcher.systemd.Reload(); err != nil {
+		return err
+	}
+
+	return err
 }
