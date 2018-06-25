@@ -92,6 +92,7 @@ type Launcher struct {
 	db               *database.Database
 	systemd          *dbus.Conn
 	downloader       downloadItf
+	users            []string
 	closeChannel     chan bool
 	services         sync.Map
 	mutex            sync.Mutex
@@ -267,9 +268,46 @@ func (launcher *Launcher) GetServiceIPAddress(id string) (address string, err er
 	return address, nil
 }
 
+// SetUsers sets users for services
+func (launcher *Launcher) SetUsers(users []string) (err error) {
+	if isUsersEqual(launcher.users, users) {
+		return nil
+	}
+
+	launcher.stopServices()
+
+	launcher.users = users
+
+	launcher.startServices()
+
+	return nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func isUsersEqual(users1, users2 []string) (result bool) {
+	if users1 == nil && users2 == nil {
+		return true
+	}
+
+	if users1 == nil || users2 == nil {
+		return false
+	}
+
+	if len(users1) != len(users2) {
+		return false
+	}
+
+	for i := range users1 {
+		if users1[i] != users2[i] {
+			return false
+		}
+	}
+
+	return true
+}
 
 // downloadService downloads service
 func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
@@ -771,9 +809,9 @@ func (launcher *Launcher) startService(id, serviceName string) (err error) {
 }
 
 func (launcher *Launcher) startServices() {
-	log.Debug("Start all services")
+	log.WithField("users", launcher.users).Debug("Start user services")
 
-	services, err := launcher.db.GetServices()
+	services, err := launcher.db.GetUsersServices(launcher.users)
 	if err != nil {
 		log.Errorf("Can't start services: %s", err)
 	}
@@ -809,6 +847,33 @@ func (launcher *Launcher) stopService(serviceName string) (err error) {
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
 
 	return nil
+}
+
+func (launcher *Launcher) stopServices() {
+	log.WithField("users", launcher.users).Debug("Stop user services")
+
+	services, err := launcher.db.GetUsersServices(launcher.users)
+	if err != nil {
+		log.Errorf("Can't stop services: %s", err)
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	// Stop all services in parallel
+	for _, service := range services {
+		go func(service database.ServiceEntry) {
+			err := launcher.stopService(service.ServiceName)
+			if err != nil {
+				log.Errorf("Can't stop service %s: %s", service.ID, err)
+			}
+			statusChannel <- err
+		}(service)
+	}
+
+	// Wait all services are stopped
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
 }
 
 func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {
