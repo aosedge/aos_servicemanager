@@ -186,6 +186,16 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 		}
 	}
 
+	// Init services
+	services, err := localLauncher.db.GetServices()
+	if err != nil {
+		return launcher, executeChannel, err
+	}
+
+	for _, service := range services {
+		localLauncher.services.Store(service.ServiceName, service.ID)
+	}
+
 	launcher = &localLauncher
 
 	return launcher, nil
@@ -525,7 +535,7 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
-	if err = launcher.startService(id, serviceName); err != nil {
+	if err = launcher.restartService(serviceName); err != nil {
 		// TODO: try to restore old service
 		return installDir, err
 	}
@@ -567,6 +577,8 @@ func (launcher *Launcher) installService(image string, id string, version uint) 
 		return installDir, err
 	}
 
+	launcher.services.Store(serviceName, id)
+
 	return installDir, nil
 }
 
@@ -592,6 +604,8 @@ func (launcher *Launcher) removeService(id string) (err error) {
 	if err := launcher.systemd.Reload(); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't reload systemd: ", err)
 	}
+
+	launcher.services.Delete(service.ServiceName)
 
 	if err := launcher.db.RemoveService(service.ID); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't remove service from db: ", err)
@@ -664,7 +678,7 @@ WantedBy=multi-user.target
 }
 
 func (launcher *Launcher) handleSystemdSubscription() {
-	serviceChannel, errorChannel := launcher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
+	unitStatus, errorChannel := launcher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
 		2,
 		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
 		func(serviceName string) bool {
@@ -676,24 +690,24 @@ func (launcher *Launcher) handleSystemdSubscription() {
 	go func() {
 		for {
 			select {
-			case services := <-serviceChannel:
-				for _, service := range services {
+			case units := <-unitStatus:
+				for _, unit := range units {
 					var (
 						state  int
 						status int
 					)
 
-					if service == nil {
+					if unit == nil {
 						continue
 					}
 
-					log.WithField("name", service.Name).Debugf(
+					log.WithField("name", unit.Name).Debugf(
 						"Service state changed. Load state: %s, active state: %s, sub state: %s",
-						service.LoadState,
-						service.ActiveState,
-						service.SubState)
+						unit.LoadState,
+						unit.ActiveState,
+						unit.SubState)
 
-					switch service.SubState {
+					switch unit.SubState {
 					case "running":
 						state = stateRunning
 						status = statusOk
@@ -702,20 +716,20 @@ func (launcher *Launcher) handleSystemdSubscription() {
 						status = statusError
 					}
 
-					log.WithField("name", service.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
+					log.WithField("name", unit.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
 
-					id, exist := launcher.services.Load(service.Name)
+					id, exist := launcher.services.Load(unit.Name)
 
 					if exist {
 						if err := launcher.db.SetServiceState(id.(string), state); err != nil {
-							log.WithField("name", service.Name).Error("Can't set service state: ", err)
+							log.WithField("name", unit.Name).Error("Can't set service state: ", err)
 						}
 
 						if err := launcher.db.SetServiceStatus(id.(string), status); err != nil {
-							log.WithField("name", service.Name).Error("Can't set service status: ", err)
+							log.WithField("name", unit.Name).Error("Can't set service status: ", err)
 						}
 					} else {
-						log.WithField("name", service.Name).Warning("Can't update state or status. Service is not installed.")
+						log.WithField("name", unit.Name).Warning("Can't update state or status. Service is not installed.")
 					}
 				}
 			case err := <-errorChannel:
@@ -799,18 +813,26 @@ func (launcher *Launcher) updateServiceSpec(spec *specs.Spec, userName string) (
 	return nil
 }
 
-func (launcher *Launcher) startService(id, serviceName string) (err error) {
-	launcher.services.Delete(serviceName)
-
+func (launcher *Launcher) restartService(serviceName string) (err error) {
 	channel := make(chan string)
 	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Start service")
+	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Restart service")
 
-	launcher.services.Store(serviceName, id)
+	return nil
+}
+
+func (launcher *Launcher) startService(serviceName string) (err error) {
+	channel := make(chan string)
+	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
+		return err
+	}
+	status := <-channel
+
+	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Start service")
 
 	return nil
 }
@@ -828,7 +850,7 @@ func (launcher *Launcher) startServices() {
 	// Start all services in parallel
 	for _, service := range services {
 		go func(service database.ServiceEntry) {
-			err := launcher.startService(service.ID, service.ServiceName)
+			err := launcher.startService(service.ServiceName)
 			if err != nil {
 				log.Errorf("Can't start service %s: %s", service.ID, err)
 			}
@@ -843,8 +865,6 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) stopService(serviceName string) (err error) {
-	launcher.services.Delete(serviceName)
-
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
 		return err
