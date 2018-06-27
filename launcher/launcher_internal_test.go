@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
@@ -55,7 +56,7 @@ func init() {
  ******************************************************************************/
 
 func newTestLauncher(downloader downloadItf) (launcher *Launcher, err error) {
-	launcher, err = New("tmp", db)
+	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db)
 	if err != nil {
 		return launcher, err
 	}
@@ -202,6 +203,10 @@ func (launcher *Launcher) removeAllServices() (err error) {
 	}
 	if len(services) != 0 {
 		return errors.New("Can't remove all services")
+	}
+
+	if err = launcher.cleanUsersDB(); err != nil {
+		return err
 	}
 
 	return err
@@ -676,7 +681,7 @@ func TestVisPermissions(t *testing.T) {
 }
 
 func TestUsersServices(t *testing.T) {
-	launcher, statusChan, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage))
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -697,7 +702,7 @@ func TestUsersServices(t *testing.T) {
 			t.Fatalf("Can't get users services: %s", err)
 		}
 		if len(services) != 0 {
-			t.Fatalf("Wrong services count")
+			t.Fatalf("Wrong service quantity")
 		}
 
 		// install services
@@ -705,7 +710,7 @@ func TestUsersServices(t *testing.T) {
 			launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("user%d_service%d", i, j)})
 		}
 		for i := 0; i < numServices; i++ {
-			if status := <-statusChan; status.Err != nil {
+			if status := <-launcher.StatusChannel; status.Err != nil {
 				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
 			}
 		}
@@ -771,5 +776,62 @@ func TestUsersServices(t *testing.T) {
 
 	if err := launcher.removeAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestServiceTTL(t *testing.T) {
+	launcher, err := newTestLauncher(new(pythonImage))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	numServices := 3
+
+	if err = launcher.SetUsers([]string{"user0"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	// install services
+	for i := 0; i < numServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
+	}
+	for i := 0; i < numServices; i++ {
+		if status := <-launcher.StatusChannel; status.Err != nil {
+			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		}
+	}
+
+	services, err := launcher.db.GetServices()
+	if err != nil {
+		t.Fatalf("Can't get services: %s", err)
+	}
+
+	for _, service := range services {
+		if err = launcher.db.SetServiceStartTime(service.ID, service.StartAt.Add(-time.Hour*24*30)); err != nil {
+			t.Errorf("Can't set service start time: %s", err)
+		}
+	}
+
+	if err = launcher.SetUsers([]string{"user1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	services, err = launcher.db.GetServices()
+	if err != nil {
+		t.Fatalf("Can't get services: %s", err)
+	}
+
+	if len(services) != 0 {
+		t.Fatal("Wrong service quantity")
+	}
+
+	usersList, err := launcher.db.GetUsersList()
+	if err != nil {
+		t.Fatalf("Can't get users list: %s", err)
+	}
+
+	if len(usersList) != 0 {
+		t.Fatal("Wrong users quantity", usersList)
 	}
 }

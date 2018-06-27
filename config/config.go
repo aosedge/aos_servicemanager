@@ -25,6 +25,7 @@ type Config struct {
 	ServiceDiscoveryURL string `json:"serviceDiscovery"`
 	VISServerURL        string `json:"visServer"`
 	WorkingDir          string `json:"workingDir"`
+	DefaultServiceTTL   uint   `json:"defaultServiceTTLDays"`
 }
 
 /*******************************************************************************
@@ -38,7 +39,7 @@ func New(fileName string) (config *Config, err error) {
 		return config, err
 	}
 
-	config = &Config{}
+	config = &Config{DefaultServiceTTL: 30}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err

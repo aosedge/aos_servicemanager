@@ -23,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
@@ -89,17 +90,24 @@ type Launcher struct {
 	// StatusChannel used to return execute command statuses
 	StatusChannel chan ActionStatus
 
-	db               *database.Database
-	systemd          *dbus.Conn
-	downloader       downloadItf
-	users            []string
-	closeChannel     chan bool
-	services         sync.Map
-	mutex            sync.Mutex
-	waitQueue        *list.List
-	workQueue        *list.List
+	db      *database.Database
+	systemd *dbus.Conn
+	config  *config.Config
+
+	downloader downloadItf
+
+	users []string
+
+	closeChannel chan bool
+
+	services sync.Map
+
+	mutex sync.Mutex
+
+	waitQueue *list.List
+	workQueue *list.List
+
 	serviceTemplate  string
-	workingDir       string
 	runcPath         string
 	netnsPath        string
 	wonderShaperPath string
@@ -116,13 +124,13 @@ type serviceAction struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(workingDir string, db *database.Database) (launcher *Launcher, err error) {
+func New(config *config.Config, db *database.Database) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
 
 	localLauncher.db = db
-	localLauncher.workingDir = workingDir
+	localLauncher.config = config
 
 	localLauncher.closeChannel = make(chan bool)
 	localLauncher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
@@ -133,7 +141,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 	localLauncher.downloader = &localLauncher
 
 	// Check and create service dir
-	dir := path.Join(workingDir, serviceDir)
+	dir := path.Join(config.WorkingDir, serviceDir)
 	if _, err = os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
 			return launcher, err
@@ -155,7 +163,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 	localLauncher.handleSystemdSubscription()
 
 	// Get systemd service template
-	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
+	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
 	if err != nil {
 		return launcher, err
 	}
@@ -167,7 +175,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 	}
 
 	// Retrieve netns abs path
-	localLauncher.netnsPath, _ = filepath.Abs(path.Join(workingDir, netnsName))
+	localLauncher.netnsPath, _ = filepath.Abs(path.Join(config.WorkingDir, netnsName))
 	if _, err := os.Stat(localLauncher.netnsPath); err != nil {
 		// check system PATH
 		localLauncher.netnsPath, err = exec.LookPath(netnsName)
@@ -177,7 +185,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, err erro
 	}
 
 	// Retrieve wondershaper abs path
-	localLauncher.wonderShaperPath, _ = filepath.Abs(path.Join(workingDir, wonderShaperName))
+	localLauncher.wonderShaperPath, _ = filepath.Abs(path.Join(config.WorkingDir, wonderShaperName))
 	if _, err := os.Stat(localLauncher.wonderShaperPath); err != nil {
 		// check system PATH
 		localLauncher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
@@ -279,12 +287,99 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	launcher.startServices()
 
+	if err = launcher.cleanServicesDB(); err != nil {
+		log.Errorf("Error cleaning DB: %s", err)
+	}
+
+	if err = launcher.cleanUsersDB(); err != nil {
+		log.Errorf("Error cleaning DB: %s", err)
+	}
+
 	return nil
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (launcher *Launcher) cleanServicesDB() (err error) {
+	log.Debug("Clean services DB")
+
+	startedServices, err := launcher.db.GetUsersServices(launcher.users)
+	if err != nil {
+		return err
+	}
+
+	allServices, err := launcher.db.GetServices()
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+
+	servicesToBeRemoved := 0
+	statusChannel := make(chan error, len(allServices))
+
+	for _, service := range allServices {
+		// check if service just started
+		justStarted := false
+
+		for _, startedService := range startedServices {
+			if service.ID == startedService.ID {
+				justStarted = true
+				break
+			}
+		}
+
+		if justStarted {
+			continue
+		}
+
+		if service.StartAt.Add(time.Hour*24*time.Duration(service.TTL)).Before(now) == true {
+			servicesToBeRemoved++
+
+			go func(id string) {
+				err := launcher.removeService(id)
+				if err != nil {
+					log.WithField("id", id).Errorf("Can't remove service: %s", err)
+				}
+				statusChannel <- launcher.removeService(id)
+			}(service.ID)
+		}
+	}
+
+	// Wait all services are removed
+	for i := 0; i < servicesToBeRemoved; i++ {
+		<-statusChannel
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) cleanUsersDB() (err error) {
+	log.Debug("Clean users DB")
+
+	usersList, err := launcher.db.GetUsersList()
+	if err != nil {
+		return err
+	}
+
+	for _, users := range usersList {
+		services, err := launcher.db.GetUsersServices(users)
+		if err != nil {
+			log.WithField("users", users).Errorf("Can't get users services: %s", err)
+		}
+		if len(services) == 0 {
+			log.WithField("users", users).Debug("Delete users from DB")
+			err = launcher.db.DeleteUsers(users)
+			if err != nil {
+				log.WithField("users", users).Errorf("Can't delete users: %s", err)
+			}
+		}
+	}
+
+	return nil
+}
 
 func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
 	if launcher.users == nil {
@@ -523,7 +618,7 @@ func (launcher *Launcher) downloadAndUnpackImage(serviceInfo amqp.ServiceInfoFro
 	}
 
 	// create install dir
-	installDir, err = ioutil.TempDir(path.Join(launcher.workingDir, serviceDir), "")
+	installDir, err = ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
 	if err != nil {
 		return installDir, err
 	}
@@ -615,6 +710,11 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return installDir, err
 	}
 
+	ttl, err := strconv.ParseUint(spec.Annotations[aosProductPrefix+"service.TTL"], 10, 64)
+	if err != nil {
+		return installDir, err
+	}
+
 	newService := database.ServiceEntry{
 		ID:          serviceInfo.ID,
 		Version:     serviceInfo.Version,
@@ -623,7 +723,8 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		UserName:    userName,
 		Permissions: spec.Annotations[aosProductPrefix+"vis.permissions"],
 		State:       stateInit,
-		Status:      statusOk}
+		Status:      statusOk,
+		TTL:         uint(ttl)}
 
 	if !serviceExists {
 		if err = launcher.addServiceToDB(newService); err != nil {
@@ -846,19 +947,19 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 		localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
 	}
 	// add hosts
-	hosts, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "hosts"))
+	hosts, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "hosts"))
 	if _, err := os.Stat(hosts); err != nil {
 		hosts = "/etc/hosts"
 	}
 	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "hosts"), Type: "bind", Source: hosts, Options: []string{"bind", "ro"}})
 	// add resolv.conf
-	resolvConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "resolv.conf"))
+	resolvConf, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "resolv.conf"))
 	if _, err := os.Stat(resolvConf); err != nil {
 		resolvConf = "/etc/resolv.conf"
 	}
 	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "resolv.conf"), Type: "bind", Source: resolvConf, Options: []string{"bind", "ro"}})
 	// add nsswitch.conf
-	nsswitchConf, _ := filepath.Abs(path.Join(launcher.workingDir, "etc", "nsswitch.conf"))
+	nsswitchConf, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "nsswitch.conf"))
 	if _, err := os.Stat(nsswitchConf); err != nil {
 		nsswitchConf = "/etc/nsswitch.conf"
 	}
@@ -875,7 +976,18 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 	}
 	localSpec.Hooks.Prestart = append(localSpec.Hooks.Prestart, specs.Hook{Path: launcher.netnsPath})
 
-	// update config.json
+	// create annotations
+	if localSpec.Annotations == nil {
+		localSpec.Annotations = make(map[string]string)
+	}
+
+	// update service TTL
+	_, exist := localSpec.Annotations[aosProductPrefix+"service.TTL"]
+	if !exist {
+		localSpec.Annotations[aosProductPrefix+"service.TTL"] = strconv.FormatUint(uint64(launcher.config.DefaultServiceTTL), 10)
+	}
+
+	// write config.json
 	if err = writeServiceSpec(&localSpec, configFile); err != nil {
 		return spec, err
 	}
@@ -900,6 +1012,10 @@ func (launcher *Launcher) restartService(id, serviceName string) (err error) {
 		log.WithField("id", id).Warnf("Can't set service status: %s", err)
 	}
 
+	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
+		log.WithField("id", id).Warnf("Can't set service start time: %s", err)
+	}
+
 	launcher.services.Store(serviceName, id)
 
 	return nil
@@ -920,6 +1036,10 @@ func (launcher *Launcher) startService(id, serviceName string) (err error) {
 
 	if err = launcher.db.SetServiceStatus(id, statusOk); err != nil {
 		log.WithField("id", id).Warnf("Can't set service status: %s", err)
+	}
+
+	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
+		log.WithField("id", id).Warnf("Can't set service start time: %s", err)
 	}
 
 	launcher.services.Store(serviceName, id)

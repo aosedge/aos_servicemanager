@@ -176,7 +176,7 @@ func main() {
 	defer db.Close()
 
 	// Create launcher
-	launcherHandler, err := launcher.New(config.WorkingDir, db)
+	launcherHandler, err := launcher.New(config, db)
 	if err != nil {
 		log.Fatalf("Can't create launcher: %s", err)
 	}
