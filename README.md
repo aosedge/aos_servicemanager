@@ -6,20 +6,38 @@ go get github.com/streadway/amqp
 
 go get github.com/sirupsen/logrus github.com/mattn/go-sqlite3 github.com/opencontainers/runtime-spec/specs-go github.com/containerd/go-runc
 
-go build servicemanager.go
-
 for testing
 go get gopkg.in/jarcoal/httpmock.v1
 
+go build
+
+```
+
+# Configuration:
+
+aos_servicemanager expects to have configuration file aos_servicemanager.cfg in current directory.
+Or configuration file could be provide by command line parameter -c:
+
+```
+./aos_servicemanager -c aos_servicemanager.cfg
+```
+
+Example configuration file could be found in misc/config/aos_servicemanager.cfg
+
+To increase log level use option -v:
+
+```
+./aos_servicemanager -c aos_servicemanager.cfg -v debug
 ```
 
 
-Fcrypt configuration:
+# General setup
 
-`config/fcrypt.json` contains example configuration for fcrypt library. Library expects to find this `fcrypt.json` in the current working directory.
+aos_servicemanager is required following applications to be available in the system or placed in
+its working directory: runc, netns, wondershaper.
+Install or put above applications to the working directory.
 
-TODO: add support for `$GOPATH` (or at least for `~`) in paths defined in `fcrypt.json`
-
+aos_servicemanager expects to aos_vis to be running and configured (see aos_vid readme).
 
 # Setup Raspberry Pi 2:
 
