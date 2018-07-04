@@ -27,6 +27,10 @@ import (
 
 // AmqpHandler structure with all amqp connection info
 type AmqpHandler struct {
+	// MessageChannel channel for amqp messages
+	MessageChannel chan interface{}
+
+	sendChannel  chan []byte                     // send channel
 	exchangeInfo amqpLocalSenderConnectionInfo   // connection for sending data
 	consumerInfo amqpLocalConsumerConnectionInfo // connection for receiving data
 }
@@ -148,11 +152,6 @@ type amqpLocalConsumerConnectionInfo struct {
  * Variables
  ******************************************************************************/
 
-// channel for return packages
-var amqpChan = make(chan interface{}, 100)
-
-var sendChan = make(chan []byte, 100)
-
 const (
 	connectionRetry  = 3
 	vehicleStatusStr = "vehicleStatus"
@@ -166,35 +165,37 @@ const (
 // New creates new amqp object
 func New() (handler *AmqpHandler, err error) {
 	handler = &AmqpHandler{}
+
+	handler.MessageChannel = make(chan interface{}, 100)
+	handler.sendChannel = make(chan []byte, 100)
+
 	return handler, nil
 }
 
 // InitAmqphandler initialisation of rabbit amqp handler
-func (handler *AmqpHandler) InitAmqphandler(sdURL string) (chan interface{}, error) {
-
-	//TODO:do get VIN users form VIS
+func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []string) error {
 	servRequest := serviceDiscoveryRequest{
 		Version: 1,
-		VIN:     "12345ZXCVBNMA1234",
-		Users:   []string{"user1", "OEM2"}}
+		VIN:     vin,
+		Users:   users}
 
 	amqpConn, err := getAmqpConnInfo(sdURL, servRequest)
 	if err != nil {
 		log.Error("NO connection info: ", err)
-		return amqpChan, err
+		return err
 	}
 	log.Debug("Results: ", amqpConn)
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
 		log.Error("GetTlsConfig error : ", err)
-		return amqpChan, err
+		return err
 	}
 
 	go handler.startSendConnection(&amqpConn.SendParam, tlsConfig)
 	go handler.startConsumerConnection(&amqpConn.ReceiveParams, tlsConfig)
 
-	return amqpChan, nil
+	return nil
 }
 
 // SendInitialSetup send initial list oaf available services
@@ -206,7 +207,7 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
 		log.Warn("Error marshall json: ", err)
 		return err
 	}
-	sendChan <- reqJSON
+	handler.sendChannel <- reqJSON
 	return nil
 }
 
@@ -221,7 +222,7 @@ func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) erro
 		log.Warn("Error marshall json: ", err)
 		return err
 	}
-	sendChan <- reqJSON
+	handler.sendChannel <- reqJSON
 	return nil
 }
 
@@ -329,7 +330,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 
 		log.Info("Create exchange OK")
 
-		startSender(&handler.exchangeInfo)
+		handler.startSender(&handler.exchangeInfo)
 		log.Warning("Stop sender #", i)
 
 		if handler.exchangeInfo.valid == false {
@@ -340,11 +341,11 @@ func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tl
 	if handler.exchangeInfo.valid == true {
 		handler.CloseAllConnections()
 		log.Error("Generate sender error Connection close to Exchange")
-		amqpChan <- errors.New("Connection close to Exchange")
+		handler.MessageChannel <- errors.New("Connection close to Exchange")
 	}
 }
 
-func startSender(info *amqpLocalSenderConnectionInfo) {
+func (handler *AmqpHandler) startSender(info *amqpLocalSenderConnectionInfo) {
 	log.Info("Start Sender ")
 	errch := info.conn.NotifyClose(make(chan *amqp.Error))
 	for {
@@ -352,7 +353,7 @@ func startSender(info *amqpLocalSenderConnectionInfo) {
 		case err := <-errch:
 			log.Warning("Exchange connection closing: ", err)
 			return
-		case sendData := <-sendChan:
+		case sendData := <-handler.sendChannel:
 			if info.valid != true {
 				log.Warning("Invalid Sender connection")
 				return
@@ -419,7 +420,7 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 		handler.consumerInfo.conn = conn
 		handler.consumerInfo.valid = true
 
-		startConsumer(&handler.consumerInfo)
+		handler.startConsumer(&handler.consumerInfo)
 		log.Warning("Stop Consumer connection #", i)
 		if handler.consumerInfo.valid == false {
 			break
@@ -429,11 +430,11 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 	if handler.consumerInfo.valid == true {
 		handler.CloseAllConnections()
 		log.Error("Generate Error Connection close to consumer")
-		amqpChan <- errors.New("Connection close to consumer")
+		handler.MessageChannel <- errors.New("Connection close to consumer")
 	}
 }
 
-func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
+func (handler *AmqpHandler) startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 	log.Info("Start listen")
 	for d := range consumerInfo.ch {
 		log.Info("Received a message: ", string(d.Body))
@@ -470,7 +471,7 @@ func startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
 			log.Error("Can't make json from decrypt data", string(decryptData), err)
 			continue
 		}
-		amqpChan <- servInfoArray
+		handler.MessageChannel <- servInfoArray
 	}
 	log.Warning("END listen") //TODO: add return error to channel
 }

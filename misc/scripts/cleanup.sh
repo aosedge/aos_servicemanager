@@ -24,7 +24,7 @@ for f in data/services/* ; do
 			echo Disabling $r...
 			systemctl disable $r
 			echo Disabled
-		fi			
+		fi
 	fi
 done
 

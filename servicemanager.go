@@ -17,6 +17,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
 const (
@@ -86,7 +87,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 	}
 }
 
-func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHandler *launcher.Launcher, launcherChannel <-chan launcher.ActionStatus) {
+func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) {
 	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
@@ -95,7 +96,7 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 
 	for {
 		select {
-		case amqpMessage := <-amqpChan:
+		case amqpMessage := <-amqpHandler.MessageChannel:
 			// check for error
 			if err, ok := amqpMessage.(error); ok {
 				log.Error("Receive amqp error: ", err)
@@ -107,7 +108,7 @@ func run(amqpHandler *amqp.AmqpHandler, amqpChan <-chan interface{}, launcherHan
 				log.Error("Error processing amqp result: ", err)
 			}
 
-		case serviceStatus := <-launcherChannel:
+		case serviceStatus := <-launcherHandler.StatusChannel:
 			info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
 
 			switch serviceStatus.Action {
@@ -170,14 +171,14 @@ func main() {
 	// Create DB
 	db, err := database.New(path.Join(config.WorkingDir, "servicemanager.db"))
 	if err != nil {
-		log.Fatal("Can't open database: ", err)
+		log.Fatalf("Can't open database: %s", err)
 	}
 	defer db.Close()
 
 	// Create launcher
-	launcherHandler, launcherChannel, err := launcher.New(config.WorkingDir, db)
+	launcherHandler, err := launcher.New(config.WorkingDir, db)
 	if err != nil {
-		log.Fatal("Can't create launcher: ", err)
+		log.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcherHandler.Close()
 
@@ -194,6 +195,13 @@ func main() {
 		log.Fatal("Can't create D-BUS server %v", err)
 	}
 
+	// Create VIS client
+	vis, err := visclient.New(config.VISServerURL)
+	if err != nil {
+		log.Fatalf("Can't connect to VIS: %s", err)
+	}
+	defer vis.Close()
+
 	// Handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -202,16 +210,29 @@ func main() {
 		launcherHandler.Close()
 		amqpHandler.CloseAllConnections()
 		dbusServer.Close()
+		vis.Close()
 		os.Exit(1)
 	}()
 
 	// Run all systems
 	log.WithField("url", config.ServiceDiscoveryURL).Debug("Start connection")
 
+	// Get vin code
+	vin, err := vis.GetVIN()
+	if err != nil {
+		log.Fatalf("Can't get vin: %s", err)
+	}
+
 	for {
-		amqpChan, err := amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL)
+		// Get vin code
+		users, err := vis.GetUsers()
+		if err != nil {
+			log.Fatalf("Can't get vin: %s", err)
+		}
+
+		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
-			run(amqpHandler, amqpChan, launcherHandler, launcherChannel)
+			run(amqpHandler, launcherHandler)
 		} else {
 			log.Error("Can't establish connection: ", err)
 

@@ -86,11 +86,13 @@ type downloadItf interface {
 
 // Launcher instance
 type Launcher struct {
+	// StatusChannel used to return execute command statuses
+	StatusChannel chan ActionStatus
+
 	db               *database.Database
 	systemd          *dbus.Conn
 	downloader       downloadItf
 	closeChannel     chan bool
-	statusChannel    chan ActionStatus
 	services         sync.Map
 	mutex            sync.Mutex
 	waitQueue        *list.List
@@ -113,7 +115,7 @@ type serviceAction struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(workingDir string, db *database.Database) (launcher *Launcher, executeChannel <-chan ActionStatus, err error) {
+func New(workingDir string, db *database.Database) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
@@ -122,7 +124,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 	localLauncher.workingDir = workingDir
 
 	localLauncher.closeChannel = make(chan bool)
-	localLauncher.statusChannel = make(chan ActionStatus, maxExecutedActions)
+	localLauncher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 
 	localLauncher.waitQueue = list.New()
 	localLauncher.workQueue = list.New()
@@ -133,17 +135,17 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 	dir := path.Join(workingDir, serviceDir)
 	if _, err = os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return launcher, executeChannel, err
+			return launcher, err
 		}
 		if err = os.MkdirAll(dir, 0755); err != nil {
-			return launcher, executeChannel, err
+			return launcher, err
 		}
 	}
 
 	// Load all installed services
 	services, err := localLauncher.db.GetServices()
 	if err != nil {
-		return launcher, executeChannel, err
+		return launcher, err
 	}
 	for _, service := range services {
 		localLauncher.services.Store(service.ServiceName, service.ID)
@@ -152,10 +154,10 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 	// Create systemd connection
 	localLauncher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
-		return launcher, executeChannel, err
+		return launcher, err
 	}
 	if err = localLauncher.systemd.Subscribe(); err != nil {
-		return launcher, executeChannel, err
+		return launcher, err
 	}
 
 	localLauncher.handleSystemdSubscription()
@@ -163,13 +165,13 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 	// Get systemd service template
 	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(workingDir)
 	if err != nil {
-		return launcher, executeChannel, err
+		return launcher, err
 	}
 
 	// Retrieve runc abs path
 	localLauncher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
-		return launcher, executeChannel, err
+		return launcher, err
 	}
 
 	// Retrieve netns abs path
@@ -178,7 +180,7 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		// check system PATH
 		localLauncher.netnsPath, err = exec.LookPath(netnsName)
 		if err != nil {
-			return launcher, executeChannel, err
+			return launcher, err
 		}
 	}
 
@@ -188,13 +190,13 @@ func New(workingDir string, db *database.Database) (launcher *Launcher, executeC
 		// check system PATH
 		localLauncher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
 		if err != nil {
-			return launcher, executeChannel, err
+			return launcher, err
 		}
 	}
 
 	launcher = &localLauncher
 
-	return launcher, launcher.statusChannel, nil
+	return launcher, nil
 }
 
 // Close closes launcher
@@ -409,7 +411,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		}
 	}
 
-	launcher.statusChannel <- status
+	launcher.StatusChannel <- status
 
 	launcher.mutex.Lock()
 	defer launcher.mutex.Unlock()
