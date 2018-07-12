@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
@@ -55,7 +56,7 @@ func init() {
  ******************************************************************************/
 
 func newTestLauncher(downloader downloadItf) (launcher *Launcher, err error) {
-	launcher, err = New("tmp", db)
+	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db)
 	if err != nil {
 		return launcher, err
 	}
@@ -169,27 +170,43 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 }
 
 func (launcher *Launcher) removeAllServices() (err error) {
-	services, err := launcher.GetServicesInfo()
+	services, err := launcher.db.GetServices()
 	if err != nil {
 		return err
 	}
 
+	statusChannel := make(chan error, len(services))
+
 	for _, service := range services {
-		launcher.RemoveService(service.ID)
+		go func(service database.ServiceEntry) {
+			err := launcher.removeService(service.ID)
+			if err != nil {
+				log.Errorf("Can't remove service %s: %s", service.ID, err)
+			}
+			statusChannel <- err
+		}(service)
 	}
 
+	// Wait all services are deleted
 	for i := 0; i < len(services); i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			err = status.Err
-		}
+		<-statusChannel
 	}
 
-	services, err = launcher.GetServicesInfo()
+	err = launcher.systemd.Reload()
+	if err != nil {
+		return err
+	}
+
+	services, err = launcher.db.GetServices()
 	if err != nil {
 		return err
 	}
 	if len(services) != 0 {
 		return errors.New("Can't remove all services")
+	}
+
+	if err = launcher.cleanUsersDB(); err != nil {
+		return err
 	}
 
 	return err
@@ -304,8 +321,12 @@ func TestInstallRemove(t *testing.T) {
 	}
 	defer launcher.Close()
 
-	numInstallServices := 30
-	numRemoveServices := 10
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	numInstallServices := 10
+	numRemoveServices := 5
 
 	// install services
 	for i := 0; i < numInstallServices; i++ {
@@ -339,7 +360,7 @@ func TestInstallRemove(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 2)
 
 	// remove remaining services
 	for i := numRemoveServices; i < numInstallServices; i++ {
@@ -359,6 +380,10 @@ func TestInstallRemove(t *testing.T) {
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
 	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
 }
 
 func TestAutoStart(t *testing.T) {
@@ -367,7 +392,11 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	numServices := 10
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	numServices := 5
 
 	// install services
 	for i := 0; i < numServices; i++ {
@@ -382,7 +411,7 @@ func TestAutoStart(t *testing.T) {
 
 	launcher.Close()
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 2)
 
 	launcher, err = newTestLauncher(new(pythonImage))
 	if err != nil {
@@ -390,7 +419,11 @@ func TestAutoStart(t *testing.T) {
 	}
 	defer launcher.Close()
 
-	time.Sleep(time.Second * 5)
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	time.Sleep(time.Second * 2)
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
@@ -423,6 +456,10 @@ func TestAutoStart(t *testing.T) {
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
 	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
 }
 
 func TestErrors(t *testing.T) {
@@ -431,6 +468,10 @@ func TestErrors(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	// test version mistmatch
 
@@ -455,7 +496,7 @@ func TestErrors(t *testing.T) {
 		t.Errorf("Can't get services info: %s", err)
 	}
 	if len(services) != 1 {
-		t.Errorf("Wrong service quantity")
+		t.Errorf("Wrong service quantity: %d", len(services))
 	} else if services[0].Version != 6 {
 		t.Errorf("Wrong service version")
 	}
@@ -471,6 +512,10 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	serverAddr, err := net.ResolveUDPAddr("udp", ":10001")
 	if err != nil {
@@ -534,6 +579,10 @@ func TestNetworkSpeed(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
 
 	numServices := 2
 
@@ -607,6 +656,10 @@ func TestVisPermissions(t *testing.T) {
 	}
 	defer launcher.Close()
 
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
 	if status := <-launcher.StatusChannel; status.Err != nil {
@@ -624,5 +677,161 @@ func TestVisPermissions(t *testing.T) {
 
 	if err := launcher.removeAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestUsersServices(t *testing.T) {
+	launcher, err := newTestLauncher(new(pythonImage))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	numUsers := 3
+	numServices := 3
+
+	for i := 0; i < numUsers; i++ {
+		users := []string{fmt.Sprintf("user%d", i)}
+
+		if err = launcher.SetUsers(users); err != nil {
+			t.Fatalf("Can't set users: %s", err)
+		}
+
+		services, err := launcher.db.GetUsersServices(users)
+		if err != nil {
+			t.Fatalf("Can't get users services: %s", err)
+		}
+		if len(services) != 0 {
+			t.Fatalf("Wrong service quantity")
+		}
+
+		// install services
+		for j := 0; j < numServices; j++ {
+			launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("user%d_service%d", i, j)})
+		}
+		for i := 0; i < numServices; i++ {
+			if status := <-launcher.StatusChannel; status.Err != nil {
+				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+			}
+		}
+
+		time.Sleep(time.Second * 2)
+
+		services, err = launcher.db.GetServices()
+		if err != nil {
+			t.Fatalf("Can't get services: %s", err)
+		}
+
+		count := 0
+		for _, service := range services {
+			if service.State == stateRunning {
+				exist, err := launcher.db.IsUsersService(users, service.ID)
+				if err != nil {
+					t.Errorf("Can't check users service: %s", err)
+				}
+				if !exist {
+					t.Errorf("Service doesn't belong to users: %s", service.ID)
+				}
+				count++
+			}
+		}
+
+		if count != numServices {
+			t.Fatalf("Wrong running services count")
+		}
+	}
+
+	for i := 0; i < numUsers; i++ {
+		users := []string{fmt.Sprintf("user%d", i)}
+
+		if err = launcher.SetUsers(users); err != nil {
+			t.Fatalf("Can't set users: %s", err)
+		}
+
+		time.Sleep(time.Second * 2)
+
+		services, err := launcher.db.GetServices()
+		if err != nil {
+			t.Fatalf("Can't get services: %s", err)
+		}
+
+		count := 0
+		for _, service := range services {
+			if service.State == stateRunning {
+				exist, err := launcher.db.IsUsersService(users, service.ID)
+				if err != nil {
+					t.Errorf("Can't check users service: %s", err)
+				}
+				if !exist {
+					t.Errorf("Service doesn't belong to users: %s", service.ID)
+				}
+				count++
+			}
+		}
+
+		if count != numServices {
+			t.Fatalf("Wrong running services count")
+		}
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestServiceTTL(t *testing.T) {
+	launcher, err := newTestLauncher(new(pythonImage))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	numServices := 3
+
+	if err = launcher.SetUsers([]string{"user0"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	// install services
+	for i := 0; i < numServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
+	}
+	for i := 0; i < numServices; i++ {
+		if status := <-launcher.StatusChannel; status.Err != nil {
+			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		}
+	}
+
+	services, err := launcher.db.GetServices()
+	if err != nil {
+		t.Fatalf("Can't get services: %s", err)
+	}
+
+	for _, service := range services {
+		if err = launcher.db.SetServiceStartTime(service.ID, service.StartAt.Add(-time.Hour*24*30)); err != nil {
+			t.Errorf("Can't set service start time: %s", err)
+		}
+	}
+
+	if err = launcher.SetUsers([]string{"user1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	services, err = launcher.db.GetServices()
+	if err != nil {
+		t.Fatalf("Can't get services: %s", err)
+	}
+
+	if len(services) != 0 {
+		t.Fatal("Wrong service quantity")
+	}
+
+	usersList, err := launcher.db.GetUsersList()
+	if err != nil {
+		t.Fatalf("Can't get users list: %s", err)
+	}
+
+	if len(usersList) != 0 {
+		t.Fatal("Wrong users quantity", usersList)
 	}
 }

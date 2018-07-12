@@ -24,8 +24,9 @@ func createConfigFile() (err error) {
 		"OfflineCert" : "OfflineCert"	
 	},
 	"serviceDiscovery" : "www.aos.com",
+	"workingDir" : "workingDir",
 	"visServer" : "wss://localhost:8088",
-	"workingDir" : "workingDir"
+	"defaultServiceTTLDays" : 30
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -134,5 +135,16 @@ func TestGetVisServerURL(t *testing.T) {
 
 	if config.VISServerURL != "wss://localhost:8088" {
 		t.Errorf("Wrong VIS server value: %s", config.VISServerURL)
+	}
+}
+
+func TestGetDefaultServiceTTL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.DefaultServiceTTL != 30 {
+		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTL)
 	}
 }
