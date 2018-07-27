@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -636,8 +637,12 @@ func (launcher *Launcher) createUser(id string) (userName string, err error) {
 	launcher.mutex.Lock()
 	defer launcher.mutex.Unlock()
 
+	// convert id to hashed u32 value
+	hash := fnv.New32a()
+	hash.Write([]byte(id))
+
 	// create user
-	userName = "user_" + id
+	userName = "user_" + strconv.FormatUint(uint64(hash.Sum32()), 16)
 	// if user exists
 	if _, err = user.Lookup(userName); err == nil {
 		return userName, errors.New("User already exists")
