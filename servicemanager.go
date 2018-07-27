@@ -230,6 +230,11 @@ func main() {
 			log.Fatalf("Can't get users: %s", err)
 		}
 
+		err = launcherHandler.SetUsers(users)
+		if err != nil {
+			log.Fatalf("Can't set users: %s", err)
+		}
+
 		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
 			run(amqpHandler, launcherHandler)
