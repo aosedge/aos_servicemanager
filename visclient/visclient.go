@@ -94,9 +94,13 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 			return vin, err
 		}
 
-		var ok bool
+		value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", resp.Value)
+		if err != nil {
+			return vin, err
+		}
 
-		if vis.vin, ok = resp.Value.(string); !ok {
+		ok := false
+		if vis.vin, ok = value.(string); !ok {
 			return vin, errors.New("Wrong VIN type")
 		}
 	}
@@ -115,7 +119,12 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 			return users, err
 		}
 
-		itfs, ok := resp.Value.([]interface{})
+		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", resp.Value)
+		if err != nil {
+			return users, err
+		}
+
+		itfs, ok := value.([]interface{})
 		if !ok {
 			return users, errors.New("Wrong users type")
 		}
@@ -123,11 +132,11 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 		vis.users = make([]string, len(itfs))
 
 		for i, itf := range itfs {
-			value, ok := itf.(string)
+			item, ok := itf.(string)
 			if !ok {
 				return users, errors.New("Wrong users type")
 			}
-			vis.users[i] = value
+			vis.users[i] = item
 		}
 	}
 
@@ -150,6 +159,16 @@ func (vis *VisClient) Close() (err error) {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func getValueFromResponse(path string, respValue interface{}) (value interface{}, err error) {
+	if valueMap, ok := respValue.(map[string]interface{}); ok {
+		if value, ok = valueMap[path]; !ok {
+			return value, errors.New("Path not found")
+		}
+		return value, nil
+	}
+	return respValue, nil
+}
 
 func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err error) {
 	// Generate request ID
