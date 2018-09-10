@@ -817,7 +817,7 @@ ExecStartPre=${RUNC} delete -f ${ID}
 ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/${ID}.pid -b ${SERVICEPATH} ${ID}
 ExecStartPost=${SETNETLIMIT}
 
-ExecStopPre=${CLEARNETLIMIT}
+ExecStop=${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
 ExecStopPost=${RUNC} delete -f ${ID}
 PIDFile=${SERVICEPATH}/${ID}.pid
