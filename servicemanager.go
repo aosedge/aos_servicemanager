@@ -56,27 +56,50 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 			return err
 		}
 
-		for iCur := len(currentList) - 1; iCur >= 0; iCur-- {
-			for iDes := len(data) - 1; iDes >= 0; iDes-- {
-				if data[iDes].ID == currentList[iCur].ID {
-					if data[iDes].Version > currentList[iCur].Version {
-						log.Info("Update ", data[iDes].ID, " from ", currentList[iCur].Version, " to ", data[iDes].Version)
+		type serviceDesc struct {
+			serviceInfo          *amqp.ServiceInfo
+			serviceInfoFromCloud *amqp.ServiceInfoFromCloud
+		}
 
-						launcherHandler.InstallService(data[iDes])
-					}
+		servicesMap := make(map[string]*serviceDesc)
 
-					data = append(data[:iDes], data[iDes+1:]...)
-					currentList = append(currentList[:iCur], currentList[iCur+1:]...)
-				}
+		for _, serviceInfo := range currentList {
+			servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
+		}
+
+		for _, serviceInfoFromCloud := range data {
+			if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {
+				servicesMap[serviceInfoFromCloud.ID] = &serviceDesc{}
 			}
+			servicesMap[serviceInfoFromCloud.ID].serviceInfoFromCloud = &serviceInfoFromCloud
 		}
 
-		for _, deleteElement := range currentList {
-			launcherHandler.RemoveService(deleteElement.ID)
-		}
+		for _, service := range servicesMap {
+			if service.serviceInfoFromCloud != nil && service.serviceInfo != nil {
+				// Update
+				if service.serviceInfoFromCloud.Version > service.serviceInfo.Version {
+					log.WithFields(log.Fields{
+						"id":   service.serviceInfo.ID,
+						"from": service.serviceInfo.Version,
+						"to":   service.serviceInfoFromCloud.Version}).Info("Update service")
 
-		for _, newElement := range data {
-			launcherHandler.InstallService(newElement)
+					launcherHandler.InstallService(*service.serviceInfoFromCloud)
+				}
+			} else if service.serviceInfoFromCloud != nil {
+				// Install
+				log.WithFields(log.Fields{
+					"id":      service.serviceInfoFromCloud.ID,
+					"version": service.serviceInfoFromCloud.Version}).Info("Install service")
+
+				launcherHandler.InstallService(*service.serviceInfoFromCloud)
+			} else if service.serviceInfo != nil {
+				// Remove
+				log.WithFields(log.Fields{
+					"id":      service.serviceInfo.ID,
+					"version": service.serviceInfo.Version}).Info("Remove service")
+
+				launcherHandler.RemoveService(service.serviceInfo.ID)
+			}
 		}
 
 		return nil
