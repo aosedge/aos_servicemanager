@@ -88,13 +88,13 @@ func New(urlStr string) (vis *VisClient, err error) {
 // GetVIN returns VIN
 func (vis *VisClient) GetVIN() (vin string, err error) {
 	if vis.vin == "" {
-		resp, err := vis.processRequest(&visRequest{Action: "get",
+		rsp, err := vis.processRequest(&visRequest{Action: "get",
 			Path: "Attribute.Vehicle.VehicleIdentification.VIN"})
 		if err != nil {
 			return vin, err
 		}
 
-		value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", resp)
+		value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", rsp)
 		if err != nil {
 			return vin, err
 		}
@@ -113,13 +113,13 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 // GetUsers returns user list
 func (vis *VisClient) GetUsers() (users []string, err error) {
 	if vis.users == nil {
-		resp, err := vis.processRequest(&visRequest{Action: "get",
+		rsp, err := vis.processRequest(&visRequest{Action: "get",
 			Path: "Attribute.Vehicle.UserIdentification.Users"})
 		if err != nil {
 			return users, err
 		}
 
-		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", resp)
+		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", rsp)
 		if err != nil {
 			return users, err
 		}
@@ -160,19 +160,19 @@ func (vis *VisClient) Close() (err error) {
  * Private
  ******************************************************************************/
 
-func getValueFromResponse(path string, resp *visResponse) (value interface{}, err error) {
-	if valueMap, ok := resp.Value.(map[string]interface{}); ok {
+func getValueFromResponse(path string, rsp *visResponse) (value interface{}, err error) {
+	if valueMap, ok := rsp.Value.(map[string]interface{}); ok {
 		if value, ok = valueMap[path]; !ok {
 			return value, errors.New("Path not found")
 		}
 		return value, nil
 	}
 
-	if resp.Value == nil {
+	if rsp.Value == nil {
 		return value, errors.New("No value found")
 	}
 
-	return resp.Value, nil
+	return rsp.Value, nil
 }
 
 func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err error) {
@@ -190,8 +190,8 @@ func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err err
 	}
 
 	// Store channel in the requests map
-	respChannel := make(chan visResponse)
-	vis.requests.Store(requestID, respChannel)
+	rspChannel := make(chan visResponse)
+	vis.requests.Store(requestID, rspChannel)
 
 	log.WithField("request", string(message)).Debug("VIS request")
 
@@ -205,7 +205,7 @@ func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err err
 	select {
 	case <-time.After(websocketTimeout * time.Second):
 		err = errors.New("Wait response timeout")
-	case r := <-respChannel:
+	case r := <-rspChannel:
 		if r.Error != nil {
 			return rsp, fmt.Errorf("Error: %d, message: %s, reason: %s",
 				r.Error.Number, r.Error.Message, r.Error.Reason)
@@ -231,15 +231,15 @@ func (vis *VisClient) processMessages() {
 
 		log.WithField("response", string(message)).Debug("VIS response")
 
-		var resp visResponse
+		var rsp visResponse
 
-		err = json.Unmarshal(message, &resp)
+		err = json.Unmarshal(message, &rsp)
 		if err != nil {
 			log.Errorf("Error parsing VIS response: %s", err)
 			continue
 		}
 
-		requestID, err := strconv.ParseUint(resp.RequestID, 10, 64)
+		requestID, err := strconv.ParseUint(rsp.RequestID, 10, 64)
 		if err != nil {
 			log.Errorf("Error parsing VIS request ID: %s", err)
 			continue
@@ -251,7 +251,7 @@ func (vis *VisClient) processMessages() {
 		vis.requests.Range(func(key, value interface{}) bool {
 			if key.(uint64) == requestID {
 				requestFound = true
-				value.(chan visResponse) <- resp
+				value.(chan visResponse) <- rsp
 				return false
 			}
 			return true
