@@ -1,19 +1,19 @@
-package visclient_test
+package visclient
 
 import (
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
-
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
 /*******************************************************************************
  * Variables
  ******************************************************************************/
 
-var vis *visclient.VisClient
+var vis *VisClient
 
 /*******************************************************************************
  * Init
@@ -35,7 +35,9 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	vis, err = visclient.New("wss://localhost:8088")
+	rand.Seed(time.Now().UnixNano())
+
+	vis, err = New("wss://localhost:8088")
 	if err != nil {
 		log.Fatalf("Error connecting to VIS server: %s", err)
 	}
@@ -73,4 +75,43 @@ func TestGetUsers(t *testing.T) {
 	if users == nil {
 		t.Fatalf("Wrong users value: %s", users)
 	}
+}
+
+func TestUsersChanged(t *testing.T) {
+
+	newUsers := []string{generateRandomString(10), generateRandomString(10)}
+
+	_, err := vis.processRequest(&visRequest{
+		Action:    "set",
+		RequestID: "1",
+		Path:      "Attribute.Vehicle.UserIdentification.Users",
+		Value:     newUsers})
+	if err != nil {
+		t.Fatalf("Error setting users: %s", err)
+	}
+
+	select {
+	case users := <-vis.UsersChangedChannel:
+		if len(users) != len(newUsers) {
+			t.Errorf("Wrong users len: %d", len(users))
+		}
+
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Waiting for users changed timeout")
+	}
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func generateRandomString(size uint) (result string) {
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	tmp := make([]rune, size)
+	for i := range tmp {
+		tmp[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+
+	return string(tmp)
 }
