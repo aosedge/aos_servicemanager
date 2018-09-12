@@ -18,7 +18,8 @@ import (
  ******************************************************************************/
 
 const (
-	websocketTimeout = 3
+	websocketTimeout        = 3
+	usersChangedChannelSize = 1
 )
 
 /*******************************************************************************
@@ -32,6 +33,8 @@ type UserChangedNtf struct {
 
 // VisClient VIS client object
 type VisClient struct {
+	UsersChangedChannel chan []string
+
 	webConn *websocket.Conn
 
 	requests sync.Map
@@ -41,6 +44,8 @@ type VisClient struct {
 
 	mutex     sync.Mutex
 	requestID uint64
+
+	subscribeMap sync.Map
 }
 
 type errorInfo struct {
@@ -57,7 +62,7 @@ type visRequest struct {
 
 type visResponse struct {
 	Action         string      `json:"action"`
-	RequestID      string      `json:"requestId"`
+	RequestID      *string     `json:"requestId"`
 	Value          interface{} `json:"value"`
 	Error          *errorInfo  `json:"error"`
 	TTL            int64       `json:"TTL"`
@@ -80,7 +85,13 @@ func New(urlStr string) (vis *VisClient, err error) {
 
 	vis = &VisClient{webConn: webConn}
 
+	vis.UsersChangedChannel = make(chan []string, usersChangedChannelSize)
+
 	go vis.processMessages()
+
+	if err = vis.subscribe("Attribute.Vehicle.UserIdentification.Users", vis.handleUsersChanged); err != nil {
+		return vis, err
+	}
 
 	return vis, err
 }
@@ -119,24 +130,8 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 			return users, err
 		}
 
-		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", rsp)
-		if err != nil {
+		if err = vis.setUsers(rsp); err != nil {
 			return users, err
-		}
-
-		itfs, ok := value.([]interface{})
-		if !ok {
-			return users, errors.New("Wrong users type")
-		}
-
-		vis.users = make([]string, len(itfs))
-
-		for i, itf := range itfs {
-			item, ok := itf.(string)
-			if !ok {
-				return users, errors.New("Wrong users type")
-			}
-			vis.users[i] = item
 		}
 	}
 
@@ -148,6 +143,11 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 // Close closes vis client
 func (vis *VisClient) Close() (err error) {
 	log.Debug("Close VIS client")
+
+	// unsubscribe from all subscriptions
+	if _, err := vis.processRequest(&visRequest{Action: "unsubscribeAll"}); err != nil {
+		log.Errorf("Can't unsubscribe from subscriptions: %s", err)
+	}
 
 	if err := vis.webConn.Close(); err != nil {
 		return err
@@ -218,6 +218,46 @@ func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err err
 	return rsp, err
 }
 
+func (vis *VisClient) processResponse(rsp *visResponse) {
+	requestID, err := strconv.ParseUint(*rsp.RequestID, 10, 64)
+	if err != nil {
+		log.Errorf("Error parsing VIS request ID: %s", err)
+		return
+	}
+
+	// serve pending request
+	requestFound := false
+	vis.requests.Range(func(key, value interface{}) bool {
+		if key.(uint64) == requestID {
+			requestFound = true
+			value.(chan visResponse) <- *rsp
+			return false
+		}
+		return true
+	})
+
+	if !requestFound {
+		log.Warningf("Unexpected request id: %v", requestID)
+	}
+}
+
+func (vis *VisClient) processSubscriptions(rsp *visResponse) {
+	// serve subscriptions
+	subscriptionFound := false
+	vis.subscribeMap.Range(func(key, value interface{}) bool {
+		if key.(string) == *rsp.SubscriptionID {
+			subscriptionFound = true
+			value.(func(*visResponse))(rsp)
+			return false
+		}
+		return true
+	})
+
+	if !subscriptionFound {
+		log.Warningf("Unexpected subscription id: %v", rsp.SubscriptionID)
+	}
+}
+
 func (vis *VisClient) processMessages() {
 	for {
 		_, message, err := vis.webConn.ReadMessage()
@@ -239,26 +279,63 @@ func (vis *VisClient) processMessages() {
 			continue
 		}
 
-		requestID, err := strconv.ParseUint(rsp.RequestID, 10, 64)
-		if err != nil {
-			log.Errorf("Error parsing VIS request ID: %s", err)
-			continue
-		}
-
-		// serve pending request
-
-		requestFound := false
-		vis.requests.Range(func(key, value interface{}) bool {
-			if key.(uint64) == requestID {
-				requestFound = true
-				value.(chan visResponse) <- rsp
-				return false
-			}
-			return true
-		})
-
-		if !requestFound {
-			log.Warningf("Unexpected request id: %v", requestID)
+		if rsp.RequestID != nil {
+			vis.processResponse(&rsp)
+		} else if rsp.Action == "subscription" {
+			vis.processSubscriptions(&rsp)
 		}
 	}
+}
+
+func (vis *VisClient) setUsers(rsp *visResponse) (err error) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
+	value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", rsp)
+	if err != nil {
+		return err
+	}
+
+	itfs, ok := value.([]interface{})
+	if !ok {
+		return errors.New("Wrong users type")
+	}
+
+	vis.users = make([]string, len(itfs))
+
+	for i, itf := range itfs {
+		item, ok := itf.(string)
+		if !ok {
+			return errors.New("Wrong users type")
+		}
+		vis.users[i] = item
+	}
+
+	return nil
+}
+
+func (vis *VisClient) handleUsersChanged(rsp *visResponse) {
+	if err := vis.setUsers(rsp); err != nil {
+		log.Errorf("Can't set users: %s", err)
+		return
+	}
+
+	vis.UsersChangedChannel <- vis.users
+
+	log.WithField("users", vis.users).Debug("Users changed")
+}
+
+func (vis *VisClient) subscribe(path string, callback func(*visResponse)) (err error) {
+	resp, err := vis.processRequest(&visRequest{Action: "subscribe", Path: path})
+	if err != nil {
+		return err
+	}
+
+	if resp.SubscriptionID == nil {
+		return errors.New("No subscriptionID in response")
+	}
+
+	vis.subscribeMap.Store(*resp.SubscriptionID, callback)
+
+	return nil
 }

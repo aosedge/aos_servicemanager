@@ -110,7 +110,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 	}
 }
 
-func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) {
+func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher, visHandler *visclient.VisClient) {
 	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
@@ -162,6 +162,11 @@ func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) {
 			if err != nil {
 				log.Error("Error send service status message: ", err)
 			}
+
+		case users := <-visHandler.UsersChangedChannel:
+			log.WithField("users", users).Info("Users changed")
+			// reconnect
+			return
 		}
 	}
 }
@@ -260,7 +265,7 @@ func main() {
 
 		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
-			run(amqpHandler, launcherHandler)
+			run(amqpHandler, launcherHandler, vis)
 		} else {
 			log.Error("Can't establish connection: ", err)
 
