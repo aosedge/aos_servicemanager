@@ -150,6 +150,11 @@ func (vis *VisClient) Close() (err error) {
 		log.Errorf("Can't unsubscribe from subscriptions: %s", err)
 	}
 
+	if err := vis.webConn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		log.Errorf("Can't send close message: %s", err)
+	}
+
 	if err := vis.webConn.Close(); err != nil {
 		return err
 	}
@@ -264,7 +269,8 @@ func (vis *VisClient) processMessages() {
 		_, message, err := vis.webConn.ReadMessage()
 		if err != nil {
 			// Don't show error no connection close
-			if !strings.Contains(err.Error(), "use of closed network connection") {
+			if !strings.Contains(err.Error(), "use of closed network connection") &&
+				!websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 				log.Errorf("Error reading VIS message: %s", err)
 			}
 			return
