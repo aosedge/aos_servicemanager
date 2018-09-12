@@ -22,7 +22,7 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 
-echo Stopping $1...
+echo "Stopping $1..."
 systemctl stop $1
 if [ $? != 0 ]; then
 	echo "Can't stop $1" 1>&2
@@ -33,30 +33,30 @@ for f in $2/services/* ; do
 	if [ -d "$f" ]; then
 		r=$(basename $(find $f -path '*.service'))
 		if [ ! -z "$r" ]; then
-			echo Stopping $r...
+			echo "Stopping $r..."
 			systemctl stop $r
-			echo Stopped
+			echo "Stopped"
 
-			echo Disabling $r...
+			echo "Disabling $r..."
 			systemctl disable $r
-			echo Disabled
+			echo "Disabled"
 		fi
 	fi
 done
 
-echo Removing services folder...
+echo "Removing services folder..."
 rm $2/services -rf
-echo Removed
+echo "Removed"
 
 echo Removing database...
 rm $2/services.db
 echo Removed
 
 echo
-echo =========================================================================
-echo WARNING: $1 is stopped. To start it use following command:
-echo '	sudo systemctl start $1'
-echo or:
-echo '	sudo reboot'
-echo ':)'
-echo =========================================================================
+echo "========================================================================="
+echo "WARNING: $1 is stopped. To start it use following command:"
+echo "	sudo systemctl start $1"
+echo "or:"
+echo "	sudo reboot"
+echo ":)"
+echo "========================================================================="
