@@ -50,7 +50,7 @@ if [ $? == 0 ]; then
 fi
 
 echo Removing database...
-rm $2/services.db
+rm $2/servicemanager.db
 if [ $? == 0 ]; then
 	echo "Removed"
 fi
