@@ -9,7 +9,6 @@ echo Stopping aos_servicemanager...
 systemctl stop aos_servicemanager
 if [ $? != 0 ]; then
 	echo "Can't stop aos_servicemanager" 1>&2
-	exit 1
 fi
 echo Stopped
 
