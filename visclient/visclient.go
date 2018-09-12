@@ -94,7 +94,7 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 			return vin, err
 		}
 
-		value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", resp.Value)
+		value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", resp)
 		if err != nil {
 			return vin, err
 		}
@@ -119,7 +119,7 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 			return users, err
 		}
 
-		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", resp.Value)
+		value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", resp)
 		if err != nil {
 			return users, err
 		}
@@ -160,14 +160,19 @@ func (vis *VisClient) Close() (err error) {
  * Private
  ******************************************************************************/
 
-func getValueFromResponse(path string, respValue interface{}) (value interface{}, err error) {
-	if valueMap, ok := respValue.(map[string]interface{}); ok {
+func getValueFromResponse(path string, resp *visResponse) (value interface{}, err error) {
+	if valueMap, ok := resp.Value.(map[string]interface{}); ok {
 		if value, ok = valueMap[path]; !ok {
 			return value, errors.New("Path not found")
 		}
 		return value, nil
 	}
-	return respValue, nil
+
+	if resp.Value == nil {
+		return value, errors.New("No value found")
+	}
+
+	return resp.Value, nil
 }
 
 func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err error) {
