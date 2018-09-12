@@ -18,7 +18,7 @@ import (
  ******************************************************************************/
 
 const (
-	websocketTimeout        = 3
+	websocketTimeout        = 3 * time.Second
 	usersChangedChannelSize = 1
 )
 
@@ -204,7 +204,7 @@ func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err err
 
 	// Wait response or timeout
 	select {
-	case <-time.After(websocketTimeout * time.Second):
+	case <-time.After(websocketTimeout):
 		err = errors.New("Wait response timeout")
 	case r := <-rspChannel:
 		if r.Error != nil {
