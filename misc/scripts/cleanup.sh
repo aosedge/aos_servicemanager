@@ -24,10 +24,9 @@ fi
 
 echo "Stopping $1..."
 systemctl stop $1
-if [ $? != 0 ]; then
-	echo "Can't stop $1" 1>&2
+if [ $? == 0 ]; then
+	echo "Stopped"
 fi
-echo Stopped
 
 for f in $2/services/* ; do
 	if [ -d "$f" ]; then
@@ -45,12 +44,16 @@ for f in $2/services/* ; do
 done
 
 echo "Removing services folder..."
-rm $2/services -rf
-echo "Removed"
+rm $2/services -r
+if [ $? == 0 ]; then
+	echo "Removed"
+fi
 
 echo Removing database...
 rm $2/services.db
-echo Removed
+if [ $? == 0 ]; then
+	echo "Removed"
+fi
 
 echo
 echo "========================================================================="
