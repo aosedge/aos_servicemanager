@@ -67,7 +67,6 @@ type ServiceError struct {
 	Message string `json:"message"`
 }
 
-///API structures
 type serviceDiscoveryRequest struct {
 	Version int      `json:"version"`
 	VIN     string   `json:"VIN"`
@@ -85,10 +84,12 @@ type desiredStatus struct {
 	MessageType string `json:"messageType"`
 	Services    string `json:"services"`
 }
+
 type serviceDiscoveryResp struct {
 	Version    uint                 `json:"version"`
 	Connection rabbitConnectioninfo `json:"connection"`
 }
+
 type rabbitConnectioninfo struct {
 	SendParam     sendParam     `json:"sendParams"`
 	ReceiveParams receiveParams `json:"receiveParams"`
@@ -131,7 +132,6 @@ type queueInfo struct {
 	NoWait           bool   `json:"noWait"`
 }
 
-/// internal structures
 type amqpLocalSenderConnectionInfo struct {
 	conn         *amqp.Connection
 	ch           *amqp.Channel
@@ -172,23 +172,20 @@ func New() (handler *AmqpHandler, err error) {
 	return handler, nil
 }
 
-// InitAmqphandler initialisation of rabbit amqp handler
-func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []string) error {
-	servRequest := serviceDiscoveryRequest{
+// InitAmqphandler initialization of rabbit amqp handler
+func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []string) (err error) {
+	log.Debug("Init AMQP")
+
+	amqpConn, err := getAmqpConnInfo(sdURL, serviceDiscoveryRequest{
 		Version: 1,
 		VIN:     vin,
-		Users:   users}
-
-	amqpConn, err := getAmqpConnInfo(sdURL, servRequest)
+		Users:   users})
 	if err != nil {
-		log.Error("NO connection info: ", err)
 		return err
 	}
-	log.Debug("Results: ", amqpConn)
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
-		log.Error("GetTlsConfig error : ", err)
 		return err
 	}
 
@@ -198,48 +195,55 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []st
 	return nil
 }
 
-// SendInitialSetup send initial list oaf available services
-func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) error {
-	log.Info("SendInitialSetup ", serviceList)
-	msg := vehicleStatus{Version: 1, MessageType: vehicleStatusStr, Services: serviceList}
-	reqJSON, err := json.Marshal(msg)
+// SendInitialSetup sends initial list oaf available services
+func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
+	log.WithField("services", serviceList).Debug("Send initial setup")
+
+	reqJSON, err := json.Marshal(vehicleStatus{
+		Version:     1,
+		MessageType: vehicleStatusStr,
+		Services:    serviceList})
 	if err != nil {
-		log.Warn("Error marshall json: ", err)
 		return err
 	}
+
 	handler.sendChannel <- reqJSON
+
 	return nil
 }
 
-// SendServiceStatusMsg send message with service status
-func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) error {
-	log.Info("SendServiceStatusMsg ", serviceStatus)
-	var list []ServiceInfo
-	list = append(list, serviceStatus)
-	msg := vehicleStatus{Version: 1, MessageType: serviceStatusStr, Services: list}
-	reqJSON, err := json.Marshal(msg)
+// SendServiceStatusMsg sends message with service status
+func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err error) {
+	log.WithField("status", serviceStatus).Debug("Send service status")
+
+	reqJSON, err := json.Marshal(vehicleStatus{
+		Version:     1,
+		MessageType: serviceStatusStr,
+		Services:    []ServiceInfo{serviceStatus}})
 	if err != nil {
-		log.Warn("Error marshall json: ", err)
 		return err
 	}
+
 	handler.sendChannel <- reqJSON
+
 	return nil
 }
 
-// CloseAllConnections close all amqp connection
+// CloseAllConnections closes all amqp connection
 func (handler *AmqpHandler) CloseAllConnections() {
-	log.Info("CloseAllConnections")
+	log.Info("AMQP: close all connections")
+
 	handler.exchangeInfo.valid = false
 	handler.consumerInfo.valid = false
 
 	if handler.exchangeInfo.conn != nil {
-		log.Debug("Close exchange connection")
+		log.Debug("AMQP: close exchange connection")
 		handler.exchangeInfo.conn.Close()
 		handler.exchangeInfo.conn = nil
 	}
 
 	if handler.consumerInfo.conn != nil {
-		log.Debug("Close consumer connection")
+		log.Debug("AMQP: close consumer connection")
 		handler.consumerInfo.conn.Close()
 		handler.consumerInfo.conn = nil
 	}
@@ -251,114 +255,112 @@ func (handler *AmqpHandler) CloseAllConnections() {
 
 // service discovery implementation
 func getAmqpConnInfo(url string, request serviceDiscoveryRequest) (connection rabbitConnectioninfo, err error) {
-
-	var jsonResp serviceDiscoveryResp
-
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
-		log.Warn("Error :", err)
 		return connection, err
 	}
 
-	log.Info("Request :", string(reqJSON))
+	log.WithField("request", string(reqJSON)).Info("AMQP service discovery request")
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
-		log.Warn("GetTlsConfig error : ", err)
 		return connection, err
 	}
+
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
 
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJSON))
-
 	if err != nil {
-		log.Warn("Post error : ", err)
 		return connection, err
 	}
 	defer resp.Body.Close()
-
-	log.Info("HTTP POST Send OK: \n")
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Error("Error Read ", err)
 		return connection, err
 	}
 	defer resp.Body.Close()
 
+	var jsonResp serviceDiscoveryResp
+
 	err = json.Unmarshal(htmlData, &jsonResp) // TODO: add check
 	if err != nil {
-		log.Error("Receive ", string(htmlData), err)
 		return connection, err
 	}
+
 	return jsonResp.Connection, nil
 }
 
 func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tls.Config) {
-
-	config := amqp.Config{TLSClientConfig: tlsConfig,
-		SASL:      nil,
-		Heartbeat: 10 * time.Second}
-
-	urlRabbitMQ := url.URL{Scheme: "amqps",
-		User: url.UserPassword(params.User, params.Password),
-		Host: params.Host,
+	urlRabbitMQ := url.URL{
+		Scheme: "amqps",
+		User:   url.UserPassword(params.User, params.Password),
+		Host:   params.Host,
 	}
-	log.Info("Sender connection url: ", urlRabbitMQ.String())
+
+	log.WithField("url", urlRabbitMQ.String()).Debug("Sender connection url")
 
 	for i := 0; i < connectionRetry; i++ {
-		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
+		conn, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
+			TLSClientConfig: tlsConfig,
+			SASL:            nil,
+			Heartbeat:       10 * time.Second})
 		if err != nil {
-			log.Warning("Amqp.Dial to exchange #", i, err)
+			log.WithField("retry", i).Errorf("AMQP sender dial error: %s", err)
 			continue
 		}
 
 		ch, err := conn.Channel()
 		if err != nil {
-			log.Warning("Failed to open a send channel #", i, err)
+			log.WithField("retry", i).Errorf("Failed to open sender channel: %s", err)
 			continue
 		}
 
-		handler.exchangeInfo.conn = conn
-		handler.exchangeInfo.ch = ch
-		handler.exchangeInfo.valid = true
-		handler.exchangeInfo.mandatory = params.Mandatory
-		handler.exchangeInfo.immediate = params.Immediate
-		handler.exchangeInfo.exchangeName = params.Exchange.Name
-		handler.exchangeInfo.userID = params.User
+		handler.exchangeInfo = amqpLocalSenderConnectionInfo{
+			conn:         conn,
+			ch:           ch,
+			valid:        true,
+			mandatory:    params.Mandatory,
+			immediate:    params.Immediate,
+			exchangeName: params.Exchange.Name,
+			userID:       params.User}
 
-		log.Info("Create exchange OK")
-
-		handler.startSender(&handler.exchangeInfo)
-		log.Warning("Stop sender #", i)
+		if err := handler.startSender(&handler.exchangeInfo); err != nil {
+			log.Errorf("AMQP sender error: %s", err)
+		}
 
 		if handler.exchangeInfo.valid == false {
 			break
 		}
 	}
-	log.Warning("Connection close to Exchange")
+
 	if handler.exchangeInfo.valid == true {
+		log.Debug("Generate sender error connection close to Exchange")
+
 		handler.CloseAllConnections()
-		log.Error("Generate sender error Connection close to Exchange")
 		handler.MessageChannel <- errors.New("Connection close to Exchange")
 	}
 }
 
-func (handler *AmqpHandler) startSender(info *amqpLocalSenderConnectionInfo) {
-	log.Info("Start Sender ")
+func (handler *AmqpHandler) startSender(info *amqpLocalSenderConnectionInfo) (err error) {
+	log.Info("Start AMQP sender")
+
 	errch := info.conn.NotifyClose(make(chan *amqp.Error))
+
 	for {
 		select {
-		case err := <-errch:
-			log.Warning("Exchange connection closing: ", err)
-			return
+		case amqpErr := <-errch:
+			if amqpErr != nil {
+				return errors.New(amqpErr.Error())
+			}
+
 		case sendData := <-handler.sendChannel:
 			if info.valid != true {
-				log.Warning("Invalid Sender connection")
-				return
+				return errors.New("Invalid Sender connection")
 			}
-			if err := info.ch.Publish(
+
+			if err = info.ch.Publish(
 				info.exchangeName, // exchange
 				"",                // routing key
 				info.mandatory,    // mandatory
@@ -370,35 +372,34 @@ func (handler *AmqpHandler) startSender(info *amqpLocalSenderConnectionInfo) {
 					UserId:        info.userID,
 					Body:          sendData,
 				}); err != nil {
-				log.Warning("Error publish", err)
-				return
+				return err
 			}
-			log.Info("Send OK ", string(sendData))
 		}
 	}
 }
 
 func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsConfig *tls.Config) {
-
-	config := amqp.Config{TLSClientConfig: tlsConfig,
-		SASL:      nil,
-		Heartbeat: 10 * time.Second}
-	urlRabbitMQ := url.URL{Scheme: "amqps",
-		User: url.UserPassword(param.User, param.Password),
-		Host: param.Host,
+	urlRabbitMQ := url.URL{
+		Scheme: "amqps",
+		User:   url.UserPassword(param.User, param.Password),
+		Host:   param.Host,
 	}
-	log.Info("Consumer connection url: ", urlRabbitMQ.String())
+
+	log.WithField("url", urlRabbitMQ.String()).Debug("Consumer connection url")
 
 	for i := 0; i < connectionRetry; i++ {
-		conn, err := amqp.DialConfig(urlRabbitMQ.String(), config)
+		conn, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
+			TLSClientConfig: tlsConfig,
+			SASL:            nil,
+			Heartbeat:       10 * time.Second})
 		if err != nil {
-			log.Warning("Fail Amqp.Dial to Consumer #", i, err)
+			log.WithField("retry", i).Errorf("AMQP consumer dial error: %s", err)
 			continue
 		}
 
 		ch, err := conn.Channel()
 		if err != nil {
-			log.Warning("Failed to open Consumer channel #", i, err)
+			log.WithField("retry", i).Errorf("Failed to open sender channel: %s", err)
 			continue
 		}
 
@@ -412,66 +413,73 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 			nil,              // args
 		)
 		if err != nil {
-			log.Warning("Failed to register a consumer #", i, err)
+			log.WithField("retry", i).Errorf("Failed to register consumer: %s", err)
 			continue
 		}
 
-		handler.consumerInfo.ch = msgs
-		handler.consumerInfo.conn = conn
-		handler.consumerInfo.valid = true
+		handler.consumerInfo = amqpLocalConsumerConnectionInfo{
+			ch:    msgs,
+			conn:  conn,
+			valid: true}
 
 		handler.startConsumer(&handler.consumerInfo)
-		log.Warning("Stop Consumer connection #", i)
+
 		if handler.consumerInfo.valid == false {
 			break
 		}
 	}
-	log.Warning("Connection close to Consumer")
+
 	if handler.consumerInfo.valid == true {
+		log.Debug("Generate Error connection close to consumer")
+
 		handler.CloseAllConnections()
-		log.Error("Generate Error Connection close to consumer")
 		handler.MessageChannel <- errors.New("Connection close to consumer")
 	}
 }
 
 func (handler *AmqpHandler) startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
-	log.Info("Start listen")
+	log.Info("Start AMQP consumer")
+
 	for d := range consumerInfo.ch {
-		log.Info("Received a message: ", string(d.Body))
-		log.Info("CorrelationId: ", d.CorrelationId)
+		log.WithFields(log.Fields{
+			"message":      string(d.Body),
+			"corrlationId": d.CorrelationId}).Debug("AMQP received message")
+
 		var encryptList desiredStatus
 
-		err := json.Unmarshal(d.Body, &encryptList) // TODO: add check
-		if err != nil {
-			log.Error("Receive ", string(d.Body), err)
+		if err := json.Unmarshal(d.Body, &encryptList); err != nil { // TODO: add check
+			log.Errorf("AMQP consumer error: %s", err)
 			continue
 		}
 
 		if encryptList.MessageType != "desiredStatus" {
-			log.Warning("Incorrect msg type ", encryptList.MessageType)
+			log.Warnf("AMQP unsupported message type: %s", encryptList.MessageType)
 			continue
 		}
 
 		var servInfoArray []ServiceInfoFromCloud
+
 		cmsData, err := base64.StdEncoding.DecodeString(encryptList.Services)
 		if err != nil {
-			log.Error("Can't decode base64 data from element: ", err)
+			log.Errorf("Can't decode base64 data from element: %s", err)
 			continue
 		}
 
 		decryptData, err := fcrypt.DecryptMetadata(cmsData)
 		if err != nil {
-			log.Error("Decryption metadata error")
+			log.Errorf("Decryption metadata error: %s", err)
 			continue
 		}
-		log.Info("Decrypted data:", string(decryptData))
 
-		err = json.Unmarshal(decryptData, &servInfoArray)
-		if err != nil {
-			log.Error("Can't make json from decrypt data", string(decryptData), err)
+		log.WithField("data", string(decryptData)).Debug("Decrypted data")
+
+		if err := json.Unmarshal(decryptData, &servInfoArray); err != nil {
+			log.Errorf("Can't make json from decrypt data: %s", err)
 			continue
 		}
+
 		handler.MessageChannel <- servInfoArray
 	}
-	log.Warning("END listen") //TODO: add return error to channel
+
+	log.Debugf("AMQP consumer closed")
 }
