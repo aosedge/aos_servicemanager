@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
@@ -37,20 +38,68 @@ type AmqpHandler struct {
 
 // ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
-	ID                     string `json:"id"`
-	Version                uint   `json:"version"`
-	UpdateType             string `json:"updateType"`
-	DownloadURL            string `json:"downloadUrl"`
-	URLExpiration          string `json:"urlExpiration"`
-	SignatureAlgorithm     string `json:"signatureAlgorithm"`
-	SignatureAlgorithmHash string `json:"signatureAlgorithmHash"`
-	SignatureScheme        string `json:"signatureScheme"`
-	ImageSignature         string `json:"imageSignature"`
-	CertificateChain       string `json:"certificateChain"`
-	EncryptionKey          string `json:"encryptionKey"`
-	EncryptionAlgorithm    string `json:"encryptionAlgorithm"`
-	EncryptionMode         string `json:"encryptionMode"`
-	EncryptionModeParams   string `json:"encryptionModeParams"`
+	ID                     string             `json:"id"`
+	Version                uint               `json:"version"`
+	UpdateType             string             `json:"updateType"`
+	DownloadURL            string             `json:"downloadUrl"`
+	URLExpiration          string             `json:"urlExpiration"`
+	SignatureAlgorithm     string             `json:"signatureAlgorithm"`
+	SignatureAlgorithmHash string             `json:"signatureAlgorithmHash"`
+	SignatureScheme        string             `json:"signatureScheme"`
+	ImageSignature         string             `json:"imageSignature"`
+	CertificateChain       string             `json:"certificateChain"`
+	EncryptionKey          string             `json:"encryptionKey"`
+	EncryptionAlgorithm    string             `json:"encryptionAlgorithm"`
+	EncryptionMode         string             `json:"encryptionMode"`
+	EncryptionModeParams   string             `json:"encryptionModeParams"`
+	ServiceMonitoring      *ServiceAlertRules `json:"serviceMonitoring,omitempty"`
+}
+
+// ServiceAlertRules define service monitoring alerts rules
+type ServiceAlertRules struct {
+	RAM        *config.AlertRule `json:"ram,omitempty"`
+	CPU        *config.AlertRule `json:"cpu,omitempty"`
+	UsedDisk   *config.AlertRule `json:"usedDisk,omitempty"`
+	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
+}
+
+// AlertData alert element
+type AlertData struct {
+	Value     uint64    `json:"value"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// MonitoringAlerts arras with alerts
+type MonitoringAlerts struct {
+	RAM        []AlertData `json:"ram"`
+	CPU        []AlertData `json:"cpu"`
+	UsedDisk   []AlertData `json:"usedDisk"`
+	InTraffic  []AlertData `json:"inTraffic"`
+	OutTraffic []AlertData `json:"outTraffic"`
+}
+
+// ServiceMonitoringData monitoring data for service
+type ServiceMonitoringData struct {
+	ServiceID  string           `json:"serviceId"`
+	RAM        uint64           `json:"ram"`
+	CPU        uint64           `json:"cpu"`
+	UsedDisk   uint64           `json:"usedDisk"`
+	InTraffic  uint64           `json:"inTraffic"`
+	OutTraffic uint64           `json:"outTraffic"`
+	Alerts     MonitoringAlerts `json:"alerts"`
+}
+
+// MonitoringData define monitoring data structure
+type MonitoringData struct {
+	Global struct {
+		RAM        uint64           `json:"ram"`
+		CPU        uint64           `json:"cpu"`
+		UsedDisk   uint64           `json:"usedDisk"`
+		InTraffic  uint64           `json:"inTraffic"`
+		OutTraffic uint64           `json:"outTraffic"`
+		Alerts     MonitoringAlerts `json:"alerts"`
+	} `json:"global"`
+	ServicesData []ServiceMonitoringData `json:"servicesData"`
 }
 
 // ServiceInfo struct with service information
@@ -71,6 +120,14 @@ type serviceDiscoveryRequest struct {
 	Version int      `json:"version"`
 	VIN     string   `json:"VIN"`
 	Users   []string `json:"users"`
+}
+
+// messageMonitor structure which define AOS monitoring message
+type messageMonitor struct {
+	Version     int            `json:"version"`
+	MessageType string         `json:"messageType"` //monitoringData
+	Timestamp   time.Time      `json:"timestamp"`
+	Data        MonitoringData `json:"data"`
 }
 
 type vehicleStatus struct {
