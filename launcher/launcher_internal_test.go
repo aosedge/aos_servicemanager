@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 
 	log "github.com/sirupsen/logrus"
 
@@ -30,6 +33,18 @@ type pythonImage struct {
 
 // Generates test image with iperf server
 type iperfImage struct {
+}
+
+// Test monitor info
+type testMonitorInfo struct {
+	serviceID string
+	config    monitoring.ServiceMonitoringConfig
+}
+
+// Test monitor
+type testMonitor struct {
+	startChannel chan *testMonitorInfo
+	stopChannel  chan string
 }
 
 /*******************************************************************************
@@ -55,8 +70,8 @@ func init() {
  * Private
  ******************************************************************************/
 
-func newTestLauncher(downloader downloadItf) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db)
+func newTestLauncher(downloader downloadItf, monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
+	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db, monitoring)
 	if err != nil {
 		return launcher, err
 	}
@@ -169,6 +184,28 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	return outputFile, nil
 }
 
+func newTestMonitor() (monitor *testMonitor, err error) {
+	monitor = &testMonitor{}
+
+	monitor.startChannel = make(chan *testMonitorInfo, 100)
+	monitor.stopChannel = make(chan string, 100)
+
+	return monitor, nil
+}
+
+func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig monitoring.ServiceMonitoringConfig) (err error) {
+
+	monitor.startChannel <- &testMonitorInfo{serviceID, monitorConfig}
+
+	return nil
+}
+
+func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
+	monitor.stopChannel <- serviceID
+
+	return nil
+}
+
 func (launcher *Launcher) removeAllServices() (err error) {
 	services, err := launcher.db.GetServices()
 	if err != nil {
@@ -226,7 +263,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		return err
 	}
@@ -315,7 +352,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemove(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -387,7 +424,7 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func TestAutoStart(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -413,7 +450,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage))
+	launcher, err = newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -463,7 +500,7 @@ func TestAutoStart(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -507,7 +544,7 @@ func TestErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -574,7 +611,7 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestNetworkSpeed(t *testing.T) {
-	launcher, err := newTestLauncher(new(iperfImage))
+	launcher, err := newTestLauncher(new(iperfImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -650,7 +687,7 @@ func TestNetworkSpeed(t *testing.T) {
 }
 
 func TestVisPermissions(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -681,7 +718,7 @@ func TestVisPermissions(t *testing.T) {
 }
 
 func TestUsersServices(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -780,7 +817,7 @@ func TestUsersServices(t *testing.T) {
 }
 
 func TestServiceTTL(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage))
+	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -833,5 +870,78 @@ func TestServiceTTL(t *testing.T) {
 
 	if len(usersList) != 0 {
 		t.Fatal("Wrong users quantity", usersList)
+	}
+}
+
+func TestServiceMonitoring(t *testing.T) {
+	monitor, err := newTestMonitor()
+	if err != nil {
+		t.Fatalf("Can't create monitor: %s", err)
+	}
+
+	launcher, err := newTestLauncher(new(pythonImage), monitor)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"user0"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	serviceAlerts := amqp.ServiceAlertRules{
+		RAM: &config.AlertRule{
+			MinTimeout:   config.Duration{Duration: 30 * time.Second},
+			MinThreshold: 0,
+			MaxThreshold: 80},
+		CPU: &config.AlertRule{
+			MinTimeout:   config.Duration{Duration: 1 * time.Minute},
+			MinThreshold: 0,
+			MaxThreshold: 20},
+		UsedDisk: &config.AlertRule{
+			MinTimeout:   config.Duration{Duration: 5 * time.Minute},
+			MinThreshold: 0,
+			MaxThreshold: 20}}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", ServiceMonitoring: &serviceAlerts})
+	if status := <-launcher.StatusChannel; status.Err != nil {
+		t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+	}
+
+	select {
+	case info := <-monitor.startChannel:
+		if info.config.Pid == 0 {
+			t.Fatalf("Wrong service pid: %d", info.config.Pid)
+		}
+
+		if info.serviceID != "Service1" {
+			t.Fatalf("Wrong service ID: %s", info.serviceID)
+		}
+
+		if !reflect.DeepEqual(info.config.ServiceRules, &serviceAlerts) {
+			t.Fatalf("Wrong service alert rules")
+		}
+
+	case <-time.After(1000 * time.Millisecond):
+		t.Errorf("Waiting for service monitor timeout")
+	}
+
+	launcher.RemoveService("Service1")
+	if status := <-launcher.StatusChannel; status.Err != nil {
+		t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
+	}
+
+	select {
+	case serviceID := <-monitor.stopChannel:
+		if serviceID != "Service1" {
+			t.Fatalf("Wrong service ID: %s", serviceID)
+		}
+
+	case <-time.After(2000 * time.Millisecond):
+		t.Errorf("Waiting for service monitor timeout")
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
