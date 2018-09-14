@@ -3,16 +3,121 @@ package launcher
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/cavaliercoder/grab"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
+
+/*******************************************************************************
+ * Service image related API
+ ******************************************************************************/
+
+// downloadService downloads service
+func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	client := grab.NewClient()
+
+	destDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create tmp dir : ", err)
+		return outputFile, err
+	}
+	req, err := grab.NewRequest(destDir, serviceInfo.DownloadURL)
+	if err != nil {
+		log.Error("Can't download package: ", err)
+		return outputFile, err
+	}
+
+	// start download
+	resp := client.Do(req)
+	defer os.RemoveAll(destDir)
+
+	log.WithField("filename", resp.Filename).Debug("Start downloading")
+
+	// wait when finished
+	resp.Wait()
+
+	if err = resp.Err(); err != nil {
+		log.Error("Can't download package: ", err)
+		return outputFile, err
+	}
+
+	imageSignature, err := hex.DecodeString(serviceInfo.ImageSignature)
+	if err != nil {
+		log.Error("Error decoding HEX string for signature: ", err)
+		return outputFile, err
+	}
+
+	encryptionKey, err := hex.DecodeString(serviceInfo.EncryptionKey)
+	if err != nil {
+		log.Error("Error decoding HEX string for key: ", err)
+		return outputFile, err
+	}
+
+	encryptionModeParams, err := hex.DecodeString(serviceInfo.EncryptionModeParams)
+	if err != nil {
+		log.Error("Error decoding HEX string for IV: ", err)
+		return outputFile, err
+	}
+
+	certificateChain := strings.Replace(serviceInfo.CertificateChain, "\\n", "", -1)
+	outputFile, err = fcrypt.DecryptImage(
+		resp.Filename,
+		imageSignature,
+		encryptionKey,
+		encryptionModeParams,
+		serviceInfo.SignatureAlgorithm,
+		serviceInfo.SignatureAlgorithmHash,
+		serviceInfo.SignatureScheme,
+		serviceInfo.EncryptionAlgorithm,
+		serviceInfo.EncryptionMode,
+		certificateChain)
+
+	if err != nil {
+		log.Error("Can't decrypt image: ", err)
+		return outputFile, err
+	}
+
+	log.WithField("filename", outputFile).Debug("Decrypt image")
+
+	return outputFile, nil
+}
+
+func (launcher *Launcher) downloadAndUnpackImage(serviceInfo amqp.ServiceInfoFromCloud) (installDir string, err error) {
+	// download image
+	image, err := launcher.downloader.downloadService(serviceInfo)
+	if image != "" {
+		defer os.Remove(image)
+	}
+	if err != nil {
+		return installDir, err
+	}
+
+	// create install dir
+	installDir, err = ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
+	if err != nil {
+		return installDir, err
+	}
+	log.WithField("dir", installDir).Debug("Create install dir")
+
+	// unpack image there
+	if err = unpackImage(image, installDir); err != nil {
+		return installDir, err
+	}
+
+	return installDir, nil
+}
 
 func packImage(source, name string) (err error) {
 	log.WithFields(log.Fields{"source": source, "name": name}).Debug("Pack image")
