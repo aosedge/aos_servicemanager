@@ -16,6 +16,7 @@ import (
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 )
 
 /*******************************************************************************
@@ -81,6 +82,7 @@ type Launcher struct {
 	StatusChannel chan ActionStatus
 
 	db      *database.Database
+	monitor monitoring.ServiceMonitoringItf
 	systemd *dbus.Conn
 	config  *config.Config
 
@@ -114,13 +116,15 @@ type serviceAction struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, db *database.Database) (launcher *Launcher, err error) {
+func New(config *config.Config, db *database.Database,
+	monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	var localLauncher Launcher
 
 	localLauncher.db = db
 	localLauncher.config = config
+	localLauncher.monitor = monitoring
 
 	localLauncher.closeChannel = make(chan bool)
 	localLauncher.StatusChannel = make(chan ActionStatus, maxExecutedActions)

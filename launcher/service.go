@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 )
 
 /*******************************************************************************
@@ -113,6 +115,10 @@ func (launcher *Launcher) stopService(id, serviceName string) (err error) {
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
 
+	if err := launcher.updateMonitoring(id, stateStopped); err != nil {
+		log.WithField("id", id).Error("Can't update monitoring: ", err)
+	}
+
 	if err = launcher.db.SetServiceState(id, stateStopped); err != nil {
 		log.WithField("id", id).Warnf("Can't set service state: %s", err)
 	}
@@ -149,6 +155,19 @@ func (launcher *Launcher) stopServices() {
 	for i := 0; i < len(services); i++ {
 		<-statusChannel
 	}
+}
+
+func (launcher *Launcher) createAlertRulesFile(installDir string, rules *amqp.ServiceAlertRules) (err error) {
+	f, err := os.Create(path.Join(installDir, "alertrules.json"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "\t")
+
+	return encoder.Encode(rules)
 }
 
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (installDir string, err error) {
@@ -191,6 +210,12 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	ttl, err := strconv.ParseUint(spec.Annotations[aosProductPrefix+"service.TTL"], 10, 64)
 	if err != nil {
 		return installDir, err
+	}
+
+	if serviceInfo.ServiceMonitoring != nil {
+		if err := launcher.createAlertRulesFile(installDir, serviceInfo.ServiceMonitoring); err != nil {
+			return installDir, err
+		}
 	}
 
 	newService := database.ServiceEntry{
@@ -361,6 +386,78 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
+func (launcher *Launcher) getServicePid(fileName string) (pid int32, err error) {
+	pidStr, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return pid, err
+	}
+
+	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
+	if err != nil {
+		return pid, err
+	}
+
+	return int32(pid64), nil
+}
+
+func (launcher *Launcher) getAlertRules(fileName string) (rules *amqp.ServiceAlertRules, err error) {
+	data, err := ioutil.ReadFile(fileName)
+	// no file - no rules
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	rules = &amqp.ServiceAlertRules{}
+
+	if err = json.Unmarshal(data, rules); err != nil {
+		return nil, err
+	}
+
+	return rules, nil
+}
+
+func (launcher *Launcher) updateMonitoring(id string, state int) (err error) {
+	if launcher.monitor == nil {
+		return nil
+	}
+
+	service, err := launcher.db.GetService(id)
+	if err != nil {
+		return err
+	}
+
+	switch state {
+	case stateRunning:
+		pid, err := launcher.getServicePid(path.Join(service.Path, service.ID+".pid"))
+		if err != nil {
+			return err
+		}
+
+		rules, err := launcher.getAlertRules(path.Join(service.Path, "alertrules.json"))
+		if err != nil {
+			return err
+		}
+
+		if err = launcher.monitor.StartMonitorService(id, monitoring.ServiceMonitoringConfig{
+			Pid:          pid,
+			WorkingDir:   service.Path,
+			ServiceRules: rules}); err != nil {
+			return err
+		}
+
+	case stateStopped:
+		if err = launcher.monitor.StopMonitorService(id); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) handleSystemdSubscription() {
 	unitStatus, errorChannel := launcher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
 		2,
@@ -411,6 +508,10 @@ func (launcher *Launcher) handleSystemdSubscription() {
 
 						if err := launcher.db.SetServiceStatus(id.(string), status); err != nil {
 							log.WithField("name", unit.Name).Error("Can't set service status: ", err)
+						}
+
+						if err := launcher.updateMonitoring(id.(string), state); err != nil {
+							log.WithField("name", unit.Name).Error("Can't update monitoring: ", err)
 						}
 					} else {
 						log.WithField("name", unit.Name).Warning("Can't update state or status. Service is not installed.")
