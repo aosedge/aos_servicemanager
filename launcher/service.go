@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"os/user"
 	"path"
 	"path/filepath"
@@ -261,14 +260,9 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		log.WithField("path", service.Path).Error("Can't remove service path")
 	}
 
-	launcher.mutex.Lock()
-
-	log.WithField("user", service.UserName).Debug("Delete user")
-
-	if err := exec.Command("userdel", service.UserName).Run(); err != nil {
+	if err := launcher.deleteUser(service.UserName); err != nil {
 		log.WithField("user", service.UserName).Error("Can't remove user")
 	}
-	launcher.mutex.Unlock()
 
 	return nil
 }

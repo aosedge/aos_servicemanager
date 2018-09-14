@@ -38,3 +38,16 @@ func (launcher *Launcher) createUser(id string) (userName string, err error) {
 
 	return userName, nil
 }
+
+func (launcher *Launcher) deleteUser(id string) (err error) {
+	launcher.mutex.Lock()
+	defer launcher.mutex.Unlock()
+
+	log.WithField("user", id).Debug("Delete user")
+
+	if err = exec.Command("userdel", id).Run(); err != nil {
+		return err
+	}
+
+	return nil
+}
