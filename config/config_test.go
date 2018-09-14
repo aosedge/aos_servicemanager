@@ -1,11 +1,13 @@
 package config_test
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"log"
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
@@ -26,7 +28,23 @@ func createConfigFile() (err error) {
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
 	"visServer" : "wss://localhost:8088",
-	"defaultServiceTTLDays" : 30
+	"defaultServiceTTLDays" : 30,
+	"monitoring": {
+		"sendPeriod": "00:05:00",
+		"pollPeriod": "00:00:01",
+		"maxOfflineMessages": 25,
+		"maxAlertsPerMessage": 128,
+		"ram": {
+			"minTimeout": "00:00:10",
+			"minThreshold": 10,
+			"maxThreshold": 150
+		},
+		"outTraffic": {
+			"minTimeout": "00:00:20",
+			"minThreshold": 10,
+			"maxThreshold": 150
+		}
+	}
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -146,5 +164,41 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 
 	if config.DefaultServiceTTL != 30 {
 		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTL)
+	}
+}
+
+func TestDurationMarshal(t *testing.T) {
+	d := config.Duration{Duration: 32 * time.Second}
+
+	result, err := json.Marshal(d)
+	if err != nil {
+		t.Errorf("Can't marshal: %s", err)
+	}
+
+	if string(result) != `"00:00:32"` {
+		t.Errorf("Wrong value: %s", result)
+	}
+}
+
+func TestGetMonitoringConfig(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Monitoring.SendPeriod.Duration != 5*time.Minute {
+		t.Errorf("Wrong send period value: %s", config.Monitoring.SendPeriod)
+	}
+
+	if config.Monitoring.PollPeriod.Duration != 1*time.Second {
+		t.Errorf("Wrong poll period value: %s", config.Monitoring.PollPeriod)
+	}
+
+	if config.Monitoring.RAM.MinTimeout.Duration != 10*time.Second {
+		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
+	}
+
+	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
+		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
 	}
 }
