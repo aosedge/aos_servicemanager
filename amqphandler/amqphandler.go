@@ -445,15 +445,24 @@ func (handler *AmqpHandler) startConsumer(consumerInfo *amqpLocalConsumerConnect
 			"message":      string(d.Body),
 			"corrlationId": d.CorrelationId}).Debug("AMQP received message")
 
-		var encryptList desiredStatus
+		header := struct {
+			MessageType string `json:"messageType"`
+		}{}
 
-		if err := json.Unmarshal(d.Body, &encryptList); err != nil { // TODO: add check
+		if err := json.Unmarshal(d.Body, &header); err != nil {
 			log.Errorf("AMQP consumer error: %s", err)
 			continue
 		}
 
-		if encryptList.MessageType != "desiredStatus" {
-			log.Warnf("AMQP unsupported message type: %s", encryptList.MessageType)
+		if header.MessageType != "desiredStatus" {
+			log.Warnf("AMQP unsupported message type: %s", header.MessageType)
+			continue
+		}
+
+		var encryptList desiredStatus
+
+		if err := json.Unmarshal(d.Body, &encryptList); err != nil { // TODO: add check
+			log.Errorf("AMQP consumer error: %s", err)
 			continue
 		}
 
