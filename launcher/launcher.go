@@ -581,14 +581,10 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		serviceInfo := action.data.(amqp.ServiceInfoFromCloud)
 		status.Version = serviceInfo.Version
 
-		if err := launcher.doActionInstall(serviceInfo); err != nil {
-			status.Err = err
-		}
+		status.Err = launcher.doActionInstall(serviceInfo)
 
 	case ActionRemove:
-		if err := launcher.doActionRemove(status.ID); err != nil {
-			status.Err = err
-		}
+		status.Err = launcher.doActionRemove(status.ID)
 	}
 
 	launcher.StatusChannel <- status
