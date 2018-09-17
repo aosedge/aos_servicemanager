@@ -432,25 +432,27 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	return nil
 }
 
-func (launcher *Launcher) doActionRemove(id string) (err error) {
-	if launcher.users == nil {
-		return errors.New("Users are not set")
-	}
-
+func (launcher *Launcher) doActionRemove(id string) (version uint, err error) {
 	service, err := launcher.db.GetService(id)
 	if err != nil {
-		return err
+		return 0, err
+	}
+
+	version = service.Version
+
+	if launcher.users == nil {
+		return version, errors.New("Users are not set")
 	}
 
 	if err := launcher.stopService(service.ID, service.ServiceName); err != nil {
-		return err
+		return version, err
 	}
 
 	if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
-		return err
+		return version, err
 	}
 
-	return nil
+	return version, nil
 }
 
 func isUsersEqual(users1, users2 []string) (result bool) {
@@ -584,7 +586,7 @@ func (launcher *Launcher) processAction(item *list.Element) {
 		status.Err = launcher.doActionInstall(serviceInfo)
 
 	case ActionRemove:
-		status.Err = launcher.doActionRemove(status.ID)
+		status.Version, status.Err = launcher.doActionRemove(status.ID)
 	}
 
 	launcher.StatusChannel <- status
