@@ -750,6 +750,12 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 			// indicate error, can continue
 			log.WithField("path", oldService.Path).Error("Can't remove service path")
 		}
+
+		launcher.StatusChannel <- ActionStatus{
+			Action:  ActionRemove,
+			ID:      oldService.ID,
+			Version: oldService.Version,
+			Err:     nil}
 	}
 
 	return installDir, nil
