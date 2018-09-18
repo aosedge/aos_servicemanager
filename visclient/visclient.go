@@ -55,9 +55,10 @@ type errorInfo struct {
 }
 
 type visRequest struct {
-	Action    string `json:"action"`
-	Path      string `json:"path"`
-	RequestID string `json:"requestId"`
+	Action    string      `json:"action"`
+	Path      string      `json:"path"`
+	RequestID string      `json:"requestId"`
+	Value     interface{} `json:"value"`
 }
 
 type visResponse struct {
