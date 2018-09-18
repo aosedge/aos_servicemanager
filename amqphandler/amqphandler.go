@@ -210,9 +210,10 @@ type amqpLocalConsumerConnectionInfo struct {
  ******************************************************************************/
 
 const (
-	connectionRetry  = 3
-	vehicleStatusStr = "vehicleStatus"
-	serviceStatusStr = "serviceStatus"
+	connectionRetry   = 3
+	vehicleStatusStr  = "vehicleStatus"
+	serviceStatusStr  = "serviceStatus"
+	monitoringDataStr = "monitoringData"
 )
 
 /*******************************************************************************
@@ -280,6 +281,24 @@ func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err
 	if err != nil {
 		return err
 	}
+
+	handler.sendChannel <- reqJSON
+
+	return nil
+}
+
+// SendMonitoringData sends monitoring data
+func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
+	reqJSON, err := json.Marshal(messageMonitor{
+		Version:     1,
+		MessageType: monitoringDataStr,
+		Timestamp:   time.Now(),
+		Data:        monitoringData})
+	if err != nil {
+		return err
+	}
+
+	log.WithField("monitoringData", string(reqJSON)).Debug("Send monitoring data")
 
 	handler.sendChannel <- reqJSON
 
