@@ -22,6 +22,15 @@ import (
 )
 
 /*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+var (
+	systemdSubscribeBuffers  = 32
+	systemdSubscribeInterval = 500 * time.Millisecond
+)
+
+/*******************************************************************************
  * Service related API
  ******************************************************************************/
 
@@ -459,8 +468,9 @@ func (launcher *Launcher) updateMonitoring(id string, state int) (err error) {
 }
 
 func (launcher *Launcher) handleSystemdSubscription() {
-	unitStatus, errorChannel := launcher.systemd.SubscribeUnitsCustom(time.Millisecond*1000,
-		2,
+	unitStatus, errorChannel := launcher.systemd.SubscribeUnitsCustom(
+		systemdSubscribeInterval,
+		systemdSubscribeBuffers,
 		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
 		func(serviceName string) bool {
 			if _, exist := launcher.services.Load(serviceName); exist {
