@@ -11,6 +11,7 @@ import (
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
@@ -49,6 +50,8 @@ type Monitor struct {
 	dataToSend amqp.MonitoringData
 
 	alertProcessors *list.List
+
+	serviceMap map[string]*serviceMonitoring
 }
 
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
@@ -56,6 +59,12 @@ type ServiceMonitoringConfig struct {
 	Pid          int32
 	WorkingDir   string
 	ServiceRules *amqp.ServiceAlertRules
+}
+
+type serviceMonitoring struct {
+	workingDir     string
+	process        *process.Process
+	monitoringData amqp.ServiceMonitoringData
 }
 
 /*******************************************************************************
@@ -91,6 +100,7 @@ func New(config *config.Config) (monitor *Monitor, err error) {
 	monitor.dataToSend.Global.Alerts.UsedDisk = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
 	monitor.dataToSend.Global.Alerts.InTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
 	monitor.dataToSend.Global.Alerts.OutTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	monitor.dataToSend.ServicesData = make([]amqp.ServiceMonitoringData, 0)
 
 	if config.Monitoring.CPU != nil {
 		monitor.alertProcessors.PushBack(createAlertProcessor(
@@ -116,6 +126,8 @@ func New(config *config.Config) (monitor *Monitor, err error) {
 			*config.Monitoring.UsedDisk))
 	}
 
+	monitor.serviceMap = make(map[string]*serviceMonitoring)
+
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
 
@@ -134,14 +146,42 @@ func (monitor *Monitor) Close() {
 
 // StartMonitorService starts monitoring service
 func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig ServiceMonitoringConfig) (err error) {
-	log.WithField("id", serviceID).Debug("Start service monitoring")
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
+	log.WithFields(log.Fields{"id": serviceID, "pid": monitoringConfig.Pid}).Debug("Start service monitoring")
+
+	if _, ok := monitor.serviceMap[serviceID]; ok {
+		return errors.New("Service already under monitoring")
+	}
+
+	serviceMonitoring := serviceMonitoring{
+		workingDir: monitoringConfig.WorkingDir,
+		monitoringData: amqp.ServiceMonitoringData{
+			ServiceID: serviceID}}
+
+	serviceMonitoring.process, err = process.NewProcess(monitoringConfig.Pid)
+	if err != nil {
+		return err
+	}
+
+	monitor.serviceMap[serviceID] = &serviceMonitoring
 
 	return nil
 }
 
 // StopMonitorService stops monitoring service
 func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
+	monitor.mutex.Lock()
+	defer monitor.mutex.Unlock()
+
 	log.WithField("id", serviceID).Debug("Stop service monitoring")
+
+	if _, ok := monitor.serviceMap[serviceID]; !ok {
+		return errors.New("Service is not under monitoring")
+	}
+
+	delete(monitor.serviceMap, serviceID)
 
 	return nil
 }
@@ -161,6 +201,7 @@ func (monitor *Monitor) run() error {
 		case <-monitor.pollTimer.C:
 			monitor.mutex.Lock()
 			monitor.getCurrentSystemData()
+			monitor.getCurrentServicesData()
 			monitor.processAlerts()
 			monitor.mutex.Unlock()
 		}
@@ -168,6 +209,13 @@ func (monitor *Monitor) run() error {
 }
 
 func (monitor *Monitor) sendMonitoringData() {
+	// Update services
+	monitor.dataToSend.ServicesData = make([]amqp.ServiceMonitoringData, 0, len(monitor.serviceMap))
+
+	for _, service := range monitor.serviceMap {
+		monitor.dataToSend.ServicesData = append(monitor.dataToSend.ServicesData, service.monitoringData)
+	}
+
 	monitor.DataChannel <- monitor.dataToSend
 
 	// Clear arrays
@@ -200,6 +248,37 @@ func (monitor *Monitor) getCurrentSystemData() {
 		"CPU":  monitor.dataToSend.Global.CPU,
 		"RAM":  monitor.dataToSend.Global.RAM,
 		"Disk": monitor.dataToSend.Global.UsedDisk}).Debug("Monitoring data")
+}
+
+func (monitor *Monitor) getCurrentServicesData() {
+	var err error
+
+	for serviceID, value := range monitor.serviceMap {
+		value.monitoringData.CPU, err = getServiceCPUUsage(value.process)
+		if err != nil {
+			log.Errorf("Can't get service CPU: %s", err)
+		}
+
+		value.monitoringData.RAM, err = getServiceRAMUsage(value.process)
+		if err != nil {
+			log.Errorf("Can't get service RAM: %s", err)
+		}
+
+		// TODO: Add proper service disk usage when persistant storage is implemented.
+		// Put 0 for now.
+		// value.monitoringData.UsedDisk, err = getSystemDiskUsage(value.workingDir)
+		// if err != nil {
+		//	log.Errorf("Can't get service Disc usage: %s", err)
+		// }
+
+		value.monitoringData.UsedDisk = 0
+
+		log.WithFields(log.Fields{
+			"id":   serviceID,
+			"CPU":  value.monitoringData.CPU,
+			"RAM":  value.monitoringData.RAM,
+			"Disk": value.monitoringData.UsedDisk}).Debug("Service monitoring data")
+	}
 }
 
 func (monitor *Monitor) processAlerts() {
@@ -238,4 +317,24 @@ func getSystemDiskUsage(path string) (discUse uint64, err error) {
 	}
 
 	return v.Used, nil
+}
+
+// getServiceCPUUsage returns service CPU usage in percent
+func getServiceCPUUsage(p *process.Process) (cpuUse uint64, err error) {
+	v, err := p.CPUPercent()
+	if err != nil {
+		return cpuUse, err
+	}
+
+	return uint64(math.RoundToEven(v)), nil
+}
+
+// getServiceRAMUsage returns service RAM usage in bytes
+func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
+	v, err := p.MemoryInfo()
+	if err != nil {
+		return ram, err
+	}
+
+	return v.VMS, nil
 }

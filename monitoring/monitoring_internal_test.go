@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -140,6 +141,84 @@ func TestSystemAlerts(t *testing.T) {
 			if len(data.Global.Alerts.UsedDisk) != 1 {
 				t.Errorf("Wrong number of Disk alerts: %d", len(data.Global.Alerts.UsedDisk))
 			}
+			return
+
+		case <-time.After(sendDuration * 2):
+			t.Fatal("Monitoring data timeout")
+		}
+	}
+}
+
+func TestServices(t *testing.T) {
+	sendDuration := 1 * time.Second
+
+	monitor, err := New(
+		&config.Config{
+			WorkingDir: ".",
+			Monitoring: config.Monitoring{
+				SendPeriod:          config.Duration{Duration: sendDuration},
+				PollPeriod:          config.Duration{Duration: 1 * time.Second},
+				MaxAlertsPerMessage: 10}})
+	if err != nil {
+		t.Fatalf("Can't create monitoring instance: %s", err)
+	}
+	defer monitor.Close()
+
+	cmd1 := exec.Command("sleep", "10")
+	cmd2 := exec.Command("sleep", "10")
+
+	if err := cmd1.Start(); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	if err := cmd2.Start(); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	err = monitor.StartMonitorService("Service1",
+		ServiceMonitoringConfig{
+			Pid:        int32(cmd1.Process.Pid),
+			WorkingDir: "."})
+	if err != nil {
+		t.Fatalf("Can't start monitoring service: %s", err)
+	}
+
+	monitor.StartMonitorService("Service2",
+		ServiceMonitoringConfig{
+			Pid:        int32(cmd2.Process.Pid),
+			WorkingDir: "."})
+	if err != nil {
+		t.Fatalf("Can't start monitoring service: %s", err)
+	}
+
+	terminate := false
+
+	for terminate != true {
+		select {
+		case data := <-monitor.DataChannel:
+			if len(data.ServicesData) != 2 {
+				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			}
+
+			terminate = true
+
+		case <-time.After(sendDuration * 2):
+			t.Fatal("Monitoring data timeout")
+		}
+	}
+
+	err = monitor.StopMonitorService("Service1")
+	if err != nil {
+		t.Fatalf("Can't stop monitoring service: %s", err)
+	}
+
+	for {
+		select {
+		case data := <-monitor.DataChannel:
+			if len(data.ServicesData) != 1 {
+				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			}
+
 			return
 
 		case <-time.After(sendDuration * 2):
