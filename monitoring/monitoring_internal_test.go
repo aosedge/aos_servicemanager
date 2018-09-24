@@ -31,6 +31,34 @@ func init() {
  * Tests
  ******************************************************************************/
 
+func TestAlertProcessor(t *testing.T) {
+	var sourceValue uint64
+	destination := make([]amqp.AlertData, 0, 2)
+
+	alert := createAlertProcessor(
+		"Test",
+		&sourceValue,
+		&destination,
+		config.AlertRule{
+			MinTimeout:   config.Duration{Duration: 3 * time.Second},
+			MinThreshold: 80,
+			MaxThreshold: 90})
+
+	values := []uint64{50, 91, 79, 92, 93, 94, 95, 94, 79, 91, 92, 93, 94, 32, 91, 92, 93, 94, 95, 96}
+	alertsCount := []int{0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2}
+
+	currentTime := time.Now()
+
+	for i, value := range values {
+		sourceValue = value
+		alert.checkAlertDetection(currentTime)
+		if alertsCount[i] != len(destination) {
+			t.Errorf("Wrong alert count %d at %d", len(destination), i)
+		}
+		currentTime = currentTime.Add(time.Second)
+	}
+}
+
 func TestPeriodicReport(t *testing.T) {
 	sendDuration := 1 * time.Second
 
