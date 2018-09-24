@@ -178,7 +178,20 @@ func TestServices(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			Pid:        int32(cmd1.Process.Pid),
-			WorkingDir: "."})
+			WorkingDir: ".",
+			ServiceRules: &amqp.ServiceAlertRules{
+				CPU: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				RAM: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				UsedDisk: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0}}})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
@@ -186,7 +199,20 @@ func TestServices(t *testing.T) {
 	monitor.StartMonitorService("Service2",
 		ServiceMonitoringConfig{
 			Pid:        int32(cmd2.Process.Pid),
-			WorkingDir: "."})
+			WorkingDir: ".",
+			ServiceRules: &amqp.ServiceAlertRules{
+				CPU: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				RAM: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				UsedDisk: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0}}})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
@@ -198,6 +224,20 @@ func TestServices(t *testing.T) {
 		case data := <-monitor.DataChannel:
 			if len(data.ServicesData) != 2 {
 				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			}
+
+			for _, serviceData := range data.ServicesData {
+				if len(serviceData.Alerts.CPU) != 1 {
+					t.Errorf("Wrong number of CPU alerts: %d", len(serviceData.Alerts.CPU))
+				}
+
+				if len(serviceData.Alerts.RAM) != 1 {
+					t.Errorf("Wrong number of RAM alerts: %d", len(serviceData.Alerts.RAM))
+				}
+
+				if len(serviceData.Alerts.UsedDisk) != 1 {
+					t.Errorf("Wrong number of Disk alerts: %d", len(serviceData.Alerts.UsedDisk))
+				}
 			}
 
 			terminate = true
@@ -217,6 +257,20 @@ func TestServices(t *testing.T) {
 		case data := <-monitor.DataChannel:
 			if len(data.ServicesData) != 1 {
 				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			}
+
+			for _, serviceData := range data.ServicesData {
+				if len(serviceData.Alerts.CPU) != 0 {
+					t.Errorf("Wrong number of CPU alerts: %d", len(serviceData.Alerts.CPU))
+				}
+
+				if len(serviceData.Alerts.RAM) != 0 {
+					t.Errorf("Wrong number of RAM alerts: %d", len(serviceData.Alerts.RAM))
+				}
+
+				if len(serviceData.Alerts.UsedDisk) != 0 {
+					t.Errorf("Wrong number of Disk alerts: %d", len(serviceData.Alerts.UsedDisk))
+				}
 			}
 
 			return

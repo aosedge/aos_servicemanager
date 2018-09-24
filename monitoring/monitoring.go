@@ -62,9 +62,10 @@ type ServiceMonitoringConfig struct {
 }
 
 type serviceMonitoring struct {
-	workingDir     string
-	process        *process.Process
-	monitoringData amqp.ServiceMonitoringData
+	workingDir             string
+	process                *process.Process
+	monitoringData         amqp.ServiceMonitoringData
+	alertProcessorElements []*list.Element
 }
 
 /*******************************************************************************
@@ -160,9 +161,51 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
 
+	serviceMonitoring.monitoringData.Alerts.CPU = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	serviceMonitoring.monitoringData.Alerts.RAM = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	serviceMonitoring.monitoringData.Alerts.UsedDisk = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	serviceMonitoring.monitoringData.Alerts.InTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	serviceMonitoring.monitoringData.Alerts.OutTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+
 	serviceMonitoring.process, err = process.NewProcess(monitoringConfig.Pid)
 	if err != nil {
 		return err
+	}
+
+	rules := monitoringConfig.ServiceRules
+
+	// For optimization capacity should be equals numbers of measurement values
+	// 5 - RAM, CPU, UsedDisk, InTraffic, OutTraffic
+	serviceMonitoring.alertProcessorElements = make([]*list.Element, 0, 5)
+
+	if rules != nil && rules.CPU != nil {
+		e := monitor.alertProcessors.PushBack(createAlertProcessor(
+			serviceID+" CPU",
+			&serviceMonitoring.monitoringData.CPU,
+			&serviceMonitoring.monitoringData.Alerts.CPU,
+			*rules.CPU))
+
+		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
+	}
+
+	if rules != nil && rules.RAM != nil {
+		e := monitor.alertProcessors.PushBack(createAlertProcessor(
+			serviceID+" RAM",
+			&serviceMonitoring.monitoringData.RAM,
+			&serviceMonitoring.monitoringData.Alerts.RAM,
+			*rules.CPU))
+
+		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
+	}
+
+	if rules != nil && rules.UsedDisk != nil {
+		e := monitor.alertProcessors.PushBack(createAlertProcessor(
+			serviceID+" Disk",
+			&serviceMonitoring.monitoringData.UsedDisk,
+			&serviceMonitoring.monitoringData.Alerts.UsedDisk,
+			*rules.CPU))
+
+		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 	}
 
 	monitor.serviceMap[serviceID] = &serviceMonitoring
@@ -179,6 +222,10 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 
 	if _, ok := monitor.serviceMap[serviceID]; !ok {
 		return errors.New("Service is not under monitoring")
+	}
+
+	for _, e := range monitor.serviceMap[serviceID].alertProcessorElements {
+		monitor.alertProcessors.Remove(e)
 	}
 
 	delete(monitor.serviceMap, serviceID)
@@ -214,6 +261,13 @@ func (monitor *Monitor) sendMonitoringData() {
 
 	for _, service := range monitor.serviceMap {
 		monitor.dataToSend.ServicesData = append(monitor.dataToSend.ServicesData, service.monitoringData)
+
+		// Clear arrayes
+		service.monitoringData.Alerts.CPU = service.monitoringData.Alerts.CPU[:0]
+		service.monitoringData.Alerts.RAM = service.monitoringData.Alerts.RAM[:0]
+		service.monitoringData.Alerts.UsedDisk = service.monitoringData.Alerts.UsedDisk[:0]
+		service.monitoringData.Alerts.InTraffic = service.monitoringData.Alerts.InTraffic[:0]
+		service.monitoringData.Alerts.OutTraffic = service.monitoringData.Alerts.OutTraffic[:0]
 	}
 
 	monitor.DataChannel <- monitor.dataToSend
