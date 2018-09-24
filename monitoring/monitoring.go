@@ -2,6 +2,7 @@
 package monitoring
 
 import (
+	"container/list"
 	"errors"
 	"math"
 	"sync"
@@ -46,6 +47,8 @@ type Monitor struct {
 
 	mutex      sync.Mutex
 	dataToSend amqp.MonitoringData
+
+	alertProcessors *list.List
 }
 
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
@@ -80,6 +83,38 @@ func New(config *config.Config) (monitor *Monitor, err error) {
 
 	monitor.config = config.Monitoring
 	monitor.workingDir = config.WorkingDir
+
+	monitor.alertProcessors = list.New()
+
+	monitor.dataToSend.Global.Alerts.CPU = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	monitor.dataToSend.Global.Alerts.RAM = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	monitor.dataToSend.Global.Alerts.UsedDisk = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	monitor.dataToSend.Global.Alerts.InTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+	monitor.dataToSend.Global.Alerts.OutTraffic = make([]amqp.AlertData, 0, monitor.config.MaxAlertsPerMessage)
+
+	if config.Monitoring.CPU != nil {
+		monitor.alertProcessors.PushBack(createAlertProcessor(
+			"System CPU",
+			&monitor.dataToSend.Global.CPU,
+			&monitor.dataToSend.Global.Alerts.CPU,
+			*config.Monitoring.CPU))
+	}
+
+	if config.Monitoring.RAM != nil {
+		monitor.alertProcessors.PushBack(createAlertProcessor(
+			"System RAM",
+			&monitor.dataToSend.Global.RAM,
+			&monitor.dataToSend.Global.Alerts.RAM,
+			*config.Monitoring.RAM))
+	}
+
+	if config.Monitoring.UsedDisk != nil {
+		monitor.alertProcessors.PushBack(createAlertProcessor(
+			"System Disk",
+			&monitor.dataToSend.Global.UsedDisk,
+			&monitor.dataToSend.Global.Alerts.UsedDisk,
+			*config.Monitoring.UsedDisk))
+	}
 
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
@@ -126,6 +161,7 @@ func (monitor *Monitor) run() error {
 		case <-monitor.pollTimer.C:
 			monitor.mutex.Lock()
 			monitor.getCurrentSystemData()
+			monitor.processAlerts()
 			monitor.mutex.Unlock()
 		}
 	}
@@ -133,6 +169,13 @@ func (monitor *Monitor) run() error {
 
 func (monitor *Monitor) sendMonitoringData() {
 	monitor.DataChannel <- monitor.dataToSend
+
+	// Clear arrays
+	monitor.dataToSend.Global.Alerts.CPU = monitor.dataToSend.Global.Alerts.CPU[:0]
+	monitor.dataToSend.Global.Alerts.RAM = monitor.dataToSend.Global.Alerts.RAM[:0]
+	monitor.dataToSend.Global.Alerts.UsedDisk = monitor.dataToSend.Global.Alerts.UsedDisk[:0]
+	monitor.dataToSend.Global.Alerts.InTraffic = monitor.dataToSend.Global.Alerts.InTraffic[:0]
+	monitor.dataToSend.Global.Alerts.OutTraffic = monitor.dataToSend.Global.Alerts.OutTraffic[:0]
 }
 
 func (monitor *Monitor) getCurrentSystemData() {
@@ -157,6 +200,14 @@ func (monitor *Monitor) getCurrentSystemData() {
 		"CPU":  monitor.dataToSend.Global.CPU,
 		"RAM":  monitor.dataToSend.Global.RAM,
 		"Disk": monitor.dataToSend.Global.UsedDisk}).Debug("Monitoring data")
+}
+
+func (monitor *Monitor) processAlerts() {
+	currentTime := time.Now()
+
+	for e := monitor.alertProcessors.Front(); e != nil; e = e.Next() {
+		e.Value.(*alertProcessor).checkAlertDetection(currentTime)
+	}
 }
 
 // getSystemCPUUsage returns CPU usage in parcent

@@ -7,6 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
 
@@ -95,6 +96,53 @@ func TestPeriodicReport(t *testing.T) {
 			}
 
 		case <-timer.C:
+			t.Fatal("Monitoring data timeout")
+		}
+	}
+}
+
+func TestSystemAlerts(t *testing.T) {
+	sendDuration := 1 * time.Second
+
+	monitor, err := New(
+		&config.Config{
+			WorkingDir: ".",
+			Monitoring: config.Monitoring{
+				SendPeriod:          config.Duration{Duration: sendDuration},
+				PollPeriod:          config.Duration{Duration: 1 * time.Second},
+				MaxAlertsPerMessage: 10,
+				CPU: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				RAM: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				UsedDisk: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0}}})
+	if err != nil {
+		t.Fatalf("Can't create monitoring instance: %s", err)
+	}
+	defer monitor.Close()
+
+	for {
+		select {
+		case data := <-monitor.DataChannel:
+			if len(data.Global.Alerts.CPU) != 1 {
+				t.Errorf("Wrong number of CPU alerts: %d", len(data.Global.Alerts.CPU))
+			}
+			if len(data.Global.Alerts.RAM) != 1 {
+				t.Errorf("Wrong number of RAM alerts: %d", len(data.Global.Alerts.RAM))
+			}
+			if len(data.Global.Alerts.UsedDisk) != 1 {
+				t.Errorf("Wrong number of Disk alerts: %d", len(data.Global.Alerts.UsedDisk))
+			}
+			return
+
+		case <-time.After(sendDuration * 2):
 			t.Fatal("Monitoring data timeout")
 		}
 	}
