@@ -17,6 +17,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
@@ -110,7 +111,8 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 	}
 }
 
-func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher, visHandler *visclient.VisClient) {
+func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher,
+	visHandler *visclient.VisClient, monitorHandler *monitoring.Monitor) {
 	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
@@ -163,6 +165,12 @@ func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher, visH
 				log.Error("Error send service status message: ", err)
 			}
 
+		case data := <-monitorHandler.DataChannel:
+			err := amqpHandler.SendMonitoringData(data)
+			if err != nil {
+				log.Error("Error send monitoring data: ", err)
+			}
+
 		case users := <-visHandler.UsersChangedChannel:
 			log.WithField("users", users).Info("Users changed")
 			// reconnect
@@ -203,19 +211,29 @@ func main() {
 	}
 	defer db.Close()
 
-	// Create launcher
-	launcherHandler, err := launcher.New(config, db, nil)
-	if err != nil {
-		log.Fatalf("Can't create launcher: %s", err)
-	}
-	defer launcherHandler.Close()
-
 	// Create amqp
 	amqpHandler, err := amqp.New()
 	if err != nil {
 		log.Fatal("Can't create amqpHandler: ", err)
 	}
 	defer amqpHandler.CloseAllConnections()
+
+	// Create monitor
+	monitor, err := monitoring.New(config)
+	if err != nil {
+		if err == monitoring.ErrDisabled {
+			log.Warn(err)
+		} else {
+			log.Fatal("Can't create monitor: ", err)
+		}
+	}
+
+	// Create launcher
+	launcherHandler, err := launcher.New(config, db, monitor)
+	if err != nil {
+		log.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcherHandler.Close()
 
 	// Create D-Bus server
 	dbusServer, err := dbushandler.New(db)
@@ -239,6 +257,7 @@ func main() {
 		amqpHandler.CloseAllConnections()
 		dbusServer.Close()
 		vis.Close()
+		monitor.Close()
 		os.Exit(1)
 	}()
 
@@ -265,7 +284,7 @@ func main() {
 
 		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
-			run(amqpHandler, launcherHandler, vis)
+			run(amqpHandler, launcherHandler, vis, monitor)
 		} else {
 			log.Error("Can't establish connection: ", err)
 
