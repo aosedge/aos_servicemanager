@@ -34,6 +34,37 @@ var (
  * Service related API
  ******************************************************************************/
 
+func (launcher *Launcher) updateServiceState(id string, state int, status int) (err error) {
+	service, err := launcher.db.GetService(id)
+	if err != nil {
+		return err
+	}
+
+	if service.State != state {
+		if launcher.monitor != nil {
+			if err = launcher.updateMonitoring(service, state); err != nil {
+				log.WithField("id", id).Error("Can't update monitoring: ", err)
+			}
+		}
+
+		log.WithField("id", id).Debugf("Set service state: %s", stateStr[state])
+
+		if err = launcher.db.SetServiceState(id, state); err != nil {
+			return err
+		}
+	}
+
+	if service.Status != status {
+		log.WithField("id", id).Debugf("Set service status: %s", statusStr[status])
+
+		if err = launcher.db.SetServiceStatus(id, status); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) restartService(id, serviceName string) (err error) {
 	channel := make(chan string)
 	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
@@ -43,12 +74,8 @@ func (launcher *Launcher) restartService(id, serviceName string) (err error) {
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Restart service")
 
-	if err = launcher.db.SetServiceState(id, stateRunning); err != nil {
-		log.WithField("id", id).Warnf("Can't set service state: %s", err)
-	}
-
-	if err = launcher.db.SetServiceStatus(id, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't set service status: %s", err)
+	if err = launcher.updateServiceState(id, stateRunning, statusOk); err != nil {
+		log.WithField("id", id).Warnf("Can't update service state: %s", err)
 	}
 
 	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
@@ -69,12 +96,8 @@ func (launcher *Launcher) startService(id, serviceName string) (err error) {
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Start service")
 
-	if err = launcher.db.SetServiceState(id, stateRunning); err != nil {
-		log.WithField("id", id).Warnf("Can't set service state: %s", err)
-	}
-
-	if err = launcher.db.SetServiceStatus(id, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't set service status: %s", err)
+	if err = launcher.updateServiceState(id, stateRunning, statusOk); err != nil {
+		log.WithField("id", id).Warnf("Can't update service state: %s", err)
 	}
 
 	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
@@ -101,8 +124,15 @@ func (launcher *Launcher) startServices() {
 		go func(service database.ServiceEntry) {
 			err := launcher.startService(service.ID, service.ServiceName)
 			if err != nil {
-				log.Errorf("Can't start service %s: %s", service.ID, err)
+				log.WithField("id", service.ID).Errorf("Can't start service: %s", err)
 			}
+
+			if service.State == stateRunning && launcher.monitor != nil {
+				if err = launcher.updateMonitoring(service, stateRunning); err != nil {
+					log.WithField("id", service.ID).Errorf("Can't update monitoring: %s", err)
+				}
+			}
+
 			statusChannel <- err
 		}(service)
 	}
@@ -124,16 +154,8 @@ func (launcher *Launcher) stopService(id, serviceName string) (err error) {
 
 	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
 
-	if err := launcher.updateMonitoring(id, stateStopped); err != nil {
-		log.WithField("id", id).Error("Can't update monitoring: ", err)
-	}
-
-	if err = launcher.db.SetServiceState(id, stateStopped); err != nil {
-		log.WithField("id", id).Warnf("Can't set service state: %s", err)
-	}
-
-	if err = launcher.db.SetServiceStatus(id, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't set service status: %s", err)
+	if err = launcher.updateServiceState(id, stateStopped, statusOk); err != nil {
+		log.WithField("id", id).Warnf("Can't update service state: %s", err)
 	}
 
 	return nil
@@ -429,16 +451,7 @@ func (launcher *Launcher) getAlertRules(fileName string) (rules *amqp.ServiceAle
 	return rules, nil
 }
 
-func (launcher *Launcher) updateMonitoring(id string, state int) (err error) {
-	if launcher.monitor == nil {
-		return nil
-	}
-
-	service, err := launcher.db.GetService(id)
-	if err != nil {
-		return err
-	}
-
+func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state int) (err error) {
 	switch state {
 	case stateRunning:
 		pid, err := launcher.getServicePid(path.Join(service.Path, service.ID+".pid"))
@@ -451,7 +464,7 @@ func (launcher *Launcher) updateMonitoring(id string, state int) (err error) {
 			return err
 		}
 
-		if err = launcher.monitor.StartMonitorService(id, monitoring.ServiceMonitoringConfig{
+		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			Pid:          pid,
 			WorkingDir:   service.Path,
 			ServiceRules: rules}); err != nil {
@@ -459,7 +472,7 @@ func (launcher *Launcher) updateMonitoring(id string, state int) (err error) {
 		}
 
 	case stateStopped:
-		if err = launcher.monitor.StopMonitorService(id); err != nil {
+		if err = launcher.monitor.StopMonitorService(service.ID); err != nil {
 			return err
 		}
 	}
@@ -507,21 +520,11 @@ func (launcher *Launcher) handleSystemdSubscription() {
 						status = statusError
 					}
 
-					log.WithField("name", unit.Name).Debugf("Set service state: %s, status: %s", stateStr[state], statusStr[status])
-
 					id, exist := launcher.services.Load(unit.Name)
 
 					if exist {
-						if err := launcher.db.SetServiceState(id.(string), state); err != nil {
-							log.WithField("name", unit.Name).Error("Can't set service state: ", err)
-						}
-
-						if err := launcher.db.SetServiceStatus(id.(string), status); err != nil {
-							log.WithField("name", unit.Name).Error("Can't set service status: ", err)
-						}
-
-						if err := launcher.updateMonitoring(id.(string), state); err != nil {
-							log.WithField("name", unit.Name).Error("Can't update monitoring: ", err)
+						if err := launcher.updateServiceState(id.(string), state, status); err != nil {
+							log.WithField("id", id.(string)).Error("Can't update service state: ", err)
 						}
 					} else {
 						log.WithField("name", unit.Name).Warning("Can't update state or status. Service is not installed.")
