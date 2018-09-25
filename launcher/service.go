@@ -260,10 +260,14 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		Status:      statusOk,
 		TTL:         uint(ttl)}
 
-	if !serviceExists {
-		if err = launcher.addServiceToDB(newService); err != nil {
+	if serviceExists {
+		if err = launcher.db.RemoveService(serviceInfo.ID); err != nil {
 			return installDir, err
 		}
+	}
+
+	if err = launcher.addServiceToDB(newService); err != nil {
+		return installDir, err
 	}
 
 	if err = launcher.restartService(newService.ID, newService.ServiceName); err != nil {
@@ -273,10 +277,6 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	// remove if exists
 	if serviceExists {
-		if err = launcher.db.UpdateService(newService); err != nil {
-			return installDir, err
-		}
-
 		if err = os.RemoveAll(oldService.Path); err != nil {
 			// indicate error, can continue
 			log.WithField("path", oldService.Path).Error("Can't remove service path")
