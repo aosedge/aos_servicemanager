@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -31,9 +30,10 @@ type AmqpHandler struct {
 	// MessageChannel channel for amqp messages
 	MessageChannel chan interface{}
 
-	sendChannel  chan []byte                     // send channel
-	exchangeInfo amqpLocalSenderConnectionInfo   // connection for sending data
-	consumerInfo amqpLocalConsumerConnectionInfo // connection for receiving data
+	sendChannel chan []byte // send channel
+
+	sendConnection    *amqp.Connection
+	receiveConnection *amqp.Connection
 }
 
 // ServiceInfoFromCloud structure with Encripted Service information
@@ -189,22 +189,6 @@ type queueInfo struct {
 	NoWait           bool   `json:"noWait"`
 }
 
-type amqpLocalSenderConnectionInfo struct {
-	conn         *amqp.Connection
-	ch           *amqp.Channel
-	valid        bool
-	exchangeName string
-	mandatory    bool
-	immediate    bool
-	userID       string
-}
-
-type amqpLocalConsumerConnectionInfo struct {
-	conn  *amqp.Connection
-	ch    <-chan amqp.Delivery
-	valid bool
-}
-
 /*******************************************************************************
  * Variables
  ******************************************************************************/
@@ -240,8 +224,13 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 		return nil, err
 	}
 
-	go handler.startSendConnection(&amqpConn.SendParams, tlsConfig)
-	go handler.startConsumerConnection(&amqpConn.ReceiveParams, tlsConfig)
+	if err = handler.setupSendConnection(amqpConn.SendParams, tlsConfig); err != nil {
+		return nil, err
+	}
+
+	if err = handler.setupReceiveConnection(amqpConn.ReceiveParams, tlsConfig); err != nil {
+		return nil, err
+	}
 
 	return handler, nil
 }
@@ -302,20 +291,8 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 func (handler *AmqpHandler) Close() {
 	log.Info("Close AMQP")
 
-	handler.exchangeInfo.valid = false
-	handler.consumerInfo.valid = false
-
-	if handler.exchangeInfo.conn != nil {
-		log.Debug("AMQP: close exchange connection")
-		handler.exchangeInfo.conn.Close()
-		handler.exchangeInfo.conn = nil
-	}
-
-	if handler.consumerInfo.conn != nil {
-		log.Debug("AMQP: close consumer connection")
-		handler.consumerInfo.conn.Close()
-		handler.consumerInfo.conn = nil
-	}
+	handler.sendConnection.Close()
+	handler.receiveConnection.Close()
 }
 
 /*******************************************************************************
@@ -361,7 +338,7 @@ func getAmqpConnInfo(url string, request serviceDiscoveryRequest) (connection ra
 	return jsonResp.Connection, nil
 }
 
-func (handler *AmqpHandler) startSendConnection(params *sendParams, tlsConfig *tls.Config) {
+func (handler *AmqpHandler) setupSendConnection(params sendParams, tlsConfig *tls.Config) (err error) {
 	urlRabbitMQ := url.URL{
 		Scheme: "amqps",
 		User:   url.UserPassword(params.User, params.Password),
@@ -370,146 +347,107 @@ func (handler *AmqpHandler) startSendConnection(params *sendParams, tlsConfig *t
 
 	log.WithField("url", urlRabbitMQ.String()).Debug("Sender connection url")
 
-	for i := 0; i < connectionRetry; i++ {
-		conn, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
-			TLSClientConfig: tlsConfig,
-			SASL:            nil,
-			Heartbeat:       10 * time.Second})
-		if err != nil {
-			log.WithField("retry", i).Errorf("AMQP sender dial error: %s", err)
-			continue
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			log.WithField("retry", i).Errorf("Failed to open sender channel: %s", err)
-			continue
-		}
-
-		handler.exchangeInfo = amqpLocalSenderConnectionInfo{
-			conn:         conn,
-			ch:           ch,
-			valid:        true,
-			mandatory:    params.Mandatory,
-			immediate:    params.Immediate,
-			exchangeName: params.Exchange.Name,
-			userID:       params.User}
-
-		if err := handler.startSender(&handler.exchangeInfo); err != nil {
-			log.Errorf("AMQP sender error: %s", err)
-		}
-
-		if handler.exchangeInfo.valid == false {
-			break
-		}
+	connection, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
+		TLSClientConfig: tlsConfig,
+		SASL:            nil,
+		Heartbeat:       10 * time.Second})
+	if err != nil {
+		return err
 	}
 
-	if handler.exchangeInfo.valid == true {
-		log.Debug("Generate sender error connection close to Exchange")
-
-		handler.Close()
-		handler.MessageChannel <- errors.New("Connection close to Exchange")
+	amqpChannel, err := connection.Channel()
+	if err != nil {
+		return err
 	}
+
+	handler.sendConnection = connection
+
+	go handler.runSender(params, amqpChannel)
+
+	return nil
 }
 
-func (handler *AmqpHandler) startSender(info *amqpLocalSenderConnectionInfo) (err error) {
+func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Channel) {
 	log.Info("Start AMQP sender")
 
-	errch := info.conn.NotifyClose(make(chan *amqp.Error))
+	errorChannel := handler.sendConnection.NotifyClose(make(chan *amqp.Error))
 
 	for {
 		select {
-		case amqpErr := <-errch:
-			if amqpErr != nil {
-				return errors.New(amqpErr.Error())
+		case err := <-errorChannel:
+			if err != nil {
+				handler.MessageChannel <- err
 			}
+
+			log.Debugf("AMQP sender closed")
+
+			return
 
 		case sendData := <-handler.sendChannel:
-			if info.valid != true {
-				return errors.New("Invalid Sender connection")
-			}
-
-			if err = info.ch.Publish(
-				info.exchangeName, // exchange
-				"",                // routing key
-				info.mandatory,    // mandatory
-				info.immediate,    // immediate
+			if err := amqpChannel.Publish(
+				params.Exchange.Name, // exchange
+				"",                   // routing key
+				params.Mandatory,     // mandatory
+				params.Immediate,     // immediate
 				amqp.Publishing{
 					ContentType:   "application/json",
 					DeliveryMode:  2,
 					CorrelationId: "100", //TODO: add processing CorelationID
-					UserId:        info.userID,
+					UserId:        params.User,
 					Body:          sendData,
 				}); err != nil {
-				return err
+				log.Errorf("AMQP can't publish message: %", err)
 			}
 		}
 	}
 }
 
-func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsConfig *tls.Config) {
+func (handler *AmqpHandler) setupReceiveConnection(params receiveParams, tlsConfig *tls.Config) (err error) {
 	urlRabbitMQ := url.URL{
 		Scheme: "amqps",
-		User:   url.UserPassword(param.User, param.Password),
-		Host:   param.Host,
+		User:   url.UserPassword(params.User, params.Password),
+		Host:   params.Host,
 	}
 
 	log.WithField("url", urlRabbitMQ.String()).Debug("Consumer connection url")
 
-	for i := 0; i < connectionRetry; i++ {
-		conn, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
-			TLSClientConfig: tlsConfig,
-			SASL:            nil,
-			Heartbeat:       10 * time.Second})
-		if err != nil {
-			log.WithField("retry", i).Errorf("AMQP consumer dial error: %s", err)
-			continue
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			log.WithField("retry", i).Errorf("Failed to open sender channel: %s", err)
-			continue
-		}
-
-		msgs, err := ch.Consume(
-			param.Queue.Name, // queue
-			param.Consumer,   // consumer
-			true,             // auto-ack param.AutoAck
-			param.Exclusive,  // exclusive
-			param.NoLocal,    // no-local
-			param.NoWait,     // no-wait
-			nil,              // args
-		)
-		if err != nil {
-			log.WithField("retry", i).Errorf("Failed to register consumer: %s", err)
-			continue
-		}
-
-		handler.consumerInfo = amqpLocalConsumerConnectionInfo{
-			ch:    msgs,
-			conn:  conn,
-			valid: true}
-
-		handler.startConsumer(&handler.consumerInfo)
-
-		if handler.consumerInfo.valid == false {
-			break
-		}
+	connection, err := amqp.DialConfig(urlRabbitMQ.String(), amqp.Config{
+		TLSClientConfig: tlsConfig,
+		SASL:            nil,
+		Heartbeat:       10 * time.Second})
+	if err != nil {
+		return err
 	}
 
-	if handler.consumerInfo.valid == true {
-		log.Debug("Generate Error connection close to consumer")
-
-		handler.Close()
-		handler.MessageChannel <- errors.New("Connection close to consumer")
+	channel, err := connection.Channel()
+	if err != nil {
+		return err
 	}
+
+	deliveryChannel, err := channel.Consume(
+		params.Queue.Name, // queue
+		params.Consumer,   // consumer
+		true,              // auto-ack param.AutoAck
+		params.Exclusive,  // exclusive
+		params.NoLocal,    // no-local
+		params.NoWait,     // no-wait
+		nil,               // args
+	)
+	if err != nil {
+		return err
+	}
+
+	handler.receiveConnection = connection
+
+	go handler.runReceiver(params, deliveryChannel)
+
+	return nil
 }
 
-func (handler *AmqpHandler) startConsumer(consumerInfo *amqpLocalConsumerConnectionInfo) {
+func (handler *AmqpHandler) runReceiver(param receiveParams, delivaryChannel <-chan amqp.Delivery) {
 	log.Info("Start AMQP consumer")
 
-	for d := range consumerInfo.ch {
+	for d := range delivaryChannel {
 		log.WithFields(log.Fields{
 			"message":      string(d.Body),
 			"corrlationId": d.CorrelationId}).Debug("AMQP received message")
@@ -559,5 +497,5 @@ func (handler *AmqpHandler) startConsumer(consumerInfo *amqpLocalConsumerConnect
 		handler.MessageChannel <- servInfoArray
 	}
 
-	log.Debugf("AMQP consumer closed")
+	log.Debugf("AMQP receiver closed")
 }
