@@ -216,7 +216,7 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 		return nil, err
 	}
 
-	amqpConn, err := getAmqpConnInfo(sdURL, serviceDiscoveryRequest{
+	connectionInfo, err := getConnectionInfo(sdURL, serviceDiscoveryRequest{
 		Version: 1,
 		VIN:     vin,
 		Users:   users}, tlsConfig)
@@ -224,11 +224,11 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 		return nil, err
 	}
 
-	if err = handler.setupSendConnection(amqpConn.SendParams, tlsConfig); err != nil {
+	if err = handler.setupSendConnection(connectionInfo.SendParams, tlsConfig); err != nil {
 		return nil, err
 	}
 
-	if err = handler.setupReceiveConnection(amqpConn.ReceiveParams, tlsConfig); err != nil {
+	if err = handler.setupReceiveConnection(connectionInfo.ReceiveParams, tlsConfig); err != nil {
 		return nil, err
 	}
 
@@ -300,10 +300,10 @@ func (handler *AmqpHandler) Close() {
  ******************************************************************************/
 
 // service discovery implementation
-func getAmqpConnInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls.Config) (connection rabbitConnectioninfo, err error) {
+func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls.Config) (info rabbitConnectioninfo, err error) {
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
-		return connection, err
+		return info, err
 	}
 
 	log.WithField("request", string(reqJSON)).Info("AMQP service discovery request")
@@ -313,13 +313,13 @@ func getAmqpConnInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls
 
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJSON))
 	if err != nil {
-		return connection, err
+		return info, err
 	}
 	defer resp.Body.Close()
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return connection, err
+		return info, err
 	}
 	defer resp.Body.Close()
 
@@ -327,7 +327,7 @@ func getAmqpConnInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls
 
 	err = json.Unmarshal(htmlData, &jsonResp) // TODO: add check
 	if err != nil {
-		return connection, err
+		return info, err
 	}
 
 	return jsonResp.Connection, nil
