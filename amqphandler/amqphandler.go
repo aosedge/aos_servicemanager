@@ -211,15 +211,15 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 	handler.MessageChannel = make(chan interface{}, 100)
 	handler.sendChannel = make(chan []byte, 100)
 
-	amqpConn, err := getAmqpConnInfo(sdURL, serviceDiscoveryRequest{
-		Version: 1,
-		VIN:     vin,
-		Users:   users})
+	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	tlsConfig, err := fcrypt.GetTLSConfig()
+	amqpConn, err := getAmqpConnInfo(sdURL, serviceDiscoveryRequest{
+		Version: 1,
+		VIN:     vin,
+		Users:   users}, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -300,18 +300,13 @@ func (handler *AmqpHandler) Close() {
  ******************************************************************************/
 
 // service discovery implementation
-func getAmqpConnInfo(url string, request serviceDiscoveryRequest) (connection rabbitConnectioninfo, err error) {
+func getAmqpConnInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls.Config) (connection rabbitConnectioninfo, err error) {
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
 		return connection, err
 	}
 
 	log.WithField("request", string(reqJSON)).Info("AMQP service discovery request")
-
-	tlsConfig, err := fcrypt.GetTLSConfig()
-	if err != nil {
-		return connection, err
-	}
 
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client := &http.Client{Transport: transport}
