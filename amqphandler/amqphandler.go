@@ -148,20 +148,20 @@ type serviceDiscoveryResp struct {
 }
 
 type rabbitConnectioninfo struct {
-	SendParam     sendParam     `json:"sendParams"`
+	SendParams    sendParams    `json:"sendParams"`
 	ReceiveParams receiveParams `json:"receiveParams"`
 }
 
-type sendParam struct {
-	Host      string        `json:"host"`
-	User      string        `json:"user"`
-	Password  string        `json:"password"`
-	Mandatory bool          `json:"mandatory"`
-	Immediate bool          `json:"immediate"`
-	Exchange  exchangeParam `json:"exchange"`
+type sendParams struct {
+	Host      string         `json:"host"`
+	User      string         `json:"user"`
+	Password  string         `json:"password"`
+	Mandatory bool           `json:"mandatory"`
+	Immediate bool           `json:"immediate"`
+	Exchange  exchangeParams `json:"exchange"`
 }
 
-type exchangeParam struct {
+type exchangeParams struct {
 	Name       string `json:"name"`
 	Durable    bool   `json:"durable"`
 	AutoDetect bool   `json:"autoDetect"`
@@ -247,7 +247,7 @@ func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []st
 		return err
 	}
 
-	go handler.startSendConnection(&amqpConn.SendParam, tlsConfig)
+	go handler.startSendConnection(&amqpConn.SendParams, tlsConfig)
 	go handler.startConsumerConnection(&amqpConn.ReceiveParams, tlsConfig)
 
 	return nil
@@ -368,7 +368,7 @@ func getAmqpConnInfo(url string, request serviceDiscoveryRequest) (connection ra
 	return jsonResp.Connection, nil
 }
 
-func (handler *AmqpHandler) startSendConnection(params *sendParam, tlsConfig *tls.Config) {
+func (handler *AmqpHandler) startSendConnection(params *sendParams, tlsConfig *tls.Config) {
 	urlRabbitMQ := url.URL{
 		Scheme: "amqps",
 		User:   url.UserPassword(params.User, params.Password),
