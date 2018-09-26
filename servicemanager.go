@@ -211,13 +211,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Create amqp
-	amqpHandler, err := amqp.New()
-	if err != nil {
-		log.Fatal("Can't create amqpHandler: ", err)
-	}
-	defer amqpHandler.Close()
-
 	// Create monitor
 	monitor, err := monitoring.New(config)
 	if err != nil {
@@ -248,13 +241,17 @@ func main() {
 	}
 	defer vis.Close()
 
+	var amqpHandler *amqp.AmqpHandler
+
 	// Handle SIGTERM
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
 		launcherHandler.Close()
-		amqpHandler.Close()
+		if amqpHandler != nil {
+			amqpHandler.Close()
+		}
 		dbusServer.Close()
 		vis.Close()
 		monitor.Close()
@@ -282,16 +279,18 @@ func main() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
-		err = amqpHandler.InitAmqphandler(config.ServiceDiscoveryURL, vin, users)
+		// Create amqp
+		amqpHandler, err = amqp.New(config.ServiceDiscoveryURL, vin, users)
 		if err == nil {
 			run(amqpHandler, launcherHandler, vis, monitor)
-		} else {
-			log.Error("Can't establish connection: ", err)
 
-			time.Sleep(reconnectTimeout)
+			amqpHandler.Close()
+			amqpHandler = nil
+		} else {
+			log.Errorf("Can't establish connection: %s", err)
 		}
 
-		amqpHandler.Close()
+		time.Sleep(reconnectTimeout)
 
 		log.Debug("Reconnecting...")
 	}

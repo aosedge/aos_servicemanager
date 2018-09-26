@@ -221,36 +221,29 @@ const (
  ******************************************************************************/
 
 // New creates new amqp object
-func New() (handler *AmqpHandler, err error) {
+func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err error) {
 	handler = &AmqpHandler{}
 
 	handler.MessageChannel = make(chan interface{}, 100)
 	handler.sendChannel = make(chan []byte, 100)
-
-	return handler, nil
-}
-
-// InitAmqphandler initialization of rabbit amqp handler
-func (handler *AmqpHandler) InitAmqphandler(sdURL string, vin string, users []string) (err error) {
-	log.Debug("Init AMQP")
 
 	amqpConn, err := getAmqpConnInfo(sdURL, serviceDiscoveryRequest{
 		Version: 1,
 		VIN:     vin,
 		Users:   users})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	go handler.startSendConnection(&amqpConn.SendParams, tlsConfig)
 	go handler.startConsumerConnection(&amqpConn.ReceiveParams, tlsConfig)
 
-	return nil
+	return handler, nil
 }
 
 // SendInitialSetup sends initial list oaf available services
