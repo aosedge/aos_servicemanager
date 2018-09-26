@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	aosReconnectTimeSec = 3
+	reconnectTimeout = 3 * time.Second
 )
 
 func init() {
@@ -288,7 +288,7 @@ func main() {
 		} else {
 			log.Error("Can't establish connection: ", err)
 
-			time.Sleep(time.Second * aosReconnectTimeSec)
+			time.Sleep(reconnectTimeout)
 		}
 
 		amqpHandler.Close()
