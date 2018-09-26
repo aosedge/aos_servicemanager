@@ -216,7 +216,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Can't create amqpHandler: ", err)
 	}
-	defer amqpHandler.CloseAllConnections()
+	defer amqpHandler.Close()
 
 	// Create monitor
 	monitor, err := monitoring.New(config)
@@ -254,7 +254,7 @@ func main() {
 	go func() {
 		<-c
 		launcherHandler.Close()
-		amqpHandler.CloseAllConnections()
+		amqpHandler.Close()
 		dbusServer.Close()
 		vis.Close()
 		monitor.Close()
@@ -291,7 +291,7 @@ func main() {
 			time.Sleep(time.Second * aosReconnectTimeSec)
 		}
 
-		amqpHandler.CloseAllConnections()
+		amqpHandler.Close()
 
 		log.Debug("Reconnecting...")
 	}

@@ -305,9 +305,9 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 	return nil
 }
 
-// CloseAllConnections closes all amqp connection
-func (handler *AmqpHandler) CloseAllConnections() {
-	log.Info("AMQP: close all connections")
+// Close closes all amqp connection
+func (handler *AmqpHandler) Close() {
+	log.Info("Close AMQP")
 
 	handler.exchangeInfo.valid = false
 	handler.consumerInfo.valid = false
@@ -414,7 +414,7 @@ func (handler *AmqpHandler) startSendConnection(params *sendParams, tlsConfig *t
 	if handler.exchangeInfo.valid == true {
 		log.Debug("Generate sender error connection close to Exchange")
 
-		handler.CloseAllConnections()
+		handler.Close()
 		handler.MessageChannel <- errors.New("Connection close to Exchange")
 	}
 }
@@ -508,7 +508,7 @@ func (handler *AmqpHandler) startConsumerConnection(param *receiveParams, tlsCon
 	if handler.consumerInfo.valid == true {
 		log.Debug("Generate Error connection close to consumer")
 
-		handler.CloseAllConnections()
+		handler.Close()
 		handler.MessageChannel <- errors.New("Connection close to consumer")
 	}
 }
