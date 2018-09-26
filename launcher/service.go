@@ -261,6 +261,12 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		TTL:         uint(ttl)}
 
 	if serviceExists {
+		launcher.services.Delete(serviceName)
+
+		if err = launcher.updateServiceState(serviceInfo.ID, stateStopped, statusOk); err != nil {
+			return installDir, err
+		}
+
 		if err = launcher.db.RemoveService(serviceInfo.ID); err != nil {
 			return installDir, err
 		}
