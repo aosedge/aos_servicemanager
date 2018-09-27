@@ -216,19 +216,28 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 		return nil, err
 	}
 
-	connectionInfo, err := getConnectionInfo(sdURL, serviceDiscoveryRequest{
-		Version: 1,
-		VIN:     vin,
-		Users:   users}, tlsConfig)
-	if err != nil {
+	var connectionInfo rabbitConnectioninfo
+
+	if err := retryHelper(func() (err error) {
+		connectionInfo, err = getConnectionInfo(sdURL, serviceDiscoveryRequest{
+			Version: 1,
+			VIN:     vin,
+			Users:   users}, tlsConfig)
+
+		return err
+	}); err != nil {
 		return nil, err
 	}
 
-	if err = handler.setupSendConnection(connectionInfo.SendParams, tlsConfig); err != nil {
+	if err := retryHelper(func() (err error) {
+		return handler.setupSendConnection(connectionInfo.SendParams, tlsConfig)
+	}); err != nil {
 		return nil, err
 	}
 
-	if err = handler.setupReceiveConnection(connectionInfo.ReceiveParams, tlsConfig); err != nil {
+	if err := retryHelper(func() (err error) {
+		return handler.setupReceiveConnection(connectionInfo.ReceiveParams, tlsConfig)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -298,6 +307,22 @@ func (handler *AmqpHandler) Close() {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func retryHelper(f func() error) (err error) {
+	for try := 1; try <= connectionRetry; try++ {
+		if err = f(); err == nil {
+			return nil
+		}
+
+		if try < connectionRetry {
+			log.Errorf("%s. Retry...", err)
+		} else {
+			log.Errorf("%s. Retry limit reached", err)
+		}
+	}
+
+	return err
+}
 
 // service discovery implementation
 func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls.Config) (info rabbitConnectioninfo, err error) {
