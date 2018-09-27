@@ -232,8 +232,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmds(spec)
-	err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, setNetLimitCmd, clearNetLimitCmd)
+	err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec)
 	if err != nil {
 		return installDir, err
 	}
@@ -376,7 +375,7 @@ WantedBy=multi-user.target
 	return template, nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, setNetLimitCmd, clearNetLimitCmd string) (err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *specs.Spec) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
@@ -387,6 +386,8 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	if err != nil {
 		return err
 	}
+
+	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmds(spec)
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
