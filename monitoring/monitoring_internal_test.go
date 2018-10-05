@@ -123,6 +123,14 @@ func TestSystemAlerts(t *testing.T) {
 				UsedDisk: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
+					MaxThreshold: 0},
+				InTraffic: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				OutTraffic: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
 					MaxThreshold: 0}}})
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
@@ -140,6 +148,12 @@ func TestSystemAlerts(t *testing.T) {
 			}
 			if len(data.Global.Alerts.UsedDisk) != 1 {
 				t.Errorf("Wrong number of Disk alerts: %d", len(data.Global.Alerts.UsedDisk))
+			}
+			if len(data.Global.Alerts.InTraffic) != 1 {
+				t.Errorf("Wrong number of IN traffic alerts: %d", len(data.Global.Alerts.InTraffic))
+			}
+			if len(data.Global.Alerts.OutTraffic) != 1 {
+				t.Errorf("Wrong number of OUT traffic alerts: %d", len(data.Global.Alerts.OutTraffic))
 			}
 			return
 

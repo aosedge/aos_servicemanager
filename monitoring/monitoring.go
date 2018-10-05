@@ -5,9 +5,12 @@ import (
 	"container/list"
 	"errors"
 	"math"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
@@ -39,6 +42,9 @@ type ServiceMonitoringItf interface {
 // Monitor instance
 type Monitor struct {
 	DataChannel chan amqp.MonitoringData
+
+	iptables      *iptables.IPTables
+	skipAddresses string
 
 	config     config.Monitoring
 	workingDir string
@@ -127,10 +133,30 @@ func New(config *config.Config) (monitor *Monitor, err error) {
 			*config.Monitoring.UsedDisk))
 	}
 
+	if config.Monitoring.InTraffic != nil {
+		monitor.alertProcessors.PushBack(createAlertProcessor(
+			"IN Traffic",
+			&monitor.dataToSend.Global.InTraffic,
+			&monitor.dataToSend.Global.Alerts.InTraffic,
+			*config.Monitoring.InTraffic))
+	}
+
+	if config.Monitoring.OutTraffic != nil {
+		monitor.alertProcessors.PushBack(createAlertProcessor(
+			"OUT Traffic",
+			&monitor.dataToSend.Global.OutTraffic,
+			&monitor.dataToSend.Global.Alerts.OutTraffic,
+			*config.Monitoring.OutTraffic))
+	}
+
 	monitor.serviceMap = make(map[string]*serviceMonitoring)
 
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
+
+	if err = monitor.setupTrafficMonitor(); err != nil {
+		return nil, err
+	}
 
 	go monitor.run()
 
@@ -143,6 +169,8 @@ func (monitor *Monitor) Close() {
 
 	monitor.sendTimer.Stop()
 	monitor.pollTimer.Stop()
+
+	monitor.deleteAllTrafficChains()
 }
 
 // StartMonitorService starts monitoring service
@@ -298,10 +326,22 @@ func (monitor *Monitor) getCurrentSystemData() {
 		log.Errorf("Can't get system Disk usage: %s", err)
 	}
 
+	monitor.dataToSend.Global.InTraffic, err = monitor.getTrafficChainBytes("AOS_SYSTEM_IN")
+	if err != nil {
+		log.Errorf("Can't get IN traffic value: %s", err)
+	}
+
+	monitor.dataToSend.Global.OutTraffic, err = monitor.getTrafficChainBytes("AOS_SYSTEM_OUT")
+	if err != nil {
+		log.Errorf("Can't get OUT traffic value: %s", err)
+	}
+
 	log.WithFields(log.Fields{
 		"CPU":  monitor.dataToSend.Global.CPU,
 		"RAM":  monitor.dataToSend.Global.RAM,
-		"Disk": monitor.dataToSend.Global.UsedDisk}).Debug("Monitoring data")
+		"Disk": monitor.dataToSend.Global.UsedDisk,
+		"IN":   monitor.dataToSend.Global.InTraffic,
+		"OUT":  monitor.dataToSend.Global.OutTraffic}).Debug("Monitoring data")
 }
 
 func (monitor *Monitor) getCurrentServicesData() {
@@ -391,4 +431,131 @@ func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
 	}
 
 	return v.VMS, nil
+}
+
+func (monitor *Monitor) setupTrafficMonitor() (err error) {
+	monitor.iptables, err = iptables.New()
+	if err != nil {
+		return err
+	}
+
+	if err = monitor.deleteAllTrafficChains(); err != nil {
+		return err
+	}
+
+	// We have to count only interned traffic.  Skip local sub networks and netns
+	// bridge network from traffic count.
+	monitor.skipAddresses = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+	if monitor.config.NetnsBridgeIP != "" {
+		monitor.skipAddresses += "," + monitor.config.NetnsBridgeIP
+	}
+
+	if err = monitor.createTrafficChain("AOS_SYSTEM_IN", "INPUT",
+		"-s", monitor.skipAddresses, "-d", "0/0"); err != nil {
+		return err
+	}
+
+	if err = monitor.createTrafficChain("AOS_SYSTEM_OUT", "OUTPUT",
+		"-d", monitor.skipAddresses, "-s", "0/0"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (monitor *Monitor) getTrafficChainBytes(chain string) (value uint64, err error) {
+	stats, err := monitor.iptables.ListWithCounters("filter", chain)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(stats) > 0 {
+		items := strings.Fields(stats[len(stats)-1])
+		for i, item := range items {
+			if item == "-c" && len(items) >= i+3 {
+				return strconv.ParseUint(items[i+2], 10, 64)
+			}
+		}
+	}
+
+	return 0, errors.New("Statistic for chain not found")
+}
+
+func (monitor *Monitor) createTrafficChain(chain, rootChain,
+	skipAddrType, skipAddresses, addrType, addresses string) (err error) {
+	if err = monitor.iptables.NewChain("filter", chain); err != nil {
+		return err
+	}
+
+	if err = monitor.iptables.Append("filter", rootChain, "-j", chain); err != nil {
+		return err
+	}
+
+	// This addresses will be not count but returned back to the root chain
+	if skipAddresses != "" {
+		if err = monitor.iptables.Append("filter", chain, skipAddrType, skipAddresses, "-j", "RETURN"); err != nil {
+			return err
+		}
+	}
+
+	if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (monitor *Monitor) deleteAllRules(chain, rootChain string) (err error) {
+	for {
+		if err = monitor.iptables.Delete("filter", rootChain, "-j", chain); err != nil {
+			errIPTables, ok := err.(*iptables.Error)
+			if ok && errIPTables.IsNotExist() {
+				return nil
+			}
+
+			return err
+		}
+	}
+}
+
+func (monitor *Monitor) deleteTrafficChain(chain, rootChain string) (err error) {
+	log.WithField("chain", chain).Debug("Delete iptables chain")
+
+	if err = monitor.deleteAllRules(chain, rootChain); err != nil {
+		return err
+	}
+
+	if err = monitor.iptables.ClearChain("filter", chain); err != nil {
+		return err
+	}
+
+	if err = monitor.iptables.DeleteChain("filter", chain); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (monitor *Monitor) deleteAllTrafficChains() (err error) {
+	// Delete all aos related chains
+	chainList, err := monitor.iptables.ListChains("filter")
+	if err != nil {
+		return err
+	}
+
+	for _, chain := range chainList {
+		switch {
+		case chain == "AOS_SYSTEM_IN":
+			err = monitor.deleteTrafficChain(chain, "INPUT")
+
+		case chain == "AOS_SYSTEM_OUT":
+			err = monitor.deleteTrafficChain(chain, "OUTPUT")
+		}
+
+		if err != nil {
+			log.WithField("chain", chain).Errorf("Can't delete chain: %s", err)
+		}
+	}
+
+	return nil
 }

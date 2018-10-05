@@ -34,6 +34,7 @@ func createConfigFile() (err error) {
 		"pollPeriod": "00:00:01",
 		"maxOfflineMessages": 25,
 		"maxAlertsPerMessage": 128,
+		"netnsBridgeIP": "192.168.0.0/24",
 		"ram": {
 			"minTimeout": "00:00:10",
 			"minThreshold": 10,
@@ -200,5 +201,9 @@ func TestGetMonitoringConfig(t *testing.T) {
 
 	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
 		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
+	}
+
+	if config.Monitoring.NetnsBridgeIP != "192.168.0.0/24" {
+		t.Errorf("Wrong value: %s", config.Monitoring.NetnsBridgeIP)
 	}
 }

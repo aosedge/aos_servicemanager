@@ -40,9 +40,11 @@ type Monitoring struct {
 	PollPeriod          Duration   `json:"pollPeriod"`
 	MaxOfflineMessages  int        `json:"maxOfflineMessages"`
 	MaxAlertsPerMessage int        `json:"maxAlertsPerMessage"`
+	NetnsBridgeIP       string     `json:"netnsBridgeIP"`
 	RAM                 *AlertRule `json:"ram"`
 	CPU                 *AlertRule `json:"cpu"`
 	UsedDisk            *AlertRule `json:"usedDisk"`
+	InTraffic           *AlertRule `json:"inTraffic"`
 	OutTraffic          *AlertRule `json:"outTraffic"`
 }
 
@@ -73,7 +75,8 @@ func New(fileName string) (config *Config, err error) {
 			SendPeriod:          Duration{1 * time.Minute},
 			PollPeriod:          Duration{10 * time.Second},
 			MaxAlertsPerMessage: 10,
-			MaxOfflineMessages:  25}}
+			MaxOfflineMessages:  25,
+			NetnsBridgeIP:       "172.19.0.0/16"}}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err
