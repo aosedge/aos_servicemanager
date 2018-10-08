@@ -4,6 +4,7 @@ package monitoring
 import (
 	"container/list"
 	"errors"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -45,6 +46,8 @@ type Monitor struct {
 
 	iptables      *iptables.IPTables
 	skipAddresses string
+	inChain       string
+	outChain      string
 
 	config     config.Monitoring
 	workingDir string
@@ -63,11 +66,14 @@ type Monitor struct {
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
 	Pid          int32
+	IPAddress    string
 	WorkingDir   string
 	ServiceRules *amqp.ServiceAlertRules
 }
 
 type serviceMonitoring struct {
+	inChain                string
+	outChain               string
 	workingDir             string
 	process                *process.Process
 	monitoringData         amqp.ServiceMonitoringData
@@ -178,13 +184,25 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	monitor.mutex.Lock()
 	defer monitor.mutex.Unlock()
 
-	log.WithFields(log.Fields{"id": serviceID, "pid": monitoringConfig.Pid}).Debug("Start service monitoring")
+	log.WithFields(log.Fields{
+		"id":  serviceID,
+		"pid": monitoringConfig.Pid,
+		"ip":  monitoringConfig.IPAddress}).Debug("Start service monitoring")
 
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		return errors.New("Service already under monitoring")
 	}
 
+	// convert id to hashed u64 value
+	hash := fnv.New64a()
+	hash.Write([]byte(serviceID))
+
+	// create base chain name
+	chainBase := strconv.FormatUint(hash.Sum64(), 16)
+
 	serviceMonitoring := serviceMonitoring{
+		inChain:    "AOS_" + chainBase + "_IN",
+		outChain:   "AOS_" + chainBase + "_OUT",
 		workingDir: monitoringConfig.WorkingDir,
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
@@ -197,6 +215,16 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 	serviceMonitoring.process, err = process.NewProcess(monitoringConfig.Pid)
 	if err != nil {
+		return err
+	}
+
+	if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD",
+		"-s", monitor.skipAddresses, "-d", monitoringConfig.IPAddress); err != nil {
+		return err
+	}
+
+	if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD",
+		"-d", monitor.skipAddresses, "-s", monitoringConfig.IPAddress); err != nil {
 		return err
 	}
 
@@ -236,6 +264,26 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 	}
 
+	if rules != nil && rules.InTraffic != nil {
+		e := monitor.alertProcessors.PushBack(createAlertProcessor(
+			serviceID+" Traffic IN",
+			&serviceMonitoring.monitoringData.InTraffic,
+			&serviceMonitoring.monitoringData.Alerts.InTraffic,
+			*rules.InTraffic))
+
+		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
+	}
+
+	if rules != nil && rules.OutTraffic != nil {
+		e := monitor.alertProcessors.PushBack(createAlertProcessor(
+			serviceID+" Traffic OUT",
+			&serviceMonitoring.monitoringData.OutTraffic,
+			&serviceMonitoring.monitoringData.Alerts.OutTraffic,
+			*rules.OutTraffic))
+
+		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
+	}
+
 	monitor.serviceMap[serviceID] = &serviceMonitoring
 
 	return nil
@@ -250,6 +298,14 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 
 	if _, ok := monitor.serviceMap[serviceID]; !ok {
 		return errors.New("Service is not under monitoring")
+	}
+
+	if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].inChain, "FORWARD"); err != nil {
+		log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+	}
+
+	if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].outChain, "FORWARD"); err != nil {
+		log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
 	}
 
 	for _, e := range monitor.serviceMap[serviceID].alertProcessorElements {
@@ -326,12 +382,12 @@ func (monitor *Monitor) getCurrentSystemData() {
 		log.Errorf("Can't get system Disk usage: %s", err)
 	}
 
-	monitor.dataToSend.Global.InTraffic, err = monitor.getTrafficChainBytes("AOS_SYSTEM_IN")
+	monitor.dataToSend.Global.InTraffic, err = monitor.getTrafficChainBytes(monitor.inChain)
 	if err != nil {
 		log.Errorf("Can't get IN traffic value: %s", err)
 	}
 
-	monitor.dataToSend.Global.OutTraffic, err = monitor.getTrafficChainBytes("AOS_SYSTEM_OUT")
+	monitor.dataToSend.Global.OutTraffic, err = monitor.getTrafficChainBytes(monitor.outChain)
 	if err != nil {
 		log.Errorf("Can't get OUT traffic value: %s", err)
 	}
@@ -367,11 +423,23 @@ func (monitor *Monitor) getCurrentServicesData() {
 
 		value.monitoringData.UsedDisk = 0
 
+		value.monitoringData.InTraffic, err = monitor.getTrafficChainBytes(value.inChain)
+		if err != nil {
+			log.Errorf("Can't get service IN traffic value: %s", err)
+		}
+
+		value.monitoringData.OutTraffic, err = monitor.getTrafficChainBytes(value.outChain)
+		if err != nil {
+			log.Errorf("Can't get service OUT traffic value: %s", err)
+		}
+
 		log.WithFields(log.Fields{
 			"id":   serviceID,
 			"CPU":  value.monitoringData.CPU,
 			"RAM":  value.monitoringData.RAM,
-			"Disk": value.monitoringData.UsedDisk}).Debug("Service monitoring data")
+			"Disk": value.monitoringData.UsedDisk,
+			"IN":   value.monitoringData.InTraffic,
+			"OUT":  value.monitoringData.OutTraffic}).Debug("Service monitoring data")
 	}
 }
 
@@ -439,6 +507,9 @@ func (monitor *Monitor) setupTrafficMonitor() (err error) {
 		return err
 	}
 
+	monitor.inChain = "AOS_SYSTEM_IN"
+	monitor.outChain = "AOS_SYSTEM_OUT"
+
 	if err = monitor.deleteAllTrafficChains(); err != nil {
 		return err
 	}
@@ -450,12 +521,12 @@ func (monitor *Monitor) setupTrafficMonitor() (err error) {
 		monitor.skipAddresses += "," + monitor.config.NetnsBridgeIP
 	}
 
-	if err = monitor.createTrafficChain("AOS_SYSTEM_IN", "INPUT",
+	if err = monitor.createTrafficChain(monitor.inChain, "INPUT",
 		"-s", monitor.skipAddresses, "-d", "0/0"); err != nil {
 		return err
 	}
 
-	if err = monitor.createTrafficChain("AOS_SYSTEM_OUT", "OUTPUT",
+	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT",
 		"-d", monitor.skipAddresses, "-s", "0/0"); err != nil {
 		return err
 	}
@@ -545,11 +616,20 @@ func (monitor *Monitor) deleteAllTrafficChains() (err error) {
 
 	for _, chain := range chainList {
 		switch {
-		case chain == "AOS_SYSTEM_IN":
+		case !strings.HasPrefix(chain, "AOS_"):
+			continue
+
+		case chain == monitor.inChain:
 			err = monitor.deleteTrafficChain(chain, "INPUT")
 
-		case chain == "AOS_SYSTEM_OUT":
+		case chain == monitor.outChain:
 			err = monitor.deleteTrafficChain(chain, "OUTPUT")
+
+		case strings.HasSuffix(chain, "_IN"):
+			err = monitor.deleteTrafficChain(chain, "FORWARD")
+
+		case strings.HasSuffix(chain, "_OUT"):
+			err = monitor.deleteTrafficChain(chain, "FORWARD")
 		}
 
 		if err != nil {

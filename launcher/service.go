@@ -477,6 +477,11 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 			return err
 		}
 
+		ipAddress, err := launcher.getServiceIPAddress(service.Path)
+		if err != nil {
+			return err
+		}
+
 		rules, err := launcher.getAlertRules(path.Join(service.Path, "alertrules.json"))
 		if err != nil {
 			return err
@@ -484,6 +489,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			Pid:          pid,
+			IPAddress:    ipAddress,
 			WorkingDir:   service.Path,
 			ServiceRules: rules}); err != nil {
 			return err

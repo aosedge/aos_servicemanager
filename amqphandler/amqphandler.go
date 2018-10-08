@@ -60,6 +60,7 @@ type ServiceAlertRules struct {
 	RAM        *config.AlertRule `json:"ram,omitempty"`
 	CPU        *config.AlertRule `json:"cpu,omitempty"`
 	UsedDisk   *config.AlertRule `json:"usedDisk,omitempty"`
+	InTraffic  *config.AlertRule `json:"inTraffic,omitempty"`
 	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
 }
 

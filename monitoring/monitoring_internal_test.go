@@ -192,6 +192,7 @@ func TestServices(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			Pid:        int32(cmd1.Process.Pid),
+			IPAddress:  "127.0.0.1",
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -203,6 +204,14 @@ func TestServices(t *testing.T) {
 					MinThreshold: 0,
 					MaxThreshold: 0},
 				UsedDisk: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				InTraffic: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
 					MaxThreshold: 0}}})
@@ -213,6 +222,7 @@ func TestServices(t *testing.T) {
 	monitor.StartMonitorService("Service2",
 		ServiceMonitoringConfig{
 			Pid:        int32(cmd2.Process.Pid),
+			IPAddress:  "127.0.0.1",
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -224,6 +234,14 @@ func TestServices(t *testing.T) {
 					MinThreshold: 0,
 					MaxThreshold: 0},
 				UsedDisk: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				InTraffic: &config.AlertRule{
+					MinTimeout:   config.Duration{},
+					MinThreshold: 0,
+					MaxThreshold: 0},
+				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
 					MaxThreshold: 0}}})
