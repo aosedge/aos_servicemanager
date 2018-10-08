@@ -345,13 +345,13 @@ Type=forking
 Restart=always
 RestartSec=1
 ExecStartPre=${RUNC} delete -f ${ID}
-ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/${ID}.pid -b ${SERVICEPATH} ${ID}
+ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
 ExecStartPost=-${SETNETLIMIT}
 
 ExecStop=-${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
 ExecStopPost=${RUNC} delete -f ${ID}
-PIDFile=${SERVICEPATH}/${ID}.pid
+PIDFile=${SERVICEPATH}/.pid
 
 [Install]
 WantedBy=multi-user.target
@@ -424,8 +424,8 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
-func (launcher *Launcher) getServicePid(fileName string) (pid int32, err error) {
-	pidStr, err := ioutil.ReadFile(fileName)
+func (launcher *Launcher) getServicePid(servicePath string) (pid int32, err error) {
+	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
 	if err != nil {
 		return pid, err
 	}
@@ -461,7 +461,7 @@ func (launcher *Launcher) getAlertRules(fileName string) (rules *amqp.ServiceAle
 func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state int) (err error) {
 	switch state {
 	case stateRunning:
-		pid, err := launcher.getServicePid(path.Join(service.Path, service.ID+".pid"))
+		pid, err := launcher.getServicePid(service.Path)
 		if err != nil {
 			return err
 		}
