@@ -424,6 +424,17 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
+func (launcher *Launcher) getServiceIPAddress(servicePath string) (address string, err error) {
+	data, err := ioutil.ReadFile(path.Join(servicePath, ".ip"))
+	if err != nil {
+		return address, err
+	}
+
+	address = string(data)
+
+	return address, nil
+}
+
 func (launcher *Launcher) getServicePid(servicePath string) (pid int32, err error) {
 	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
 	if err != nil {

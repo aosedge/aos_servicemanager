@@ -636,7 +636,13 @@ func TestNetworkSpeed(t *testing.T) {
 	for i := 0; i < numServices; i++ {
 		serviceID := fmt.Sprintf("service%d", i)
 
-		addr, err := launcher.GetServiceIPAddress(serviceID)
+		service, err := launcher.db.GetService(serviceID)
+		if err != nil {
+			t.Errorf("Can't get service: %s", err)
+			continue
+		}
+
+		addr, err := launcher.getServiceIPAddress(service.Path)
 		if err != nil {
 			t.Errorf("Can't get ip address: %s", err)
 			continue

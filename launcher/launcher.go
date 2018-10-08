@@ -3,7 +3,6 @@ package launcher
 
 import (
 	"container/list"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -246,25 +245,6 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	}
 
 	return info, nil
-}
-
-// GetServiceIPAddress returns service ip address
-func (launcher *Launcher) GetServiceIPAddress(id string) (address string, err error) {
-	service, err := launcher.db.GetService(id)
-	if err != nil {
-		return address, err
-	}
-
-	data, err := ioutil.ReadFile(path.Join(service.Path, ".ip"))
-	if err != nil {
-		return address, err
-	}
-
-	address = string(data)
-
-	log.WithField("id", id).Debugf("Get ip address: %s", address)
-
-	return address, nil
 }
 
 // SetUsers sets users for services
