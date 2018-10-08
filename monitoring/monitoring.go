@@ -221,7 +221,7 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 			serviceID+" RAM",
 			&serviceMonitoring.monitoringData.RAM,
 			&serviceMonitoring.monitoringData.Alerts.RAM,
-			*rules.CPU))
+			*rules.RAM))
 
 		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 	}
@@ -231,7 +231,7 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 			serviceID+" Disk",
 			&serviceMonitoring.monitoringData.UsedDisk,
 			&serviceMonitoring.monitoringData.Alerts.UsedDisk,
-			*rules.CPU))
+			*rules.UsedDisk))
 
 		serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 	}
