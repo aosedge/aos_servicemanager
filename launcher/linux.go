@@ -24,7 +24,7 @@ func (launcher *Launcher) createUser(id string) (userName string, err error) {
 	hash.Write([]byte(id))
 
 	// create user
-	userName = "user_" + strconv.FormatUint(hash.Sum64(), 16)
+	userName = "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
 	// if user exists
 	if _, err = user.Lookup(userName); err == nil {
 		return userName, errors.New("User already exists")
