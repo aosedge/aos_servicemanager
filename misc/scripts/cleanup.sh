@@ -55,6 +55,15 @@ if [ $? == 0 ]; then
 	echo "Removed"
 fi
 
+USERS=($(cut -d: -f1 /etc/passwd))
+
+for i in "${USERS[@]}"
+do
+	if [[ $i == AOS_* ]]; then
+		deluser $i
+	fi
+done
+
 echo
 echo "========================================================================="
 echo "WARNING: $1 is stopped. To start it use following command:"
