@@ -20,11 +20,11 @@ func (launcher *Launcher) createUser(id string) (userName string, err error) {
 	defer launcher.mutex.Unlock()
 
 	// convert id to hashed u32 value
-	hash := fnv.New32a()
+	hash := fnv.New64a()
 	hash.Write([]byte(id))
 
 	// create user
-	userName = "user_" + strconv.FormatUint(uint64(hash.Sum32()), 16)
+	userName = "user_" + strconv.FormatUint(hash.Sum64(), 16)
 	// if user exists
 	if _, err = user.Lookup(userName); err == nil {
 		return userName, errors.New("User already exists")
