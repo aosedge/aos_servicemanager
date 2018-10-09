@@ -34,11 +34,12 @@ for f in $2/services/* ; do
 		if [ ! -z "$r" ]; then
 			echo "Stopping $r..."
 			systemctl stop $r
-			echo "Stopped"
+			if [ $? == 0 ]; then
+				echo "Stopped"
+			fi
 
-			echo "Disabling $r..."
+			echo "Removing $r..."
 			systemctl disable $r
-			echo "Disabled"
 		fi
 	fi
 done
