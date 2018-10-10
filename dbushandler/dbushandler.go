@@ -26,7 +26,7 @@ const (
 
 // DBusHandler d-bus interface structure
 type DBusHandler struct {
-	db       *database.Database
+	db       database.ServiceItf
 	dbusConn *dbus.Conn
 }
 
@@ -35,7 +35,7 @@ type DBusHandler struct {
  ******************************************************************************/
 
 // New creates and launch d-bus server
-func New(db *database.Database) (dbusHandler *DBusHandler, err error) {
+func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
 		return dbusHandler, err

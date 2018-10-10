@@ -27,6 +27,31 @@ var ErrNotExist = errors.New("Entry doesn't not exist")
  * Types
  ******************************************************************************/
 
+// ServiceItf provides API to create, remove or access services DB
+type ServiceItf interface {
+	AddService(entry ServiceEntry) (err error)
+	UpdateService(entry ServiceEntry) (err error)
+	RemoveService(id string) (err error)
+	GetService(id string) (entry ServiceEntry, err error)
+	GetServices() (entries []ServiceEntry, err error)
+	SetServiceStatus(id string, status int) (err error)
+	SetServiceState(id string, state int) (err error)
+	SetServiceStartTime(id string, time time.Time) (err error)
+	AddUsersService(users []string, serviceID string) (err error)
+	RemoveUsersService(users []string, serviceID string) (err error)
+	GetUsersServices(users []string) (entries []ServiceEntry, err error)
+	IsUsersService(users []string, id string) (result bool, err error)
+	GetUsersList() (usersList [][]string, err error)
+	DeleteUsers(users []string) (err error)
+}
+
+// MonitoringItf provides API to create, remove or access monitoring DB
+type MonitoringItf interface {
+	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
+	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
+	RemoveTrafficMonitorData(chain string) (err error)
+}
+
 //Database structure with database information
 type Database struct {
 	sql *sql.DB

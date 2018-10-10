@@ -80,7 +80,7 @@ type Launcher struct {
 	// StatusChannel used to return execute command statuses
 	StatusChannel chan ActionStatus
 
-	db      *database.Database
+	db      database.ServiceItf
 	monitor monitoring.ServiceMonitoringItf
 	systemd *dbus.Conn
 	config  *config.Config
@@ -115,7 +115,7 @@ type serviceAction struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, db *database.Database,
+func New(config *config.Config, db database.ServiceItf,
 	monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
