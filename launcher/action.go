@@ -4,9 +4,9 @@ import (
 	"container/list"
 	"errors"
 	"os"
-	"strings"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
 /*******************************************************************************
@@ -78,7 +78,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	}
 
 	service, err := launcher.db.GetService(serviceInfo.ID)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+	if err != nil && err != database.ErrNotExist {
 		return err
 	}
 

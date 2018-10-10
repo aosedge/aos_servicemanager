@@ -213,7 +213,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	// check if service already installed
 	oldService, err := launcher.db.GetService(serviceInfo.ID)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+	if err != nil && err != database.ErrNotExist {
 		return installDir, err
 	}
 	serviceExists := err == nil

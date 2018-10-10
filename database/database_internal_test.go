@@ -3,7 +3,6 @@ package database
 import (
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -110,7 +109,7 @@ func TestNotExistService(t *testing.T) {
 	_, err := db.GetService("service3")
 	if err == nil {
 		t.Error("Error in non existed service")
-	} else if !strings.Contains(err.Error(), "does not exist") {
+	} else if err != ErrNotExist {
 		t.Errorf("Can't get service: %s", err)
 	}
 }

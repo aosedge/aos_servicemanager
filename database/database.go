@@ -17,6 +17,13 @@ import (
  ******************************************************************************/
 
 /*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+// ErrNotExist is returned when requiested entry not exist in DB
+var ErrNotExist = errors.New("Entry doesn't not exist")
+
+/*******************************************************************************
  * Types
  ******************************************************************************/
 
@@ -124,7 +131,7 @@ func (db *Database) UpdateService(entry ServiceEntry) (err error) {
 	}
 
 	if count == 0 {
-		return errors.New("Service does not exist")
+		return ErrNotExist
 	}
 
 	return err
@@ -155,7 +162,7 @@ func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
 		&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
 		&entry.StartAt, &entry.TTL)
 	if err == sql.ErrNoRows {
-		return entry, errors.New("Service does not exist")
+		return entry, ErrNotExist
 	}
 	if err != nil {
 		return entry, err
@@ -207,7 +214,7 @@ func (db *Database) SetServiceStatus(id string, status int) (err error) {
 	}
 
 	if count == 0 {
-		return errors.New("Service does not exist")
+		return ErrNotExist
 	}
 
 	return err
@@ -232,7 +239,7 @@ func (db *Database) SetServiceState(id string, state int) (err error) {
 	}
 
 	if count == 0 {
-		return errors.New("Service does not exist")
+		return ErrNotExist
 	}
 
 	return err
@@ -257,7 +264,7 @@ func (db *Database) SetServiceStartTime(id string, time time.Time) (err error) {
 	}
 
 	if count == 0 {
-		return errors.New("Service does not exist")
+		return ErrNotExist
 	}
 
 	return err
@@ -427,7 +434,7 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
 	if err == sql.ErrNoRows {
-		return timestamp, value, errors.New("Chain does not exist")
+		return timestamp, value, ErrNotExist
 	}
 	if err != nil {
 		return timestamp, value, err
