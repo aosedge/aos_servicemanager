@@ -2,11 +2,12 @@ package database
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 /*******************************************************************************
@@ -429,5 +430,36 @@ func TestAddUsersList(t *testing.T) {
 	// Clear DB
 	if err = db.removeAllUsers(); err != nil {
 		t.Errorf("Can't remove all users: %s", err)
+	}
+}
+
+func TestTrafficMonitor(t *testing.T) {
+	setTime := time.Now()
+	setValue := uint64(100)
+
+	if err := db.SetTrafficMonitorData("chain1", setTime, setValue); err != nil {
+		t.Fatalf("Can't set traffic monitor: %s", err)
+	}
+
+	getTime, getValue, err := db.GetTrafficMonitorData("chain1")
+	if err != nil {
+		t.Fatalf("Can't get traffic monitor: %s", err)
+	}
+
+	if !getTime.Equal(setTime) || getValue != setValue {
+		t.Fatalf("Wrong value time: %s, value %d", getTime, getValue)
+	}
+
+	if err := db.RemoveTrafficMonitorData("chain1"); err != nil {
+		t.Fatalf("Can't remove traffic monitor: %s", err)
+	}
+
+	if _, _, err := db.GetTrafficMonitorData("chain1"); err == nil {
+		t.Fatal("Entry should be removed")
+	}
+
+	// Clear DB
+	if err := db.removeAllTrafficMonitor(); err != nil {
+		t.Errorf("Can't remove all traffic monitor: %s", err)
 	}
 }

@@ -78,6 +78,9 @@ func New(name string) (db *Database, err error) {
 		if err := db.createUsersTable(); err != nil {
 			return db, err
 		}
+		if err := db.createTrafficMonitorTable(); err != nil {
+			return db, err
+		}
 	}
 
 	return db, nil
@@ -392,6 +395,60 @@ func (db *Database) DeleteUsers(users []string) (err error) {
 	return err
 }
 
+// SetTrafficMonitorData stores traffic monitor data
+func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
+	result, err := db.sql.Exec("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?", timestamp, value, chain)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		if _, err = db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)",
+			chain, timestamp, value); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// GetTrafficMonitorData stores traffic monitor data
+func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
+	stmt, err := db.sql.Prepare("SELECT time, value FROM trafficmonitor WHERE chain = ?")
+	if err != nil {
+		return timestamp, value, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
+	if err == sql.ErrNoRows {
+		return timestamp, value, errors.New("Chain does not exist")
+	}
+	if err != nil {
+		return timestamp, value, err
+	}
+
+	return timestamp, value, nil
+}
+
+// RemoveTrafficMonitorData removes existing traffic monitor entry
+func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
+	stmt, err := db.sql.Prepare("DELETE FROM trafficmonitor WHERE chain = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(chain)
+
+	return err
+}
+
 // Close closes database
 func (db *Database) Close() {
 	db.sql.Close()
@@ -448,6 +505,22 @@ func (db *Database) removeAllServices() (err error) {
 
 func (db *Database) removeAllUsers() (err error) {
 	_, err = db.sql.Exec("DELETE FROM users;")
+
+	return err
+}
+
+func (db *Database) removeAllTrafficMonitor() (err error) {
+	_, err = db.sql.Exec("DELETE FROM trafficmonitor;")
+
+	return err
+}
+
+func (db *Database) createTrafficMonitorTable() (err error) {
+	log.Info("Create traffic monitor table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+																	 time TIMESTAMP,
+																	 value INTEGER);`)
 
 	return err
 }
