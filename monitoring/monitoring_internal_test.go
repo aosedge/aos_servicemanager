@@ -10,6 +10,7 @@ import (
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 )
 
 /*******************************************************************************
@@ -26,8 +27,55 @@ func init() {
 }
 
 /*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var db *database.Database
+
+/*******************************************************************************
  * Private
  ******************************************************************************/
+
+func setup() (err error) {
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		return err
+	}
+
+	db, err = database.New("tmp/servicemanager.db")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func cleanup() (err error) {
+	db.Close()
+
+	if err := os.RemoveAll("tmp"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Error setting up: %s", err)
+	}
+
+	ret := m.Run()
+
+	if err := cleanup(); err != nil {
+		log.Fatalf("Error cleaning up: %s", err)
+	}
+
+	os.Exit(ret)
+}
 
 /*******************************************************************************
  * Tests
@@ -68,7 +116,8 @@ func TestPeriodicReport(t *testing.T) {
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
 			SendPeriod: config.Duration{Duration: sendDuration},
-			PollPeriod: config.Duration{Duration: 1 * time.Second}}})
+			PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+		db)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -131,7 +180,8 @@ func TestSystemAlerts(t *testing.T) {
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}})
+					MaxThreshold: 0}}},
+		db)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -172,7 +222,8 @@ func TestServices(t *testing.T) {
 			Monitoring: config.Monitoring{
 				SendPeriod:          config.Duration{Duration: sendDuration},
 				PollPeriod:          config.Duration{Duration: 1 * time.Second},
-				MaxAlertsPerMessage: 10}})
+				MaxAlertsPerMessage: 10}},
+		db)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}

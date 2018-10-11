@@ -212,7 +212,7 @@ func main() {
 	defer db.Close()
 
 	// Create monitor
-	monitor, err := monitoring.New(config)
+	monitor, err := monitoring.New(config, db)
 	if err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
@@ -255,6 +255,8 @@ func main() {
 		dbusServer.Close()
 		vis.Close()
 		monitor.Close()
+		db.Close()
+
 		os.Exit(1)
 	}()
 

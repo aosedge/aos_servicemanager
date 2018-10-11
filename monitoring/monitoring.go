@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
@@ -44,10 +46,13 @@ type ServiceMonitoringItf interface {
 type Monitor struct {
 	DataChannel chan amqp.MonitoringData
 
+	db database.MonitoringItf
+
 	iptables      *iptables.IPTables
 	skipAddresses string
 	inChain       string
 	outChain      string
+	trafficMap    map[string]*trafficMonitoring
 
 	config     config.Monitoring
 	workingDir string
@@ -71,6 +76,13 @@ type ServiceMonitoringConfig struct {
 	ServiceRules *amqp.ServiceAlertRules
 }
 
+type trafficMonitoring struct {
+	currentValue uint64
+	initialValue uint64
+	subValue     uint64
+	lastUpdate   time.Time
+}
+
 type serviceMonitoring struct {
 	inChain                string
 	outChain               string
@@ -92,14 +104,14 @@ var ErrDisabled = errors.New("Monitoring is disabled")
  ******************************************************************************/
 
 // New creates new monitor instance
-func New(config *config.Config) (monitor *Monitor, err error) {
+func New(config *config.Config, db database.MonitoringItf) (monitor *Monitor, err error) {
 	log.Debug("Create monitor")
 
 	if config.Monitoring.Disabled {
 		return nil, ErrDisabled
 	}
 
-	monitor = &Monitor{}
+	monitor = &Monitor{db: db}
 
 	monitor.DataChannel = make(chan amqp.MonitoringData, dataChannelSize)
 
@@ -327,10 +339,12 @@ func (monitor *Monitor) run() error {
 		case <-monitor.sendTimer.C:
 			monitor.mutex.Lock()
 			monitor.sendMonitoringData()
+			monitor.saveTraffic()
 			monitor.mutex.Unlock()
 
 		case <-monitor.pollTimer.C:
 			monitor.mutex.Lock()
+			monitor.processTraffic()
 			monitor.getCurrentSystemData()
 			monitor.getCurrentServicesData()
 			monitor.processAlerts()
@@ -382,14 +396,16 @@ func (monitor *Monitor) getCurrentSystemData() {
 		log.Errorf("Can't get system Disk usage: %s", err)
 	}
 
-	monitor.dataToSend.Global.InTraffic, err = monitor.getTrafficChainBytes(monitor.inChain)
-	if err != nil {
-		log.Errorf("Can't get IN traffic value: %s", err)
+	if traffic, ok := monitor.trafficMap[monitor.inChain]; ok {
+		monitor.dataToSend.Global.InTraffic = traffic.currentValue
+	} else {
+		log.WithField("chain", monitor.inChain).Error("Can't get service traffic value")
 	}
 
-	monitor.dataToSend.Global.OutTraffic, err = monitor.getTrafficChainBytes(monitor.outChain)
-	if err != nil {
-		log.Errorf("Can't get OUT traffic value: %s", err)
+	if traffic, ok := monitor.trafficMap[monitor.outChain]; ok {
+		monitor.dataToSend.Global.OutTraffic = traffic.currentValue
+	} else {
+		log.WithField("chain", monitor.outChain).Error("Can't get service traffic value")
 	}
 
 	log.WithFields(log.Fields{
@@ -423,14 +439,16 @@ func (monitor *Monitor) getCurrentServicesData() {
 
 		value.monitoringData.UsedDisk = 0
 
-		value.monitoringData.InTraffic, err = monitor.getTrafficChainBytes(value.inChain)
-		if err != nil {
-			log.Errorf("Can't get service IN traffic value: %s", err)
+		if traffic, ok := monitor.trafficMap[value.inChain]; ok {
+			value.monitoringData.InTraffic = traffic.currentValue
+		} else {
+			log.WithField("chain", value.inChain).Error("Can't get service traffic value")
 		}
 
-		value.monitoringData.OutTraffic, err = monitor.getTrafficChainBytes(value.outChain)
-		if err != nil {
-			log.Errorf("Can't get service OUT traffic value: %s", err)
+		if traffic, ok := monitor.trafficMap[value.outChain]; ok {
+			value.monitoringData.OutTraffic = traffic.currentValue
+		} else {
+			log.WithField("chain", value.outChain).Error("Can't get service traffic value")
 		}
 
 		log.WithFields(log.Fields{
@@ -440,6 +458,47 @@ func (monitor *Monitor) getCurrentServicesData() {
 			"Disk": value.monitoringData.UsedDisk,
 			"IN":   value.monitoringData.InTraffic,
 			"OUT":  value.monitoringData.OutTraffic}).Debug("Service monitoring data")
+	}
+}
+
+func isDateEquals(t1, t2 time.Time) (result bool) {
+	y1, m1, d1 := t1.Date()
+	y2, m2, d2 := t2.Date()
+
+	return y1 == y2 && m1 == m2 && d1 == d2
+}
+
+func (monitor *Monitor) processTraffic() {
+	timestamp := time.Now().UTC()
+
+	for chain, traffic := range monitor.trafficMap {
+		value, err := monitor.getTrafficChainBytes(chain)
+		if err != nil {
+			log.WithField("chain", chain).Errorf("Can't get chain byte count: %s", err)
+			continue
+		}
+
+		if !isDateEquals(timestamp, traffic.lastUpdate) {
+			log.WithField("chain", chain).Debug("Reset stats")
+			// we count statistics per day, it date is different then reset stats
+			traffic.initialValue = 0
+			traffic.subValue = value
+		}
+
+		// intialValue is used to keep traffic between resets
+		// Unfortunately, github.com/coreos/go-iptables/iptables doesn't provide API to reset chain statistics.
+		// We use subValue to reset statistics.
+		traffic.currentValue = traffic.initialValue + value - traffic.subValue
+
+		traffic.lastUpdate = timestamp
+	}
+}
+
+func (monitor *Monitor) saveTraffic() {
+	for chain, traffic := range monitor.trafficMap {
+		if err := monitor.db.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue); err != nil {
+			log.WithField("chain", chain).Errorf("Can't set traffic data: %s", err)
+		}
 	}
 }
 
@@ -502,6 +561,8 @@ func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
 }
 
 func (monitor *Monitor) setupTrafficMonitor() (err error) {
+	monitor.trafficMap = make(map[string]*trafficMonitoring)
+
 	monitor.iptables, err = iptables.New()
 	if err != nil {
 		return err
@@ -573,6 +634,15 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain,
 		return err
 	}
 
+	traffic := trafficMonitoring{}
+
+	if traffic.lastUpdate, traffic.initialValue, err =
+		monitor.db.GetTrafficMonitorData(chain); err != nil && err != database.ErrNotExist {
+		return err
+	}
+
+	monitor.trafficMap[chain] = &traffic
+
 	return nil
 }
 
@@ -591,6 +661,13 @@ func (monitor *Monitor) deleteAllRules(chain, rootChain string) (err error) {
 
 func (monitor *Monitor) deleteTrafficChain(chain, rootChain string) (err error) {
 	log.WithField("chain", chain).Debug("Delete iptables chain")
+
+	// Store traffic data to DB
+	if traffic, ok := monitor.trafficMap[chain]; ok {
+		monitor.db.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
+	}
+
+	delete(monitor.trafficMap, chain)
 
 	if err = monitor.deleteAllRules(chain, rootChain); err != nil {
 		return err
