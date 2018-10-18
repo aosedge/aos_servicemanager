@@ -654,9 +654,9 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 	return nil
 }
 
-func (monitor *Monitor) deleteAllRules(chain, rootChain string) (err error) {
+func (monitor *Monitor) deleteAllRules(chain string, rulespec ...string) (err error) {
 	for {
-		if err = monitor.iptables.Delete("filter", rootChain, "-j", chain); err != nil {
+		if err = monitor.iptables.Delete("filter", chain, rulespec...); err != nil {
 			errIPTables, ok := err.(*iptables.Error)
 			if ok && errIPTables.IsNotExist() {
 				return nil
@@ -677,7 +677,7 @@ func (monitor *Monitor) deleteTrafficChain(chain, rootChain string) (err error) 
 
 	delete(monitor.trafficMap, chain)
 
-	if err = monitor.deleteAllRules(chain, rootChain); err != nil {
+	if err = monitor.deleteAllRules(rootChain, "-j", chain); err != nil {
 		return err
 	}
 
