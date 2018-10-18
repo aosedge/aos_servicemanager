@@ -237,9 +237,12 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return installDir, err
 	}
 
-	ttl, err := strconv.ParseUint(spec.Annotations[aosProductPrefix+"service.TTL"], 10, 64)
-	if err != nil {
-		return installDir, err
+	ttl := launcher.config.DefaultServiceTTL
+
+	if ttlString, ok := spec.Annotations[aosProductPrefix+"service.TTL"]; ok {
+		if ttl, err = strconv.ParseUint(ttlString, 10, 64); err != nil {
+			return installDir, err
+		}
 	}
 
 	if serviceInfo.ServiceMonitoring != nil {
@@ -643,12 +646,6 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 	// create annotations
 	if localSpec.Annotations == nil {
 		localSpec.Annotations = make(map[string]string)
-	}
-
-	// update service TTL
-	_, exist := localSpec.Annotations[aosProductPrefix+"service.TTL"]
-	if !exist {
-		localSpec.Annotations[aosProductPrefix+"service.TTL"] = strconv.FormatUint(uint64(launcher.config.DefaultServiceTTL), 10)
 	}
 
 	// write config.json

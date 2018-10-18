@@ -54,7 +54,7 @@ type Config struct {
 	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
 	VISServerURL        string     `json:"visServer"`
 	WorkingDir          string     `json:"workingDir"`
-	DefaultServiceTTL   uint       `json:"defaultServiceTTLDays"`
+	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
 	Monitoring          Monitoring `json:"monitoring"`
 }
 
