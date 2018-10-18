@@ -231,13 +231,11 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		return err
 	}
 
-	if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD",
-		"-s", monitor.skipAddresses, "-d", monitoringConfig.IPAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
 		return err
 	}
 
-	if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD",
-		"-d", monitor.skipAddresses, "-s", monitoringConfig.IPAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
 		return err
 	}
 
@@ -583,13 +581,11 @@ func (monitor *Monitor) setupTrafficMonitor() (err error) {
 		monitor.skipAddresses += "," + monitor.config.NetnsBridgeIP
 	}
 
-	if err = monitor.createTrafficChain(monitor.inChain, "INPUT",
-		"-s", monitor.skipAddresses, "-d", "0/0"); err != nil {
+	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {
 		return err
 	}
 
-	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT",
-		"-d", monitor.skipAddresses, "-s", "0/0"); err != nil {
+	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT", "0/0"); err != nil {
 		return err
 	}
 
@@ -614,8 +610,19 @@ func (monitor *Monitor) getTrafficChainBytes(chain string) (value uint64, err er
 	return 0, errors.New("Statistic for chain not found")
 }
 
-func (monitor *Monitor) createTrafficChain(chain, rootChain,
-	skipAddrType, skipAddresses, addrType, addresses string) (err error) {
+func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (err error) {
+	var skipAddrType, addrType string
+
+	if strings.HasSuffix(chain, "_IN") {
+		skipAddrType = "-s"
+		addrType = "-d"
+	}
+
+	if strings.HasSuffix(chain, "_OUT") {
+		skipAddrType = "-d"
+		addrType = "-s"
+	}
+
 	if err = monitor.iptables.NewChain("filter", chain); err != nil {
 		return err
 	}
@@ -625,8 +632,8 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain,
 	}
 
 	// This addresses will be not count but returned back to the root chain
-	if skipAddresses != "" {
-		if err = monitor.iptables.Append("filter", chain, skipAddrType, skipAddresses, "-j", "RETURN"); err != nil {
+	if monitor.skipAddresses != "" {
+		if err = monitor.iptables.Append("filter", chain, skipAddrType, monitor.skipAddresses, "-j", "RETURN"); err != nil {
 			return err
 		}
 	}
