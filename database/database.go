@@ -20,7 +20,7 @@ import (
  * Vars
  ******************************************************************************/
 
-// ErrNotExist is returned when requiested entry not exist in DB
+// ErrNotExist is returned when requested entry not exist in DB
 var ErrNotExist = errors.New("Entry doesn't not exist")
 
 /*******************************************************************************
@@ -52,12 +52,12 @@ type MonitoringItf interface {
 	RemoveTrafficMonitorData(chain string) (err error)
 }
 
-//Database structure with database information
+// Database structure with database information
 type Database struct {
 	sql *sql.DB
 }
 
-//ServiceEntry describes entry structure
+// ServiceEntry describes entry structure
 type ServiceEntry struct {
 	ID            string    // service id
 	Version       uint64    // service version
@@ -179,7 +179,7 @@ func (db *Database) RemoveService(id string) (err error) {
 
 // GetService returns service entry
 func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM SERVICES WHERE id = ?")
+	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE id = ?")
 	if err != nil {
 		return entry, err
 	}
