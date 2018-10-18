@@ -224,46 +224,24 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return installDir, err
 	}
 
-	ttl := launcher.config.DefaultServiceTTL
-
-	if ttlString, ok := spec.Annotations[aosProductPrefix+"service.TTL"]; ok {
-		if ttl, err = strconv.ParseUint(ttlString, 10, 64); err != nil {
-			return installDir, err
-		}
-	}
-
-	var uploadLimit, downloadLimit uint64
-
-	if uploadLimitString, ok := spec.Annotations[aosProductPrefix+"network.uploadLimit"]; ok {
-		if uploadLimit, err = strconv.ParseUint(uploadLimitString, 10, 64); err != nil {
-			return installDir, err
-		}
-	}
-
-	if downloadLimitString, ok := spec.Annotations[aosProductPrefix+"network.downloadLimit"]; ok {
-		if downloadLimit, err = strconv.ParseUint(downloadLimitString, 10, 64); err != nil {
-			return installDir, err
-		}
-	}
-
 	alertRules, err := json.Marshal(serviceInfo.ServiceMonitoring)
 	if err != nil {
 		return installDir, err
 	}
 
 	newService := database.ServiceEntry{
-		ID:            serviceInfo.ID,
-		Version:       serviceInfo.Version,
-		Path:          installDir,
-		ServiceName:   serviceName,
-		UserName:      userName,
-		Permissions:   spec.Annotations[aosProductPrefix+"vis.permissions"],
-		State:         stateInit,
-		Status:        statusOk,
-		TTL:           ttl,
-		AlertRules:    string(alertRules),
-		UploadLimit:   uploadLimit,
-		DownloadLimit: downloadLimit}
+		ID:          serviceInfo.ID,
+		Version:     serviceInfo.Version,
+		Path:        installDir,
+		ServiceName: serviceName,
+		UserName:    userName,
+		State:       stateInit,
+		Status:      statusOk,
+		AlertRules:  string(alertRules)}
+
+	if err := launcher.updateServiceFromSpec(&newService, spec); err != nil {
+		return installDir, err
+	}
 
 	if serviceExists {
 		launcher.services.Delete(serviceName)
@@ -550,6 +528,32 @@ func (launcher *Launcher) handleSystemdSubscription() {
 			}
 		}
 	}()
+}
+
+func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, spec *specs.Spec) (err error) {
+	service.TTL = launcher.config.DefaultServiceTTL
+
+	if ttlString, ok := spec.Annotations[aosProductPrefix+"service.TTL"]; ok {
+		if service.TTL, err = strconv.ParseUint(ttlString, 10, 64); err != nil {
+			return err
+		}
+	}
+
+	if uploadLimitString, ok := spec.Annotations[aosProductPrefix+"network.uploadLimit"]; ok {
+		if service.UploadLimit, err = strconv.ParseUint(uploadLimitString, 10, 64); err != nil {
+			return err
+		}
+	}
+
+	if downloadLimitString, ok := spec.Annotations[aosProductPrefix+"network.downloadLimit"]; ok {
+		if service.DownloadLimit, err = strconv.ParseUint(downloadLimitString, 10, 64); err != nil {
+			return err
+		}
+	}
+
+	service.Permissions = spec.Annotations[aosProductPrefix+"vis.permissions"]
+
+	return nil
 }
 
 func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *specs.Spec, err error) {
