@@ -31,6 +31,15 @@ const (
 	dataChannelSize = 32
 )
 
+// Service status
+const (
+	MinutePeriod = iota
+	HourPeriod
+	DayPeriod
+	MonthPeriod
+	YearPeriod
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -48,6 +57,7 @@ type Monitor struct {
 	db database.MonitoringItf
 
 	iptables      *iptables.IPTables
+	trafficPeriod int
 	skipAddresses string
 	inChain       string
 	outChain      string
@@ -460,11 +470,34 @@ func (monitor *Monitor) getCurrentServicesData() {
 	}
 }
 
-func isDateEquals(t1, t2 time.Time) (result bool) {
+func (monitor *Monitor) isSamePeriod(t1, t2 time.Time) (result bool) {
 	y1, m1, d1 := t1.Date()
-	y2, m2, d2 := t2.Date()
+	h1 := t1.Hour()
+	min1 := t1.Minute()
 
-	return y1 == y2 && m1 == m2 && d1 == d2
+	y2, m2, d2 := t2.Date()
+	h2 := t2.Hour()
+	min2 := t2.Minute()
+
+	switch monitor.trafficPeriod {
+	case MinutePeriod:
+		return y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2 && min1 == min2
+
+	case HourPeriod:
+		return y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2
+
+	case DayPeriod:
+		return y1 == y2 && m1 == m2 && d1 == d2
+
+	case MonthPeriod:
+		return y1 == y2 && m1 == m2
+
+	case YearPeriod:
+		return y1 == y2
+
+	default:
+		return false
+	}
 }
 
 func (monitor *Monitor) processTraffic() {
@@ -477,9 +510,9 @@ func (monitor *Monitor) processTraffic() {
 			continue
 		}
 
-		if !isDateEquals(timestamp, traffic.lastUpdate) {
+		if !monitor.isSamePeriod(timestamp, traffic.lastUpdate) {
 			log.WithField("chain", chain).Debug("Reset stats")
-			// we count statistics per day, it date is different then reset stats
+			// we count statistics per day, if date is different then reset stats
 			traffic.initialValue = 0
 			traffic.subValue = value
 		}
@@ -560,6 +593,8 @@ func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
 }
 
 func (monitor *Monitor) setupTrafficMonitor() (err error) {
+	monitor.trafficPeriod = DayPeriod
+
 	monitor.trafficMap = make(map[string]*trafficMonitoring)
 
 	monitor.iptables, err = iptables.New()
