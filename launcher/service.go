@@ -245,6 +245,20 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		}
 	}
 
+	var uploadLimit, downloadLimit uint64
+
+	if uploadLimitString, ok := spec.Annotations[aosProductPrefix+"network.uploadLimit"]; ok {
+		if uploadLimit, err = strconv.ParseUint(uploadLimitString, 10, 64); err != nil {
+			return installDir, err
+		}
+	}
+
+	if downloadLimitString, ok := spec.Annotations[aosProductPrefix+"network.downloadLimit"]; ok {
+		if downloadLimit, err = strconv.ParseUint(downloadLimitString, 10, 64); err != nil {
+			return installDir, err
+		}
+	}
+
 	if serviceInfo.ServiceMonitoring != nil {
 		if err := launcher.createAlertRulesFile(installDir, serviceInfo.ServiceMonitoring); err != nil {
 			return installDir, err
@@ -252,15 +266,17 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	}
 
 	newService := database.ServiceEntry{
-		ID:          serviceInfo.ID,
-		Version:     serviceInfo.Version,
-		Path:        installDir,
-		ServiceName: serviceName,
-		UserName:    userName,
-		Permissions: spec.Annotations[aosProductPrefix+"vis.permissions"],
-		State:       stateInit,
-		Status:      statusOk,
-		TTL:         uint(ttl)}
+		ID:            serviceInfo.ID,
+		Version:       serviceInfo.Version,
+		Path:          installDir,
+		ServiceName:   serviceName,
+		UserName:      userName,
+		Permissions:   spec.Annotations[aosProductPrefix+"vis.permissions"],
+		State:         stateInit,
+		Status:        statusOk,
+		TTL:           uint(ttl),
+		UploadLimit:   uint(uploadLimit),
+		DownloadLimit: uint(downloadLimit)}
 
 	if serviceExists {
 		launcher.services.Delete(serviceName)
@@ -491,10 +507,12 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 		}
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
-			Pid:          pid,
-			IPAddress:    ipAddress,
-			WorkingDir:   service.Path,
-			ServiceRules: rules}); err != nil {
+			Pid:           pid,
+			IPAddress:     ipAddress,
+			WorkingDir:    service.Path,
+			UploadLimit:   uint64(service.UploadLimit),
+			DownloadLimit: uint64(service.DownloadLimit),
+			ServiceRules:  rules}); err != nil {
 			return err
 		}
 

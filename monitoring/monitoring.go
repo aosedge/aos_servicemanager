@@ -69,10 +69,12 @@ type Monitor struct {
 
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
-	Pid          int32
-	IPAddress    string
-	WorkingDir   string
-	ServiceRules *amqp.ServiceAlertRules
+	Pid           int32
+	IPAddress     string
+	WorkingDir    string
+	UploadLimit   uint64
+	DownloadLimit uint64
+	ServiceRules  *amqp.ServiceAlertRules
 }
 
 type trafficMonitoring struct {
