@@ -1,8 +1,11 @@
 package monitoring
 
 import (
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
+	"strconv"
 	"testing"
 	"time"
 
@@ -46,6 +49,312 @@ func setup() (err error) {
 		return err
 	}
 
+	// Make containers
+
+	serviceConfig := `
+{
+	"ociVersion": "1.0.0",
+	"process": {
+		"user": {
+			"uid": 0,
+			"gid": 0
+		},
+		"args": [
+			"ping", "8.8.8.8", "-c10", "-i1"
+		],
+		"env": [
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"TERM=xterm"
+		],
+		"cwd": "/",
+		"capabilities": {
+			"bounding": [
+				"CAP_AUDIT_WRITE",
+				"CAP_KILL",
+				"CAP_NET_BIND_SERVICE",
+				"CAP_NET_RAW"
+			],
+			"effective": [
+				"CAP_AUDIT_WRITE",
+				"CAP_KILL",
+				"CAP_NET_BIND_SERVICE",
+				"CAP_NET_RAW"
+			],
+			"inheritable": [
+				"CAP_AUDIT_WRITE",
+				"CAP_KILL",
+				"CAP_NET_BIND_SERVICE",
+				"CAP_NET_RAW"
+			],
+			"permitted": [
+				"CAP_AUDIT_WRITE",
+				"CAP_KILL",
+				"CAP_NET_BIND_SERVICE",
+				"CAP_NET_RAW"
+			],
+			"ambient": [
+				"CAP_AUDIT_WRITE",
+				"CAP_KILL",
+				"CAP_NET_BIND_SERVICE",
+				"CAP_NET_RAW"
+			]
+		},
+		"rlimits": [
+			{
+				"type": "RLIMIT_NOFILE",
+				"hard": 1024,
+				"soft": 1024
+			}
+		],
+		"noNewPrivileges": true
+	},
+	"root": {
+		"path": "rootfs",
+		"readonly": true
+	},
+	"hostname": "runc",
+	"mounts": [
+		{
+			"destination": "/proc",
+			"type": "proc",
+			"source": "proc"
+		},
+		{
+			"destination": "/dev",
+			"type": "tmpfs",
+			"source": "tmpfs",
+			"options": [
+				"nosuid",
+				"strictatime",
+				"mode=755",
+				"size=65536k"
+			]
+		},
+		{
+			"destination": "/dev/pts",
+			"type": "devpts",
+			"source": "devpts",
+			"options": [
+				"nosuid",
+				"noexec",
+				"newinstance",
+				"ptmxmode=0666",
+				"mode=0620",
+				"gid=5"
+			]
+		},
+		{
+			"destination": "/dev/shm",
+			"type": "tmpfs",
+			"source": "shm",
+			"options": [
+				"nosuid",
+				"noexec",
+				"nodev",
+				"mode=1777",
+				"size=65536k"
+			]
+		},
+		{
+			"destination": "/dev/mqueue",
+			"type": "mqueue",
+			"source": "mqueue",
+			"options": [
+				"nosuid",
+				"noexec",
+				"nodev"
+			]
+		},
+		{
+			"destination": "/sys",
+			"type": "sysfs",
+			"source": "sysfs",
+			"options": [
+				"nosuid",
+				"noexec",
+				"nodev",
+				"ro"
+			]
+		},
+		{
+			"destination": "/sys/fs/cgroup",
+			"type": "cgroup",
+			"source": "cgroup",
+			"options": [
+				"nosuid",
+				"noexec",
+				"nodev",
+				"relatime",
+				"ro"
+			]
+		},
+		{
+			"destination": "/bin",
+			"type": "bind",
+			"source": "/bin",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/sbin",
+			"type": "bind",
+			"source": "/sbin",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/lib",
+			"type": "bind",
+			"source": "/lib",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/usr",
+			"type": "bind",
+			"source": "/usr",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/tmp",
+			"type": "bind",
+			"source": "/tmp",
+			"options": [
+				"bind",
+				"rw"
+			]
+		},
+		{
+			"destination": "/lib64",
+			"type": "bind",
+			"source": "/lib64",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/etc/hosts",
+			"type": "bind",
+			"source": "/etc/hosts",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/etc/resolv.conf",
+			"type": "bind",
+			"source": "/etc/resolv.conf",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/etc/nsswitch.conf",
+			"type": "bind",
+			"source": "/etc/nsswitch.conf",
+			"options": [
+				"bind",
+				"ro"
+			]
+		},
+		{
+			"destination": "/etc/ssl",
+			"type": "bind",
+			"source": "/etc/ssl",
+			"options": [
+				"bind",
+				"ro"
+			]
+		}
+	],
+	"hooks": {
+		"prestart": [
+			{
+				"path": "/usr/local/bin/netns",
+				"args": ["-d"]
+			}
+		]
+	},
+	"linux": {
+		"resources": {
+			"devices": [
+				{
+					"allow": false,
+					"access": "rwm"
+				}
+			],
+			"cpu": {
+				"shares": 1024
+			},
+			"network": {
+				"classID": 10
+			}
+		},
+		"namespaces": [
+			{
+				"type": "pid"
+			},
+			{
+				"type": "network"
+			},
+			{
+				"type": "ipc"
+			},
+			{
+				"type": "uts"
+			},
+			{
+				"type": "mount"
+			}
+		],
+		"maskedPaths": [
+			"/proc/kcore",
+			"/proc/latency_stats",
+			"/proc/timer_list",
+			"/proc/timer_stats",
+			"/proc/sched_debug",
+			"/sys/firmware",
+			"/proc/scsi"
+		],
+		"readonlyPaths": [
+			"/proc/asound",
+			"/proc/bus",
+			"/proc/fs",
+			"/proc/irq",
+			"/proc/sys",
+			"/proc/sysrq-trigger"
+		]
+	}
+}
+`
+	if err := os.MkdirAll("tmp/service1/rootfs", 0755); err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile("tmp/service1/config.json", []byte(serviceConfig), 0644); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll("tmp/service2/rootfs", 0755); err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile("tmp/service2/config.json", []byte(serviceConfig), 0644); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -57,6 +366,29 @@ func cleanup() (err error) {
 	}
 
 	return nil
+}
+
+func getServiceIP(servicePath string) (address string) {
+	data, err := ioutil.ReadFile(path.Join(servicePath, ".ip"))
+	if err != nil {
+		return ""
+	}
+
+	return string(data)
+}
+
+func getServicePid(servicePath string) (pid int32) {
+	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
+	if err != nil {
+		return 0
+	}
+
+	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
+	if err != nil {
+		return 0
+	}
+
+	return int32(pid64)
 }
 
 /*******************************************************************************
@@ -214,7 +546,7 @@ func TestSystemAlerts(t *testing.T) {
 }
 
 func TestServices(t *testing.T) {
-	sendDuration := 1 * time.Second
+	sendDuration := 2 * time.Second
 
 	monitor, err := New(
 		&config.Config{
@@ -229,8 +561,8 @@ func TestServices(t *testing.T) {
 	}
 	defer monitor.Close()
 
-	cmd1 := exec.Command("sleep", "10")
-	cmd2 := exec.Command("sleep", "10")
+	cmd1 := exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
+	cmd2 := exec.Command("runc", "run", "--pid-file", "tmp/service2/.pid", "-b", "tmp/service2", "service2")
 
 	if err := cmd1.Start(); err != nil {
 		t.Fatalf("Can't start service: %s", err)
@@ -240,10 +572,13 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
+	// Wait while .ip amd .pid files are created
+	time.Sleep(1 * time.Second)
+
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
-			Pid:        int32(cmd1.Process.Pid),
-			IPAddress:  "127.0.0.1",
+			Pid:        getServicePid("tmp/service1"),
+			IPAddress:  getServiceIP("tmp/service1"),
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -272,8 +607,8 @@ func TestServices(t *testing.T) {
 
 	monitor.StartMonitorService("Service2",
 		ServiceMonitoringConfig{
-			Pid:        int32(cmd2.Process.Pid),
-			IPAddress:  "127.0.0.1",
+			Pid:        getServicePid("tmp/service2"),
+			IPAddress:  getServiceIP("tmp/service2"),
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -335,7 +670,9 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 
-	for {
+	terminate = false
+
+	for terminate != true {
 		select {
 		case data := <-monitor.DataChannel:
 			if len(data.ServicesData) != 1 {
@@ -356,10 +693,23 @@ func TestServices(t *testing.T) {
 				}
 			}
 
-			return
+			terminate = true
 
 		case <-time.After(sendDuration * 2):
 			t.Fatal("Monitoring data timeout")
 		}
+	}
+
+	err = monitor.StopMonitorService("Service2")
+	if err != nil {
+		t.Fatalf("Can't stop monitoring service: %s", err)
+	}
+
+	if err := cmd1.Wait(); err != nil {
+		t.Errorf("Can't wait for service: %s", err)
+	}
+
+	if err := cmd2.Wait(); err != nil {
+		t.Errorf("Can't wait for service: %s", err)
 	}
 }
