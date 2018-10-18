@@ -660,11 +660,11 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 }
 
 func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {
-	value, exist := spec.Annotations[aosProductPrefix+"network.download"]
+	value, exist := spec.Annotations[aosProductPrefix+"network.downloadSpeed"]
 	if exist {
 		setCmd = setCmd + " -d " + value
 	}
-	value, exist = spec.Annotations[aosProductPrefix+"network.upload"]
+	value, exist = spec.Annotations[aosProductPrefix+"network.uploadSpeed"]
 	if exist {
 		setCmd = setCmd + " -u " + value
 	}
