@@ -188,19 +188,6 @@ func (launcher *Launcher) stopServices() {
 	}
 }
 
-func (launcher *Launcher) createAlertRulesFile(installDir string, rules *amqp.ServiceAlertRules) (err error) {
-	f, err := os.Create(path.Join(installDir, "alertrules.json"))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "\t")
-
-	return encoder.Encode(rules)
-}
-
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (installDir string, err error) {
 
 	log.WithFields(log.Fields{"id": serviceInfo.ID, "version": serviceInfo.Version}).Debug("Install service")
@@ -259,10 +246,9 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		}
 	}
 
-	if serviceInfo.ServiceMonitoring != nil {
-		if err := launcher.createAlertRulesFile(installDir, serviceInfo.ServiceMonitoring); err != nil {
-			return installDir, err
-		}
+	alertRules, err := json.Marshal(serviceInfo.ServiceMonitoring)
+	if err != nil {
+		return installDir, err
 	}
 
 	newService := database.ServiceEntry{
@@ -275,6 +261,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		State:         stateInit,
 		Status:        statusOk,
 		TTL:           ttl,
+		AlertRules:    string(alertRules),
 		UploadLimit:   uploadLimit,
 		DownloadLimit: downloadLimit}
 
@@ -468,26 +455,6 @@ func (launcher *Launcher) getServicePid(servicePath string) (pid int32, err erro
 	return int32(pid64), nil
 }
 
-func (launcher *Launcher) getAlertRules(fileName string) (rules *amqp.ServiceAlertRules, err error) {
-	data, err := ioutil.ReadFile(fileName)
-	// no file - no rules
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	rules = &amqp.ServiceAlertRules{}
-
-	if err = json.Unmarshal(data, rules); err != nil {
-		return nil, err
-	}
-
-	return rules, nil
-}
-
 func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state int) (err error) {
 	switch state {
 	case stateRunning:
@@ -501,8 +468,9 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 			return err
 		}
 
-		rules, err := launcher.getAlertRules(path.Join(service.Path, "alertrules.json"))
-		if err != nil {
+		var rules amqp.ServiceAlertRules
+
+		if err := json.Unmarshal([]byte(service.AlertRules), &rules); err != nil {
 			return err
 		}
 
@@ -512,7 +480,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 			WorkingDir:    service.Path,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),
-			ServiceRules:  rules}); err != nil {
+			ServiceRules:  &rules}); err != nil {
 			return err
 		}
 
