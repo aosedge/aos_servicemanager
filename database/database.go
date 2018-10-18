@@ -60,7 +60,7 @@ type Database struct {
 //ServiceEntry describes entry structure
 type ServiceEntry struct {
 	ID            string    // service id
-	Version       uint      // service version
+	Version       uint64    // service version
 	Path          string    // path to service bundle
 	ServiceName   string    // systemd service name
 	UserName      string    // user used to run this service
@@ -68,9 +68,9 @@ type ServiceEntry struct {
 	State         int       // service state
 	Status        int       // service status
 	StartAt       time.Time // time at which service was started
-	TTL           uint      // expiration service duration in days
-	UploadLimit   uint      // upload traffic limit
-	DownloadLimit uint      // download traffic limit
+	TTL           uint64    // expiration service duration in days
+	UploadLimit   uint64    // upload traffic limit
+	DownloadLimit uint64    // download traffic limit
 }
 
 /*******************************************************************************

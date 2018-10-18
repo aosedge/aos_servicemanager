@@ -63,11 +63,11 @@ const (
 
 type action int
 
-//ActionStatus status of performed action
+// ActionStatus status of performed action
 type ActionStatus struct {
 	Action  action
 	ID      string
-	Version uint
+	Version uint64
 	Err     error
 }
 
@@ -206,7 +206,7 @@ func (launcher *Launcher) Close() {
 }
 
 // GetServiceVersion returns installed version of requested service
-func (launcher *Launcher) GetServiceVersion(id string) (version uint, err error) {
+func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err error) {
 	log.WithField("id", id).Debug("Get service version")
 
 	service, err := launcher.db.GetService(id)

@@ -274,9 +274,9 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		Permissions:   spec.Annotations[aosProductPrefix+"vis.permissions"],
 		State:         stateInit,
 		Status:        statusOk,
-		TTL:           uint(ttl),
-		UploadLimit:   uint(uploadLimit),
-		DownloadLimit: uint(downloadLimit)}
+		TTL:           ttl,
+		UploadLimit:   uploadLimit,
+		DownloadLimit: downloadLimit}
 
 	if serviceExists {
 		launcher.services.Delete(serviceName)

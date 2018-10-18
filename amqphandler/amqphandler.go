@@ -39,7 +39,7 @@ type AmqpHandler struct {
 // ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
 	ID                     string             `json:"id"`
-	Version                uint               `json:"version"`
+	Version                uint64             `json:"version"`
 	UpdateType             string             `json:"updateType"`
 	DownloadURL            string             `json:"downloadUrl"`
 	URLExpiration          string             `json:"urlExpiration"`
@@ -106,7 +106,7 @@ type MonitoringData struct {
 // ServiceInfo struct with service information
 type ServiceInfo struct {
 	ID      string        `json:"id"`
-	Version uint          `json:"version"`
+	Version uint64        `json:"version"`
 	Status  string        `json:"status"`
 	Error   *ServiceError `json:"error"`
 }

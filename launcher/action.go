@@ -122,7 +122,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	return nil
 }
 
-func (launcher *Launcher) doActionRemove(id string) (version uint, err error) {
+func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) {
 	service, err := launcher.db.GetService(id)
 	if err != nil {
 		return 0, err
