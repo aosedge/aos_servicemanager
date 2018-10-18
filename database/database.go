@@ -59,16 +59,18 @@ type Database struct {
 
 //ServiceEntry describes entry structure
 type ServiceEntry struct {
-	ID          string    // service id
-	Version     uint      // service version
-	Path        string    // path to service bundle
-	ServiceName string    // systemd service name
-	UserName    string    // user used to run this service
-	Permissions string    // VIS permissions
-	State       int       // service state
-	Status      int       // service status
-	StartAt     time.Time // time at which service was started
-	TTL         uint      // expiration service duration in days
+	ID            string    // service id
+	Version       uint      // service version
+	Path          string    // path to service bundle
+	ServiceName   string    // systemd service name
+	UserName      string    // user used to run this service
+	Permissions   string    // VIS permissions
+	State         int       // service state
+	Status        int       // service status
+	StartAt       time.Time // time at which service was started
+	TTL           uint      // expiration service duration in days
+	UploadLimit   uint      // upload traffic limit
+	DownloadLimit uint      // download traffic limit
 }
 
 /*******************************************************************************
@@ -120,14 +122,15 @@ func New(name string) (db *Database, err error) {
 
 // AddService adds new service entry
 func (db *Database) AddService(entry ServiceEntry) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(entry.ID, entry.Version, entry.Path, entry.ServiceName,
-		entry.UserName, entry.Permissions, entry.State, entry.Status, entry.StartAt, entry.TTL)
+		entry.UserName, entry.Permissions, entry.State, entry.Status, entry.StartAt, entry.TTL,
+		entry.UploadLimit, entry.DownloadLimit)
 
 	return err
 }
@@ -137,15 +140,14 @@ func (db *Database) UpdateService(entry ServiceEntry) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
 								 SET version = ?, path = ?, service = ?, user = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
-								 ttl = ? WHERE id = ?`)
+								 ttl = ?, ulLimit = ?, dlLimit = ? WHERE id = ?`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	result, err := stmt.Exec(entry.Version, entry.Path,
-		entry.ServiceName, entry.UserName, entry.Permissions,
-		entry.State, entry.Status, entry.StartAt, entry.TTL, entry.ID)
+	result, err := stmt.Exec(entry.Version, entry.Path, entry.ServiceName, entry.UserName, entry.Permissions,
+		entry.State, entry.Status, entry.StartAt, entry.TTL, entry.UploadLimit, entry.DownloadLimit, entry.ID)
 	if err != nil {
 		return err
 	}
@@ -185,7 +187,7 @@ func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
 
 	err = stmt.QueryRow(id).Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 		&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-		&entry.StartAt, &entry.TTL)
+		&entry.StartAt, &entry.TTL, &entry.UploadLimit, &entry.DownloadLimit)
 	if err == sql.ErrNoRows {
 		return entry, ErrNotExist
 	}
@@ -210,7 +212,7 @@ func (db *Database) GetServices() (entries []ServiceEntry, err error) {
 		var entry ServiceEntry
 		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 			&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-			&entry.StartAt, &entry.TTL)
+			&entry.StartAt, &entry.TTL, &entry.UploadLimit, &entry.DownloadLimit)
 		if err != nil {
 			return entries, err
 		}
@@ -350,7 +352,7 @@ func (db *Database) GetUsersServices(users []string) (entries []ServiceEntry, er
 		var entry ServiceEntry
 		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 			&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-			&entry.StartAt, &entry.TTL)
+			&entry.StartAt, &entry.TTL, &entry.UploadLimit, &entry.DownloadLimit)
 		if err != nil {
 			return entries, err
 		}
@@ -514,7 +516,9 @@ func (db *Database) createServiceTable() (err error) {
 															   state INTEGER,
 															   status INTEGER,
 															   startat TIMESTAMP,
-															   ttl INTEGER);`)
+															   ttl INTEGER,
+															   ulLimit INTEGER,
+															   dlLimit INTEGER);`)
 
 	return err
 }

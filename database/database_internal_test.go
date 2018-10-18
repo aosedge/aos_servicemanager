@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 func TestAddService(t *testing.T) {
 	// AddService
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -74,14 +74,14 @@ func TestAddService(t *testing.T) {
 func TestUpdateService(t *testing.T) {
 	// AddService
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
 	}
 
 	service1 = ServiceEntry{"service1", 2, "to/new_service1", "new_service1.service", "new_user1", `{"*":"rw", "new":"r"}`, 1, 1,
-		time.Now().UTC().Add(time.Hour * 10), 0}
+		time.Now().UTC().Add(time.Hour * 10), 0, 123, 456}
 
 	// UpdateService
 	err = db.UpdateService(service1)
@@ -117,7 +117,7 @@ func TestNotExistService(t *testing.T) {
 func TestSetServiceStatus(t *testing.T) {
 	// AddService
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -144,7 +144,7 @@ func TestSetServiceStatus(t *testing.T) {
 
 func TestSetServiceState(t *testing.T) {
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -171,7 +171,7 @@ func TestSetServiceState(t *testing.T) {
 
 func TestSetServiceStartTime(t *testing.T) {
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -200,7 +200,7 @@ func TestSetServiceStartTime(t *testing.T) {
 func TestRemoveService(t *testing.T) {
 	// AddService
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -220,7 +220,7 @@ func TestRemoveService(t *testing.T) {
 func TestGetServices(t *testing.T) {
 	// Add service 1
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -228,7 +228,7 @@ func TestGetServices(t *testing.T) {
 
 	// Add service 2
 	service2 := ServiceEntry{"service2", 1, "to/service2", "service2.service", "user2", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
@@ -257,14 +257,14 @@ func TestGetServices(t *testing.T) {
 func TestAddUsersService(t *testing.T) {
 	// Add services
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
 	}
 
 	service2 := ServiceEntry{"service2", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0}
+		time.Now().UTC(), 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add entry: %s", err)
