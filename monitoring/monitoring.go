@@ -531,7 +531,7 @@ func (monitor *Monitor) processTraffic() {
 			traffic.subValue = value
 		}
 
-		// intialValue is used to keep traffic between resets
+		// initialValue is used to keep traffic between resets
 		// Unfortunately, github.com/coreos/go-iptables/iptables doesn't provide API to reset chain statistics.
 		// We use subValue to reset statistics.
 		traffic.currentValue = traffic.initialValue + value - traffic.subValue
