@@ -27,10 +27,6 @@ import (
  * Consts
  ******************************************************************************/
 
-const (
-	dataChannelSize = 32
-)
-
 // Service status
 const (
 	MinutePeriod = iota
@@ -124,7 +120,7 @@ func New(config *config.Config, db database.MonitoringItf) (monitor *Monitor, er
 
 	monitor = &Monitor{db: db}
 
-	monitor.DataChannel = make(chan amqp.MonitoringData, dataChannelSize)
+	monitor.DataChannel = make(chan amqp.MonitoringData, config.Monitoring.MaxOfflineMessages)
 
 	monitor.config = config.Monitoring
 	monitor.workingDir = config.WorkingDir
@@ -377,7 +373,11 @@ func (monitor *Monitor) sendMonitoringData() {
 		service.monitoringData.Alerts.OutTraffic = service.monitoringData.Alerts.OutTraffic[:0]
 	}
 
-	monitor.DataChannel <- monitor.dataToSend
+	if len(monitor.DataChannel) < cap(monitor.DataChannel) {
+		monitor.DataChannel <- monitor.dataToSend
+	} else {
+		log.Warn("Skip sending monitoring data. Channel full.")
+	}
 
 	// Clear arrays
 	monitor.dataToSend.Global.Alerts.CPU = monitor.dataToSend.Global.Alerts.CPU[:0]
