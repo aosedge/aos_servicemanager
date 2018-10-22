@@ -84,9 +84,12 @@ type ServiceMonitoringConfig struct {
 }
 
 type trafficMonitoring struct {
+	disabled     bool
+	addresses    string
 	currentValue uint64
 	initialValue uint64
 	subValue     uint64
+	limit        uint64
 	lastUpdate   time.Time
 }
 
@@ -241,9 +244,13 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		return err
 	}
 
+	monitor.trafficMap[serviceMonitoring.inChain].limit = monitoringConfig.DownloadLimit
+
 	if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
 		return err
 	}
+
+	monitor.trafficMap[serviceMonitoring.outChain].limit = monitoringConfig.UploadLimit
 
 	rules := monitoringConfig.ServiceRules
 
@@ -302,6 +309,8 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	}
 
 	monitor.serviceMap[serviceID] = &serviceMonitoring
+
+	monitor.processTraffic()
 
 	return nil
 }
@@ -504,10 +513,15 @@ func (monitor *Monitor) processTraffic() {
 	timestamp := time.Now().UTC()
 
 	for chain, traffic := range monitor.trafficMap {
-		value, err := monitor.getTrafficChainBytes(chain)
-		if err != nil {
-			log.WithField("chain", chain).Errorf("Can't get chain byte count: %s", err)
-			continue
+		var value uint64
+		var err error
+
+		if !traffic.disabled {
+			value, err = monitor.getTrafficChainBytes(chain)
+			if err != nil {
+				log.WithField("chain", chain).Errorf("Can't get chain byte count: %s", err)
+				continue
+			}
 		}
 
 		if !monitor.isSamePeriod(timestamp, traffic.lastUpdate) {
@@ -521,8 +535,31 @@ func (monitor *Monitor) processTraffic() {
 		// Unfortunately, github.com/coreos/go-iptables/iptables doesn't provide API to reset chain statistics.
 		// We use subValue to reset statistics.
 		traffic.currentValue = traffic.initialValue + value - traffic.subValue
-
 		traffic.lastUpdate = timestamp
+
+		if traffic.limit != 0 {
+			if traffic.currentValue > traffic.limit && !traffic.disabled {
+				// disable chain
+				if err := monitor.setChainState(chain, traffic.addresses, false); err != nil {
+					log.WithField("chain", chain).Errorf("Can't disable chain: %s", err)
+				} else {
+					traffic.disabled = true
+					traffic.initialValue = traffic.currentValue
+					traffic.subValue = 0
+				}
+			}
+
+			if traffic.currentValue < traffic.limit && traffic.disabled {
+				// enable chain
+				if err = monitor.setChainState(chain, traffic.addresses, true); err != nil {
+					log.WithField("chain", chain).Errorf("Can't enable chain: %s", err)
+				} else {
+					traffic.disabled = false
+					traffic.initialValue = traffic.currentValue
+					traffic.subValue = 0
+				}
+			}
+		}
 	}
 }
 
@@ -645,6 +682,40 @@ func (monitor *Monitor) getTrafficChainBytes(chain string) (value uint64, err er
 	return 0, errors.New("Statistic for chain not found")
 }
 
+func (monitor *Monitor) setChainState(chain, addresses string, enable bool) (err error) {
+	log.WithFields(log.Fields{"chain": chain, "state": enable}).Debug("Set chain state")
+
+	var addrType string
+
+	if strings.HasSuffix(chain, "_IN") {
+		addrType = "-d"
+	}
+
+	if strings.HasSuffix(chain, "_OUT") {
+		addrType = "-s"
+	}
+
+	if enable {
+		if err = monitor.deleteAllRules(chain, addrType, addresses, "-j", "DROP"); err != nil {
+			return err
+		}
+
+		if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
+			return err
+		}
+	} else {
+		if err = monitor.deleteAllRules(chain, addrType, addresses); err != nil {
+			return err
+		}
+
+		if err = monitor.iptables.Append("filter", chain, addrType, addresses, "-j", "DROP"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (err error) {
 	var skipAddrType, addrType string
 
@@ -677,7 +748,7 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 		return err
 	}
 
-	traffic := trafficMonitoring{}
+	traffic := trafficMonitoring{addresses: addresses}
 
 	if traffic.lastUpdate, traffic.initialValue, err =
 		monitor.db.GetTrafficMonitorData(chain); err != nil && err != database.ErrNotExist {

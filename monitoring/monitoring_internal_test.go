@@ -60,7 +60,7 @@ func setup() (err error) {
 			"gid": 0
 		},
 		"args": [
-			"ping", "8.8.8.8", "-c10", "-i1"
+			"ping", "8.8.8.8", "-c10", "-w10"
 		],
 		"env": [
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -711,5 +711,91 @@ func TestServices(t *testing.T) {
 
 	if err := cmd2.Wait(); err != nil {
 		t.Errorf("Can't wait for service: %s", err)
+	}
+}
+
+func TestTrafficLimit(t *testing.T) {
+	sendDuration := 2 * time.Second
+
+	monitor, err := New(
+		&config.Config{
+			WorkingDir: ".",
+			Monitoring: config.Monitoring{
+				MaxOfflineMessages:  256,
+				SendPeriod:          config.Duration{Duration: sendDuration},
+				PollPeriod:          config.Duration{Duration: 1 * time.Second},
+				MaxAlertsPerMessage: 10}},
+		db)
+	if err != nil {
+		t.Fatalf("Can't create monitoring instance: %s", err)
+	}
+	defer monitor.Close()
+
+	monitor.trafficPeriod = MinutePeriod
+
+	// wait for beginning of next minute
+	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
+
+	cmd1 := exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
+
+	if err := cmd1.Start(); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	// Wait while .ip amd .pid files are created
+	time.Sleep(1 * time.Second)
+
+	err = monitor.StartMonitorService("Service1",
+		ServiceMonitoringConfig{
+			Pid:           getServicePid("tmp/service1"),
+			IPAddress:     getServiceIP("tmp/service1"),
+			WorkingDir:    ".",
+			UploadLimit:   300,
+			DownloadLimit: 300})
+	if err != nil {
+		t.Fatalf("Can't start monitoring service: %s", err)
+	}
+
+	if err := cmd1.Wait(); err == nil {
+		t.Error("Ping should fail")
+	}
+
+	err = monitor.StopMonitorService("Service1")
+	if err != nil {
+		t.Fatalf("Can't stop monitoring service: %s", err)
+	}
+
+	// wait for beginning of next minute
+	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
+
+	// Start again
+
+	cmd1 = exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
+
+	if err := cmd1.Start(); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	// Wait while .ip amd .pid files are created
+	time.Sleep(1 * time.Second)
+
+	err = monitor.StartMonitorService("Service1",
+		ServiceMonitoringConfig{
+			Pid:           getServicePid("tmp/service1"),
+			IPAddress:     getServiceIP("tmp/service1"),
+			WorkingDir:    ".",
+			UploadLimit:   2000,
+			DownloadLimit: 2000})
+	if err != nil {
+		t.Fatalf("Can't start monitoring service: %s", err)
+	}
+
+	if err := cmd1.Wait(); err != nil {
+		t.Errorf("Wait for service error: %s", err)
+	}
+
+	err = monitor.StopMonitorService("Service1")
+	if err != nil {
+		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 }
