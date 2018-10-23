@@ -43,6 +43,9 @@ type ServiceItf interface {
 	IsUsersService(users []string, id string) (result bool, err error)
 	GetUsersList() (usersList [][]string, err error)
 	DeleteUsers(users []string) (err error)
+	GetUsersEntry(users []string, serviceID string) (entry UsersEntry, err error)
+	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
+	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
 }
 
 // MonitoringItf provides API to create, remove or access monitoring DB
@@ -72,6 +75,14 @@ type ServiceEntry struct {
 	AlertRules    string    // alert rules in json format
 	UploadLimit   uint64    // upload traffic limit
 	DownloadLimit uint64    // download traffic limit
+}
+
+// UsersEntry describes users entry structure
+type UsersEntry struct {
+	Users         []string
+	ServiceID     string
+	StorageFolder string
+	StateChecksum []byte
 }
 
 /*******************************************************************************
@@ -301,7 +312,7 @@ func (db *Database) SetServiceStartTime(id string, time time.Time) (err error) {
 
 // AddUsersService adds service ID to users
 func (db *Database) AddUsersService(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -312,7 +323,7 @@ func (db *Database) AddUsersService(users []string, serviceID string) (err error
 		return err
 	}
 
-	_, err = stmt.Exec(usersJSON, serviceID)
+	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{})
 
 	return err
 }
@@ -333,6 +344,84 @@ func (db *Database) RemoveUsersService(users []string, serviceID string) (err er
 	_, err = stmt.Exec(usersJSON, serviceID)
 
 	return err
+}
+
+// SetUsersStorageFolder sets users storage folder
+func (db *Database) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
+	usersJSON, err := json.Marshal(users)
+	if err != nil {
+		return err
+	}
+
+	result, err := db.sql.Exec("UPDATE users SET storageFolder = ? WHERE users = ? AND serviceid = ?",
+		storageFolder, usersJSON, serviceID)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// SetUsersStateChecksum sets users state checksum
+func (db *Database) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
+	usersJSON, err := json.Marshal(users)
+	if err != nil {
+		return err
+	}
+
+	result, err := db.sql.Exec("UPDATE users SET stateCheckSum = ? WHERE users = ? AND serviceid = ?",
+		checksum, usersJSON, serviceID)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetUsersEntry returns users entry
+func (db *Database) GetUsersEntry(users []string, serviceID string) (entry UsersEntry, err error) {
+	usersJSON, err := json.Marshal(users)
+	if err != nil {
+		return entry, err
+	}
+
+	rows, err := db.sql.Query("SELECT storageFolder, stateCheckSum FROM users WHERE users = ? AND serviceid = ?",
+		usersJSON, serviceID)
+	if err != nil {
+		return entry, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err = rows.Scan(&entry.StorageFolder, &entry.StateChecksum); err != nil {
+			return entry, err
+		}
+
+		entry.Users = users
+		entry.ServiceID = serviceID
+
+		return entry, nil
+	}
+
+	return entry, ErrNotExist
 }
 
 // GetUsersServices returns list of users service entries
@@ -531,6 +620,8 @@ func (db *Database) createUsersTable() (err error) {
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
 															serviceid TEXT NOT NULL,
+															storageFolder TEXT,
+															stateCheckSum BLOB,
 															PRIMARY KEY(users, serviceid));`)
 
 	return err

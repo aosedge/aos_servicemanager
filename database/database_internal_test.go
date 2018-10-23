@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -432,6 +433,45 @@ func TestAddUsersList(t *testing.T) {
 	}
 }
 
+func TestUsersStorage(t *testing.T) {
+	// Add users service
+	err := db.AddUsersService([]string{"user1"}, "service1")
+	if err != nil {
+		t.Errorf("Can't add users service: %s", err)
+	}
+
+	// Check default values
+	entry, err := db.GetUsersEntry([]string{"user1"}, "service1")
+	if err != nil {
+		t.Errorf("Can't get users entry: %s", err)
+	}
+
+	if entry.StorageFolder != "" || len(entry.StateChecksum) != 0 {
+		t.Error("Wrong users entry value")
+	}
+
+	if err = db.SetUsersStorageFolder([]string{"user1"}, "service1", "stateFolder1"); err != nil {
+		t.Errorf("Can't set users storage folder: %s", err)
+	}
+
+	if err = db.SetUsersStateChecksum([]string{"user1"}, "service1", []byte{0, 1, 2, 3, 4, 5}); err != nil {
+		t.Errorf("Can't set users state checksum: %s", err)
+	}
+
+	entry, err = db.GetUsersEntry([]string{"user1"}, "service1")
+	if err != nil {
+		t.Errorf("Can't get users entry: %s", err)
+	}
+
+	if entry.StorageFolder != "stateFolder1" || !reflect.DeepEqual(entry.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
+		t.Error("Wrong users entry value")
+	}
+
+	// Clear DB
+	if err = db.removeAllUsers(); err != nil {
+		t.Errorf("Can't remove all users: %s", err)
+	}
+}
 func TestTrafficMonitor(t *testing.T) {
 	setTime := time.Now()
 	setValue := uint64(100)
