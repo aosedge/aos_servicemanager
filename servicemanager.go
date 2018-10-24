@@ -53,7 +53,7 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 
 		currentList, err := launcherHandler.GetServicesInfo()
 		if err != nil {
-			log.Error("Error getting services info: ", err)
+			log.Errorf("Error getting services info: %s", err)
 			return err
 		}
 
@@ -106,75 +106,102 @@ func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launche
 		return nil
 
 	default:
-		log.Warn("Receive unsupported amqp message: ", reflect.TypeOf(data))
+		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
 		return nil
 	}
 }
 
-func run(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher,
-	visHandler *visclient.VisClient, monitorHandler *monitoring.Monitor) {
+func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStatus) (err error) {
+	info := amqp.ServiceInfo{ID: status.ID, Version: status.Version}
+
+	switch status.Action {
+	case launcher.ActionInstall:
+		if status.Err != nil {
+			info.Status = "error"
+			errorMsg := amqp.ServiceError{ID: -1, Message: "Can't install service"}
+			info.Error = &errorMsg
+
+			log.WithFields(log.Fields{
+				"id":      status.ID,
+				"version": status.Version}).Errorf("Can't install service: %s", status.Err)
+		} else {
+			info.Status = "installed"
+
+			log.WithFields(log.Fields{
+				"id":      status.ID,
+				"version": status.Version}).Info("Service successfully installed")
+		}
+
+	case launcher.ActionRemove:
+		if status.Err != nil {
+			info.Status = "error"
+			errorMsg := amqp.ServiceError{ID: -1, Message: "Can't remove service"}
+			info.Error = &errorMsg
+
+			log.WithFields(log.Fields{
+				"id":      status.ID,
+				"version": status.Version}).Errorf("Can't remove service: %s", status.Err)
+		} else {
+			info.Status = "removed"
+
+			log.WithFields(log.Fields{
+				"id":      status.ID,
+				"version": status.Version}).Info("Service successfully removed")
+		}
+	}
+
+	if err = amqpHandler.SendServiceStatusMsg(info); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func run(
+	amqpHandler *amqp.AmqpHandler,
+	launcherHandler *launcher.Launcher,
+	visHandler *visclient.VisClient,
+	monitorHandler *monitoring.Monitor,
+	terminateChannel chan os.Signal) (reconnect bool) {
 	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
 		log.Errorf("Can't send initial setup: %s", err)
 		// reconnect
-		return
+		return true
 	}
 
 	for {
 		select {
+		case <-terminateChannel:
+			// Close application
+			return false
+
 		case amqpMessage := <-amqpHandler.MessageChannel:
 			// check for error
 			if err, ok := amqpMessage.(error); ok {
-				log.Error("Receive amqp error: ", err)
+				log.Errorf("Receive amqp error: %s", err)
 				// reconnect
-				return
+				return true
 			}
 
 			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
-				log.Error("Error processing amqp result: ", err)
+				log.Errorf("Error processing amqp result: %s", err)
 			}
 
-		case serviceStatus := <-launcherHandler.StatusChannel:
-			info := amqp.ServiceInfo{ID: serviceStatus.ID, Version: serviceStatus.Version}
-
-			switch serviceStatus.Action {
-			case launcher.ActionInstall:
-				if serviceStatus.Err != nil {
-					info.Status = "error"
-					errorMsg := amqp.ServiceError{ID: -1, Message: "Can't install service"}
-					info.Error = &errorMsg
-					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't install service: ", serviceStatus.Err)
-				} else {
-					info.Status = "installed"
-					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully installed")
-				}
-
-			case launcher.ActionRemove:
-				if serviceStatus.Err != nil {
-					info.Status = "error"
-					errorMsg := amqp.ServiceError{ID: -1, Message: "Can't remove service"}
-					info.Error = &errorMsg
-					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Error("Can't remove service: ", serviceStatus.Err)
-				} else {
-					info.Status = "removed"
-					log.WithFields(log.Fields{"id": serviceStatus.ID, "version": serviceStatus.Version}).Info("Service successfully removed")
-				}
-			}
-
-			err := amqpHandler.SendServiceStatusMsg(info)
-			if err != nil {
-				log.Error("Error send service status message: ", err)
+		case status := <-launcherHandler.StatusChannel:
+			if err := sendServiceStatus(amqpHandler, status); err != nil {
+				log.Errorf("Error send service status message: %s", err)
 			}
 
 		case data := <-monitorHandler.DataChannel:
 			err := amqpHandler.SendMonitoringData(data)
 			if err != nil {
-				log.Error("Error send monitoring data: ", err)
+				log.Errorf("Error send monitoring data: %s", err)
 			}
 
 		case users := <-visHandler.UsersChangedChannel:
 			log.WithField("users", users).Info("Users changed")
 			// reconnect
-			return
+			return true
 		}
 	}
 }
@@ -198,7 +225,7 @@ func main() {
 	// Create config
 	config, err := config.New(*configFile)
 	if err != nil {
-		log.Fatal("Error while opening configuration file: ", err)
+		log.Fatalf("Error while opening configuration file: %s", err)
 	}
 
 	// Initialize fcrypt
@@ -217,7 +244,7 @@ func main() {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
 		} else {
-			log.Fatal("Can't create monitor: ", err)
+			log.Fatalf("Can't create monitor: %s", err)
 		}
 	}
 
@@ -231,8 +258,9 @@ func main() {
 	// Create D-Bus server
 	dbusServer, err := dbushandler.New(db)
 	if err != nil {
-		log.Fatal("Can't create D-BUS server %v", err)
+		log.Fatalf("Can't create D-BUS server: %s", err)
 	}
+	defer dbusServer.Close()
 
 	// Create VIS client
 	vis, err := visclient.New(config.VISServerURL)
@@ -248,24 +276,8 @@ func main() {
 	defer amqpHandler.Close()
 
 	// Handle SIGTERM
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		launcherHandler.Close()
-		if amqpHandler != nil {
-			amqpHandler.Close()
-		}
-		dbusServer.Close()
-		vis.Close()
-		monitor.Close()
-		db.Close()
-
-		os.Exit(1)
-	}()
-
-	// Run all systems
-	log.WithField("url", config.ServiceDiscoveryURL).Debug("Start connection")
+	terminateChannel := make(chan os.Signal, 1)
+	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
 	// Get vin code
 	vin, err := vis.GetVIN()
@@ -287,7 +299,10 @@ func main() {
 
 		// Connect
 		if err = amqpHandler.Connect(config.ServiceDiscoveryURL, vin, users); err == nil {
-			run(amqpHandler, launcherHandler, vis, monitor)
+			if !run(amqpHandler, launcherHandler, vis, monitor, terminateChannel) {
+				// Close application
+				return
+			}
 			amqpHandler.Disconnect()
 		} else {
 			log.Errorf("Can't establish connection: %s", err)
