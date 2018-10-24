@@ -195,6 +195,9 @@ type queueInfo struct {
  ******************************************************************************/
 
 const (
+	sendChannelSize    = 32
+	receiveChannelSize = 16
+
 	connectionRetry   = 3
 	vehicleStatusStr  = "vehicleStatus"
 	serviceStatusStr  = "serviceStatus"
@@ -206,15 +209,24 @@ const (
  ******************************************************************************/
 
 // New creates new amqp object
-func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err error) {
+func New() (handler *AmqpHandler, err error) {
+	log.Debug("New AMQP")
+
 	handler = &AmqpHandler{}
 
-	handler.MessageChannel = make(chan interface{}, 100)
-	handler.sendChannel = make(chan []byte, 100)
+	handler.MessageChannel = make(chan interface{}, receiveChannelSize)
+	handler.sendChannel = make(chan []byte, sendChannelSize)
+
+	return handler, nil
+}
+
+// Connect connects to cloud
+func (handler *AmqpHandler) Connect(sdURL string, vin string, users []string) (err error) {
+	log.WithFields(log.Fields{"url": sdURL, "vin": vin, "users": users}).Debug("AMQP connect")
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	var connectionInfo rabbitConnectioninfo
@@ -227,22 +239,37 @@ func New(sdURL string, vin string, users []string) (handler *AmqpHandler, err er
 
 		return err
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := retryHelper(func() (err error) {
 		return handler.setupSendConnection(connectionInfo.SendParams, tlsConfig)
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := retryHelper(func() (err error) {
 		return handler.setupReceiveConnection(connectionInfo.ReceiveParams, tlsConfig)
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
-	return handler, nil
+	return nil
+}
+
+// Disconnect disconnects from cloud
+func (handler *AmqpHandler) Disconnect() (err error) {
+	log.Debug("AMQP disconnect")
+
+	if handler.sendConnection != nil {
+		handler.sendConnection.Close()
+	}
+
+	if handler.receiveConnection != nil {
+		handler.receiveConnection.Close()
+	}
+
+	return nil
 }
 
 // SendInitialSetup sends initial list oaf available services
@@ -301,8 +328,7 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 func (handler *AmqpHandler) Close() {
 	log.Info("Close AMQP")
 
-	handler.sendConnection.Close()
-	handler.receiveConnection.Close()
+	handler.Disconnect()
 }
 
 /*******************************************************************************

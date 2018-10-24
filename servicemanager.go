@@ -241,7 +241,11 @@ func main() {
 	}
 	defer vis.Close()
 
-	var amqpHandler *amqp.AmqpHandler
+	amqpHandler, err := amqp.New()
+	if err != nil {
+		log.Fatalf("Can't create amqp: %s", err)
+	}
+	defer amqpHandler.Close()
 
 	// Handle SIGTERM
 	c := make(chan os.Signal, 2)
@@ -281,13 +285,10 @@ func main() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
-		// Create amqp
-		amqpHandler, err = amqp.New(config.ServiceDiscoveryURL, vin, users)
-		if err == nil {
+		// Connect
+		if err = amqpHandler.Connect(config.ServiceDiscoveryURL, vin, users); err == nil {
 			run(amqpHandler, launcherHandler, vis, monitor)
-
-			amqpHandler.Close()
-			amqpHandler = nil
+			amqpHandler.Disconnect()
 		} else {
 			log.Errorf("Can't establish connection: %s", err)
 		}
