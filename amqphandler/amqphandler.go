@@ -126,7 +126,7 @@ type serviceDiscoveryRequest struct {
 // messageMonitor structure which define AOS monitoring message
 type messageMonitor struct {
 	Version     int            `json:"version"`
-	MessageType string         `json:"messageType"` //monitoringData
+	MessageType string         `json:"messageType"`
 	Timestamp   time.Time      `json:"timestamp"`
 	Data        MonitoringData `json:"data"`
 }
@@ -400,7 +400,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 				handler.MessageChannel <- err
 			}
 
-			log.Debugf("AMQP sender closed")
+			log.Debug("AMQP sender closed")
 
 			return
 
@@ -417,7 +417,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 					UserId:        params.User,
 					Body:          sendData,
 				}); err != nil {
-				log.Errorf("AMQP can't publish message: %", err)
+				log.Errorf("AMQP can't publish message: %s", err)
 			}
 		}
 	}
@@ -465,10 +465,10 @@ func (handler *AmqpHandler) setupReceiveConnection(params receiveParams, tlsConf
 	return nil
 }
 
-func (handler *AmqpHandler) runReceiver(param receiveParams, delivaryChannel <-chan amqp.Delivery) {
+func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-chan amqp.Delivery) {
 	log.Info("Start AMQP consumer")
 
-	for d := range delivaryChannel {
+	for d := range deliveryChannel {
 		log.WithFields(log.Fields{
 			"message":      string(d.Body),
 			"corrlationId": d.CorrelationId}).Debug("AMQP received message")
@@ -518,5 +518,5 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, delivaryChannel <-c
 		handler.MessageChannel <- servInfoArray
 	}
 
-	log.Debugf("AMQP receiver closed")
+	log.Debug("AMQP receiver closed")
 }
