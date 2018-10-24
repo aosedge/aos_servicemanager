@@ -30,7 +30,8 @@ type AmqpHandler struct {
 	// MessageChannel channel for amqp messages
 	MessageChannel chan interface{}
 
-	sendChannel chan []byte // send channel
+	sendChannel  chan []byte
+	retryChannel chan []byte
 
 	sendConnection    *amqp.Connection
 	receiveConnection *amqp.Connection
@@ -197,6 +198,7 @@ type queueInfo struct {
 const (
 	sendChannelSize    = 32
 	receiveChannelSize = 16
+	retryChannelSize   = 8
 
 	connectionRetry   = 3
 	vehicleStatusStr  = "vehicleStatus"
@@ -216,6 +218,7 @@ func New() (handler *AmqpHandler, err error) {
 
 	handler.MessageChannel = make(chan interface{}, receiveChannelSize)
 	handler.sendChannel = make(chan []byte, sendChannelSize)
+	handler.retryChannel = make(chan []byte, retryChannelSize)
 
 	return handler, nil
 }
@@ -409,6 +412,10 @@ func (handler *AmqpHandler) setupSendConnection(params sendParams, tlsConfig *tl
 
 	handler.sendConnection = connection
 
+	if err = amqpChannel.Confirm(false); err != nil {
+		return err
+	}
+
 	go handler.runSender(params, amqpChannel)
 
 	return nil
@@ -416,21 +423,29 @@ func (handler *AmqpHandler) setupSendConnection(params sendParams, tlsConfig *tl
 
 func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Channel) {
 	log.Info("Start AMQP sender")
+	defer log.Debug("AMQP sender closed")
 
-	errorChannel := handler.sendConnection.NotifyClose(make(chan *amqp.Error))
+	errorChannel := handler.sendConnection.NotifyClose(make(chan *amqp.Error, 1))
+	confirmChannel := amqpChannel.NotifyPublish(make(chan amqp.Confirmation, 1))
 
 	for {
+		var data []byte
+
 		select {
 		case err := <-errorChannel:
 			if err != nil {
 				handler.MessageChannel <- err
 			}
 
-			log.Debug("AMQP sender closed")
-
 			return
 
-		case sendData := <-handler.sendChannel:
+		case data = <-handler.retryChannel:
+			log.WithField("data", string(data)).Debug("AMQP resend")
+
+		case data = <-handler.sendChannel:
+		}
+
+		if data != nil {
 			if err := amqpChannel.Publish(
 				params.Exchange.Name, // exchange
 				"",                   // routing key
@@ -438,12 +453,24 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 				params.Immediate,     // immediate
 				amqp.Publishing{
 					ContentType:   "application/json",
-					DeliveryMode:  2,
+					DeliveryMode:  amqp.Persistent,
 					CorrelationId: "100", //TODO: add processing CorelationID
 					UserId:        params.User,
-					Body:          sendData,
+					Body:          data,
 				}); err != nil {
-				log.Errorf("AMQP can't publish message: %s", err)
+				handler.MessageChannel <- err
+			}
+
+			// Handle retry packets
+			confirm, ok := <-confirmChannel
+			if !ok || !confirm.Ack {
+				log.WithField("data", string(data)).Warning("AMQP data is not sent. Put into retry queue")
+
+				handler.retryChannel <- data
+			}
+
+			if !ok {
+				return
 			}
 		}
 	}
