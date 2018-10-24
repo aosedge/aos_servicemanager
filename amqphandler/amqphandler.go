@@ -466,12 +466,12 @@ func (handler *AmqpHandler) setupReceiveConnection(params receiveParams, tlsConf
 		return err
 	}
 
-	channel, err := connection.Channel()
+	amqpChannel, err := connection.Channel()
 	if err != nil {
 		return err
 	}
 
-	deliveryChannel, err := channel.Consume(
+	deliveryChannel, err := amqpChannel.Consume(
 		params.Queue.Name, // queue
 		params.Consumer,   // consumer
 		true,              // auto-ack param.AutoAck
@@ -492,57 +492,72 @@ func (handler *AmqpHandler) setupReceiveConnection(params receiveParams, tlsConf
 }
 
 func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-chan amqp.Delivery) {
-	log.Info("Start AMQP consumer")
+	log.Info("Start AMQP receiver")
+	defer log.Info("AMQP receiver closed")
 
-	for d := range deliveryChannel {
-		log.WithFields(log.Fields{
-			"message":      string(d.Body),
-			"corrlationId": d.CorrelationId}).Debug("AMQP received message")
+	errorChannel := handler.receiveConnection.NotifyClose(make(chan *amqp.Error, 1))
 
-		header := struct {
-			MessageType string `json:"messageType"`
-		}{}
+	for {
+		select {
+		case err := <-errorChannel:
+			if err != nil {
+				handler.MessageChannel <- err
+			}
 
-		if err := json.Unmarshal(d.Body, &header); err != nil {
-			log.Errorf("AMQP consumer error: %s", err)
-			continue
+			return
+
+		case data, ok := <-deliveryChannel:
+			if !ok {
+				return
+			}
+
+			log.WithFields(log.Fields{
+				"message":      string(data.Body),
+				"corrlationId": data.CorrelationId}).Debug("AMQP received message")
+
+			header := struct {
+				MessageType string `json:"messageType"`
+			}{}
+
+			if err := json.Unmarshal(data.Body, &header); err != nil {
+				log.Errorf("AMQP consumer error: %s", err)
+				break
+			}
+
+			if header.MessageType != "desiredStatus" {
+				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
+				break
+			}
+
+			var encryptList desiredStatus
+
+			if err := json.Unmarshal(data.Body, &encryptList); err != nil { // TODO: add check
+				log.Errorf("AMQP consumer error: %s", err)
+				break
+			}
+
+			var servInfoArray []ServiceInfoFromCloud
+
+			cmsData, err := base64.StdEncoding.DecodeString(encryptList.Services)
+			if err != nil {
+				log.Errorf("Can't decode base64 data from element: %s", err)
+				break
+			}
+
+			decryptData, err := fcrypt.DecryptMetadata(cmsData)
+			if err != nil {
+				log.Errorf("Decryption metadata error: %s", err)
+				break
+			}
+
+			log.WithField("data", string(decryptData)).Debug("Decrypted data")
+
+			if err := json.Unmarshal(decryptData, &servInfoArray); err != nil {
+				log.Errorf("Can't make json from decrypt data: %s", err)
+				break
+			}
+
+			handler.MessageChannel <- servInfoArray
 		}
-
-		if header.MessageType != "desiredStatus" {
-			log.Warnf("AMQP unsupported message type: %s", header.MessageType)
-			continue
-		}
-
-		var encryptList desiredStatus
-
-		if err := json.Unmarshal(d.Body, &encryptList); err != nil { // TODO: add check
-			log.Errorf("AMQP consumer error: %s", err)
-			continue
-		}
-
-		var servInfoArray []ServiceInfoFromCloud
-
-		cmsData, err := base64.StdEncoding.DecodeString(encryptList.Services)
-		if err != nil {
-			log.Errorf("Can't decode base64 data from element: %s", err)
-			continue
-		}
-
-		decryptData, err := fcrypt.DecryptMetadata(cmsData)
-		if err != nil {
-			log.Errorf("Decryption metadata error: %s", err)
-			continue
-		}
-
-		log.WithField("data", string(decryptData)).Debug("Decrypted data")
-
-		if err := json.Unmarshal(decryptData, &servInfoArray); err != nil {
-			log.Errorf("Can't make json from decrypt data: %s", err)
-			continue
-		}
-
-		handler.MessageChannel <- servInfoArray
 	}
-
-	log.Debug("AMQP receiver closed")
 }
