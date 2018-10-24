@@ -277,8 +277,6 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list oaf available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	log.WithField("services", serviceList).Debug("Send initial setup")
-
 	reqJSON, err := json.Marshal(vehicleStatus{
 		Version:     1,
 		MessageType: vehicleStatusStr,
@@ -294,8 +292,6 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 
 // SendServiceStatusMsg sends message with service status
 func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err error) {
-	log.WithField("status", serviceStatus).Debug("Send service status")
-
 	reqJSON, err := json.Marshal(vehicleStatus{
 		Version:     1,
 		MessageType: serviceStatusStr,
@@ -319,8 +315,6 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 	if err != nil {
 		return err
 	}
-
-	log.WithField("monitoringData", string(reqJSON)).Debug("Send monitoring data")
 
 	handler.sendChannel <- reqJSON
 
@@ -443,6 +437,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 			log.WithField("data", string(data)).Debug("AMQP resend")
 
 		case data = <-handler.sendChannel:
+			log.WithField("data", string(data)).Debug("AMQP send")
 		}
 
 		if data != nil {
