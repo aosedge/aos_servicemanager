@@ -164,9 +164,19 @@ func (launcher *Launcher) stopService(id, serviceName string) (err error) {
 func (launcher *Launcher) stopServices() {
 	log.WithField("users", launcher.users).Debug("Stop user services")
 
-	services, err := launcher.db.GetUsersServices(launcher.users)
-	if err != nil {
-		log.Errorf("Can't stop services: %s", err)
+	var services []database.ServiceEntry
+	var err error
+
+	if launcher.users == nil {
+		services, err = launcher.db.GetServices()
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+		}
+	} else {
+		services, err = launcher.db.GetUsersServices(launcher.users)
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+		}
 	}
 
 	statusChannel := make(chan error, len(services))
