@@ -119,75 +119,73 @@ func New(config *config.Config, db database.ServiceItf,
 	monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	var localLauncher Launcher
+	launcher = &Launcher{}
 
-	localLauncher.db = db
-	localLauncher.config = config
-	localLauncher.monitor = monitoring
+	launcher.db = db
+	launcher.config = config
+	launcher.monitor = monitoring
 
-	localLauncher.closeChannel = make(chan bool)
-	localLauncher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
+	launcher.closeChannel = make(chan bool)
+	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 
-	localLauncher.waitQueue = list.New()
-	localLauncher.workQueue = list.New()
+	launcher.waitQueue = list.New()
+	launcher.workQueue = list.New()
 
-	localLauncher.downloader = &localLauncher
+	launcher.downloader = launcher
 
 	// Check and create service dir
 	dir := path.Join(config.WorkingDir, serviceDir)
 	if _, err = os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return launcher, err
+			return nil, err
 		}
 		if err = os.MkdirAll(dir, 0755); err != nil {
-			return launcher, err
+			return nil, err
 		}
 	}
 
 	// Create systemd connection
-	localLauncher.systemd, err = dbus.NewSystemConnection()
+	launcher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
-		return launcher, err
+		return nil, err
 	}
-	if err = localLauncher.systemd.Subscribe(); err != nil {
-		return launcher, err
+	if err = launcher.systemd.Subscribe(); err != nil {
+		return nil, err
 	}
 
-	localLauncher.handleSystemdSubscription()
+	launcher.handleSystemdSubscription()
 
 	// Get systemd service template
-	localLauncher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
+	launcher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
 	if err != nil {
-		return launcher, err
+		return nil, err
 	}
 
 	// Retrieve runc abs path
-	localLauncher.runcPath, err = exec.LookPath(runcName)
+	launcher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
-		return launcher, err
+		return nil, err
 	}
 
 	// Retrieve netns abs path
-	localLauncher.netnsPath, _ = filepath.Abs(path.Join(config.WorkingDir, netnsName))
-	if _, err := os.Stat(localLauncher.netnsPath); err != nil {
+	launcher.netnsPath, _ = filepath.Abs(path.Join(config.WorkingDir, netnsName))
+	if _, err := os.Stat(launcher.netnsPath); err != nil {
 		// check system PATH
-		localLauncher.netnsPath, err = exec.LookPath(netnsName)
+		launcher.netnsPath, err = exec.LookPath(netnsName)
 		if err != nil {
-			return launcher, err
+			return nil, err
 		}
 	}
 
 	// Retrieve wondershaper abs path
-	localLauncher.wonderShaperPath, _ = filepath.Abs(path.Join(config.WorkingDir, wonderShaperName))
-	if _, err := os.Stat(localLauncher.wonderShaperPath); err != nil {
+	launcher.wonderShaperPath, _ = filepath.Abs(path.Join(config.WorkingDir, wonderShaperName))
+	if _, err := os.Stat(launcher.wonderShaperPath); err != nil {
 		// check system PATH
-		localLauncher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
+		launcher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
 		if err != nil {
-			return launcher, err
+			return nil, err
 		}
 	}
-
-	launcher = &localLauncher
 
 	return launcher, nil
 }
