@@ -2,7 +2,7 @@
 package launcher
 
 import (
-	"container/list"
+	"errors"
 	"os"
 	"os/exec"
 	"path"
@@ -23,8 +23,7 @@ import (
  ******************************************************************************/
 
 const (
-	serviceDir         = "services" // services directory
-	maxExecutedActions = 10         // max number of actions processed simultaneously
+	serviceDir = "services" // services directory
 
 	runcName         = "runc"         // runc file name
 	netnsName        = "netns"        // netns file name
@@ -61,11 +60,11 @@ const (
  * Types
  ******************************************************************************/
 
-type action int
+type actionType int
 
 // ActionStatus status of performed action
 type ActionStatus struct {
-	Action  action
+	Action  actionType
 	ID      string
 	Version uint64
 	Err     error
@@ -85,6 +84,8 @@ type Launcher struct {
 	systemd *dbus.Conn
 	config  *config.Config
 
+	actionHandler *actionHandler
+
 	downloader downloadItf
 
 	users []string
@@ -95,19 +96,10 @@ type Launcher struct {
 
 	mutex sync.Mutex
 
-	waitQueue *list.List
-	workQueue *list.List
-
 	serviceTemplate  string
 	runcPath         string
 	netnsPath        string
 	wonderShaperPath string
-}
-
-type serviceAction struct {
-	action action
-	id     string
-	data   interface{}
 }
 
 /*******************************************************************************
@@ -128,8 +120,9 @@ func New(config *config.Config, db database.ServiceItf,
 	launcher.closeChannel = make(chan bool)
 	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 
-	launcher.waitQueue = list.New()
-	launcher.workQueue = list.New()
+	if launcher.actionHandler, err = newActionHandler(); err != nil {
+		return nil, err
+	}
 
 	launcher.downloader = launcher
 
@@ -219,12 +212,12 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	launcher.putInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo})
+	launcher.actionHandler.PutInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo, launcher.doAction})
 }
 
 // RemoveService stops and removes service
 func (launcher *Launcher) RemoveService(id string) {
-	launcher.putInQueue(serviceAction{ActionRemove, id, nil})
+	launcher.actionHandler.PutInQueue(serviceAction{ActionRemove, id, nil, launcher.doAction})
 }
 
 // GetServicesInfo returns information about all installed services
@@ -294,4 +287,94 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 	}
 
 	return true
+}
+
+func (launcher *Launcher) doAction(action actionType, id string, data interface{}) {
+	status := ActionStatus{Action: action, ID: id}
+
+	switch action {
+	case ActionInstall:
+		serviceInfo := data.(amqp.ServiceInfoFromCloud)
+		status.Version = serviceInfo.Version
+
+		status.Err = launcher.doActionInstall(serviceInfo)
+
+	case ActionRemove:
+		status.Version, status.Err = launcher.doActionRemove(status.ID)
+	}
+
+	launcher.StatusChannel <- status
+}
+
+func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
+	if launcher.users == nil {
+		return errors.New("Users are not set")
+	}
+
+	service, err := launcher.db.GetService(serviceInfo.ID)
+	if err != nil && err != database.ErrNotExist {
+		return err
+	}
+
+	// Skip incorrect version
+	if err == nil && serviceInfo.Version < service.Version {
+		return errors.New("Version mistmatch")
+	}
+
+	installed := false
+
+	// Check if we need to install
+	if err != nil || serviceInfo.Version > service.Version {
+		if installDir, err := launcher.installService(serviceInfo); err != nil {
+			if installDir != "" {
+				os.RemoveAll(installDir)
+			}
+			return err
+		}
+		installed = true
+	}
+
+	// Update users DB
+	exist, err := launcher.db.IsUsersService(launcher.users, serviceInfo.ID)
+	if err != nil {
+		return err
+	}
+
+	if !exist {
+		if err := launcher.db.AddUsersService(launcher.users, serviceInfo.ID); err != nil {
+			return err
+		}
+	}
+
+	// Start service
+	if !installed {
+		if err = launcher.startService(service.ID, service.ServiceName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) {
+	service, err := launcher.db.GetService(id)
+	if err != nil {
+		return 0, err
+	}
+
+	version = service.Version
+
+	if launcher.users == nil {
+		return version, errors.New("Users are not set")
+	}
+
+	if err := launcher.stopService(service.ID, service.ServiceName); err != nil {
+		return version, err
+	}
+
+	if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
+		return version, err
+	}
+
+	return version, nil
 }
