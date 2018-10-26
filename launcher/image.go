@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -21,11 +20,17 @@ import (
 )
 
 /*******************************************************************************
- * Service image related API
+ * Type
  ******************************************************************************/
 
-// downloadService downloads service
-func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+type imageHandler struct {
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (handler *imageHandler) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
 	client := grab.NewClient()
 
 	destDir, err := ioutil.TempDir("", "aos_")
@@ -94,29 +99,22 @@ func (launcher *Launcher) downloadService(serviceInfo amqp.ServiceInfoFromCloud)
 	return outputFile, nil
 }
 
-func (launcher *Launcher) downloadAndUnpackImage(serviceInfo amqp.ServiceInfoFromCloud) (installDir string, err error) {
+func downloadAndUnpackImage(downloader downloadItf, serviceInfo amqp.ServiceInfoFromCloud, installDir string) (err error) {
 	// download image
-	image, err := launcher.downloader.downloadService(serviceInfo)
+	image, err := downloader.downloadService(serviceInfo)
 	if image != "" {
 		defer os.Remove(image)
 	}
 	if err != nil {
-		return installDir, err
+		return err
 	}
-
-	// create install dir
-	installDir, err = ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
-	if err != nil {
-		return installDir, err
-	}
-	log.WithField("dir", installDir).Debug("Create install dir")
 
 	// unpack image there
 	if err = unpackImage(image, installDir); err != nil {
-		return installDir, err
+		return err
 	}
 
-	return installDir, nil
+	return nil
 }
 
 func packImage(source, name string) (err error) {

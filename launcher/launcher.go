@@ -124,7 +124,7 @@ func New(config *config.Config, db database.ServiceItf,
 		return nil, err
 	}
 
-	launcher.downloader = launcher
+	launcher.downloader = &imageHandler{}
 
 	// Check and create service dir
 	dir := path.Join(config.WorkingDir, serviceDir)

@@ -202,8 +202,15 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	log.WithFields(log.Fields{"id": serviceInfo.ID, "version": serviceInfo.Version}).Debug("Install service")
 
+	// create install dir
+	installDir, err = ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
+	if err != nil {
+		return installDir, err
+	}
+	log.WithField("dir", installDir).Debug("Create install dir")
+
 	// download and unpack
-	installDir, err = launcher.downloadAndUnpackImage(serviceInfo)
+	err = downloadAndUnpackImage(launcher.downloader, serviceInfo, installDir)
 	if err != nil {
 		return installDir, err
 	}
