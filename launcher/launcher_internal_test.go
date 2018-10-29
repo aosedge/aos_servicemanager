@@ -263,6 +263,8 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
+	defer db.Close()
+
 	launcher, err := newTestLauncher(new(pythonImage), nil)
 	if err != nil {
 		return err
@@ -272,8 +274,6 @@ func cleanup() (err error) {
 	if err := launcher.removeAllServices(); err != nil {
 		return err
 	}
-
-	db.Close()
 
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err

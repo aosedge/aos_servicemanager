@@ -199,6 +199,8 @@ func New(config *config.Config, db database.ServiceItf,
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
 
+	launcher.stopServices()
+
 	if err := launcher.systemd.Unsubscribe(); err != nil {
 		log.Warn("Can't unsubscribe from systemd: ", err)
 	}
