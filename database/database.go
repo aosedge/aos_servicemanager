@@ -75,6 +75,8 @@ type ServiceEntry struct {
 	AlertRules    string    // alert rules in json format
 	UploadLimit   uint64    // upload traffic limit
 	DownloadLimit uint64    // download traffic limit
+	StorageLimit  uint64    // storage limit
+	StateLimit    uint64    // state limit
 }
 
 // UsersEntry describes users entry structure
@@ -134,7 +136,7 @@ func New(name string) (db *Database, err error) {
 
 // AddService adds new service entry
 func (db *Database) AddService(entry ServiceEntry) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -142,7 +144,7 @@ func (db *Database) AddService(entry ServiceEntry) (err error) {
 
 	_, err = stmt.Exec(entry.ID, entry.Version, entry.Path, entry.ServiceName,
 		entry.UserName, entry.Permissions, entry.State, entry.Status, entry.StartAt, entry.TTL,
-		entry.AlertRules, entry.UploadLimit, entry.DownloadLimit)
+		entry.AlertRules, entry.UploadLimit, entry.DownloadLimit, entry.StorageLimit, entry.StateLimit)
 
 	return err
 }
@@ -152,7 +154,8 @@ func (db *Database) UpdateService(entry ServiceEntry) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
 								 SET version = ?, path = ?, service = ?, user = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
-								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ? WHERE id = ?`)
+								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?,
+								 storageLimit = ?, stateLimit = ? WHERE id = ?`)
 	if err != nil {
 		return err
 	}
@@ -160,7 +163,7 @@ func (db *Database) UpdateService(entry ServiceEntry) (err error) {
 
 	result, err := stmt.Exec(entry.Version, entry.Path, entry.ServiceName, entry.UserName, entry.Permissions,
 		entry.State, entry.Status, entry.StartAt, entry.TTL, entry.AlertRules, entry.UploadLimit, entry.DownloadLimit,
-		entry.ID)
+		entry.StorageLimit, entry.StateLimit, entry.ID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +203,8 @@ func (db *Database) GetService(id string) (entry ServiceEntry, err error) {
 
 	err = stmt.QueryRow(id).Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 		&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-		&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit)
+		&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit,
+		&entry.StorageLimit, &entry.StateLimit)
 	if err == sql.ErrNoRows {
 		return entry, ErrNotExist
 	}
@@ -225,7 +229,8 @@ func (db *Database) GetServices() (entries []ServiceEntry, err error) {
 		var entry ServiceEntry
 		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 			&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-			&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit)
+			&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit,
+			&entry.StorageLimit, &entry.StateLimit)
 		if err != nil {
 			return entries, err
 		}
@@ -443,7 +448,8 @@ func (db *Database) GetUsersServices(users []string) (entries []ServiceEntry, er
 		var entry ServiceEntry
 		err = rows.Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
 			&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
-			&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit)
+			&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit,
+			&entry.StorageLimit, &entry.StateLimit)
 		if err != nil {
 			return entries, err
 		}
@@ -610,7 +616,9 @@ func (db *Database) createServiceTable() (err error) {
 															   ttl INTEGER,
 															   alertRules TEXT,
 															   ulLimit INTEGER,
-															   dlLimit INTEGER);`)
+															   dlLimit INTEGER,
+															   storageLimit INTEGER,
+															   stateLimit INTEGER);`)
 
 	return err
 }
