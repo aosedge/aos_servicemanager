@@ -633,6 +633,10 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return installDir, err
 	}
 
+	if err := setUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, userName); err != nil {
+		return installDir, err
+	}
+
 	if err = launcher.restartService(newService.ID, newService.ServiceName); err != nil {
 		// TODO: try to restore old service
 		return installDir, err

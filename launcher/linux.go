@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"strconv"
 
+	"github.com/anexia-it/fsquota"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -69,4 +70,27 @@ func getUserUIDGID(id string) (uid, gid uint32, err error) {
 	}
 
 	return uint32(uid64), uint32(gid64), nil
+}
+
+func setUserFSQuota(path string, limit uint64, userName string) (err error) {
+	supported, _ := fsquota.UserQuotasSupported(path)
+
+	if limit == 0 && !supported {
+		return nil
+	}
+
+	user, err := user.Lookup(userName)
+	if err != nil {
+		return err
+	}
+
+	limits := fsquota.Limits{}
+
+	limits.Bytes.SetHard(limit)
+
+	if _, err := fsquota.SetUserQuota(path, user, limits); err != nil {
+		return err
+	}
+
+	return nil
 }
