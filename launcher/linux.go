@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
+	"sync"
 
 	"github.com/anexia-it/fsquota"
 	log "github.com/sirupsen/logrus"
@@ -16,9 +17,11 @@ import (
  * Linux related API
  ******************************************************************************/
 
-func (launcher *Launcher) createUser(id string) (userName string, err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
+var userMutex sync.Mutex
+
+func createUser(id string) (userName string, err error) {
+	userMutex.Lock()
+	defer userMutex.Unlock()
 
 	// convert id to hashed u32 value
 	hash := fnv.New64a()
@@ -40,9 +43,9 @@ func (launcher *Launcher) createUser(id string) (userName string, err error) {
 	return userName, nil
 }
 
-func (launcher *Launcher) deleteUser(id string) (err error) {
-	launcher.mutex.Lock()
-	defer launcher.mutex.Unlock()
+func deleteUser(id string) (err error) {
+	userMutex.Lock()
+	defer userMutex.Unlock()
 
 	log.WithField("user", id).Debug("Delete user")
 

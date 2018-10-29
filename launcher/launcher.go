@@ -106,8 +106,6 @@ type Launcher struct {
 
 	services sync.Map
 
-	mutex sync.Mutex
-
 	serviceTemplate  string
 	runcPath         string
 	netnsPath        string
@@ -582,7 +580,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	serviceExists := err == nil
 
 	// create OS user
-	userName, err := launcher.createUser(serviceInfo.ID)
+	userName, err := createUser(serviceInfo.ID)
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return installDir, err
 	}
@@ -685,7 +683,7 @@ func (launcher *Launcher) removeService(id string) (err error) {
 		log.WithField("path", service.Path).Error("Can't remove service path")
 	}
 
-	if err := launcher.deleteUser(service.UserName); err != nil {
+	if err := deleteUser(service.UserName); err != nil {
 		log.WithField("user", service.UserName).Error("Can't remove user")
 	}
 
