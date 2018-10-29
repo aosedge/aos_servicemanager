@@ -928,6 +928,22 @@ func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, 
 
 	service.Permissions = spec.Annotations[aosProductPrefix+"vis.permissions"]
 
+	if storageLimitString, ok := spec.Annotations[aosProductPrefix+"storage.limit"]; ok {
+		if service.StorageLimit, err = strconv.ParseUint(storageLimitString, 10, 64); err != nil {
+			return err
+		}
+	}
+
+	if stateLimitString, ok := spec.Annotations[aosProductPrefix+"state.limit"]; ok {
+		if service.StateLimit, err = strconv.ParseUint(stateLimitString, 10, 64); err != nil {
+			return err
+		}
+	}
+
+	if service.StateLimit > service.StorageLimit {
+		return errors.New("Wrong state limit value")
+	}
+
 	return nil
 }
 
