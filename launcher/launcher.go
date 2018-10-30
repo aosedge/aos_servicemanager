@@ -268,10 +268,6 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 		log.Errorf("Error cleaning DB: %s", err)
 	}
 
-	if err = launcher.cleanUsersDB(); err != nil {
-		log.Errorf("Error cleaning DB: %s", err)
-	}
-
 	return nil
 }
 
@@ -673,6 +669,10 @@ func (launcher *Launcher) removeService(id string) (err error) {
 
 	if _, err := launcher.systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't disable systemd unit: ", err)
+	}
+
+	if err := launcher.db.DeleteUsersByServiceID(service.ID); err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't delete users from db: ", err)
 	}
 
 	if err := launcher.db.RemoveService(service.ID); err != nil {
@@ -1116,31 +1116,6 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 	// Wait all services are removed
 	for i := 0; i < servicesToBeRemoved; i++ {
 		<-statusChannel
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) cleanUsersDB() (err error) {
-	log.Debug("Clean users DB")
-
-	usersList, err := launcher.db.GetUsersList()
-	if err != nil {
-		return err
-	}
-
-	for _, users := range usersList {
-		services, err := launcher.db.GetUsersServices(users)
-		if err != nil {
-			log.WithField("users", users).Errorf("Can't get users services: %s", err)
-		}
-		if len(services) == 0 {
-			log.WithField("users", users).Debug("Delete users from DB")
-			err = launcher.db.DeleteUsers(users)
-			if err != nil {
-				log.WithField("users", users).Errorf("Can't delete users: %s", err)
-			}
-		}
 	}
 
 	return nil

@@ -242,8 +242,12 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		return errors.New("Can't remove all services")
 	}
 
-	if err = launcher.cleanUsersDB(); err != nil {
+	usersList, err := launcher.db.GetUsersList()
+	if err != nil {
 		return err
+	}
+	if len(usersList) != 0 {
+		return errors.New("Can't remove all users")
 	}
 
 	return err

@@ -42,7 +42,7 @@ type ServiceItf interface {
 	GetUsersServices(users []string) (entries []ServiceEntry, err error)
 	IsUsersService(users []string, id string) (result bool, err error)
 	GetUsersList() (usersList [][]string, err error)
-	DeleteUsers(users []string) (err error)
+	DeleteUsersByServiceID(id string) (err error)
 	GetUsersEntry(users []string, serviceID string) (entry UsersEntry, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
@@ -508,20 +508,15 @@ func (db *Database) GetUsersList() (usersList [][]string, err error) {
 	return usersList, rows.Err()
 }
 
-// DeleteUsers deletes users
-func (db *Database) DeleteUsers(users []string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM users WHERE users = ?")
+// DeleteUsersByServiceID deletes users by service ID
+func (db *Database) DeleteUsersByServiceID(serviceID string) (err error) {
+	stmt, err := db.sql.Prepare("DELETE FROM users WHERE serviceid = ?")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return err
-	}
-
-	_, err = stmt.Exec(usersJSON)
+	_, err = stmt.Exec(serviceID)
 
 	return err
 }

@@ -411,8 +411,10 @@ func TestAddUsersList(t *testing.T) {
 		if !ok {
 			t.Errorf("Invalid users: %s", users)
 		}
+	}
 
-		err = db.DeleteUsers(users)
+	for j := 0; j < numServices; j++ {
+		err := db.DeleteUsersByServiceID(fmt.Sprintf("service%d", j))
 		if err != nil {
 			t.Errorf("Can't delete users: %s", err)
 		}
