@@ -51,3 +51,22 @@ func (launcher *Launcher) deleteUser(id string) (err error) {
 
 	return nil
 }
+
+func getUserUIDGID(id string) (uid, gid uint32, err error) {
+	user, err := user.Lookup(id)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	uid64, err := strconv.ParseUint(user.Uid, 10, 32)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	gid64, err := strconv.ParseUint(user.Gid, 10, 32)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return uint32(uid64), uint32(gid64), nil
+}

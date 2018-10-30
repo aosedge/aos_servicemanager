@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"os/user"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -960,23 +959,9 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 	localSpec.Process.Terminal = false
 
 	// assign UID, GID
-	user, err := user.Lookup(userName)
-	if err != nil {
+	if localSpec.Process.User.UID, localSpec.Process.User.GID, err = getUserUIDGID(userName); err != nil {
 		return spec, err
 	}
-
-	uid, err := strconv.ParseUint(user.Uid, 10, 32)
-	if err != nil {
-		return spec, err
-	}
-
-	gid, err := strconv.ParseUint(user.Gid, 10, 32)
-	if err != nil {
-		return spec, err
-	}
-
-	localSpec.Process.User.UID = uint32(uid)
-	localSpec.Process.User.GID = uint32(gid)
 
 	mounts := []specs.Mount{
 		specs.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
