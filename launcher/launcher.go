@@ -1108,7 +1108,7 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 				if err != nil {
 					log.WithField("id", id).Errorf("Can't remove service: %s", err)
 				}
-				statusChannel <- launcher.removeService(id)
+				statusChannel <- err
 			}(service.ID)
 		}
 	}
