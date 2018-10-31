@@ -448,12 +448,12 @@ func (monitor *Monitor) getCurrentServicesData() {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		// TODO: Add proper service disk usage when persistant storage is implemented.
-		// Put 0 for now.
-		// value.monitoringData.UsedDisk, err = getSystemDiskUsage(value.workingDir)
-		// if err != nil {
-		//	log.Errorf("Can't get service Disc usage: %s", err)
-		// }
+		if value.workingDir != "" {
+			value.monitoringData.UsedDisk, err = getSystemDiskUsage(value.workingDir)
+			if err != nil {
+				log.Errorf("Can't get service Disc usage: %s", err)
+			}
+		}
 
 		value.monitoringData.UsedDisk = 0
 
