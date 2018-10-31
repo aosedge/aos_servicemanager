@@ -414,7 +414,33 @@ func TestAddUsersList(t *testing.T) {
 	}
 
 	for j := 0; j < numServices; j++ {
-		err := db.DeleteUsersByServiceID(fmt.Sprintf("service%d", j))
+		serviceID := fmt.Sprintf("service%d", j)
+
+		entries, err := db.GetUsersEntriesByServiceID(serviceID)
+		if err != nil {
+			t.Errorf("Can't get users entries: %s", err)
+		}
+
+		for _, entry := range entries {
+			if entry.ServiceID != serviceID {
+				t.Errorf("Invalid serviceID: %s", entry.ServiceID)
+			}
+
+			ok := false
+
+			for i := 0; i < numUsers; i++ {
+				if entry.Users[0] == fmt.Sprintf("user%d", i) {
+					ok = true
+					break
+				}
+			}
+
+			if !ok {
+				t.Errorf("Invalid users: %s", entry.Users)
+			}
+		}
+
+		err = db.DeleteUsersByServiceID(serviceID)
 		if err != nil {
 			t.Errorf("Can't delete users: %s", err)
 		}

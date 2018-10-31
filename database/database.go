@@ -44,6 +44,7 @@ type ServiceItf interface {
 	GetUsersList() (usersList [][]string, err error)
 	DeleteUsersByServiceID(id string) (err error)
 	GetUsersEntry(users []string, serviceID string) (entry UsersEntry, err error)
+	GetUsersEntriesByServiceID(serviceID string) (entries []UsersEntry, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
 }
@@ -427,6 +428,34 @@ func (db *Database) GetUsersEntry(users []string, serviceID string) (entry Users
 	}
 
 	return entry, ErrNotExist
+}
+
+// GetUsersEntriesByServiceID returns users entry by service ID
+func (db *Database) GetUsersEntriesByServiceID(serviceID string) (entries []UsersEntry, err error) {
+	rows, err := db.sql.Query("SELECT users, storageFolder, stateCheckSum FROM users WHERE serviceid = ?", serviceID)
+	if err != nil {
+		return entries, err
+	}
+	defer rows.Close()
+
+	entries = make([]UsersEntry, 0, 10)
+
+	for rows.Next() {
+		entry := UsersEntry{ServiceID: serviceID}
+		usersJSON := []byte{}
+
+		if err = rows.Scan(&usersJSON, &entry.StorageFolder, &entry.StateChecksum); err != nil {
+			return entries, err
+		}
+
+		if err = json.Unmarshal(usersJSON, &entry.Users); err != nil {
+			return entries, err
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, rows.Err()
 }
 
 // GetUsersServices returns list of users service entries
