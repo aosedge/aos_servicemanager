@@ -96,7 +96,8 @@ type Launcher struct {
 	systemd *dbus.Conn
 	config  *config.Config
 
-	actionHandler *actionHandler
+	actionHandler  *actionHandler
+	storageHandler *storageHandler
 
 	downloader downloadItf
 
@@ -131,6 +132,10 @@ func New(config *config.Config, db database.ServiceItf,
 	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 
 	if launcher.actionHandler, err = newActionHandler(); err != nil {
+		return nil, err
+	}
+
+	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, db); err != nil {
 		return nil, err
 	}
 
@@ -337,6 +342,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 			if installDir != "" {
 				os.RemoveAll(installDir)
 			}
+
 			return err
 		}
 		installed = true
@@ -380,6 +386,21 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 		return version, err
 	}
 
+	entry, err := launcher.db.GetUsersEntry(launcher.users, service.ID)
+	if err != nil {
+		return version, err
+	}
+
+	if entry.StorageFolder != "" {
+		log.WithFields(log.Fields{
+			"folder":    entry.StorageFolder,
+			"serviceID": service.ID}).Debug("Remove storage folder")
+
+		if err = os.RemoveAll(entry.StorageFolder); err != nil {
+			return version, err
+		}
+	}
+
 	if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
 		return version, err
 	}
@@ -419,6 +440,10 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 }
 
 func (launcher *Launcher) restartService(service database.ServiceEntry) (err error) {
+	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
+		return err
+	}
+
 	channel := make(chan string)
 	if _, err = launcher.systemd.RestartUnit(service.ServiceName, "replace", channel); err != nil {
 		return err
@@ -441,6 +466,10 @@ func (launcher *Launcher) restartService(service database.ServiceEntry) (err err
 }
 
 func (launcher *Launcher) startService(service database.ServiceEntry) (err error) {
+	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
+		return err
+	}
+
 	channel := make(chan string)
 	if _, err = launcher.systemd.StartUnit(service.ServiceName, "replace", channel); err != nil {
 		return err
@@ -669,6 +698,23 @@ func (launcher *Launcher) removeService(id string) (err error) {
 
 	if _, err := launcher.systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't disable systemd unit: ", err)
+	}
+
+	entries, err := launcher.db.GetUsersEntriesByServiceID(service.ID)
+	if err != nil {
+		log.WithField("name", service.ServiceName).Error("Can't get users entries: ", err)
+	}
+
+	for _, entry := range entries {
+		if entry.StorageFolder != "" {
+			log.WithFields(log.Fields{
+				"folder":    entry.StorageFolder,
+				"serviceID": service.ID}).Debug("Remove storage folder")
+
+			if err = os.RemoveAll(entry.StorageFolder); err != nil {
+				log.WithField("name", service.ServiceName).Error("Can't remove storage folder: ", err)
+			}
+		}
 	}
 
 	if err := launcher.db.DeleteUsersByServiceID(service.ID); err != nil {

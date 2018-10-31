@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -14,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
-
+	"github.com/jlaffaye/ftp"
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 )
 
 /*******************************************************************************
@@ -33,6 +34,12 @@ type pythonImage struct {
 
 // Generates test image with iperf server
 type iperfImage struct {
+}
+
+// Generates test image with ftp server
+type ftpImage struct {
+	storageLimit uint64
+	stateLimit   uint64
 }
 
 // Test monitor info
@@ -184,6 +191,59 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	return outputFile, nil
 }
 
+func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateFtpContent(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	specFile := path.Join(imageDir, "config.json")
+
+	spec, err := getServiceSpec(specFile)
+	if err != nil {
+		return outputFile, err
+	}
+
+	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+
+	if spec.Annotations == nil {
+		spec.Annotations = make(map[string]string)
+	}
+	spec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
+	spec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
+
+	if err := writeServiceSpec(&spec, specFile); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
 func newTestMonitor() (monitor *testMonitor, err error) {
 	monitor = &testMonitor{}
 
@@ -315,6 +375,29 @@ while True:
 	return nil
 }
 
+func generateFtpContent(imagePath string) (err error) {
+	serviceContent := `#!/usr/bin/python
+
+from pyftpdlib.authorizers import DummyAuthorizer
+from pyftpdlib.handlers import FTPHandler
+from pyftpdlib.servers import FTPServer
+
+authorizer = DummyAuthorizer()
+authorizer.add_anonymous("/home/service/storage", perm="elradfmw")
+
+handler = FTPHandler
+handler.authorizer = authorizer
+
+server = FTPServer(("", 21), handler)
+server.serve_forever()`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func generateConfig(imagePath string) (err error) {
 	// remove json
 	if err := os.Remove(path.Join(imagePath, "config.json")); err != nil {
@@ -330,6 +413,30 @@ func generateConfig(imagePath string) (err error) {
 	}
 
 	return nil
+}
+
+func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.ServerConn, err error) {
+	service, err := launcher.db.GetService(serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	ip, err := launcher.getServiceIPAddress(service.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	ftpConnection, err = ftp.DialTimeout(ip+":21", 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = ftpConnection.Login("anonymous", "anonymous"); err != nil {
+		ftpConnection.Quit()
+		return nil, err
+	}
+
+	return ftpConnection, nil
 }
 
 /*******************************************************************************
@@ -949,6 +1056,43 @@ func TestServiceMonitoring(t *testing.T) {
 
 	case <-time.After(2000 * time.Millisecond):
 		t.Errorf("Waiting for service monitor timeout")
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestServiceStorage(t *testing.T) {
+	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 0}, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
+	if status := <-launcher.StatusChannel; status.Err != nil {
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	}
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+	defer ftp.Quit()
+
+	testData := make([]byte, 8192)
+
+	if err := ftp.Stor("test1.dat", bytes.NewReader(testData)); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	if err := ftp.Stor("test2.dat", bytes.NewReader(testData)); err == nil {
+		t.Errorf("Unexpected nil error")
 	}
 
 	if err := launcher.removeAllServices(); err != nil {
