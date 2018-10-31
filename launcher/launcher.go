@@ -356,7 +356,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 
 	// Start service
 	if !installed {
-		if err = launcher.startService(service.ID, service.ServiceName); err != nil {
+		if err = launcher.startService(service); err != nil {
 			return err
 		}
 	}
@@ -418,46 +418,46 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	return nil
 }
 
-func (launcher *Launcher) restartService(id, serviceName string) (err error) {
+func (launcher *Launcher) restartService(service database.ServiceEntry) (err error) {
 	channel := make(chan string)
-	if _, err = launcher.systemd.RestartUnit(serviceName, "replace", channel); err != nil {
+	if _, err = launcher.systemd.RestartUnit(service.ServiceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Restart service")
+	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Restart service")
 
-	if err = launcher.updateServiceState(id, stateRunning, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't update service state: %s", err)
+	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
-	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
-		log.WithField("id", id).Warnf("Can't set service start time: %s", err)
+	if err = launcher.db.SetServiceStartTime(service.ID, time.Now()); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
-	launcher.services.Store(serviceName, id)
+	launcher.services.Store(service.ServiceName, service.ID)
 
 	return nil
 }
 
-func (launcher *Launcher) startService(id, serviceName string) (err error) {
+func (launcher *Launcher) startService(service database.ServiceEntry) (err error) {
 	channel := make(chan string)
-	if _, err = launcher.systemd.StartUnit(serviceName, "replace", channel); err != nil {
+	if _, err = launcher.systemd.StartUnit(service.ServiceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Start service")
+	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Start service")
 
-	if err = launcher.updateServiceState(id, stateRunning, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't update service state: %s", err)
+	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
-	if err = launcher.db.SetServiceStartTime(id, time.Now()); err != nil {
-		log.WithField("id", id).Warnf("Can't set service start time: %s", err)
+	if err = launcher.db.SetServiceStartTime(service.ID, time.Now()); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
-	launcher.services.Store(serviceName, id)
+	launcher.services.Store(service.ServiceName, service.ID)
 
 	return nil
 }
@@ -475,7 +475,7 @@ func (launcher *Launcher) startServices() {
 	// Start all services in parallel
 	for _, service := range services {
 		go func(service database.ServiceEntry) {
-			err := launcher.startService(service.ID, service.ServiceName)
+			err := launcher.startService(service)
 			if err != nil {
 				log.WithField("id", service.ID).Errorf("Can't start service: %s", err)
 			}
@@ -633,7 +633,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return installDir, err
 	}
 
-	if err = launcher.restartService(newService.ID, newService.ServiceName); err != nil {
+	if err = launcher.restartService(newService); err != nil {
 		// TODO: try to restore old service
 		return installDir, err
 	}
