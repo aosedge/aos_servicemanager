@@ -339,8 +339,14 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	// Check if we need to install
 	if err != nil || serviceInfo.Version > service.Version {
 		if installDir, err := launcher.installService(serviceInfo); err != nil {
-			if installDir != "" {
-				os.RemoveAll(installDir)
+			if err := launcher.removeService(serviceInfo.ID); err != nil {
+				if err == database.ErrNotExist {
+					if installDir != "" {
+						os.RemoveAll(installDir)
+					}
+				} else {
+					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't cleanup service: %s", err)
+				}
 			}
 
 			return err
