@@ -388,7 +388,7 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 		return version, errors.New("Users are not set")
 	}
 
-	if err := launcher.stopService(service.ID, service.ServiceName); err != nil {
+	if err := launcher.stopService(service); err != nil {
 		return version, err
 	}
 
@@ -531,19 +531,19 @@ func (launcher *Launcher) startServices() {
 	}
 }
 
-func (launcher *Launcher) stopService(id, serviceName string) (err error) {
-	launcher.services.Delete(serviceName)
+func (launcher *Launcher) stopService(service database.ServiceEntry) (err error) {
+	launcher.services.Delete(service.ServiceName)
 
 	channel := make(chan string)
-	if _, err := launcher.systemd.StopUnit(serviceName, "replace", channel); err != nil {
+	if _, err := launcher.systemd.StopUnit(service.ServiceName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": serviceName, "status": status}).Debug("Stop service")
+	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Stop service")
 
-	if err = launcher.updateServiceState(id, stateStopped, statusOk); err != nil {
-		log.WithField("id", id).Warnf("Can't update service state: %s", err)
+	if err = launcher.updateServiceState(service.ID, stateStopped, statusOk); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
 	return nil
@@ -572,7 +572,7 @@ func (launcher *Launcher) stopServices() {
 	// Stop all services in parallel
 	for _, service := range services {
 		go func(service database.ServiceEntry) {
-			err := launcher.stopService(service.ID, service.ServiceName)
+			err := launcher.stopService(service)
 			if err != nil {
 				log.Errorf("Can't stop service %s: %s", service.ID, err)
 			}
@@ -698,7 +698,7 @@ func (launcher *Launcher) removeService(id string) (err error) {
 
 	log.WithFields(log.Fields{"id": service.ID, "version": service.Version}).Debug("Remove service")
 
-	if err := launcher.stopService(service.ID, service.ServiceName); err != nil {
+	if err := launcher.stopService(service); err != nil {
 		log.WithField("name", service.ServiceName).Error("Can't stop service: ", err)
 	}
 
