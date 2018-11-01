@@ -754,9 +754,9 @@ Restart=always
 RestartSec=1
 ExecStartPre=${RUNC} delete -f ${ID}
 ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
-ExecStartPost=-${SETNETLIMIT}
+ExecStartPost=${SETNETLIMIT}
 
-ExecStop=-${CLEARNETLIMIT}
+ExecStop=${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
 ExecStopPost=${RUNC} delete -f ${ID}
 PIDFile=${SERVICEPATH}/.pid
@@ -1087,8 +1087,8 @@ func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clear
 		setCmd = setCmd + " -u " + value
 	}
 	if setCmd != "" {
-		setCmd = launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
-		clearCmd = launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
+		setCmd = "-" + launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
+		clearCmd = "-" + launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
 
 		log.Debugf("Set net limit cmd: %s", setCmd)
 		log.Debugf("Clear net limit cmd: %s", clearCmd)
