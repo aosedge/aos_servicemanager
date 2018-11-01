@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/jlaffaye/ftp"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/sha3"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
@@ -1093,6 +1095,152 @@ func TestServiceStorage(t *testing.T) {
 
 	if err := ftp.Stor("test2.dat", bytes.NewReader(testData)); err == nil {
 		t.Errorf("Unexpected nil error")
+	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestServiceState(t *testing.T) {
+	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 256}, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
+	if status := <-launcher.StatusChannel; status.Err != nil {
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	}
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+	defer ftp.Quit()
+
+	// Check new state accept
+
+	stateData := ""
+
+	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	stateData = "Hello"
+
+	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	select {
+	case newState := <-launcher.NewStateChannel:
+		if newState.State != stateData {
+			t.Errorf("Wrong state: %s", newState.State)
+		}
+
+		if err = launcher.StateAcceptance(amqp.StateAcceptance{
+			Result: "accepted"}, newState.CorrelationID); err != nil {
+			t.Errorf("Can't accept state: %s", err)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Error("No new state event")
+	}
+
+	// Check new state reject
+
+	stateData = "Hello again"
+
+	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	select {
+	case newState := <-launcher.NewStateChannel:
+		if newState.State != stateData {
+			t.Errorf("Wrong state: %s", newState.State)
+		}
+
+		if err = launcher.StateAcceptance(amqp.StateAcceptance{
+			Result: "rejected",
+			Reason: "just because"}, newState.CorrelationID); err != nil {
+			t.Errorf("Can't reject state: %s", err)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Error("No new state event")
+	}
+
+	select {
+	case <-launcher.StateRequestChannel:
+		stateData = "Hello"
+		calcSum := sha3.Sum224([]byte(stateData))
+
+		if err = launcher.UpdateState(amqp.UpdateState{
+			ServiceID: "service0",
+			State:     stateData,
+			Checksum:  hex.EncodeToString(calcSum[:])}); err != nil {
+			t.Errorf("Can't update state: %s", err)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Error("No state request event")
+	}
+
+	if ftp, err = launcher.connectToFtp("service0"); err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+	defer ftp.Quit()
+
+	response, err := ftp.Retr("state.dat")
+	if err != nil {
+		t.Errorf("Can't retrieve state file: %s", err)
+	} else {
+		serviceState, err := ioutil.ReadAll(response)
+		if err != nil {
+			t.Errorf("Can't retrieve state file: %s", err)
+		}
+
+		if string(serviceState) != stateData {
+			t.Errorf("Wrong state: %s", serviceState)
+		}
+
+		response.Close()
+	}
+
+	// Check state after update
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
+	if status := <-launcher.StatusChannel; status.Err != nil {
+		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	}
+
+	if ftp, err = launcher.connectToFtp("service0"); err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+	defer ftp.Quit()
+
+	if response, err = ftp.Retr("state.dat"); err != nil {
+		t.Errorf("Can't retrieve state file: %s", err)
+	} else {
+		serviceState, err := ioutil.ReadAll(response)
+		if err != nil {
+			t.Errorf("Can't retrieve state file: %s", err)
+		}
+
+		if string(serviceState) != stateData {
+			t.Errorf("Wrong state: %s", serviceState)
+		}
+
+		response.Close()
 	}
 
 	if err := launcher.removeAllServices(); err != nil {

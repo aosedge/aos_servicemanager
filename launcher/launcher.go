@@ -44,6 +44,10 @@ const (
 	systemdSubscribeInterval = 500 * time.Millisecond
 )
 
+const (
+	stateChannelSize = 32
+)
+
 var (
 	statusStr = []string{"OK", "Error"}
 	stateStr  = []string{"Init", "Running", "Stopped"}
@@ -82,6 +86,20 @@ type ActionStatus struct {
 	Err     error
 }
 
+// NewState new state message
+type NewState struct {
+	CorrelationID string
+	ServiceID     string
+	State         string
+	Checksum      string
+}
+
+// StateRequest state request message
+type StateRequest struct {
+	ServiceID string
+	Default   bool
+}
+
 type downloadItf interface {
 	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
 }
@@ -90,6 +108,10 @@ type downloadItf interface {
 type Launcher struct {
 	// StatusChannel used to return execute command statuses
 	StatusChannel chan ActionStatus
+	// NewStateChannel used to notify about new service state
+	NewStateChannel chan NewState
+	// StateRequestChannel used to request last or default service state
+	StateRequestChannel chan StateRequest
 
 	db      database.ServiceItf
 	monitor monitoring.ServiceMonitoringItf
@@ -130,12 +152,15 @@ func New(config *config.Config, db database.ServiceItf,
 
 	launcher.closeChannel = make(chan bool)
 	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
+	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
+	launcher.StateRequestChannel = make(chan StateRequest, stateChannelSize)
 
 	if launcher.actionHandler, err = newActionHandler(); err != nil {
 		return nil, err
 	}
 
-	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, db); err != nil {
+	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, db,
+		launcher.NewStateChannel, launcher.StateRequestChannel); err != nil {
 		return nil, err
 	}
 
@@ -211,6 +236,8 @@ func (launcher *Launcher) Close() {
 	launcher.closeChannel <- true
 
 	launcher.systemd.Close()
+
+	launcher.storageHandler.Close()
 }
 
 // GetServiceVersion returns installed version of requested service
@@ -271,6 +298,33 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	if err = launcher.cleanServicesDB(); err != nil {
 		log.Errorf("Error cleaning DB: %s", err)
+	}
+
+	return nil
+}
+
+// StateAcceptance notifies launcher about new state acceptance
+func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
+	return launcher.storageHandler.StateAcceptance(acceptance, correlationID)
+}
+
+// UpdateState updates service state
+func (launcher *Launcher) UpdateState(state amqp.UpdateState) (err error) {
+	service, err := launcher.db.GetService(state.ServiceID)
+	if err != nil {
+		return err
+	}
+
+	if err = launcher.stopService(service); err != nil {
+		return err
+	}
+
+	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum); err != nil {
+		return err
+	}
+
+	if err = launcher.startService(service); err != nil {
+		return err
 	}
 
 	return nil
@@ -533,6 +587,10 @@ func (launcher *Launcher) startServices() {
 
 func (launcher *Launcher) stopService(service database.ServiceEntry) (err error) {
 	launcher.services.Delete(service.ServiceName)
+
+	if err = launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
+		return err
+	}
 
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(service.ServiceName, "replace", channel); err != nil {
