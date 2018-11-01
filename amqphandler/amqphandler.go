@@ -114,6 +114,21 @@ type ServiceError struct {
 	Message string `json:"message"`
 }
 
+// StateAcceptance state acceptance message
+type StateAcceptance struct {
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"checksum"`
+	Result    string `json:"result"`
+	Reason    string `json:"reason"`
+}
+
+// UpdateState state update message
+type UpdateState struct {
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"stateChecksum"`
+	State     string `json:"state"`
+}
+
 // Message structure used to send/receive data by amqp
 type Message struct {
 	CorrelationID string
@@ -191,6 +206,18 @@ type queueInfo struct {
 	DeleteWhenUnused bool   `json:"deleteWhenUnused"`
 	Exclusive        bool   `json:"exclusive"`
 	NoWait           bool   `json:"noWait"`
+}
+
+type stateAcceptance struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	StateAcceptance
+}
+
+type updateState struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	UpdateState
 }
 
 /*******************************************************************************
@@ -543,40 +570,67 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				break
 			}
 
-			if header.MessageType != "desiredStatus" {
+			switch header.MessageType {
+			case "desiredStatus":
+				var status desiredStatus
+
+				if err := json.Unmarshal(data.Body, &status); err != nil {
+					log.Errorf("Can't parse message body: %s", err)
+					continue
+				}
+
+				services, err := decodeServices(status.Services)
+				if err != nil {
+					log.Errorf("Can't decode services: %s", err)
+					continue
+				}
+
+				handler.MessageChannel <- Message{data.CorrelationId, services}
+
+			case "stateAcceptance":
+				var acceptance stateAcceptance
+
+				if err := json.Unmarshal(data.Body, &acceptance); err != nil {
+					log.Errorf("Can't parse message body: %s", err)
+					continue
+				}
+
+				handler.MessageChannel <- Message{data.CorrelationId, acceptance.StateAcceptance}
+
+			case "updateState":
+				var update updateState
+
+				if err := json.Unmarshal(data.Body, &update); err != nil {
+					log.Errorf("Can't parse message body: %s", err)
+					continue
+				}
+
+				handler.MessageChannel <- Message{data.CorrelationId, update.UpdateState}
+
+			default:
 				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
-				break
+				continue
 			}
-
-			var encryptList desiredStatus
-
-			if err := json.Unmarshal(data.Body, &encryptList); err != nil { // TODO: add check
-				log.Errorf("AMQP consumer error: %s", err)
-				break
-			}
-
-			var servInfoArray []ServiceInfoFromCloud
-
-			cmsData, err := base64.StdEncoding.DecodeString(encryptList.Services)
-			if err != nil {
-				log.Errorf("Can't decode base64 data from element: %s", err)
-				break
-			}
-
-			decryptData, err := fcrypt.DecryptMetadata(cmsData)
-			if err != nil {
-				log.Errorf("Decryption metadata error: %s", err)
-				break
-			}
-
-			log.WithField("data", string(decryptData)).Debug("Decrypted data")
-
-			if err := json.Unmarshal(decryptData, &servInfoArray); err != nil {
-				log.Errorf("Can't make json from decrypt data: %s", err)
-				break
-			}
-
-			handler.MessageChannel <- Message{data.CorrelationId, servInfoArray}
 		}
 	}
+}
+
+func decodeServices(data string) (services []ServiceInfoFromCloud, err error) {
+	cmsData, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, err
+	}
+
+	decryptData, err := fcrypt.DecryptMetadata(cmsData)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithField("data", string(decryptData)).Debug("Decrypted data")
+
+	if err = json.Unmarshal(decryptData, &services); err != nil {
+		return nil, err
+	}
+
+	return services, nil
 }
