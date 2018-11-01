@@ -119,33 +119,33 @@ type ServiceError struct {
 }
 
 type serviceDiscoveryRequest struct {
-	Version int      `json:"version"`
+	Version uint64   `json:"version"`
 	VIN     string   `json:"VIN"`
 	Users   []string `json:"users"`
 }
 
 // messageMonitor structure which define AOS monitoring message
 type messageMonitor struct {
-	Version     int            `json:"version"`
+	Version     uint64         `json:"version"`
 	MessageType string         `json:"messageType"`
 	Timestamp   time.Time      `json:"timestamp"`
 	Data        MonitoringData `json:"data"`
 }
 
 type vehicleStatus struct {
-	Version     uint          `json:"version"`
+	Version     uint64        `json:"version"`
 	MessageType string        `json:"messageType"`
 	Services    []ServiceInfo `json:"services"`
 }
 
 type desiredStatus struct {
-	Version     uint   `json:"version"`
+	Version     uint64 `json:"version"`
 	MessageType string `json:"messageType"`
 	Services    string `json:"services"`
 }
 
 type serviceDiscoveryResp struct {
-	Version    uint                 `json:"version"`
+	Version    uint64               `json:"version"`
 	Connection rabbitConnectioninfo `json:"connection"`
 }
 
