@@ -161,6 +161,21 @@ type desiredStatus struct {
 	Services    string `json:"services"`
 }
 
+type newState struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	ServiceID   string `json:"serviceId"`
+	Checksum    string `json:"stateChecksum"`
+	State       string `json:"state"`
+}
+
+type stateRequest struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	ServiceID   string `json:"serviceId"`
+	Default     bool   `json:"default"`
+}
+
 type serviceDiscoveryResp struct {
 	Version    uint64               `json:"version"`
 	Connection rabbitConnectioninfo `json:"connection"`
@@ -229,10 +244,13 @@ const (
 	receiveChannelSize = 16
 	retryChannelSize   = 8
 
-	connectionRetry   = 3
+	connectionRetry = 3
+
 	vehicleStatusStr  = "vehicleStatus"
 	serviceStatusStr  = "serviceStatus"
 	monitoringDataStr = "monitoringData"
+	newStateStr       = "newState"
+	stateRequestStr   = "stateRequest"
 )
 
 /*******************************************************************************
@@ -331,6 +349,29 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 		MessageType: monitoringDataStr,
 		Timestamp:   time.Now(),
 		Data:        monitoringData}}
+
+	return nil
+}
+
+// SendNewState sends new state message
+func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
+	handler.sendChannel <- Message{correlationID, newState{
+		Version:     1,
+		MessageType: newStateStr,
+		ServiceID:   serviceID,
+		State:       state,
+		Checksum:    checksum}}
+
+	return nil
+}
+
+// SendStateRequest sends state request message
+func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
+	handler.sendChannel <- Message{"", stateRequest{
+		Version:     1,
+		MessageType: stateRequestStr,
+		ServiceID:   serviceID,
+		Default:     defaultState}}
 
 	return nil
 }
