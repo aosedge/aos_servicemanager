@@ -17,10 +17,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 )
 
-//TODO: list
-// - close/erase channel
-// - correlation ID
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -28,10 +24,10 @@ import (
 // AmqpHandler structure with all amqp connection info
 type AmqpHandler struct {
 	// MessageChannel channel for amqp messages
-	MessageChannel chan interface{}
+	MessageChannel chan Message
 
-	sendChannel  chan []byte
-	retryChannel chan []byte
+	sendChannel  chan Message
+	retryChannel chan Message
 
 	sendConnection    *amqp.Connection
 	receiveConnection *amqp.Connection
@@ -116,6 +112,12 @@ type ServiceInfo struct {
 type ServiceError struct {
 	ID      int    `json:"id"`
 	Message string `json:"message"`
+}
+
+// Message structure used to send/receive data by amqp
+type Message struct {
+	CorrelationID string
+	Data          interface{}
 }
 
 type serviceDiscoveryRequest struct {
@@ -216,9 +218,9 @@ func New() (handler *AmqpHandler, err error) {
 
 	handler = &AmqpHandler{}
 
-	handler.MessageChannel = make(chan interface{}, receiveChannelSize)
-	handler.sendChannel = make(chan []byte, sendChannelSize)
-	handler.retryChannel = make(chan []byte, retryChannelSize)
+	handler.MessageChannel = make(chan Message, receiveChannelSize)
+	handler.sendChannel = make(chan Message, sendChannelSize)
+	handler.retryChannel = make(chan Message, retryChannelSize)
 
 	return handler, nil
 }
@@ -277,46 +279,31 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list oaf available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	reqJSON, err := json.Marshal(vehicleStatus{
+	handler.sendChannel <- Message{"", vehicleStatus{
 		Version:     1,
 		MessageType: vehicleStatusStr,
-		Services:    serviceList})
-	if err != nil {
-		return err
-	}
-
-	handler.sendChannel <- reqJSON
+		Services:    serviceList}}
 
 	return nil
 }
 
 // SendServiceStatusMsg sends message with service status
 func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err error) {
-	reqJSON, err := json.Marshal(vehicleStatus{
+	handler.sendChannel <- Message{"", vehicleStatus{
 		Version:     1,
 		MessageType: serviceStatusStr,
-		Services:    []ServiceInfo{serviceStatus}})
-	if err != nil {
-		return err
-	}
-
-	handler.sendChannel <- reqJSON
+		Services:    []ServiceInfo{serviceStatus}}}
 
 	return nil
 }
 
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
-	reqJSON, err := json.Marshal(messageMonitor{
+	handler.sendChannel <- Message{"", messageMonitor{
 		Version:     1,
 		MessageType: monitoringDataStr,
 		Timestamp:   time.Now(),
-		Data:        monitoringData})
-	if err != nil {
-		return err
-	}
-
-	handler.sendChannel <- reqJSON
+		Data:        monitoringData}}
 
 	return nil
 }
@@ -423,24 +410,32 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 	confirmChannel := amqpChannel.NotifyPublish(make(chan amqp.Confirmation, 1))
 
 	for {
-		var data []byte
+		var message Message
 
 		select {
 		case err := <-errorChannel:
 			if err != nil {
-				handler.MessageChannel <- err
+				handler.MessageChannel <- Message{"", err}
 			}
 
 			return
 
-		case data = <-handler.retryChannel:
-			log.WithField("data", string(data)).Debug("AMQP resend")
+		case message = <-handler.retryChannel:
 
-		case data = <-handler.sendChannel:
-			log.WithField("data", string(data)).Debug("AMQP send")
+		case message = <-handler.sendChannel:
 		}
 
-		if data != nil {
+		if message.Data != nil {
+			data, err := json.Marshal(message.Data)
+			if err != nil {
+				log.Errorf("Can't parse message: %s", err)
+				continue
+			}
+
+			log.WithFields(log.Fields{
+				"correlationID": message.CorrelationID,
+				"data":          string(data)}).Debug("AMQP send message")
+
 			if err := amqpChannel.Publish(
 				params.Exchange.Name, // exchange
 				"",                   // routing key
@@ -449,19 +444,21 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 				amqp.Publishing{
 					ContentType:   "application/json",
 					DeliveryMode:  amqp.Persistent,
-					CorrelationId: "100", //TODO: add processing CorelationID
+					CorrelationId: message.CorrelationID,
 					UserId:        params.User,
 					Body:          data,
 				}); err != nil {
-				handler.MessageChannel <- err
+				handler.MessageChannel <- Message{"", err}
 			}
 
 			// Handle retry packets
 			confirm, ok := <-confirmChannel
 			if !ok || !confirm.Ack {
-				log.WithField("data", string(data)).Warning("AMQP data is not sent. Put into retry queue")
+				log.WithFields(log.Fields{
+					"correlationID": message.CorrelationID,
+					"data":          string(data)}).Warning("AMQP data is not sent. Put into retry queue")
 
-				handler.retryChannel <- data
+				handler.retryChannel <- message
 			}
 
 			if !ok {
@@ -523,7 +520,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 		select {
 		case err := <-errorChannel:
 			if err != nil {
-				handler.MessageChannel <- err
+				handler.MessageChannel <- Message{"", err}
 			}
 
 			return
@@ -579,7 +576,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				break
 			}
 
-			handler.MessageChannel <- servInfoArray
+			handler.MessageChannel <- Message{data.CorrelationId, servInfoArray}
 		}
 	}
 }

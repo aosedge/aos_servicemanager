@@ -46,8 +46,8 @@ func sendInitialSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.L
 	return nil
 }
 
-func processAmqpMessage(data interface{}, amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
-	switch data := data.(type) {
+func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
+	switch data := message.Data.(type) {
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Receive services info")
 
@@ -177,7 +177,7 @@ func run(
 
 		case amqpMessage := <-amqpHandler.MessageChannel:
 			// check for error
-			if err, ok := amqpMessage.(error); ok {
+			if err, ok := amqpMessage.Data.(error); ok {
 				log.Errorf("Receive amqp error: %s", err)
 				// reconnect
 				return true
