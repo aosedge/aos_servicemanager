@@ -235,7 +235,7 @@ func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
 	hash := hashFunc.New()
 	_, err = io.Copy(hash, f)
 	if err != nil {
-		log.Error("Error hashing file: %s", err)
+		log.Errorf("Error hashing file: %s", err)
 		return err
 	}
 	h := hash.Sum(nil)
