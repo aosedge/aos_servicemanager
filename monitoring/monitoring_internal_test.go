@@ -447,8 +447,9 @@ func TestPeriodicReport(t *testing.T) {
 	monitor, err := New(&config.Config{
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
-			SendPeriod: config.Duration{Duration: sendDuration},
-			PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+			MaxOfflineMessages: 10,
+			SendPeriod:         config.Duration{Duration: sendDuration},
+			PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
 		db)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
@@ -490,6 +491,7 @@ func TestSystemAlerts(t *testing.T) {
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
+				MaxOfflineMessages:  10,
 				SendPeriod:          config.Duration{Duration: sendDuration},
 				PollPeriod:          config.Duration{Duration: 1 * time.Second},
 				MaxAlertsPerMessage: 10,
@@ -552,6 +554,7 @@ func TestServices(t *testing.T) {
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
+				MaxOfflineMessages:  10,
 				SendPeriod:          config.Duration{Duration: sendDuration},
 				PollPeriod:          config.Duration{Duration: 1 * time.Second},
 				MaxAlertsPerMessage: 10}},
