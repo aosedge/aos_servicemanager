@@ -103,12 +103,29 @@ func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, lau
 			}
 		}
 
-		return nil
+	case amqp.StateAcceptance:
+		log.WithFields(log.Fields{
+			"serviceID": data.ServiceID,
+			"result":    data.Result}).Info("Receive state acceptance")
+
+		if err := launcherHandler.StateAcceptance(data, message.CorrelationID); err != nil {
+			log.WithField("serviceID", data.ServiceID).Errorf("Accept state error: %s", err)
+		}
+
+	case amqp.UpdateState:
+		log.WithFields(log.Fields{
+			"serviceID": data.ServiceID,
+			"checksum":  data.Checksum}).Info("Receive update state")
+
+		if err := launcherHandler.UpdateState(data); err != nil {
+			log.WithField("serviceID", data.ServiceID).Errorf("Update state error: %s", err)
+		}
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
-		return nil
 	}
+
+	return nil
 }
 
 func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStatus) (err error) {
@@ -190,6 +207,17 @@ func run(
 		case status := <-launcherHandler.StatusChannel:
 			if err := sendServiceStatus(amqpHandler, status); err != nil {
 				log.Errorf("Error send service status message: %s", err)
+			}
+
+		case newState := <-launcherHandler.NewStateChannel:
+			if err := amqpHandler.SendNewState(newState.ServiceID, newState.State,
+				newState.Checksum, newState.CorrelationID); err != nil {
+				log.Errorf("Error send new state message: %s", err)
+			}
+
+		case stateRequest := <-launcherHandler.StateRequestChannel:
+			if err := amqpHandler.SendStateRequest(stateRequest.ServiceID, stateRequest.Default); err != nil {
+				log.Errorf("Error send new state message: %s", err)
 			}
 
 		case data := <-monitorHandler.DataChannel:
