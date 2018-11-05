@@ -1,89 +1,124 @@
-# Build instruction:
+
+# AOS Service Manager
+
+AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for following tasks:
+* communicate with the backend;
+* install, remove, start, stop AOS services;
+* configure AOS services network;
+* configure and monitor AOS services and system resource usage;
+* provide persistent storage and state handling for AOS services.
+
+See architecture [document](doc/architecture.md) for more details.
+
+# Build
+
+## Required packages
+
+To build SM, following additional packages should be installed:
+* github.com/anexia-it/fsquota
+* github.com/cavaliercoder/grab
+* github.com/coreos/go-iptables/iptables
+* github.com/coreos/go-systemd/dbus
+* github.com/fsnotify/fsnotify
+* github.com/godbus/dbus
+* github.com/google/uuid
+* github.com/gorilla/websocket
+* github.com/mattn/go-sqlite3
+* github.com/opencontainers/runtime-spec/specs-go
+* github.com/shirou/gopsutil
+* github.com/sirupsen/logrus
+* github.com/streadway/amqp
+
+## Native build
 
 ```
-go get github.com/cavaliercoder/grab
-go get github.com/streadway/amqp
-
-go get github.com/sirupsen/logrus github.com/mattn/go-sqlite3 github.com/opencontainers/runtime-spec/specs-go github.com/containerd/go-runc
-
-for testing
-go get gopkg.in/jarcoal/httpmock.v1
-
 go build
-
 ```
 
-# Configuration:
+## ARM 64 build
 
-aos_servicemanager expects to have configuration file aos_servicemanager.cfg in current directory.
-Or configuration file could be provide by command line parameter -c:
+```
+CC=arm-linux-gnueabi-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64
+```
 
+# Configuration
+
+SM is configured through a configuration file. The file `aos_servicemanager.cfg` should be either in current directory or specified with command line option as following:
 ```
 ./aos_servicemanager -c aos_servicemanager.cfg
 ```
-
-Example configuration file could be found in misc/config/aos_servicemanager.cfg
+The configuration file has JSON format described [here] (doc/config.md). Example configuration file could be found in `misc/config/aos_servicemanager.cfg`
 
 To increase log level use option -v:
-
 ```
 ./aos_servicemanager -c aos_servicemanager.cfg -v debug
 ```
 
+# System folders and files mount
 
-# General setup
+For each installed service, SM mounts following system folders:
+* `/bin`
+* `/sbin`
+* `/lib`
+* `/usr`
+* `/lib64` - if exists
+* `/tmp` - this is temporary solution. Each service should has its own tmp folder
+* `/etc/ssl` - this is temporary solution. Each service should be provided with its own certificates
 
-aos_servicemanager is required following applications to be available in the system or placed in
-its working directory: runc, netns, wondershaper.
-Install or put above applications to the working directory.
+To configure service network, SM mounts following system files:
+* `/etc/hosts`
+* `/etc/resolv.conf`
+* `/etc/nsswitch.conf`
 
-aos_servicemanager expects to aos_vis to be running and configured (see aos_vid readme).
+In order to override system network configuration, custom version of above files can be put to SM working directory under `etc` folder.
 
-# Setup Raspberry Pi 2:
+# Run
 
-## Prepare required applications
+## Required packages
 
-1. Install arm toolchain on your host pc:
-```
-sudo apt install gcc-5-arm-linux-gnueabi
-```
-2. Compile aos service manager:
-```
-cd $GOPATH/src/gitpct.epam.com/epmd-aepr/aos_servicemanager
-CC=arm-linux-gnueabi-gcc-5 CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=5 go build
-```
-3. Compile runc:
-```
-cd $GOPATH/src/github.com/opencontainers/runc
-CC=arm-linux-gnueabi-gcc-5 CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=5 go build
-```
-4. Compile netns:
-```
-cd $GOPATH/src/github.com/genuinetools/netns
-CC=arm-linux-gnueabi-gcc-5 CGO_ENABLED=1 GOOS=linux GOARCH=arm GOARM=5 go build
-```
+SM needs aos_vis to be running and configured (see aos_vis [readme](https://gitpct.epam.com/epmd-aepr/aos_vis/blob/master/README.md)) before start.
 
-## Prepare target
+SM requires following applications to be available in the system or placed in SM working directory:
+* [runc](https://github.com/opencontainers/runc) - launch service containers
+* [netns](https://github.com/genuinetools/netns) - set containers network bridge
+* [wondershaper](https://github.com/magnific0/wondershaper) - set network UL/DL speed limit
 
-1. Install Raspberry image: https://www.raspberrypi.org/documentation/installation/installing-images/README.md
-2. Enable ssh (see chapter 3 ): https://www.raspberrypi.org/documentation/remote-access/ssh/
-3. Copy compiled files and configurations to following destination on the target:
-* `$GOPATH/src/github.com/opencontainers/runc/runc` to `/usr/local/bin`
-* `$GOPATH/src/github.com/genuinetools/netns/netns` to `/usr/local/bin`
-* `$GOPATH/src/gitpct.epam.com/epmd-aepr/aos_servicemanager/aos_servicemanager/config/aos_servicemanager.service` to `/lib/systemd/system`
-* `$GOPATH/src/gitpct.epam.com/epmd-aepr/aos_servicemanager/aos_servicemanager` to `/home/aos/servicemanager`
-* `$GOPATH/src/gitpct.epam.com/epmd-aepr/aos_servicemanager/aos_servicemanager/fcrypt.json` to `/home/aos/servicemanager`
-* `$GOPATH/src/gitpct.epam.com/epmd-aepr/aos_servicemanager/aos_servicemanager/data/*` to `/home/aos/servicemanager/data`
-4. Change `fcrypt.json` to use `data` directory
-5. Uncoment `net.ipv4.ip_forward=1` line in `/etc/sysctl.conf` (required for bridge)
-6. Connect to the target by ssh with default credentials.
-7. Create user: `aos` amd relogin with its credentials. 
-8. Start aos_service manager and check service manager service:
+## Required Python3 packages
+
+Following python3 packages are required to launch demo python service:
+* `python3-compression`
+* `python3-crypt`
+* `python3-enum`
+* `python3-json`
+* `python3-misc`
+* `python3-selectors`
+* `python3-shell`
+* `python3-six`
+* `python3-threading`
+* `python3-websocket-client`
+
+Following python3 packages are required to launch telemetry-emulator:
+* `python3-argparse`
+* `python3-compression`
+* `python3-datetime`
+* `python3-json`
+* `python3-misc`
+* `python3-netserver`
+* `python3-selectors`
+* `python3-shell`
+* `python3-signal`
+* `python3-textutils`
+* `python3-threading`
+
+# Test
+
+To launch test, additional go packages should be installed:
+* github.com/jlaffaye/ftp
+
+Test all packages:
+
 ```
-sudo systemctl start aos_servicemanager
+sudo -E go test ./... -v
 ```
-9. Check log with `journalctl`
-10. To make service manager start automatically:
-```
-sudo systemctl enable aos_servicemanager
-```
+## Known issues
+* dbushandler test fails if run with sudo
