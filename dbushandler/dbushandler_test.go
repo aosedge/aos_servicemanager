@@ -104,9 +104,9 @@ func TestGetPermission(t *testing.T) {
 		permissions    map[string]string
 	)
 
-	obj := conn.Object(dbusServer.IntrfaceName, dbusServer.ObjectPath)
+	obj := conn.Object(dbusServer.InterfaceName, dbusServer.ObjectPath)
 
-	err = obj.Call(dbusServer.IntrfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
+	err = obj.Call(dbusServer.InterfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
 	if err != nil {
 		t.Fatalf("Can't make D-Bus call: %s", err)
 	}

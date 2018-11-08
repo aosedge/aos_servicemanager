@@ -16,8 +16,8 @@ import (
 const (
 	// ObjectPath object path
 	ObjectPath = "/com/epam/aos/vis"
-	// IntrfaceName insterface name
-	IntrfaceName = "com.epam.aos.vis"
+	// InterfaceName interface name
+	InterfaceName = "com.epam.aos.vis"
 )
 
 /*******************************************************************************
@@ -41,7 +41,7 @@ func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 		return dbusHandler, err
 	}
 
-	reply, err := conn.RequestName(IntrfaceName, dbus.NameFlagDoNotQueue)
+	reply, err := conn.RequestName(InterfaceName, dbus.NameFlagDoNotQueue)
 	if err != nil {
 		return dbusHandler, err
 	}
@@ -54,7 +54,7 @@ func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 	server := DBusHandler{dbusConn: conn, db: db}
 
 	// TODO: add introspect
-	conn.Export(server, ObjectPath, IntrfaceName)
+	conn.Export(server, ObjectPath, InterfaceName)
 
 	dbusHandler = &server
 
@@ -65,7 +65,7 @@ func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 func (dbusHandler *DBusHandler) Close() (err error) {
 	log.Debug("Close D-Bus server")
 
-	reply, err := dbusHandler.dbusConn.ReleaseName(IntrfaceName)
+	reply, err := dbusHandler.dbusConn.ReleaseName(InterfaceName)
 	if err != nil {
 		return err
 	}
