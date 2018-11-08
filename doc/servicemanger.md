@@ -8,7 +8,7 @@ description
 * [amqphandler](doc/amqphandler.md) - handles communication with IoT Gateway
 * launcher - installs/removes AOS services and manages their life cycle
 * monitoring - monitors system and AOS services resource usage
-* dbushandler - provides VIS client permissions
+* [dbushandler](doc/dbushandler.md) - provides VIS client permissions
 
 ```mermaid
 graph BT
