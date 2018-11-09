@@ -6,7 +6,7 @@ AOS Service Manager contains following packages:
 * [database](doc/database.md) - stores local services configuration
 description
 * [amqphandler](doc/amqphandler.md) - handles communication with IoT Gateway
-* launcher - installs/removes AOS services and manages their life cycle
+* [launcher](doc/launcher.md) - installs/removes AOS services and manages their life cycle
 * [monitoring](doc/monitoring.md) - monitors system and AOS services resource usage
 * [dbushandler](doc/dbushandler.md) - provides VIS client permissions
 
