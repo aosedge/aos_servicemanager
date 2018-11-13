@@ -659,6 +659,16 @@ func (db *Database) createUsersTable() (err error) {
 	return err
 }
 
+func (db *Database) createTrafficMonitorTable() (err error) {
+	log.Info("Create traffic monitor table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+																	 time TIMESTAMP,
+																	 value INTEGER);`)
+
+	return err
+}
+
 func (db *Database) removeAllServices() (err error) {
 	_, err = db.sql.Exec("DELETE FROM services;")
 
@@ -673,16 +683,6 @@ func (db *Database) removeAllUsers() (err error) {
 
 func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor;")
-
-	return err
-}
-
-func (db *Database) createTrafficMonitorTable() (err error) {
-	log.Info("Create traffic monitor table")
-
-	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
-																	 time TIMESTAMP,
-																	 value INTEGER);`)
 
 	return err
 }
