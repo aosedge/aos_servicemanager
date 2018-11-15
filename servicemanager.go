@@ -251,6 +251,7 @@ func main() {
 	// Initialize command line flags
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
 	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
+	doCleanup := flag.Bool("reset", false, `Removes all services, wipes services and storages and remove DB`)
 
 	flag.Parse()
 
@@ -269,13 +270,17 @@ func main() {
 		log.Fatalf("Error while opening configuration file: %s", err)
 	}
 
+	dbFile := path.Join(config.WorkingDir, "servicemanager.db")
+
+	if *doCleanup {
+		cleanup(config.WorkingDir, dbFile)
+		return
+	}
+
 	// Initialize fcrypt
 	fcrypt.Init(config.Crypt)
 
 	// Create DB
-
-	dbFile := path.Join(config.WorkingDir, "servicemanager.db")
-
 	db, err := database.New(dbFile)
 	if err != nil {
 		if err == database.ErrVersionMismatch {
