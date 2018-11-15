@@ -234,6 +234,19 @@ func run(
 	}
 }
 
+func cleanup(workingDir, dbFile string) {
+	log.Debug("System cleanup")
+
+	if err := launcher.Cleanup(workingDir); err != nil {
+		log.Fatalf("Can't cleanup launcher: %s", err)
+	}
+
+	log.WithField("file", dbFile).Debug("Delete DB file")
+	if err := os.RemoveAll(dbFile); err != nil {
+		log.Fatalf("Can't cleanup database: %s", err)
+	}
+}
+
 func main() {
 	// Initialize command line flags
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
@@ -260,9 +273,22 @@ func main() {
 	fcrypt.Init(config.Crypt)
 
 	// Create DB
-	db, err := database.New(path.Join(config.WorkingDir, "servicemanager.db"))
+
+	dbFile := path.Join(config.WorkingDir, "servicemanager.db")
+
+	db, err := database.New(dbFile)
 	if err != nil {
-		log.Fatalf("Can't open database: %s", err)
+		if err == database.ErrVersionMismatch {
+			log.Warning("Unsupported database version")
+
+			cleanup(config.WorkingDir, dbFile)
+
+			db, err = database.New(dbFile)
+		}
+
+		if err != nil {
+			log.Fatalf("Can't open database: %s", err)
+		}
 	}
 	defer db.Close()
 

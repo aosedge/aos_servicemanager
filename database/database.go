@@ -16,12 +16,19 @@ import (
  * Consts
  ******************************************************************************/
 
+const (
+	dbVersion = 1
+)
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 // ErrNotExist is returned when requested entry not exist in DB
 var ErrNotExist = errors.New("Entry doesn't not exist")
+
+// ErrVersionMismatch is returned when DB has unsupported DB version
+var ErrVersionMismatch = errors.New("Version mismatch")
 
 /*******************************************************************************
  * Types
@@ -113,23 +120,26 @@ func New(name string) (db *Database, err error) {
 
 	db = &Database{sqlite}
 
-	exist, err := db.isTableExist("services")
+	if err := db.createConfigTable(); err != nil {
+		return db, err
+	}
+	if err := db.createServiceTable(); err != nil {
+		return db, err
+	}
+	if err := db.createUsersTable(); err != nil {
+		return db, err
+	}
+	if err := db.createTrafficMonitorTable(); err != nil {
+		return db, err
+	}
+
+	version, err := db.getVersion()
 	if err != nil {
 		return db, err
 	}
 
-	if !exist {
-		log.Warning("Service table doesn't exist. Either it is first start or something bad happened.")
-
-		if err := db.createServiceTable(); err != nil {
-			return db, err
-		}
-		if err := db.createUsersTable(); err != nil {
-			return db, err
-		}
-		if err := db.createTrafficMonitorTable(); err != nil {
-			return db, err
-		}
+	if version != dbVersion {
+		return db, ErrVersionMismatch
 	}
 
 	return db, nil
@@ -613,6 +623,43 @@ func (db *Database) Close() {
  * Private
  ******************************************************************************/
 
+func (db *Database) getVersion() (version uint64, err error) {
+	stmt, err := db.sql.Prepare("SELECT version FROM config")
+	if err != nil {
+		return version, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow().Scan(&version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return version, ErrNotExist
+		}
+
+		return version, err
+	}
+
+	return version, nil
+}
+
+func (db *Database) setVersion(version uint64) (err error) {
+	result, err := db.sql.Exec("UPDATE config SET version = ?", version)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
 func (db *Database) isTableExist(name string) (result bool, err error) {
 	rows, err := db.sql.Query("SELECT * FROM sqlite_master WHERE name = ? and type='table'", name)
 	if err != nil {
@@ -623,6 +670,29 @@ func (db *Database) isTableExist(name string) (result bool, err error) {
 	result = rows.Next()
 
 	return result, rows.Err()
+}
+
+func (db *Database) createConfigTable() (err error) {
+	log.Info("Create config table")
+
+	exist, err := db.isTableExist("config")
+	if err != nil {
+		return err
+	}
+
+	if exist {
+		return nil
+	}
+
+	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER);`, dbVersion); err != nil {
+		return err
+	}
+
+	if _, err = db.sql.Exec("INSERT INTO config values(?)", dbVersion); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (db *Database) createServiceTable() (err error) {

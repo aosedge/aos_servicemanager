@@ -530,3 +530,25 @@ func TestTrafficMonitor(t *testing.T) {
 		t.Errorf("Can't remove all traffic monitor: %s", err)
 	}
 }
+
+func TestDBVersion(t *testing.T) {
+	db, err := New("tmp/version.db")
+	if err != nil {
+		log.Fatalf("Can't create database: %s", err)
+	}
+
+	if err = db.setVersion(dbVersion - 1); err != nil {
+		log.Errorf("Can't set database version: %s", err)
+	}
+
+	db.Close()
+
+	db, err = New("tmp/version.db")
+	if err == nil {
+		log.Error("Expect version mismatch error")
+	} else if err != ErrVersionMismatch {
+		log.Errorf("Can't create database: %s", err)
+	}
+
+	db.Close()
+}

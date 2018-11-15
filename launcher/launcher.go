@@ -330,6 +330,72 @@ func (launcher *Launcher) UpdateState(state amqp.UpdateState) (err error) {
 	return nil
 }
 
+// Cleanup deletes all AOS services, their storages and states
+func Cleanup(workingDir string) (err error) {
+	systemd, err := dbus.NewSystemConnection()
+	if err != nil {
+		log.Errorf("Can't connect to systemd: %s", err)
+	}
+
+	if systemd != nil {
+		units, err := systemd.ListUnits()
+		if err != nil {
+			log.Errorf("Can't list systemd units: %s", err)
+		} else {
+			for _, unit := range units {
+				if !strings.HasPrefix(unit.Name, "aos_") {
+					continue
+				}
+
+				desc, err := systemd.GetUnitProperty(unit.Name, "Description")
+				if err != nil {
+					log.WithField("name", unit.Name).Errorf("Can't get unit property: %s", err)
+					continue
+				}
+
+				value, ok := desc.Value.Value().(string)
+				if !ok {
+					log.WithField("name", unit.Name).Error("Can't convert description")
+					continue
+				}
+
+				if value == "AOS Service" {
+					log.WithField("name", unit.Name).Debug("Deleting systemd service")
+
+					channel := make(chan string)
+					if _, err := systemd.StopUnit(unit.Name, "replace", channel); err != nil {
+						log.WithField("name", unit.Name).Errorf("Can't stop unit: %s", err)
+					} else {
+						<-channel
+					}
+
+					if _, err := systemd.DisableUnitFiles([]string{unit.Name}, false); err != nil {
+						log.WithField("name", unit.Name).Error("Can't disable unit: ", err)
+					}
+				}
+			}
+		}
+	}
+
+	serviceDir := path.Join(workingDir, serviceDir)
+
+	log.WithField("dir", serviceDir).Debug("Remove service dir")
+
+	if err := os.RemoveAll(serviceDir); err != nil {
+		log.Fatalf("Can't remove service folder: %s", err)
+	}
+
+	storageDir := path.Join(workingDir, storageDir)
+
+	log.WithField("dir", storageDir).Debug("Remove storage dir")
+
+	if err := os.RemoveAll(storageDir); err != nil {
+		log.Fatalf("Can't remove storage folder: %s", err)
+	}
+
+	return nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
