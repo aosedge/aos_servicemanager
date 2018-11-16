@@ -426,7 +426,6 @@ func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *t
 	if err != nil {
 		return info, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		return info, fmt.Errorf("%s: %s", resp.Status, string(htmlData))
