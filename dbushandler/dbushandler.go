@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/godbus/dbus"
+	"github.com/godbus/dbus/introspect"
 	log "github.com/sirupsen/logrus"
 
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
@@ -19,6 +20,29 @@ const (
 	// InterfaceName interface name
 	InterfaceName = "com.epam.aos.vis"
 )
+
+const intro = `
+<node>
+	<interface name="com.epam.aos.vis">
+		<method name="GetPermissions">
+			<arg name="token" direction="in" type="s">
+				<doc:doc><doc:summary>VIS client token (service id)</doc:summary></doc:doc>
+			</arg>
+			<arg name="permissions" direction="out" type="s">
+				<doc:doc><doc:summary>VIS client permissions</doc:summary></doc:doc>
+			</arg>
+			<arg name="status" direction="out" type="s">
+				<doc:doc><doc:summary>Status of getting VIS permissions: OK or error</doc:summary></doc:doc>
+			</arg>
+			<doc:doc>
+				<doc:description>
+				<doc:para>
+					Returns VIS client permission
+				</doc:para>
+				</doc:description>
+			</doc:doc>
+		</method>
+	</interface>` + introspect.IntrospectDataString + `</node> `
 
 /*******************************************************************************
  * Types
@@ -53,8 +77,9 @@ func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 
 	server := DBusHandler{dbusConn: conn, db: db}
 
-	// TODO: add introspect
 	conn.Export(server, ObjectPath, InterfaceName)
+	conn.Export(introspect.Introspectable(intro), ObjectPath,
+		"org.freedesktop.DBus.Introspectable")
 
 	dbusHandler = &server
 

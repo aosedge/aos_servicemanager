@@ -18,6 +18,7 @@ import (
  ******************************************************************************/
 
 var db *database.Database
+var server *dbusServer.DBusHandler
 
 /*******************************************************************************
  * Init
@@ -41,8 +42,11 @@ func setup() (err error) {
 		return err
 	}
 
-	db, err = database.New("tmp/servicemanager.db")
-	if err != nil {
+	if db, err = database.New("tmp/servicemanager.db"); err != nil {
+		return err
+	}
+
+	if server, err = dbusServer.New(db); err != nil {
 		return err
 	}
 
@@ -81,17 +85,25 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
+func TestIntrospect(t *testing.T) {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		t.Fatalf("Can't connect to session bus: %s", err)
+	}
+
+	var intro string
+
+	obj := conn.Object(dbusServer.InterfaceName, dbusServer.ObjectPath)
+
+	if err = obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {
+		t.Errorf("Can't make D-Bus call: %s", err)
+	}
+}
 func TestGetPermission(t *testing.T) {
 	if err := db.AddService(database.ServiceEntry{ID: "Service1",
 		Permissions: `{"*": "rw", "123": "rw"}`}); err != nil {
 		t.Fatalf("Can't add service: %s", err)
 	}
-
-	server, err := dbusServer.New(db)
-	if err != nil {
-		t.Fatalf("Can't create D-Bus server: %s", err)
-	}
-	defer server.Close()
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
