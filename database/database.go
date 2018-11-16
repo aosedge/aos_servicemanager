@@ -684,7 +684,7 @@ func (db *Database) createConfigTable() (err error) {
 		return nil
 	}
 
-	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER);`, dbVersion); err != nil {
+	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER)`); err != nil {
 		return err
 	}
 
@@ -712,7 +712,7 @@ func (db *Database) createServiceTable() (err error) {
 															   ulLimit INTEGER,
 															   dlLimit INTEGER,
 															   storageLimit INTEGER,
-															   stateLimit INTEGER);`)
+															   stateLimit INTEGER)`)
 
 	return err
 }
@@ -724,7 +724,7 @@ func (db *Database) createUsersTable() (err error) {
 															serviceid TEXT NOT NULL,
 															storageFolder TEXT,
 															stateCheckSum BLOB,
-															PRIMARY KEY(users, serviceid));`)
+															PRIMARY KEY(users, serviceid))`)
 
 	return err
 }
@@ -734,25 +734,25 @@ func (db *Database) createTrafficMonitorTable() (err error) {
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
 																	 time TIMESTAMP,
-																	 value INTEGER);`)
+																	 value INTEGER)`)
 
 	return err
 }
 
 func (db *Database) removeAllServices() (err error) {
-	_, err = db.sql.Exec("DELETE FROM services;")
+	_, err = db.sql.Exec("DELETE FROM services")
 
 	return err
 }
 
 func (db *Database) removeAllUsers() (err error) {
-	_, err = db.sql.Exec("DELETE FROM users;")
+	_, err = db.sql.Exec("DELETE FROM users")
 
 	return err
 }
 
 func (db *Database) removeAllTrafficMonitor() (err error) {
-	_, err = db.sql.Exec("DELETE FROM trafficmonitor;")
+	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
 	return err
 }
