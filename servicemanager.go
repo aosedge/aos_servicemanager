@@ -25,6 +25,9 @@ const (
 	reconnectTimeout = 3 * time.Second
 )
 
+// GitSummary provided by govvv at compile-time
+var GitSummary string
+
 func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
@@ -267,7 +270,7 @@ func main() {
 	}
 	log.SetLevel(logLevel)
 
-	log.WithField("configFile", *configFile).Info("Start service manager")
+	log.WithFields(log.Fields{"configFile": *configFile, "version": GitSummary}).Info("Start service manager")
 
 	// Create config
 	config, err := config.New(*configFile)
