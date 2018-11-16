@@ -67,14 +67,19 @@ func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, lau
 
 		servicesMap := make(map[string]*serviceDesc)
 
-		for _, serviceInfo := range currentList {
+		for _, item := range currentList {
+			serviceInfo := item
+
 			servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
 		}
 
-		for _, serviceInfoFromCloud := range data {
+		for _, item := range data {
+			serviceInfoFromCloud := item
+
 			if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {
 				servicesMap[serviceInfoFromCloud.ID] = &serviceDesc{}
 			}
+
 			servicesMap[serviceInfoFromCloud.ID].serviceInfoFromCloud = &serviceInfoFromCloud
 		}
 
