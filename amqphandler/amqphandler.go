@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -426,6 +427,10 @@ func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *t
 		return info, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return info, fmt.Errorf("%s: %s", resp.Status, string(htmlData))
+	}
 
 	var jsonResp serviceDiscoveryResp
 
