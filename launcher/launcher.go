@@ -819,7 +819,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	return installDir, nil
 }
 
-func (launcher *Launcher) removeService(id string) (err error) {
+func (launcher *Launcher) removeService(id string) (retErr error) {
 	service, err := launcher.db.GetService(id)
 	if err != nil {
 		return err
@@ -828,16 +828,24 @@ func (launcher *Launcher) removeService(id string) (err error) {
 	log.WithFields(log.Fields{"id": service.ID, "version": service.Version}).Debug("Remove service")
 
 	if err := launcher.stopService(service); err != nil {
-		log.WithField("name", service.ServiceName).Error("Can't stop service: ", err)
+		if retErr == nil {
+			retErr = err
+		}
 	}
 
 	if _, err := launcher.systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
-		log.WithField("name", service.ServiceName).Error("Can't disable systemd unit: ", err)
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't disable systemd unit: %s", err)
+			retErr = err
+		}
 	}
 
 	entries, err := launcher.db.GetUsersEntriesByServiceID(service.ID)
 	if err != nil {
-		log.WithField("name", service.ServiceName).Error("Can't get users entries: ", err)
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't get users entry: %s", err)
+			retErr = err
+		}
 	}
 
 	for _, entry := range entries {
@@ -846,29 +854,44 @@ func (launcher *Launcher) removeService(id string) (err error) {
 				"folder":    entry.StorageFolder,
 				"serviceID": service.ID}).Debug("Remove storage folder")
 
-			if err = os.RemoveAll(entry.StorageFolder); err != nil {
-				log.WithField("name", service.ServiceName).Error("Can't remove storage folder: ", err)
+			if err := os.RemoveAll(entry.StorageFolder); err != nil {
+				if retErr == nil {
+					log.WithField("name", service.ID).Errorf("Can't remove storage folder: %s", err)
+					retErr = err
+				}
 			}
 		}
 	}
 
 	if err := launcher.db.DeleteUsersByServiceID(service.ID); err != nil {
-		log.WithField("name", service.ServiceName).Error("Can't delete users from db: ", err)
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't delete users from DB: %s", err)
+			retErr = err
+		}
 	}
 
 	if err := launcher.db.RemoveService(service.ID); err != nil {
-		log.WithField("name", service.ServiceName).Error("Can't remove service from db: ", err)
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't remove service from DB: %s", err)
+			retErr = err
+		}
 	}
 
 	if err := os.RemoveAll(service.Path); err != nil {
-		log.WithField("path", service.Path).Error("Can't remove service path")
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't remove service folder: %s", err)
+			retErr = err
+		}
 	}
 
 	if err := deleteUser(service.UserName); err != nil {
-		log.WithField("user", service.UserName).Error("Can't remove user")
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't delete user: %s", err)
+			retErr = err
+		}
 	}
 
-	return nil
+	return retErr
 }
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
@@ -1290,11 +1313,7 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 			servicesToBeRemoved++
 
 			go func(id string) {
-				err := launcher.removeService(id)
-				if err != nil {
-					log.WithField("id", id).Errorf("Can't remove service: %s", err)
-				}
-				statusChannel <- err
+				statusChannel <- launcher.removeService(id)
 			}(service.ID)
 		}
 	}
