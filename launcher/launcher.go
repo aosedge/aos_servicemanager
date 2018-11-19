@@ -651,26 +651,35 @@ func (launcher *Launcher) startServices() {
 	}
 }
 
-func (launcher *Launcher) stopService(service database.ServiceEntry) (err error) {
+func (launcher *Launcher) stopService(service database.ServiceEntry) (retErr error) {
 	launcher.services.Delete(service.ServiceName)
 
-	if err = launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
-		return err
+	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
+			retErr = err
+		}
 	}
 
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(service.ServiceName, "replace", channel); err != nil {
-		return err
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't stop systemd unit: %s", err)
+			retErr = err
+		}
+	} else {
+		status := <-channel
+		log.WithFields(log.Fields{"id": service.ID, "status": status}).Debug("Stop service")
 	}
-	status := <-channel
 
-	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Stop service")
-
-	if err = launcher.updateServiceState(service.ID, stateStopped, statusOk); err != nil {
-		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
+	if err := launcher.updateServiceState(service.ID, stateStopped, statusOk); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't update service state: %s", err)
+			retErr = err
+		}
 	}
 
-	return nil
+	return retErr
 }
 
 func (launcher *Launcher) stopServices() {
@@ -696,11 +705,7 @@ func (launcher *Launcher) stopServices() {
 	// Stop all services in parallel
 	for _, service := range services {
 		go func(service database.ServiceEntry) {
-			err := launcher.stopService(service)
-			if err != nil {
-				log.Errorf("Can't stop service %s: %s", service.ID, err)
-			}
-			statusChannel <- err
+			statusChannel <- launcher.stopService(service)
 		}(service)
 	}
 
