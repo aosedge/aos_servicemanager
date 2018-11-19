@@ -180,8 +180,16 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 	handler.mutex.Lock()
 	defer handler.mutex.Unlock()
 
+	if service.StateLimit == 0 {
+		return nil
+	}
+
 	entry, err := handler.db.GetUsersEntry(users, service.ID)
 	if err != nil {
+		if err == database.ErrNotExist {
+			return nil
+		}
+
 		return err
 	}
 
