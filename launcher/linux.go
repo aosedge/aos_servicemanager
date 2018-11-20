@@ -26,6 +26,17 @@ func serviceIDToUser(serviceID string) (userName string) {
 	return "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
 }
 
+func isUserExist(serviceID string) (result bool) {
+	userMutex.Lock()
+	defer userMutex.Unlock()
+
+	if _, err := user.Lookup(serviceIDToUser(serviceID)); err == nil {
+		return true
+	}
+
+	return false
+}
+
 func createUser(serviceID string) (userName string, err error) {
 	userMutex.Lock()
 	defer userMutex.Unlock()

@@ -448,61 +448,76 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	if err != nil && err != database.ErrNotExist {
 		return err
 	}
+	serviceExists := err == nil
 
 	// Skip incorrect version
-	if err == nil && serviceInfo.Version < service.Version {
+	if serviceExists && serviceInfo.Version < service.Version {
 		return errors.New("Version mistmatch")
 	}
 
-	installed := false
-
-	// Check if we need to install
-	if err != nil || serviceInfo.Version > service.Version {
-		if installDir, err := launcher.installService(serviceInfo); err != nil {
-			removeService, err := launcher.db.GetService(serviceInfo.ID)
-			if err != nil {
-				if err == database.ErrNotExist {
-					if installDir != "" {
-						os.RemoveAll(installDir)
-					}
-				} else {
-					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't get service: %s", err)
-				}
-
-				return err
-			}
-
-			if err := launcher.removeService(removeService); err != nil {
-				if err == database.ErrNotExist {
-					if installDir != "" {
-						os.RemoveAll(installDir)
-					}
-				} else {
-					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't cleanup service: %s", err)
-				}
-			}
-
+	// If same service version exists, just start the service
+	if serviceExists && serviceInfo.Version == service.Version {
+		if err = launcher.addServiceToCurrentUsers(serviceInfo.ID); err != nil {
 			return err
 		}
-		installed = true
+
+		if err = launcher.startService(service); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	// Update users DB
-	exist, err := launcher.db.IsUsersService(launcher.users, serviceInfo.ID)
+	// We need to install or update the service
+
+	// create install dir
+	installDir, err := ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
 	if err != nil {
 		return err
 	}
 
-	if !exist {
-		if err := launcher.db.AddUsersService(launcher.users, serviceInfo.ID); err != nil {
-			return err
+	defer func() {
+		if r := recover(); r != nil {
+			log.WithField("serviceID", serviceInfo.ID).Error(r)
+
+			if !serviceExists {
+				// Remove system user
+				if isUserExist(serviceInfo.ID) {
+					if err := deleteUser(serviceInfo.ID); err != nil {
+						log.WithField("serviceID", serviceInfo.ID).Errorf("Can't delete user: %s", err)
+					}
+				}
+			}
+
+			// Remove install dir if exists
+			if _, err := os.Stat(installDir); err == nil {
+				if err := os.RemoveAll(installDir); err != nil {
+					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't remove service dir: %s", err)
+				}
+			}
 		}
+	}()
+
+	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.ID}).Debug("Create install dir")
+
+	// download and unpack
+	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, installDir); err != nil {
+		panic("Download failed")
 	}
 
-	// Start service
-	if !installed {
-		if err = launcher.startService(service); err != nil {
-			return err
+	var newService database.ServiceEntry
+
+	if newService, err = launcher.prepareService(installDir, serviceInfo); err != nil {
+		panic("Prepare failed")
+	}
+
+	if !serviceExists {
+		if err = launcher.installService(newService); err != nil {
+			panic("Install failed")
+		}
+	} else {
+		if err = launcher.updateService(service, newService); err != nil {
+			panic("Update failed")
 		}
 	}
 
@@ -579,6 +594,21 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 }
 
 func (launcher *Launcher) restartService(service database.ServiceEntry) (err error) {
+	fileName, err := filepath.Abs(path.Join(service.Path, service.ServiceName))
+	if err != nil {
+		return err
+	}
+
+	// Use launcher.systemd.EnableUnitFiles if services should be started automatically
+	// on system restart
+	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+		return err
+	}
+
+	if err = launcher.systemd.Reload(); err != nil {
+		return err
+	}
+
 	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
 		return err
 	}
@@ -728,55 +758,58 @@ func (launcher *Launcher) stopServices() {
 	}
 }
 
-func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (installDir string, err error) {
+func (launcher *Launcher) restoreService(service database.ServiceEntry) (retErr error) {
+	log.WithField("id", service.ID).Warn("Restore previous service version")
 
-	log.WithFields(log.Fields{"id": serviceInfo.ID, "version": serviceInfo.Version}).Debug("Install service")
-
-	// create install dir
-	installDir, err = ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
-	if err != nil {
-		return installDir, err
-	}
-	log.WithField("dir", installDir).Debug("Create install dir")
-
-	// download and unpack
-	err = downloadAndUnpackImage(launcher.downloader, serviceInfo, installDir)
-	if err != nil {
-		return installDir, err
+	if err := launcher.db.UpdateService(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't update service in DB: %s", err)
+			retErr = err
+		}
 	}
 
-	// check if service already installed
-	oldService, err := launcher.db.GetService(serviceInfo.ID)
-	if err != nil && err != database.ErrNotExist {
-		return installDir, err
+	if err := setUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
+			retErr = err
+		}
 	}
-	serviceExists := err == nil
 
-	// create OS user
+	if err := launcher.restartService(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't install service: %s", err)
+			retErr = err
+		}
+	}
+
+	return retErr
+}
+
+func (launcher *Launcher) prepareService(installDir string,
+	serviceInfo amqp.ServiceInfoFromCloud) (service database.ServiceEntry, err error) {
 	userName, err := createUser(serviceInfo.ID)
-	if err != nil && !strings.Contains(err.Error(), "already exists") {
-		return installDir, err
+	if err != nil {
+		return service, err
 	}
 
 	// update config.json
 	spec, err := launcher.updateServiceSpec(installDir, userName)
 	if err != nil {
-		return installDir, err
+		return service, err
 	}
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec)
-	if err != nil {
-		return installDir, err
+	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec); err != nil {
+		return service, err
 	}
 
 	alertRules, err := json.Marshal(serviceInfo.ServiceMonitoring)
 	if err != nil {
-		return installDir, err
+		return service, err
 	}
 
-	newService := database.ServiceEntry{
+	service = database.ServiceEntry{
 		ID:          serviceInfo.ID,
 		Version:     serviceInfo.Version,
 		Path:        installDir,
@@ -786,50 +819,89 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		Status:      statusOk,
 		AlertRules:  string(alertRules)}
 
-	if err := launcher.updateServiceFromSpec(&newService, spec); err != nil {
-		return installDir, err
+	if err = launcher.updateServiceFromSpec(&service, spec); err != nil {
+		return service, err
 	}
 
-	if serviceExists {
-		launcher.services.Delete(serviceName)
+	return service, nil
+}
 
-		if err = launcher.updateServiceState(serviceInfo.ID, stateStopped, statusOk); err != nil {
-			return installDir, err
+func (launcher *Launcher) installService(service database.ServiceEntry) (err error) {
+	// We can't remove service if it is not in DB. Just return error and rollback will be
+	// handled by parent function
+
+	if err = setUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
+		return err
+	}
+
+	if err = launcher.db.AddService(service); err != nil {
+		return err
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.WithField("id", service.ID).Error(r)
+			launcher.removeService(service)
 		}
+	}()
 
-		if err = launcher.db.RemoveService(serviceInfo.ID); err != nil {
-			return installDir, err
+	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
+		panic("Add service to users failed")
+	}
+
+	if err = launcher.restartService(service); err != nil {
+		panic("Restart service failed")
+	}
+
+	return err
+}
+
+func (launcher *Launcher) updateService(oldService, newService database.ServiceEntry) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.WithField("id", newService.ID).Error(r)
+
+			if err := launcher.restoreService(oldService); err != nil {
+				launcher.removeService(oldService)
+
+				launcher.StatusChannel <- ActionStatus{
+					Action:  ActionRemove,
+					ID:      oldService.ID,
+					Version: oldService.Version,
+					Err:     nil}
+			}
 		}
+	}()
+
+	launcher.services.Delete(oldService.ServiceName)
+
+	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
+		panic("Update service state failed")
 	}
 
-	if err = launcher.addServiceToDB(newService); err != nil {
-		return installDir, err
+	if err = setUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, newService.UserName); err != nil {
+		panic("Set service quota failed")
 	}
 
-	if err := setUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, userName); err != nil {
-		return installDir, err
+	if err = launcher.db.UpdateService(newService); err != nil {
+		panic("Update service failed")
 	}
 
 	if err = launcher.restartService(newService); err != nil {
-		// TODO: try to restore old service
-		return installDir, err
+		panic("Restart service failed")
 	}
 
-	// remove if exists
-	if serviceExists {
-		if err = os.RemoveAll(oldService.Path); err != nil {
-			// indicate error, can continue
-			log.WithField("path", oldService.Path).Error("Can't remove service path")
-		}
-
-		launcher.StatusChannel <- ActionStatus{
-			Action:  ActionRemove,
-			ID:      oldService.ID,
-			Version: oldService.Version,
-			Err:     nil}
+	if err = os.RemoveAll(oldService.Path); err != nil {
+		panic("Remove service dir failed")
 	}
 
-	return installDir, nil
+	launcher.StatusChannel <- ActionStatus{
+		Action:  ActionRemove,
+		ID:      oldService.ID,
+		Version: oldService.Version,
+		Err:     nil}
+
+	return nil
 }
 
 func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr error) {
@@ -978,21 +1050,6 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		line = strings.Replace(line, "${CLEARNETLIMIT}", clearNetLimitCmd, -1)
 
 		fmt.Fprint(f, line)
-	}
-
-	fileName, err := filepath.Abs(f.Name())
-	if err != nil {
-		return err
-	}
-
-	// Use launcher.systemd.EnableUnitFiles if services should be started automatically
-	// on system restart
-	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
-		return err
-	}
-
-	if err = launcher.systemd.Reload(); err != nil {
-		return err
 	}
 
 	return err
@@ -1263,20 +1320,13 @@ func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clear
 	return setCmd, clearCmd
 }
 
-func (launcher *Launcher) addServiceToDB(service database.ServiceEntry) (err error) {
-	// add to database
-	if err = launcher.db.AddService(service); err != nil {
-		// TODO: delete linux user?
-		// TODO: try to restore old
-		return err
-	}
-
-	exist, err := launcher.db.IsUsersService(launcher.users, service.ID)
+func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error) {
+	exist, err := launcher.db.IsUsersService(launcher.users, serviceID)
 	if err != nil {
 		return err
 	}
 	if !exist {
-		if err = launcher.db.AddUsersService(launcher.users, service.ID); err != nil {
+		if err = launcher.db.AddUsersService(launcher.users, serviceID); err != nil {
 			return err
 		}
 	}
