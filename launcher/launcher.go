@@ -384,6 +384,10 @@ func Cleanup(workingDir string) (err error) {
 				}
 			}
 		}
+
+		if err := systemd.Reload(); err != nil {
+			log.Errorf("Can't reload systemd: %s", err)
+		}
 	}
 
 	serviceDir := path.Join(workingDir, serviceDir)
