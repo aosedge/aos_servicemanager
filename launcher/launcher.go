@@ -374,6 +374,13 @@ func Cleanup(workingDir string) (err error) {
 					if _, err := systemd.DisableUnitFiles([]string{serviceName}, false); err != nil {
 						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
 					}
+
+					// Delete service user
+					serviceID := strings.TrimSuffix(strings.TrimPrefix(serviceName, "aos_"), ".service")
+
+					if err := deleteUser(serviceID); err != nil {
+						log.WithField("serviceID", serviceID).Error("Can't delete user: ", err)
+					}
 				}
 			}
 		}
