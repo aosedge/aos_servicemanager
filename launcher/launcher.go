@@ -338,39 +338,41 @@ func Cleanup(workingDir string) (err error) {
 	}
 
 	if systemd != nil {
-		units, err := systemd.ListUnits()
+		unitFiles, err := systemd.ListUnitFiles()
 		if err != nil {
 			log.Errorf("Can't list systemd units: %s", err)
 		} else {
-			for _, unit := range units {
-				if !strings.HasPrefix(unit.Name, "aos_") {
+			for _, unitFile := range unitFiles {
+				serviceName := filepath.Base(unitFile.Path)
+
+				if !strings.HasPrefix(serviceName, "aos_") {
 					continue
 				}
 
-				desc, err := systemd.GetUnitProperty(unit.Name, "Description")
+				desc, err := systemd.GetUnitProperty(serviceName, "Description")
 				if err != nil {
-					log.WithField("name", unit.Name).Errorf("Can't get unit property: %s", err)
+					log.WithField("name", serviceName).Errorf("Can't get unit property: %s", err)
 					continue
 				}
 
 				value, ok := desc.Value.Value().(string)
 				if !ok {
-					log.WithField("name", unit.Name).Error("Can't convert description")
+					log.WithField("name", serviceName).Error("Can't convert description")
 					continue
 				}
 
 				if value == "AOS Service" {
-					log.WithField("name", unit.Name).Debug("Deleting systemd service")
+					log.WithField("name", serviceName).Debug("Deleting systemd service")
 
 					channel := make(chan string)
-					if _, err := systemd.StopUnit(unit.Name, "replace", channel); err != nil {
-						log.WithField("name", unit.Name).Errorf("Can't stop unit: %s", err)
+					if _, err := systemd.StopUnit(serviceName, "replace", channel); err != nil {
+						log.WithField("name", serviceName).Errorf("Can't stop unit: %s", err)
 					} else {
 						<-channel
 					}
 
-					if _, err := systemd.DisableUnitFiles([]string{unit.Name}, false); err != nil {
-						log.WithField("name", unit.Name).Error("Can't disable unit: ", err)
+					if _, err := systemd.DisableUnitFiles([]string{serviceName}, false); err != nil {
+						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
 					}
 				}
 			}
