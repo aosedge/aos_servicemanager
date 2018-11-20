@@ -278,7 +278,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 
 	for _, service := range services {
 		go func(service database.ServiceEntry) {
-			err := launcher.removeService(service.ID)
+			err := launcher.removeService(service)
 			if err != nil {
 				log.Errorf("Can't remove service %s: %s", service.ID, err)
 			}

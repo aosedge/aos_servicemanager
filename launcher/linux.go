@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"os/exec"
@@ -19,37 +18,45 @@ import (
 
 var userMutex sync.Mutex
 
-func createUser(id string) (userName string, err error) {
+func serviceIDToUser(serviceID string) (userName string) {
+	// convert id to hashed u32 value
+	hash := fnv.New64a()
+	hash.Write([]byte(serviceID))
+
+	return "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
+}
+
+func createUser(serviceID string) (userName string, err error) {
 	userMutex.Lock()
 	defer userMutex.Unlock()
 
-	// convert id to hashed u32 value
-	hash := fnv.New64a()
-	hash.Write([]byte(id))
-
 	// create user
-	userName = "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
+	userName = serviceIDToUser(serviceID)
 	// if user exists
 	if _, err = user.Lookup(userName); err == nil {
-		return userName, errors.New("User already exists")
+		log.WithField("user", userName).Debug("User already exists")
+
+		return userName, nil
 	}
 
 	log.WithField("user", userName).Debug("Create user")
 
 	if err = exec.Command("useradd", "-M", userName).Run(); err != nil {
-		return userName, fmt.Errorf("Error creating user: %s", err)
+		return "", fmt.Errorf("Error creating user: %s", err)
 	}
 
 	return userName, nil
 }
 
-func deleteUser(id string) (err error) {
+func deleteUser(serviceID string) (err error) {
 	userMutex.Lock()
 	defer userMutex.Unlock()
 
-	log.WithField("user", id).Debug("Delete user")
+	userName := serviceIDToUser(serviceID)
 
-	if err = exec.Command("userdel", id).Run(); err != nil {
+	log.WithField("user", userName).Debug("Delete user")
+
+	if err = exec.Command("userdel", userName).Run(); err != nil {
 		return err
 	}
 
@@ -86,6 +93,8 @@ func setUserFSQuota(path string, limit uint64, userName string) (err error) {
 	if err != nil {
 		return err
 	}
+
+	log.WithFields(log.Fields{"user": userName, "limit": limit}).Debug("Set user FS quota")
 
 	limits := fsquota.Limits{}
 

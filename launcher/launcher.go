@@ -459,7 +459,20 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	// Check if we need to install
 	if err != nil || serviceInfo.Version > service.Version {
 		if installDir, err := launcher.installService(serviceInfo); err != nil {
-			if err := launcher.removeService(serviceInfo.ID); err != nil {
+			removeService, err := launcher.db.GetService(serviceInfo.ID)
+			if err != nil {
+				if err == database.ErrNotExist {
+					if installDir != "" {
+						os.RemoveAll(installDir)
+					}
+				} else {
+					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't get service: %s", err)
+				}
+
+				return err
+			}
+
+			if err := launcher.removeService(removeService); err != nil {
 				if err == database.ErrNotExist {
 					if installDir != "" {
 						os.RemoveAll(installDir)
@@ -819,12 +832,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	return installDir, nil
 }
 
-func (launcher *Launcher) removeService(id string) (retErr error) {
-	service, err := launcher.db.GetService(id)
-	if err != nil {
-		return err
-	}
-
+func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr error) {
 	log.WithFields(log.Fields{"id": service.ID, "version": service.Version}).Debug("Remove service")
 
 	if err := launcher.stopService(service); err != nil {
@@ -884,7 +892,7 @@ func (launcher *Launcher) removeService(id string) (retErr error) {
 		}
 	}
 
-	if err := deleteUser(service.UserName); err != nil {
+	if err := deleteUser(service.ID); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't delete user: %s", err)
 			retErr = err
@@ -1312,9 +1320,9 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 		if service.StartAt.Add(time.Hour*24*time.Duration(service.TTL)).Before(now) == true {
 			servicesToBeRemoved++
 
-			go func(id string) {
-				statusChannel <- launcher.removeService(id)
-			}(service.ID)
+			go func(service database.ServiceEntry) {
+				statusChannel <- launcher.removeService(service)
+			}(service)
 		}
 	}
 
