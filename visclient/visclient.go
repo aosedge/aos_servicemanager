@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 const (
 	websocketTimeout        = 3 * time.Second
 	usersChangedChannelSize = 1
+	errorChannelSize        = 1
 )
 
 /*******************************************************************************
@@ -34,6 +34,7 @@ type UserChangedNtf struct {
 // VisClient VIS client object
 type VisClient struct {
 	UsersChangedChannel chan []string
+	ErrorChannel        chan error
 
 	webConn *websocket.Conn
 
@@ -76,29 +77,75 @@ type visResponse struct {
  ******************************************************************************/
 
 // New creates new visclient
-func New(urlStr string) (vis *VisClient, err error) {
-	log.WithField("url", urlStr).Debug("New VIS client")
+func New() (vis *VisClient, err error) {
+	log.Debug("New VIS client")
 
-	webConn, _, err := websocket.DefaultDialer.Dial(urlStr, nil)
-	if err != nil {
-		return vis, err
-	}
+	vis = &VisClient{}
 
-	vis = &VisClient{webConn: webConn}
+	return vis, nil
+}
+
+// Connect connects to the VIS
+func (vis *VisClient) Connect(url string) (err error) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
 
 	vis.UsersChangedChannel = make(chan []string, usersChangedChannelSize)
+	vis.ErrorChannel = make(chan error, errorChannelSize)
+
+	log.WithField("url", url).Debug("Connect to VIS")
+
+	if vis.webConn != nil {
+		return errors.New("Already connected to VIS")
+	}
+
+	webConn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		return err
+	}
+
+	vis.webConn = webConn
 
 	go vis.processMessages()
 
 	if err = vis.subscribe("Attribute.Vehicle.UserIdentification.Users", vis.handleUsersChanged); err != nil {
-		return vis, err
+		if err := vis.disconnect(); err != nil {
+			log.Errorf("Can't disconnect from VIS: %s", err)
+		}
+		return err
 	}
 
-	return vis, err
+	vis.users = nil
+	vis.vin = ""
+
+	return nil
+}
+
+// Disconnect disconnects from the VIS
+func (vis *VisClient) Disconnect() (err error) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
+	return vis.disconnect()
+}
+
+// IsConnected returns true if connected to VIS
+func (vis *VisClient) IsConnected() (result bool) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
+	return vis.webConn != nil
 }
 
 // GetVIN returns VIN
 func (vis *VisClient) GetVIN() (vin string, err error) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
+	if vis.webConn == nil {
+		return "", errors.New("Not connected to VIS")
+	}
+
 	if vis.vin == "" {
 		rsp, err := vis.processRequest(&visRequest{Action: "get",
 			Path: "Attribute.Vehicle.VehicleIdentification.VIN"})
@@ -124,6 +171,13 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 
 // GetUsers returns user list
 func (vis *VisClient) GetUsers() (users []string, err error) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
+	if vis.webConn == nil {
+		return nil, errors.New("Not connected to VIS")
+	}
+
 	if vis.users == nil {
 		rsp, err := vis.processRequest(&visRequest{Action: "get",
 			Path: "Attribute.Vehicle.UserIdentification.Users"})
@@ -143,28 +197,43 @@ func (vis *VisClient) GetUsers() (users []string, err error) {
 
 // Close closes vis client
 func (vis *VisClient) Close() (err error) {
-	log.Debug("Close VIS client")
+	log.Info("Close VIS client")
 
-	// unsubscribe from all subscriptions
-	if _, err := vis.processRequest(&visRequest{Action: "unsubscribeAll"}); err != nil {
-		log.Errorf("Can't unsubscribe from subscriptions: %s", err)
-	}
-
-	if err := vis.webConn.WriteMessage(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-		log.Errorf("Can't send close message: %s", err)
-	}
-
-	if err := vis.webConn.Close(); err != nil {
-		return err
-	}
-
-	return nil
+	return vis.Disconnect()
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (vis *VisClient) disconnect() (retErr error) {
+	log.Debug("Disconnect from VIS")
+
+	if vis.webConn == nil {
+		return nil
+	}
+
+	// unsubscribe from all subscriptions
+	if _, err := vis.processRequest(&visRequest{Action: "unsubscribeAll"}); err != nil {
+		log.Errorf("Can't unsubscribe from subscriptions: %s", err)
+		retErr = err
+	}
+
+	if err := vis.webConn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		log.Errorf("Can't send close message: %s", err)
+		retErr = err
+	}
+
+	if err := vis.webConn.Close(); err != nil {
+		log.Errorf("Can't close web socket: %s", err)
+		retErr = err
+	}
+
+	vis.webConn = nil
+
+	return retErr
+}
 
 func getValueFromResponse(path string, rsp *visResponse) (value interface{}, err error) {
 	if valueMap, ok := rsp.Value.(map[string]interface{}); ok {
@@ -183,10 +252,8 @@ func getValueFromResponse(path string, rsp *visResponse) (value interface{}, err
 
 func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err error) {
 	// Generate request ID
-	vis.mutex.Lock()
 	requestID := vis.requestID
 	vis.requestID++
-	vis.mutex.Unlock()
 
 	req.RequestID = strconv.FormatUint(requestID, 10)
 
@@ -211,11 +278,18 @@ func (vis *VisClient) processRequest(req *visRequest) (rsp *visResponse, err err
 	select {
 	case <-time.After(websocketTimeout):
 		err = errors.New("Wait response timeout")
-	case r := <-rspChannel:
-		if r.Error != nil {
-			return rsp, fmt.Errorf("Error: %d, message: %s, reason: %s",
-				r.Error.Number, r.Error.Message, r.Error.Reason)
+	case r, ok := <-rspChannel:
+		if !ok {
+			err = errors.New("Response channel is closed")
+			break
 		}
+
+		if r.Error != nil {
+			err = fmt.Errorf("Error: %d, message: %s, reason: %s",
+				r.Error.Number, r.Error.Message, r.Error.Reason)
+			break
+		}
+
 		rsp = &r
 	}
 
@@ -268,11 +342,16 @@ func (vis *VisClient) processMessages() {
 	for {
 		_, message, err := vis.webConn.ReadMessage()
 		if err != nil {
-			// Don't show error no connection close
-			if !strings.Contains(err.Error(), "use of closed network connection") &&
-				!websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-				log.Errorf("Error reading VIS message: %s", err)
+			vis.mutex.Lock()
+			defer vis.mutex.Unlock()
+
+			if vis.webConn != nil {
+				vis.webConn.Close()
+				vis.webConn = nil
 			}
+
+			vis.ErrorChannel <- err
+
 			return
 		}
 
@@ -295,9 +374,6 @@ func (vis *VisClient) processMessages() {
 }
 
 func (vis *VisClient) setUsers(rsp *visResponse) (err error) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
-
 	value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", rsp)
 	if err != nil {
 		return err
@@ -322,6 +398,9 @@ func (vis *VisClient) setUsers(rsp *visResponse) (err error) {
 }
 
 func (vis *VisClient) handleUsersChanged(rsp *visResponse) {
+	vis.mutex.Lock()
+	defer vis.mutex.Unlock()
+
 	if err := vis.setUsers(rsp); err != nil {
 		log.Errorf("Can't set users: %s", err)
 		return

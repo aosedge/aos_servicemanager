@@ -230,6 +230,11 @@ func run(
 			log.WithField("users", users).Info("Users changed")
 			// reconnect
 			return true
+
+		case err := <-visHandler.ErrorChannel:
+			log.Errorf("VIS client error: %s", err)
+			// reconnect
+			return true
 		}
 	}
 }
@@ -322,7 +327,7 @@ func main() {
 	defer dbusServer.Close()
 
 	// Create VIS client
-	vis, err := visclient.New(config.VISServerURL)
+	vis, err := visclient.New()
 	if err != nil {
 		log.Fatalf("Can't connect to VIS: %s", err)
 	}
@@ -338,17 +343,31 @@ func main() {
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
-	// Get vin code
-	vin, err := vis.GetVIN()
-	if err != nil {
-		log.Fatalf("Can't get VIN: %s", err)
-	}
-
 	for {
+		var (
+			users []string
+			vin   string
+		)
+
+		if !vis.IsConnected() {
+			if err = vis.Connect(config.VISServerURL); err != nil {
+				log.Errorf("Can't connect to VIS: %s", err)
+				goto reconnect
+			}
+		}
+
 		// Get vin code
-		users, err := vis.GetUsers()
-		if err != nil {
-			log.Fatalf("Can't get users: %s", err)
+		if vin, err = vis.GetVIN(); err != nil {
+			log.Errorf("Can't get VIN: %s", err)
+			vis.Disconnect()
+			goto reconnect
+		}
+
+		// Get users
+		if users, err = vis.GetUsers(); err != nil {
+			log.Errorf("Can't get users: %s", err)
+			vis.Disconnect()
+			goto reconnect
 		}
 
 		err = launcherHandler.SetUsers(users)
@@ -367,7 +386,14 @@ func main() {
 			log.Errorf("Can't establish connection: %s", err)
 		}
 
-		time.Sleep(reconnectTimeout)
+	reconnect:
+		select {
+		case <-terminateChannel:
+			// Close application
+			return
+
+		case <-time.After(reconnectTimeout):
+		}
 
 		log.Debug("Reconnecting...")
 	}

@@ -37,8 +37,12 @@ func TestMain(m *testing.M) {
 
 	rand.Seed(time.Now().UnixNano())
 
-	vis, err = New("wss://localhost:8088")
+	vis, err = New()
 	if err != nil {
+		log.Fatalf("Error creating VIS client: %s", err)
+	}
+
+	if err = vis.Connect("wss://localhost:8088"); err != nil {
 		log.Fatalf("Error connecting to VIS server: %s", err)
 	}
 
