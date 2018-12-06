@@ -78,7 +78,32 @@ func getPrivKey() (*rsa.PrivateKey, error) {
 		log.Errorf("Error reading private key: %s", err)
 		return nil, err
 	}
-	return x509.ParsePKCS1PrivateKey(keydata)
+
+	var block *pem.Block
+	var decodingError error
+	var key *rsa.PrivateKey
+
+	// Try to decode file data as PEM data
+	block, _ = pem.Decode(keydata)
+
+	if block != nil {
+		// File format is PEM
+		if block.Type == "RSA PRIVATE KEY" {
+			// If block is PEM RSA
+			key, decodingError = x509.ParsePKCS1PrivateKey(block.Bytes)
+		} else {
+			key, decodingError = nil, errors.New("file does not contain private key data")
+		}
+	} else {
+		// File format is not PEM. try to decode as DER
+		key, decodingError = x509.ParsePKCS1PrivateKey(keydata)
+	}
+
+	if decodingError != nil {
+		log.Errorf("Error decoding offline private key: %s", decodingError)
+	}
+
+	return key, decodingError
 }
 
 func getOfflineCert() (*x509.Certificate, error) {
