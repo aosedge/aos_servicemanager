@@ -843,7 +843,8 @@ func (launcher *Launcher) installService(service database.ServiceEntry) (err err
 	// We can't remove service if it is not in DB. Just return error and rollback will be
 	// handled by parent function
 
-	if err = setUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
+	if err = setUserFSQuota(launcher.config.WorkingDir,
+		service.StorageLimit+service.StateLimit, service.UserName); err != nil {
 		return err
 	}
 
@@ -1228,10 +1229,6 @@ func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, 
 		if service.StateLimit, err = strconv.ParseUint(stateLimitString, 10, 64); err != nil {
 			return err
 		}
-	}
-
-	if service.StateLimit > service.StorageLimit {
-		return errors.New("Wrong state limit value")
 	}
 
 	return nil
