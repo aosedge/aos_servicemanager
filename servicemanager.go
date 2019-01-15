@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ const (
 
 // GitSummary provided by govvv at compile-time
 var GitSummary string
+var quitError error = errors.New("Close application")
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -187,25 +189,16 @@ func run(
 	launcherHandler *launcher.Launcher,
 	visHandler *visclient.VisClient,
 	monitorHandler *monitoring.Monitor,
-	terminateChannel chan os.Signal) (reconnect bool) {
-	if err := sendInitialSetup(amqpHandler, launcherHandler); err != nil {
-		log.Errorf("Can't send initial setup: %s", err)
-		// reconnect
-		return true
-	}
-
+	terminateChannel chan os.Signal) (err error) {
 	for {
 		select {
 		case <-terminateChannel:
-			// Close application
-			return false
+			return quitError
 
 		case amqpMessage := <-amqpHandler.MessageChannel:
-			// check for error
 			if err, ok := amqpMessage.Data.(error); ok {
 				log.Errorf("Receive amqp error: %s", err)
-				// reconnect
-				return true
+				return err
 			}
 
 			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
@@ -236,13 +229,10 @@ func run(
 
 		case users := <-visHandler.UsersChangedChannel:
 			log.WithField("users", users).Info("Users changed")
-			// reconnect
-			return true
+			return nil
 
 		case err := <-visHandler.ErrorChannel:
-			log.Errorf("VIS client error: %s", err)
-			// reconnect
-			return true
+			return err
 		}
 	}
 }
@@ -384,17 +374,27 @@ func main() {
 		}
 
 		// Connect
-		if err = amqpHandler.Connect(config.ServiceDiscoveryURL, vin, users); err == nil {
-			if !run(amqpHandler, launcherHandler, vis, monitor, terminateChannel) {
-				// Close application
+		if err = amqpHandler.Connect(config.ServiceDiscoveryURL, vin, users); err != nil {
+			log.Errorf("Can't establish connection: %s", err)
+			goto reconnect
+		}
+
+		if err = sendInitialSetup(amqpHandler, launcherHandler); err != nil {
+			log.Errorf("Can't send initial setup: %s", err)
+			goto reconnect
+		}
+
+		if err = run(amqpHandler, launcherHandler, vis, monitor, terminateChannel); err != nil {
+			if err == quitError {
 				return
 			}
-			amqpHandler.Disconnect()
-		} else {
-			log.Errorf("Can't establish connection: %s", err)
+			log.Errorf("Runtime error: %s", err)
 		}
 
 	reconnect:
+
+		amqpHandler.Disconnect()
+
 		select {
 		case <-terminateChannel:
 			// Close application
