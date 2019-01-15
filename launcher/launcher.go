@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -582,7 +583,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	}
 
 	if service.State != state {
-		if launcher.monitor != nil {
+		if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
 			if err = launcher.updateMonitoring(service, state); err != nil {
 				log.WithField("id", id).Error("Can't update monitoring: ", err)
 			}
@@ -691,7 +692,7 @@ func (launcher *Launcher) startServices() {
 				log.WithField("id", service.ID).Errorf("Can't start service: %s", err)
 			}
 
-			if service.State == stateRunning && launcher.monitor != nil {
+			if service.State == stateRunning && launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
 				if err = launcher.updateMonitoring(service, stateRunning); err != nil {
 					log.WithField("id", service.ID).Errorf("Can't update monitoring: %s", err)
 				}
