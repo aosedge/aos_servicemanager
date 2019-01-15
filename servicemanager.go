@@ -190,6 +190,13 @@ func run(
 	visHandler *visclient.VisClient,
 	monitorHandler *monitoring.Monitor,
 	terminateChannel chan os.Signal) (err error) {
+
+	var monitorDataChannel chan amqp.MonitoringData
+
+	if monitorHandler != nil {
+		monitorDataChannel = monitorHandler.DataChannel
+	}
+
 	for {
 		select {
 		case <-terminateChannel:
@@ -221,7 +228,7 @@ func run(
 				log.Errorf("Error send new state message: %s", err)
 			}
 
-		case data := <-monitorHandler.DataChannel:
+		case data := <-monitorDataChannel:
 			err := amqpHandler.SendMonitoringData(data)
 			if err != nil {
 				log.Errorf("Error send monitoring data: %s", err)
