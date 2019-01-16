@@ -4,8 +4,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"path"
-	"strconv"
 	"testing"
 	"time"
 
@@ -368,29 +366,6 @@ func cleanup() (err error) {
 	return nil
 }
 
-func getServiceIP(servicePath string) (address string) {
-	data, err := ioutil.ReadFile(path.Join(servicePath, ".ip"))
-	if err != nil {
-		return ""
-	}
-
-	return string(data)
-}
-
-func getServicePid(servicePath string) (pid int32) {
-	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
-	if err != nil {
-		return 0
-	}
-
-	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
-	if err != nil {
-		return 0
-	}
-
-	return int32(pid64)
-}
-
 /*******************************************************************************
  * Main
  ******************************************************************************/
@@ -580,8 +555,7 @@ func TestServices(t *testing.T) {
 
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
-			Pid:        getServicePid("tmp/service1"),
-			IPAddress:  getServiceIP("tmp/service1"),
+			ServiceDir: "tmp/service1",
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -610,8 +584,7 @@ func TestServices(t *testing.T) {
 
 	monitor.StartMonitorService("Service2",
 		ServiceMonitoringConfig{
-			Pid:        getServicePid("tmp/service2"),
-			IPAddress:  getServiceIP("tmp/service2"),
+			ServiceDir: "tmp/service2",
 			WorkingDir: ".",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
@@ -750,8 +723,7 @@ func TestTrafficLimit(t *testing.T) {
 
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
-			Pid:           getServicePid("tmp/service1"),
-			IPAddress:     getServiceIP("tmp/service1"),
+			ServiceDir:    "tmp/service1",
 			WorkingDir:    ".",
 			UploadLimit:   300,
 			DownloadLimit: 300})
@@ -784,8 +756,7 @@ func TestTrafficLimit(t *testing.T) {
 
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
-			Pid:           getServicePid("tmp/service1"),
-			IPAddress:     getServiceIP("tmp/service1"),
+			ServiceDir:    "tmp/service1",
 			WorkingDir:    ".",
 			UploadLimit:   2000,
 			DownloadLimit: 2000})

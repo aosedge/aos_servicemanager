@@ -423,7 +423,7 @@ func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.Ser
 		return nil, err
 	}
 
-	ip, err := launcher.getServiceIPAddress(service.Path)
+	ip, err := monitoring.GetServiceIPAddress(service.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +755,7 @@ func TestNetworkSpeed(t *testing.T) {
 			continue
 		}
 
-		addr, err := launcher.getServiceIPAddress(service.Path)
+		addr, err := monitoring.GetServiceIPAddress(service.Path)
 		if err != nil {
 			t.Errorf("Can't get ip address: %s", err)
 			continue
@@ -1029,10 +1029,6 @@ func TestServiceMonitoring(t *testing.T) {
 
 	select {
 	case info := <-monitor.startChannel:
-		if info.config.Pid == 0 {
-			t.Fatalf("Wrong service pid: %d", info.config.Pid)
-		}
-
 		if info.serviceID != "Service1" {
 			t.Fatalf("Wrong service ID: %s", info.serviceID)
 		}

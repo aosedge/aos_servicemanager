@@ -41,11 +41,6 @@ const (
 )
 
 const (
-	systemdSubscribeBuffers  = 32
-	systemdSubscribeInterval = 500 * time.Millisecond
-)
-
-const (
 	stateChannelSize = 32
 )
 
@@ -126,8 +121,6 @@ type Launcher struct {
 
 	users []string
 
-	closeChannel chan bool
-
 	services sync.Map
 
 	serviceTemplate  string
@@ -151,7 +144,6 @@ func New(config *config.Config, db database.ServiceItf,
 	launcher.config = config
 	launcher.monitor = monitoring
 
-	launcher.closeChannel = make(chan bool)
 	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 	launcher.StateRequestChannel = make(chan StateRequest, stateChannelSize)
@@ -183,11 +175,6 @@ func New(config *config.Config, db database.ServiceItf,
 	if err != nil {
 		return nil, err
 	}
-	if err = launcher.systemd.Subscribe(); err != nil {
-		return nil, err
-	}
-
-	launcher.handleSystemdSubscription()
 
 	// Get systemd service template
 	launcher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
@@ -229,12 +216,6 @@ func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
 
 	launcher.stopServices()
-
-	if err := launcher.systemd.Unsubscribe(); err != nil {
-		log.Warn("Can't unsubscribe from systemd: ", err)
-	}
-
-	launcher.closeChannel <- true
 
 	launcher.systemd.Close()
 
@@ -582,13 +563,13 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 		return err
 	}
 
-	if service.State != state {
-		if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
-			if err = launcher.updateMonitoring(service, state); err != nil {
-				log.WithField("id", id).Error("Can't update monitoring: ", err)
-			}
+	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
+		if err = launcher.updateMonitoring(service, state); err != nil {
+			log.WithField("id", id).Error("Can't update monitoring: ", err)
 		}
+	}
 
+	if service.State != state {
 		log.WithField("id", id).Debugf("Set service state: %s", stateStr[state])
 
 		if err = launcher.db.SetServiceState(id, state); err != nil {
@@ -690,12 +671,6 @@ func (launcher *Launcher) startServices() {
 			err := launcher.startService(service)
 			if err != nil {
 				log.WithField("id", service.ID).Errorf("Can't start service: %s", err)
-			}
-
-			if service.State == stateRunning && launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
-				if err = launcher.updateMonitoring(service, stateRunning); err != nil {
-					log.WithField("id", service.ID).Errorf("Can't update monitoring: %s", err)
-				}
 			}
 
 			statusChannel <- err
@@ -1070,44 +1045,9 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
-func (launcher *Launcher) getServiceIPAddress(servicePath string) (address string, err error) {
-	data, err := ioutil.ReadFile(path.Join(servicePath, ".ip"))
-	if err != nil {
-		return address, err
-	}
-
-	address = string(data)
-
-	return address, nil
-}
-
-func (launcher *Launcher) getServicePid(servicePath string) (pid int32, err error) {
-	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
-	if err != nil {
-		return pid, err
-	}
-
-	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
-	if err != nil {
-		return pid, err
-	}
-
-	return int32(pid64), nil
-}
-
 func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state int) (err error) {
 	switch state {
 	case stateRunning:
-		pid, err := launcher.getServicePid(service.Path)
-		if err != nil {
-			return err
-		}
-
-		ipAddress, err := launcher.getServiceIPAddress(service.Path)
-		if err != nil {
-			return err
-		}
-
 		var rules amqp.ServiceAlertRules
 
 		if err := json.Unmarshal([]byte(service.AlertRules), &rules); err != nil {
@@ -1120,8 +1060,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 		}
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
-			Pid:           pid,
-			IPAddress:     ipAddress,
+			ServiceDir:    service.Path,
 			WorkingDir:    entry.StorageFolder,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),
@@ -1136,65 +1075,6 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 	}
 
 	return nil
-}
-
-func (launcher *Launcher) handleSystemdSubscription() {
-	unitStatus, errorChannel := launcher.systemd.SubscribeUnitsCustom(
-		systemdSubscribeInterval,
-		systemdSubscribeBuffers,
-		func(u1, u2 *dbus.UnitStatus) bool { return *u1 != *u2 },
-		func(serviceName string) bool {
-			if _, exist := launcher.services.Load(serviceName); exist {
-				return false
-			}
-			return true
-		})
-	go func() {
-		for {
-			select {
-			case units := <-unitStatus:
-				for _, unit := range units {
-					var (
-						state  int
-						status int
-					)
-
-					if unit == nil {
-						continue
-					}
-
-					log.WithField("name", unit.Name).Debugf(
-						"Service state changed. Load state: %s, active state: %s, sub state: %s",
-						unit.LoadState,
-						unit.ActiveState,
-						unit.SubState)
-
-					switch unit.SubState {
-					case "running":
-						state = stateRunning
-						status = statusOk
-					default:
-						state = stateStopped
-						status = statusError
-					}
-
-					id, exist := launcher.services.Load(unit.Name)
-
-					if exist {
-						if err := launcher.updateServiceState(id.(string), state, status); err != nil {
-							log.WithField("id", id.(string)).Error("Can't update service state: ", err)
-						}
-					} else {
-						log.WithField("name", unit.Name).Warning("Can't update state or status. Service is not installed.")
-					}
-				}
-			case err := <-errorChannel:
-				log.Error("Subscription error: ", err)
-			case <-launcher.closeChannel:
-				return
-			}
-		}
-	}()
 }
 
 func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, spec *specs.Spec) (err error) {
