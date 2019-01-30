@@ -5,12 +5,14 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -72,38 +74,63 @@ func GetTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
+	var der []byte
+
+	// Try to parse data as PEM. Ignore the rest of the data
+	// ToDo: add support private key and certificate in the same file
+	block, _ := pem.Decode(bytes)
+
+	if block != nil {
+		// bytes is PEM
+		der = block.Bytes
+	} else {
+		der = bytes
+	}
+
+	// Try to load key as PKCS1 container
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+
+	// Try to load key as PKCS8 container
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		switch key := key.(type) {
+		case *rsa.PrivateKey, *ecdsa.PrivateKey:
+			return key, nil
+		default:
+			return nil, errors.New("found unsupported private key type in PKCS8 container")
+		}
+	}
+
+	// Try to parse as PCKS8 EC private key
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+
+	// This is not a private key
+	return nil, errors.New("failed to parse private key")
+}
+
 func getPrivKey() (*rsa.PrivateKey, error) {
-	keydata, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
+	var err error
+	var key crypto.PrivateKey
+
+	keyBytes, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
 	if err != nil {
-		log.Errorf("Error reading private key: %s", err)
+		return nil, errors.New(fmt.Sprintf("error reading private key: %s", err))
+	}
+
+	if key, err = decodePrivateKey(keyBytes); err != nil {
 		return nil, err
 	}
 
-	var block *pem.Block
-	var decodingError error
-	var key *rsa.PrivateKey
-
-	// Try to decode file data as PEM data
-	block, _ = pem.Decode(keydata)
-
-	if block != nil {
-		// File format is PEM
-		if block.Type == "RSA PRIVATE KEY" {
-			// If block is PEM RSA
-			key, decodingError = x509.ParsePKCS1PrivateKey(block.Bytes)
-		} else {
-			key, decodingError = nil, errors.New("file does not contain private key data")
-		}
-	} else {
-		// File format is not PEM. try to decode as DER
-		key, decodingError = x509.ParsePKCS1PrivateKey(keydata)
+	switch key := key.(type) {
+	case *rsa.PrivateKey:
+		return key, nil
+	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
+		return nil, errors.New("ECDSA private key not yet supported")
 	}
-
-	if decodingError != nil {
-		log.Errorf("Error decoding offline private key: %s", decodingError)
-	}
-
-	return key, decodingError
 }
 
 func getOfflineCert() (*x509.Certificate, error) {
