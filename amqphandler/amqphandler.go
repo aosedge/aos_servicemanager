@@ -476,7 +476,7 @@ func (handler *AmqpHandler) setupSendConnection(params sendParams, tlsConfig *tl
 
 func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Channel) {
 	log.Info("Start AMQP sender")
-	defer log.Debug("AMQP sender closed")
+	defer log.Info("AMQP sender closed")
 
 	errorChannel := handler.sendConnection.NotifyClose(make(chan *amqp.Error, 1))
 	confirmChannel := amqpChannel.NotifyPublish(make(chan amqp.Confirmation, 1))
