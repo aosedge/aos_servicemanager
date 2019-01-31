@@ -47,6 +47,8 @@ type VisClient struct {
 	requestID uint64
 
 	subscribeMap sync.Map
+
+	isConnected bool
 }
 
 type errorInfo struct {
@@ -82,6 +84,9 @@ func New() (vis *VisClient, err error) {
 
 	vis = &VisClient{}
 
+	vis.UsersChangedChannel = make(chan []string, usersChangedChannelSize)
+	vis.ErrorChannel = make(chan error, errorChannelSize)
+
 	return vis, nil
 }
 
@@ -90,12 +95,9 @@ func (vis *VisClient) Connect(url string) (err error) {
 	vis.mutex.Lock()
 	defer vis.mutex.Unlock()
 
-	vis.UsersChangedChannel = make(chan []string, usersChangedChannelSize)
-	vis.ErrorChannel = make(chan error, errorChannelSize)
-
 	log.WithField("url", url).Debug("Connect to VIS")
 
-	if vis.webConn != nil {
+	if vis.isConnected {
 		return errors.New("Already connected to VIS")
 	}
 
@@ -118,6 +120,8 @@ func (vis *VisClient) Connect(url string) (err error) {
 	vis.users = nil
 	vis.vin = ""
 
+	vis.isConnected = true
+
 	return nil
 }
 
@@ -134,7 +138,7 @@ func (vis *VisClient) IsConnected() (result bool) {
 	vis.mutex.Lock()
 	defer vis.mutex.Unlock()
 
-	return vis.webConn != nil
+	return vis.isConnected
 }
 
 // GetVIN returns VIN
@@ -209,7 +213,7 @@ func (vis *VisClient) Close() (err error) {
 func (vis *VisClient) disconnect() (retErr error) {
 	log.Debug("Disconnect from VIS")
 
-	if vis.webConn == nil {
+	if !vis.isConnected {
 		return nil
 	}
 
@@ -229,8 +233,6 @@ func (vis *VisClient) disconnect() (retErr error) {
 		log.Errorf("Can't close web socket: %s", err)
 		retErr = err
 	}
-
-	vis.webConn = nil
 
 	return retErr
 }
@@ -345,9 +347,9 @@ func (vis *VisClient) processMessages() {
 			vis.mutex.Lock()
 			defer vis.mutex.Unlock()
 
-			if vis.webConn != nil {
+			if vis.isConnected {
 				vis.webConn.Close()
-				vis.webConn = nil
+				vis.isConnected = false
 			}
 
 			vis.ErrorChannel <- err
