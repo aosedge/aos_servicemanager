@@ -2,6 +2,7 @@
 package launcher
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,10 +78,11 @@ type actionType int
 
 // ActionStatus status of performed action
 type ActionStatus struct {
-	Action  actionType
-	ID      string
-	Version uint64
-	Err     error
+	Action        actionType
+	ID            string
+	Version       uint64
+	StateChecksum string
+	Err           error
 }
 
 // NewState new state message
@@ -260,6 +262,15 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 
 	for i, service := range services {
 		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: statusStr[service.Status]}
+
+		entry, err := launcher.db.GetUsersEntry(launcher.users, service.ID)
+		if err != nil {
+			return info, err
+		}
+
+		if service.StateLimit != 0 {
+			info[i].StateChecksum = hex.EncodeToString(entry.StateChecksum)
+		}
 	}
 
 	return info, nil
@@ -414,6 +425,13 @@ func (launcher *Launcher) doAction(action actionType, id string, data interface{
 	case ActionRemove:
 		status.Version, status.Err = launcher.doActionRemove(status.ID)
 	}
+
+	entry, err := launcher.db.GetUsersEntry(launcher.users, id)
+	if err != nil {
+		log.Errorf("Can't get users entry: %s", err)
+	}
+
+	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
 
 	launcher.StatusChannel <- status
 }

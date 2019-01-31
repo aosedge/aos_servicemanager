@@ -103,10 +103,11 @@ type MonitoringData struct {
 
 // ServiceInfo struct with service information
 type ServiceInfo struct {
-	ID      string        `json:"id"`
-	Version uint64        `json:"version"`
-	Status  string        `json:"status"`
-	Error   *ServiceError `json:"error"`
+	ID            string        `json:"id"`
+	Version       uint64        `json:"version"`
+	Status        string        `json:"status"`
+	Error         *ServiceError `json:"error"`
+	StateChecksum string        `json:"stateChecksum"`
 }
 
 // ServiceError error structure

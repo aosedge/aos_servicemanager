@@ -137,7 +137,7 @@ func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, lau
 }
 
 func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStatus) (err error) {
-	info := amqp.ServiceInfo{ID: status.ID, Version: status.Version}
+	info := amqp.ServiceInfo{ID: status.ID, Version: status.Version, StateChecksum: status.StateChecksum}
 
 	switch status.Action {
 	case launcher.ActionInstall:
