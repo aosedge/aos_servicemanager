@@ -226,7 +226,11 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 	handler.mutex.Lock()
 	defer handler.mutex.Unlock()
 
-	log.WithFields(log.Fields{"serviceID": service.ID, "checksum": checksum}).Debug("Update state")
+	log.WithFields(log.Fields{
+		"serviceID":  service.ID,
+		"checksum":   checksum,
+		"stateLimit": service.StateLimit,
+		"stateSize":  len(state)}).Debug("Update state")
 
 	if err = checkChecksum(state, checksum); err != nil {
 		return err
