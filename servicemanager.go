@@ -143,8 +143,7 @@ func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStat
 	case launcher.ActionInstall:
 		if status.Err != nil {
 			info.Status = "error"
-			errorMsg := amqp.ServiceError{ID: -1, Message: "Can't install service"}
-			info.Error = &errorMsg
+			info.Error = "Can't install service"
 
 			log.WithFields(log.Fields{
 				"id":      status.ID,
@@ -160,8 +159,7 @@ func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStat
 	case launcher.ActionRemove:
 		if status.Err != nil {
 			info.Status = "error"
-			errorMsg := amqp.ServiceError{ID: -1, Message: "Can't remove service"}
-			info.Error = &errorMsg
+			info.Error = "Can't remove service"
 
 			log.WithFields(log.Fields{
 				"id":      status.ID,
