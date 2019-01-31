@@ -66,6 +66,7 @@ const (
 const (
 	ActionInstall = iota
 	ActionRemove
+	ActionUpdateState
 )
 
 /*******************************************************************************
@@ -291,25 +292,8 @@ func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, corre
 }
 
 // UpdateState updates service state
-func (launcher *Launcher) UpdateState(state amqp.UpdateState) (err error) {
-	service, err := launcher.db.GetService(state.ServiceID)
-	if err != nil {
-		return err
-	}
-
-	if err = launcher.stopService(service); err != nil {
-		return err
-	}
-
-	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum); err != nil {
-		return err
-	}
-
-	if err = launcher.startService(service); err != nil {
-		return err
-	}
-
-	return nil
+func (launcher *Launcher) UpdateState(state amqp.UpdateState) {
+	launcher.actionHandler.PutInQueue(serviceAction{ActionUpdateState, state.ServiceID, state, launcher.doUpdateState})
 }
 
 // Cleanup deletes all AOS services, their storages and states
@@ -555,6 +539,36 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 	}
 
 	return version, nil
+}
+
+func (launcher *Launcher) doUpdateState(action actionType, id string, data interface{}) {
+
+	service, err := launcher.db.GetService(id)
+	if err != nil {
+		log.Errorf("Can't get service: %s", err)
+		return
+	}
+
+	if err = launcher.stopService(service); err != nil {
+		log.Errorf("Can't stop service: %s", err)
+		return
+	}
+
+	state, ok := data.(amqp.UpdateState)
+	if !ok {
+		log.Error("Wrong data type")
+		return
+	}
+
+	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum); err != nil {
+		log.Errorf("Can't update state: %s", err)
+		return
+	}
+
+	if err = launcher.startService(service); err != nil {
+		log.Errorf("Can't start service: %s", err)
+		return
+	}
 }
 
 func (launcher *Launcher) updateServiceState(id string, state int, status int) (err error) {

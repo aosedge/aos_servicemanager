@@ -1180,12 +1180,12 @@ func TestServiceState(t *testing.T) {
 		stateData = "Hello"
 		calcSum := sha3.Sum224([]byte(stateData))
 
-		if err = launcher.UpdateState(amqp.UpdateState{
+		launcher.UpdateState(amqp.UpdateState{
 			ServiceID: "service0",
 			State:     stateData,
-			Checksum:  hex.EncodeToString(calcSum[:])}); err != nil {
-			t.Errorf("Can't update state: %s", err)
-		}
+			Checksum:  hex.EncodeToString(calcSum[:])})
+
+		time.Sleep(1 * time.Second)
 
 	case <-time.After(2 * time.Second):
 		t.Error("No state request event")

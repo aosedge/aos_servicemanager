@@ -127,9 +127,7 @@ func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, lau
 			"serviceID": data.ServiceID,
 			"checksum":  data.Checksum}).Info("Receive update state")
 
-		if err := launcherHandler.UpdateState(data); err != nil {
-			log.WithField("serviceID", data.ServiceID).Errorf("Update state error: %s", err)
-		}
+		launcherHandler.UpdateState(data)
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
