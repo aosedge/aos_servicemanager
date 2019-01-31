@@ -766,6 +766,8 @@ func (monitor *Monitor) setChainState(chain, addresses string, enable bool) (err
 func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (err error) {
 	var skipAddrType, addrType string
 
+	log.WithField("chain", chain).Debug("Create iptables chain")
+
 	if strings.HasSuffix(chain, "_IN") {
 		skipAddrType = "-s"
 		addrType = "-d"
@@ -809,6 +811,8 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 
 func (monitor *Monitor) editTrafficChain(chain, addresses string) (err error) {
 	var addrType string
+
+	log.WithField("chain", chain).Debug("Edit iptables chain")
 
 	traffic, ok := monitor.trafficMap[chain]
 	if !ok {
