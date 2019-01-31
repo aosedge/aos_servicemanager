@@ -188,6 +188,8 @@ func New(config *config.Config, db database.MonitoringItf) (monitor *Monitor, er
 		return nil, err
 	}
 
+	monitor.processTraffic()
+
 	go monitor.run()
 
 	return monitor, nil
