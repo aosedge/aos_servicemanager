@@ -360,7 +360,8 @@ func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
 		return outfname, err
 	}
 	defer fout.Close()
-	log.Println("Temp file name: ", fout.Name())
+
+	log.Debugf("Temp file name: %s", fout.Name())
 
 	// Open file
 	f, err := os.Open(fname)
