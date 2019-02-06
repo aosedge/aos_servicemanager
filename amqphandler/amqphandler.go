@@ -241,6 +241,12 @@ const (
 	retryChannelSize   = 8
 
 	connectionRetry = 3
+)
+
+const (
+	desiredStatusStr   = "desiredStatus"
+	stateAcceptanceStr = "stateAcceptance"
+	updateStateStr     = "updateState"
 
 	vehicleStatusStr  = "vehicleStatus"
 	serviceStatusStr  = "serviceStatus"
@@ -611,7 +617,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 			}
 
 			switch header.MessageType {
-			case "desiredStatus":
+			case desiredStatusStr:
 				var status desiredStatus
 
 				if err := json.Unmarshal(data.Body, &status); err != nil {
@@ -627,7 +633,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 				handler.MessageChannel <- Message{data.CorrelationId, services}
 
-			case "stateAcceptance":
+			case stateAcceptanceStr:
 				var acceptance stateAcceptance
 
 				if err := json.Unmarshal(data.Body, &acceptance); err != nil {
@@ -637,7 +643,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 				handler.MessageChannel <- Message{data.CorrelationId, acceptance.StateAcceptance}
 
-			case "updateState":
+			case updateStateStr:
 				var update updateState
 
 				if err := json.Unmarshal(data.Body, &update); err != nil {
