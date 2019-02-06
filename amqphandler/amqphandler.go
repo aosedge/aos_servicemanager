@@ -125,6 +125,29 @@ type UpdateState struct {
 	State     string `json:"state"`
 }
 
+// RequestServiceLog request service log message
+type RequestServiceLog struct {
+	ServiceID string     `json:"serviceId"`
+	LogID     string     `json:"logID"`
+	From      *time.Time `json:"from"`
+	Till      *time.Time `json:"till"`
+}
+
+// RequestServiceCrashLog request service crash log message
+type RequestServiceCrashLog struct {
+	ServiceID string `json:"serviceId"`
+	LogID     string `json:"logID"`
+}
+
+// PushServiceLog push service log structure
+type PushServiceLog struct {
+	LogID     string  `json:"logID"`
+	PartCount *uint64 `json:"partCount,omitempty"`
+	Part      *uint64 `json:"part,omitempty"`
+	Data      *[]byte `json:"data,omitempty"`
+	Error     *string `json:"error,omitempty"`
+}
+
 // Message structure used to send/receive data by amqp
 type Message struct {
 	CorrelationID string
@@ -170,6 +193,12 @@ type stateRequest struct {
 	MessageType string `json:"messageType"`
 	ServiceID   string `json:"serviceId"`
 	Default     bool   `json:"default"`
+}
+
+type pushServiceLog struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	PushServiceLog
 }
 
 type serviceDiscoveryResp struct {
@@ -231,6 +260,18 @@ type updateState struct {
 	UpdateState
 }
 
+type requestServiceLog struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	RequestServiceLog
+}
+
+type requestServiceCrashLog struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+	RequestServiceCrashLog
+}
+
 /*******************************************************************************
  * Variables
  ******************************************************************************/
@@ -244,15 +285,18 @@ const (
 )
 
 const (
-	desiredStatusStr   = "desiredStatus"
-	stateAcceptanceStr = "stateAcceptance"
-	updateStateStr     = "updateState"
+	desiredStatusStr          = "desiredStatus"
+	stateAcceptanceStr        = "stateAcceptance"
+	updateStateStr            = "updateState"
+	requestServiceLogStr      = "requestServiceLog"
+	requestServiceCrashLogStr = "requestServiceCrashLog"
 
 	vehicleStatusStr  = "vehicleStatus"
 	serviceStatusStr  = "serviceStatus"
 	monitoringDataStr = "monitoringData"
 	newStateStr       = "newState"
 	stateRequestStr   = "stateRequest"
+	pushServiceLogStr = "pushServiceLog"
 )
 
 /*******************************************************************************
@@ -374,6 +418,16 @@ func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool
 		MessageType: stateRequestStr,
 		ServiceID:   serviceID,
 		Default:     defaultState}}
+
+	return nil
+}
+
+// SendServiceLog sends service logs
+func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
+	handler.sendChannel <- Message{"", pushServiceLog{
+		Version:        1,
+		MessageType:    pushServiceLogStr,
+		PushServiceLog: serviceLog}}
 
 	return nil
 }
@@ -652,6 +706,26 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				}
 
 				handler.MessageChannel <- Message{data.CorrelationId, update.UpdateState}
+
+			case requestServiceLogStr:
+				var request requestServiceLog
+
+				if err := json.Unmarshal(data.Body, &request); err != nil {
+					log.Errorf("Can't parse message body: %s", err)
+					continue
+				}
+
+				handler.MessageChannel <- Message{data.CorrelationId, request.RequestServiceLog}
+
+			case requestServiceCrashLogStr:
+				var request requestServiceCrashLog
+
+				if err := json.Unmarshal(data.Body, &request); err != nil {
+					log.Errorf("Can't parse message body: %s", err)
+					continue
+				}
+
+				handler.MessageChannel <- Message{data.CorrelationId, request.RequestServiceCrashLog}
 
 			default:
 				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
