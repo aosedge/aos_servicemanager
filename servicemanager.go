@@ -29,7 +29,7 @@ const (
 
 // GitSummary provided by govvv at compile-time
 var GitSummary string
-var quitError error = errors.New("Close application")
+var errQuit = errors.New("Close application")
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -216,7 +216,7 @@ func run(
 	for {
 		select {
 		case <-terminateChannel:
-			return quitError
+			return errQuit
 
 		case amqpMessage := <-amqpHandler.MessageChannel:
 			if err, ok := amqpMessage.Data.(error); ok {
@@ -245,8 +245,7 @@ func run(
 			}
 
 		case data := <-monitorDataChannel:
-			err := amqpHandler.SendMonitoringData(data)
-			if err != nil {
+			if err := amqpHandler.SendMonitoringData(data); err != nil {
 				log.Errorf("Error send monitoring data: %s", err)
 			}
 
@@ -421,7 +420,7 @@ func main() {
 
 		if err = run(amqpHandler, launcherHandler, vis,
 			monitor, logging, terminateChannel); err != nil {
-			if err == quitError {
+			if err == errQuit {
 				return
 			}
 			log.Errorf("Runtime error: %s", err)
