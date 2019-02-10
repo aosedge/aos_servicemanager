@@ -48,6 +48,11 @@ type Monitoring struct {
 	OutTraffic          *AlertRule `json:"outTraffic"`
 }
 
+// Logging configuration for system and service logging
+type Logging struct {
+	MaxPartSize uint64 `json:"maxPartSize"`
+}
+
 // Config instance
 type Config struct {
 	Crypt               Crypt      `json:"fcrypt"`
@@ -56,6 +61,7 @@ type Config struct {
 	WorkingDir          string     `json:"workingDir"`
 	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
 	Monitoring          Monitoring `json:"monitoring"`
+	Logging             Logging    `json:"logging"`
 }
 
 /*******************************************************************************
@@ -76,7 +82,9 @@ func New(fileName string) (config *Config, err error) {
 			PollPeriod:          Duration{10 * time.Second},
 			MaxAlertsPerMessage: 10,
 			MaxOfflineMessages:  25,
-			NetnsBridgeIP:       "172.19.0.0/16"}}
+			NetnsBridgeIP:       "172.19.0.0/16"},
+		Logging: Logging{
+			MaxPartSize: 524288}}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err

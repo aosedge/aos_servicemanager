@@ -45,6 +45,9 @@ func createConfigFile() (err error) {
 			"minThreshold": 10,
 			"maxThreshold": 150
 		}
+	},
+	"logging": {
+		"maxPartSize": 1024
 	}
 }`
 
@@ -205,5 +208,16 @@ func TestGetMonitoringConfig(t *testing.T) {
 
 	if config.Monitoring.NetnsBridgeIP != "192.168.0.0/24" {
 		t.Errorf("Wrong value: %s", config.Monitoring.NetnsBridgeIP)
+	}
+}
+
+func TestGetLoggingConfig(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Logging.MaxPartSize != 1024 {
+		t.Errorf("Wrong max part size: %d", config.Logging.MaxPartSize)
 	}
 }

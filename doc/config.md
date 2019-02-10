@@ -148,6 +148,18 @@ The configuration file has JSON format. Following is JSON schema:
                     "$ref": "#/definitions/alertRule"
                 }
             }
+        },
+        "logging": {
+            "description": "Service logging parameters",
+            "type": "object",
+            "properties": {
+                "maxPartSize": {
+                    "description": "Indicates maximum size of logging part in bytes",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 524288
+                }
+            }
         }
     }
 }
