@@ -2,6 +2,9 @@
 package logging
 
 import (
+	"fmt"
+
+	"github.com/coreos/go-systemd/sdjournal"
 	log "github.com/sirupsen/logrus"
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
@@ -15,6 +18,8 @@ import (
 
 const (
 	logChannelSize = 32
+
+	serviceField = "_SYSTEMD_UNIT"
 )
 
 /*******************************************************************************
@@ -25,7 +30,8 @@ const (
 type Logging struct {
 	LogChannel chan amqp.PushServiceLog
 
-	db database.ServiceItf
+	db     database.ServiceItf
+	config config.Logging
 }
 
 /*******************************************************************************
@@ -36,7 +42,7 @@ type Logging struct {
 func New(config *config.Config, db database.ServiceItf) (instance *Logging, err error) {
 	log.Debug("New logging")
 
-	instance = &Logging{db: db}
+	instance = &Logging{db: db, config: config.Logging}
 
 	instance.LogChannel = make(chan amqp.PushServiceLog, logChannelSize)
 
@@ -55,6 +61,8 @@ func (instance *Logging) GetServiceLog(request amqp.RequestServiceLog) {
 		"logID":     request.LogID,
 		"dateFrom":  request.From,
 		"dateTill":  request.Till}).Debug("Get service log")
+
+	go instance.getServiceLog(request)
 }
 
 // GetServiceCrashLog returns service log
@@ -67,3 +75,94 @@ func (instance *Logging) GetServiceCrashLog(request amqp.RequestServiceCrashLog)
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
+	var err error
+
+	// error handling
+	defer func() {
+		if r := recover(); r != nil {
+			errorStr := fmt.Sprintf("%s: %s", r, err)
+
+			log.Error(errorStr)
+
+			response := amqp.PushServiceLog{
+				LogID: request.LogID,
+				Error: &errorStr}
+			instance.LogChannel <- response
+		}
+	}()
+
+	var service database.ServiceEntry
+
+	service, err = instance.db.GetService(request.ServiceID)
+	if err != nil {
+		panic("Can't get service")
+	}
+
+	var journal *sdjournal.Journal
+
+	journal, err = sdjournal.NewJournal()
+	if err != nil {
+		panic("Can't open sd journal")
+	}
+	defer journal.Close()
+
+	if err = journal.AddMatch(serviceField + "=" + service.ServiceName); err != nil {
+		panic("Can't add filter")
+	}
+
+	if request.From != nil {
+		if err = journal.SeekRealtimeUsec(uint64(request.From.UnixNano() / 1000)); err != nil {
+			panic("Can't seek log")
+		}
+	} else {
+		if err = journal.SeekHead(); err != nil {
+			panic("Can't seek log")
+		}
+	}
+
+	var tillRealtime uint64
+
+	if request.Till != nil {
+		tillRealtime = uint64(request.Till.UnixNano() / 1000)
+	}
+
+	var archInstance *archivator
+
+	if archInstance, err = newArchivator(instance.LogChannel, instance.config.MaxPartSize); err != nil {
+		panic("Can't create archivator")
+	}
+
+	for {
+		var rowCount uint64
+
+		if rowCount, err = journal.Next(); err != nil {
+			panic("Can't seek log")
+		}
+
+		// end of log
+		if rowCount == 0 {
+			break
+		}
+
+		var logEntry *sdjournal.JournalEntry
+
+		if logEntry, err = journal.GetEntry(); err != nil {
+			panic("Can't get entry")
+		}
+
+		// till time reached
+		if tillRealtime != 0 && logEntry.RealtimeTimestamp > tillRealtime {
+			break
+		}
+
+		if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
+			panic("Can't archive log")
+		}
+	}
+
+	if err = archInstance.sendLog(request.LogID); err != nil {
+		panic("Can't send log")
+	}
+}
