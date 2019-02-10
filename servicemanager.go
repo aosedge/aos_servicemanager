@@ -18,6 +18,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/logging"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
@@ -51,7 +52,11 @@ func sendInitialSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.L
 	return nil
 }
 
-func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
+func processAmqpMessage(
+	message amqp.Message,
+	amqpHandler *amqp.AmqpHandler,
+	launcherHandler *launcher.Launcher,
+	loggingHandler *logging.Logging) (err error) {
 	switch data := message.Data.(type) {
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Receive services info")
@@ -129,6 +134,20 @@ func processAmqpMessage(message amqp.Message, amqpHandler *amqp.AmqpHandler, lau
 
 		launcherHandler.UpdateState(data)
 
+	case amqp.RequestServiceLog:
+		log.WithFields(log.Fields{
+			"serviceID": data.ServiceID,
+			"from":      data.From,
+			"till":      data.Till}).Info("Receive request service log")
+
+		loggingHandler.GetServiceLog(data)
+
+	case amqp.RequestServiceCrashLog:
+		log.WithFields(log.Fields{
+			"serviceID": data.ServiceID}).Info("Receive request service crash log")
+
+		loggingHandler.GetServiceCrashLog(data)
+
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
 	}
@@ -185,6 +204,7 @@ func run(
 	launcherHandler *launcher.Launcher,
 	visHandler *visclient.VisClient,
 	monitorHandler *monitoring.Monitor,
+	loggingHandler *logging.Logging,
 	terminateChannel chan os.Signal) (err error) {
 
 	var monitorDataChannel chan amqp.MonitoringData
@@ -204,7 +224,7 @@ func run(
 				return err
 			}
 
-			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler); err != nil {
+			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler, loggingHandler); err != nil {
 				log.Errorf("Error processing amqp result: %s", err)
 			}
 
@@ -228,6 +248,11 @@ func run(
 			err := amqpHandler.SendMonitoringData(data)
 			if err != nil {
 				log.Errorf("Error send monitoring data: %s", err)
+			}
+
+		case logData := <-loggingHandler.LogChannel:
+			if err := amqpHandler.SendServiceLog(logData); err != nil {
+				log.Errorf("Error send service log: %s", err)
 			}
 
 		case users := <-visHandler.UsersChangedChannel:
@@ -340,6 +365,13 @@ func main() {
 	}
 	defer amqpHandler.Close()
 
+	// Create logging
+	logging, err := logging.New(config, db)
+	if err != nil {
+		log.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
 	// Handle SIGTERM
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
@@ -387,7 +419,8 @@ func main() {
 			goto reconnect
 		}
 
-		if err = run(amqpHandler, launcherHandler, vis, monitor, terminateChannel); err != nil {
+		if err = run(amqpHandler, launcherHandler, vis,
+			monitor, logging, terminateChannel); err != nil {
 			if err == quitError {
 				return
 			}
