@@ -227,6 +227,29 @@ func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, t
 	}
 }
 
+func checkEmptyLog(t *testing.T, logChannel chan amqp.PushServiceLog) {
+	for {
+		select {
+		case result := <-logChannel:
+			if result.Error != nil {
+				t.Errorf("Error log received: %s", *result.Error)
+				return
+			}
+
+			if result.Data != nil {
+				t.Error("Empty log expected")
+				return
+			}
+
+			return
+
+		case <-time.After(5 * time.Second):
+			t.Error("Receive log timeout")
+			return
+		}
+	}
+}
+
 /*******************************************************************************
  * Main
  ******************************************************************************/
@@ -313,6 +336,32 @@ func TestGetWrongServiceLog(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		log.Errorf("Receive log timeout")
 	}
+}
+
+func TestGetEmptyLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	if err = createService("service2"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	from := time.Now()
+
+	time.Sleep(5 * time.Second)
+
+	till := time.Now()
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "service2",
+		LogID:     "log0",
+		From:      &from,
+		Till:      &till})
+
+	checkEmptyLog(t, logging.LogChannel)
 }
 
 func TestGetServiceCrashLog(t *testing.T) {

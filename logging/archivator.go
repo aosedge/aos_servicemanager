@@ -76,6 +76,22 @@ func (instance *archivator) sendLog(logID string) (err error) {
 		instance.partCount++
 	}
 
+	if instance.partCount == 0 {
+		var part uint64 = 1
+
+		instance.logChannel <- amqp.PushServiceLog{
+			LogID:     logID,
+			PartCount: &part,
+			Part:      &part,
+			Data:      &[]byte{}}
+
+		log.WithFields(log.Fields{
+			"part": part,
+			"size": 0}).Debugf("Push log")
+
+		return nil
+	}
+
 	var i uint64
 
 	for ; i < instance.partCount; i++ {
