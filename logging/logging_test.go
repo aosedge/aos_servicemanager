@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -148,6 +149,10 @@ func stopService(serviceID string) (err error) {
 	<-channel
 
 	return nil
+}
+
+func crashService(serviceID string) {
+	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }
 
 func getTimeRange(logData string) (from, till time.Time, err error) {
@@ -308,4 +313,36 @@ func TestGetWrongServiceLog(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		log.Errorf("Receive log timeout")
 	}
+}
+
+func TestGetServiceCrashLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	if err = createService("service1"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	from := time.Now()
+
+	if err = startService("service1"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	crashService("service1")
+
+	till := time.Now()
+
+	time.Sleep(1 * time.Second)
+
+	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
+		ServiceID: "service1",
+		LogID:     "log2"})
+
+	checkReceivedLog(t, logging.LogChannel, from, till)
 }
