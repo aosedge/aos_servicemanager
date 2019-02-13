@@ -17,7 +17,7 @@ import (
  ******************************************************************************/
 
 const (
-	dbVersion = 1
+	dbVersion = 2
 )
 
 /*******************************************************************************
@@ -61,6 +61,12 @@ type MonitoringItf interface {
 	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
 	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
 	RemoveTrafficMonitorData(chain string) (err error)
+}
+
+// JournalItf provides API to set and get journal cursor
+type JournalItf interface {
+	SetJournalCursor(cursor string) (err error)
+	GetJournalCursor() (cursor string, err error)
 }
 
 // Database structure with database information
@@ -614,6 +620,45 @@ func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
 	return err
 }
 
+// SetJournalCursor stores system logger cursor
+func (db *Database) SetJournalCursor(cursor string) (err error) {
+	result, err := db.sql.Exec("UPDATE config SET cursor = ?", cursor)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetJournalCursor retrieves logger cursor
+func (db *Database) GetJournalCursor() (cursor string, err error) {
+	stmt, err := db.sql.Prepare("SELECT cursor FROM config")
+	if err != nil {
+		return cursor, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow().Scan(&cursor)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return cursor, ErrNotExist
+		}
+
+		return cursor, err
+	}
+
+	return cursor, nil
+}
+
 // Close closes database
 func (db *Database) Close() {
 	db.sql.Close()
@@ -684,11 +729,11 @@ func (db *Database) createConfigTable() (err error) {
 		return nil
 	}
 
-	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER)`); err != nil {
+	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER, cursor TEXT);`, dbVersion); err != nil {
 		return err
 	}
 
-	if _, err = db.sql.Exec("INSERT INTO config values(?)", dbVersion); err != nil {
+	if _, err = db.sql.Exec("INSERT INTO config (version, cursor) values(?, ?)", dbVersion, ""); err != nil {
 		return err
 	}
 

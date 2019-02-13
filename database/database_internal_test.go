@@ -552,3 +552,20 @@ func TestDBVersion(t *testing.T) {
 
 	db.Close()
 }
+
+func TestCursor(t *testing.T) {
+	setCursor := "cursor123"
+
+	if err := db.SetJournalCursor(setCursor); err != nil {
+		t.Fatalf("Can't set logging cursor: %s", err)
+	}
+
+	getCursor, err := db.GetJournalCursor()
+	if err != nil {
+		t.Fatalf("Can't get logger cursor: %s", err)
+	}
+
+	if getCursor != setCursor {
+		t.Fatalf("Wrong cursor value: %s", getCursor)
+	}
+}
