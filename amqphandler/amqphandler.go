@@ -148,6 +148,25 @@ type PushServiceLog struct {
 	Error     *string `json:"error,omitempty"`
 }
 
+// Alerts alerts message structure
+type Alerts struct {
+	Data []AlertItem `json:"data"`
+}
+
+// AlertItem alert item structure
+type AlertItem struct {
+	Timestamp time.Time   `json:"timestamp"`
+	Tag       string      `json:"tag"`
+	Source    string      `json:"source"`
+	Version   *uint64     `json:"version,omitempty"`
+	Payload   interface{} `json:"payload"`
+}
+
+// SystemAlert system alert structure
+type SystemAlert struct {
+	Message string `json:"message"`
+}
+
 // Message structure used to send/receive data by amqp
 type Message struct {
 	CorrelationID string
@@ -297,6 +316,11 @@ const (
 	newStateStr       = "newState"
 	stateRequestStr   = "stateRequest"
 	pushServiceLogStr = "pushServiceLog"
+)
+
+// Alert tags
+const (
+	AlertSystemError = "systemError"
 )
 
 /*******************************************************************************
