@@ -48,6 +48,9 @@ func createConfigFile() (err error) {
 	},
 	"logging": {
 		"maxPartSize": 1024
+	},
+	"alerts": {
+		"pollPeriod": "00:00:10"
 	}
 }`
 
@@ -219,5 +222,16 @@ func TestGetLoggingConfig(t *testing.T) {
 
 	if config.Logging.MaxPartSize != 1024 {
 		t.Errorf("Wrong max part size: %d", config.Logging.MaxPartSize)
+	}
+}
+
+func TestGetAlertsConfig(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Alerts.PollPeriod.Duration != 10*time.Second {
+		t.Errorf("Wrong poll period value: %s", config.Alerts.PollPeriod)
 	}
 }
