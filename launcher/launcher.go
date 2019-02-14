@@ -1020,6 +1020,7 @@ ExecStop=${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
 ExecStopPost=${RUNC} delete -f ${ID}
 PIDFile=${SERVICEPATH}/.pid
+SuccessExitStatus=SIGKILL
 
 [Install]
 WantedBy=multi-user.target
