@@ -2,6 +2,8 @@
 package alerts
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,17 +28,12 @@ const (
  * Types
  ******************************************************************************/
 
-// ResourceAlertsItf interface to send resource alerts
-type ResourceAlertsItf interface {
-	SendResourceAlert(serviceID, resource string, time time.Time, value uint64)
-}
-
 // Alerts instance
 type Alerts struct {
 	AlertsChannel chan amqp.Alerts
 
 	config config.Alerts
-	db     database.JournalItf
+	db     *database.Database
 
 	alerts amqp.Alerts
 
@@ -52,7 +49,7 @@ type Alerts struct {
  ******************************************************************************/
 
 // New creates new alerts object
-func New(config *config.Config, db database.JournalItf) (instance *Alerts, err error) {
+func New(config *config.Config, db *database.Database) (instance *Alerts, err error) {
 	log.Debug("New alerts")
 
 	instance = &Alerts{config: config.Alerts, db: db}
@@ -104,6 +101,14 @@ func (instance *Alerts) setupJournal() (err error) {
 	}
 
 	if err = instance.journal.AddMatch("PRIORITY=3"); err != nil {
+		return err
+	}
+
+	if err = instance.journal.AddDisjunction(); err != nil {
+		return err
+	}
+
+	if err = instance.journal.AddMatch("_SYSTEMD_UNIT=init.scope"); err != nil {
 		return err
 	}
 
@@ -184,6 +189,27 @@ func (instance *Alerts) processJournal() (err error) {
 			return err
 		}
 
+		var version *uint64
+		source := "system"
+
+		if entry.Fields["_SYSTEMD_UNIT"] == "init.scope" {
+			if priority, err := strconv.Atoi(entry.Fields["PRIORITY"]); err != nil || priority > 4 {
+				continue
+			}
+
+			unit := entry.Fields["UNIT"]
+
+			if strings.HasPrefix(unit, "aos") {
+				service, err := instance.db.GetServiceByServiceName(unit)
+				if err != nil {
+					continue
+				}
+
+				source = service.ID
+				version = &service.Version
+			}
+		}
+
 		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
 			int64((entry.RealtimeTimestamp%1000000)*1000))
 
@@ -192,7 +218,8 @@ func (instance *Alerts) processJournal() (err error) {
 		item := amqp.AlertItem{
 			Timestamp: t,
 			Tag:       amqp.AlertSystemError,
-			Source:    "system",
+			Source:    source,
+			Version:   version,
 			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}}
 
 		instance.mutex.Lock()

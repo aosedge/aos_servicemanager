@@ -3,12 +3,17 @@ package alerts_test
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log/syslog"
 	"os"
+	"path"
+	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/coreos/go-systemd/dbus"
 	"github.com/google/uuid"
 
 	log "github.com/sirupsen/logrus"
@@ -37,6 +42,7 @@ func init() {
  ******************************************************************************/
 
 var db *database.Database
+var systemd *dbus.Conn
 
 var errTimeout = errors.New("timeout")
 
@@ -54,11 +60,31 @@ func setup() (err error) {
 		return err
 	}
 
+	if systemd, err = dbus.NewSystemConnection(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func cleanup() {
+	services, err := db.GetServices()
+	if err != nil {
+		log.Errorf("Can't get services: %s", err)
+	}
+
+	for _, service := range services {
+		if err := stopService(service.ID); err != nil {
+			log.Errorf("Can't stop service: %s", err)
+		}
+
+		if _, err := systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
+			log.Errorf("Can't disable service: %s", err)
+		}
+	}
+
 	db.Close()
+	systemd.Close()
 
 	if err := os.RemoveAll("tmp"); err != nil {
 		log.Errorf("Can't remove tmp folder: %s", err)
@@ -123,6 +149,75 @@ func waitSystemAlerts(alertsChannel <-chan amqp.Alerts, timeout time.Duration, s
 
 		return false, nil
 	})
+}
+
+func createService(serviceID string) (err error) {
+	serviceContent := `[Unit]
+	Description=AOS Service
+	After=network.target
+	
+	[Service]
+	Type=simple
+	Restart=always
+	RestartSec=1
+	ExecStart=/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'
+	
+	[Install]
+	WantedBy=multi-user.target
+`
+
+	serviceName := "aos_" + serviceID + ".service"
+
+	if err = db.AddService(database.ServiceEntry{ID: serviceID, ServiceName: serviceName}); err != nil {
+		return err
+	}
+
+	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
+	if err != nil {
+		return err
+	}
+
+	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0644); err != nil {
+		return err
+	}
+
+	if _, err = systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+		return err
+	}
+
+	if err = systemd.Reload(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func startService(serviceID string) (err error) {
+	channel := make(chan string)
+
+	if _, err = systemd.RestartUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+		return err
+	}
+
+	<-channel
+
+	return nil
+}
+
+func stopService(serviceID string) (err error) {
+	channel := make(chan string)
+
+	if _, err = systemd.StopUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+		return err
+	}
+
+	<-channel
+
+	return nil
+}
+
+func crashService(serviceID string) {
+	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }
 
 /*******************************************************************************
@@ -263,6 +358,36 @@ func TestGetOfflineSystemError(t *testing.T) {
 
 	// Check all offline messages are handled
 	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "system", nil, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetServiceError(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("service0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	if err = startService("service0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	crashService("service0")
+
+	messages := []string{
+		"aos_service0.service: Main process exited, code=dumped, status=11/SEGV",
+		"aos_service0.service: Failed with result 'core-dump'."}
+
+	var version uint64 = 0
+
+	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "service0", &version, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
