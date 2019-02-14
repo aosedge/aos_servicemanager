@@ -41,6 +41,7 @@ type ServiceItf interface {
 	RemoveService(id string) (err error)
 	GetService(id string) (entry ServiceEntry, err error)
 	GetServices() (entries []ServiceEntry, err error)
+	GetServiceByServiceName(serviceName string) (entry ServiceEntry, err error)
 	SetServiceStatus(id string, status int) (err error)
 	SetServiceState(id string, state int) (err error)
 	SetServiceStartTime(id string, time time.Time) (err error)
@@ -255,6 +256,28 @@ func (db *Database) GetServices() (entries []ServiceEntry, err error) {
 	}
 
 	return entries, rows.Err()
+}
+
+// GetServiceByServiceName returns service entry by service name
+func (db *Database) GetServiceByServiceName(serviceName string) (entry ServiceEntry, err error) {
+	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE service = ?")
+	if err != nil {
+		return entry, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(serviceName).Scan(&entry.ID, &entry.Version, &entry.Path, &entry.ServiceName,
+		&entry.UserName, &entry.Permissions, &entry.State, &entry.Status,
+		&entry.StartAt, &entry.TTL, &entry.AlertRules, &entry.UploadLimit, &entry.DownloadLimit,
+		&entry.StorageLimit, &entry.StateLimit)
+	if err == sql.ErrNoRows {
+		return entry, ErrNotExist
+	}
+	if err != nil {
+		return entry, err
+	}
+
+	return entry, nil
 }
 
 // SetServiceStatus sets service status

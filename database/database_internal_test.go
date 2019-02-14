@@ -569,3 +569,28 @@ func TestCursor(t *testing.T) {
 		t.Fatalf("Wrong cursor value: %s", getCursor)
 	}
 }
+
+func TestGetServiceByServiceName(t *testing.T) {
+	// AddService
+	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+	err := db.AddService(service1)
+	if err != nil {
+		t.Errorf("Can't add entry: %s", err)
+	}
+
+	// GetService
+	service, err := db.GetServiceByServiceName("service1.service")
+	if err != nil {
+		t.Errorf("Can't get service: %s", err)
+	}
+
+	if service != service1 {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	// Clear DB
+	if err = db.removeAllServices(); err != nil {
+		t.Errorf("Can't remove all services: %s", err)
+	}
+}
