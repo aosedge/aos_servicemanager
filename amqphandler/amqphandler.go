@@ -167,6 +167,12 @@ type SystemAlert struct {
 	Message string `json:"message"`
 }
 
+// ResourceAlert resource alert structure
+type ResourceAlert struct {
+	Parameter string `json:"paramater"`
+	Value     uint64 `json:"value"`
+}
+
 // Message structure used to send/receive data by amqp
 type Message struct {
 	CorrelationID string
@@ -321,6 +327,7 @@ const (
 // Alert tags
 const (
 	AlertSystemError = "systemError"
+	AlertResource    = "resourceAlert"
 )
 
 /*******************************************************************************

@@ -391,3 +391,69 @@ func TestGetServiceError(t *testing.T) {
 		t.Errorf("Result failed: %s", err)
 	}
 }
+
+func TestGetResourceAlerts(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("service3"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	type resourceAlert struct {
+		source   string
+		resource string
+		time     time.Time
+		value    uint64
+	}
+
+	resourceAlerts := []resourceAlert{
+		resourceAlert{"service3", "cpu", time.Now(), 89},
+		resourceAlert{"service3", "cpu", time.Now(), 90},
+		resourceAlert{"service3", "cpu", time.Now(), 91},
+		resourceAlert{"service3", "cpu", time.Now(), 92},
+		resourceAlert{"system", "ram", time.Now(), 93},
+		resourceAlert{"system", "ram", time.Now(), 1500},
+		resourceAlert{"system", "ram", time.Now(), 1600}}
+
+	for _, alert := range resourceAlerts {
+		alertsHandler.SendResourceAlert(alert.source, alert.resource, alert.time, alert.value)
+	}
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		func(alert amqp.AlertItem) (success bool, err error) {
+			if alert.Tag != amqp.AlertResource {
+				return false, nil
+			}
+
+			for i, originItem := range resourceAlerts {
+				receivedAlert, ok := (alert.Payload.(amqp.ResourceAlert))
+				if !ok {
+					return false, errors.New("wrong alert type")
+				}
+
+				receivedItem := resourceAlert{
+					source:   alert.Source,
+					resource: receivedAlert.Parameter,
+					time:     alert.Timestamp,
+					value:    receivedAlert.Value}
+
+				if receivedItem == originItem {
+					resourceAlerts = append(resourceAlerts[:i], resourceAlerts[i+1:]...)
+
+					if len(resourceAlerts) == 0 {
+						return true, nil
+					}
+
+					return false, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}

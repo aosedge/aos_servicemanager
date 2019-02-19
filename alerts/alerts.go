@@ -28,6 +28,11 @@ const (
  * Types
  ******************************************************************************/
 
+// ResourceAlertsItf interface to send resource alerts
+type ResourceAlertsItf interface {
+	SendResourceAlert(source, resource string, time time.Time, value uint64)
+}
+
 // Alerts instance
 type Alerts struct {
 	AlertsChannel chan amqp.Alerts
@@ -77,6 +82,33 @@ func (instance *Alerts) Close() {
 	instance.ticker.Stop()
 
 	instance.journal.Close()
+}
+
+// SendResourceAlert sends resource alert
+func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
+	instance.mutex.Lock()
+	defer instance.mutex.Unlock()
+
+	log.WithFields(log.Fields{
+		"timestamp": time,
+		"source":    source,
+		"resource":  resource,
+		"value":     value}).Debug("Alert")
+
+	var version *uint64
+
+	if service, err := instance.db.GetService(source); err == nil {
+		version = &service.Version
+	}
+
+	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
+		Timestamp: time,
+		Tag:       amqp.AlertResource,
+		Source:    source,
+		Version:   version,
+		Payload: amqp.ResourceAlert{
+			Parameter: resource,
+			Value:     value}})
 }
 
 /*******************************************************************************
