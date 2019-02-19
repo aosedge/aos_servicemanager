@@ -328,7 +328,7 @@ func main() {
 	defer db.Close()
 
 	// Create monitor
-	monitor, err := monitoring.New(config, db)
+	monitor, err := monitoring.New(config, db, nil)
 	if err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)

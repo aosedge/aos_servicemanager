@@ -5,15 +5,16 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
+
+type alertCallback func(time time.Time, value uint64)
 
 // alertProcessor object for detection alerts
 type alertProcessor struct {
 	name              string
 	source            *uint64
-	destination       *[]amqp.AlertData
+	callback          alertCallback
 	rule              config.AlertRule
 	thresholdTime     time.Time
 	thresholdDetected bool
@@ -21,8 +22,8 @@ type alertProcessor struct {
 
 // createAlertProcessor creates alert processor based on configuration
 func createAlertProcessor(name string, source *uint64,
-	destination *[]amqp.AlertData, rule config.AlertRule) (alert *alertProcessor) {
-	return &alertProcessor{name: name, source: source, destination: destination, rule: rule}
+	callback alertCallback, rule config.AlertRule) (alert *alertProcessor) {
+	return &alertProcessor{name: name, source: source, callback: callback, rule: rule}
 }
 
 // checkAlertDetection checks if alert was detected
@@ -47,11 +48,7 @@ func (alert *alertProcessor) checkAlertDetection(currentTime time.Time) {
 			"time":  currentTime.Format("Jan 2 15:04:05")}).Debugf("%s alert", alert.name)
 
 		alert.thresholdDetected = true
-		if len(*alert.destination) < cap(*alert.destination) {
-			*alert.destination = append(*alert.destination,
-				amqp.AlertData{Value: value, Timestamp: currentTime})
-		} else {
-			log.WithField("limit", cap(*alert.destination)).Warnf("Alert limit exceeds")
-		}
+
+		alert.callback(currentTime, value)
 	}
 }

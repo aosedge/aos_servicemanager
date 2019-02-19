@@ -35,17 +35,16 @@ type AlertRule struct {
 
 // Monitoring configuration for system monitoring
 type Monitoring struct {
-	Disabled            bool       `json:"disabled"`
-	SendPeriod          Duration   `json:"sendPeriod"`
-	PollPeriod          Duration   `json:"pollPeriod"`
-	MaxOfflineMessages  int        `json:"maxOfflineMessages"`
-	MaxAlertsPerMessage int        `json:"maxAlertsPerMessage"`
-	NetnsBridgeIP       string     `json:"netnsBridgeIP"`
-	RAM                 *AlertRule `json:"ram"`
-	CPU                 *AlertRule `json:"cpu"`
-	UsedDisk            *AlertRule `json:"usedDisk"`
-	InTraffic           *AlertRule `json:"inTraffic"`
-	OutTraffic          *AlertRule `json:"outTraffic"`
+	Disabled           bool       `json:"disabled"`
+	SendPeriod         Duration   `json:"sendPeriod"`
+	PollPeriod         Duration   `json:"pollPeriod"`
+	MaxOfflineMessages int        `json:"maxOfflineMessages"`
+	NetnsBridgeIP      string     `json:"netnsBridgeIP"`
+	RAM                *AlertRule `json:"ram"`
+	CPU                *AlertRule `json:"cpu"`
+	UsedDisk           *AlertRule `json:"usedDisk"`
+	InTraffic          *AlertRule `json:"inTraffic"`
+	OutTraffic         *AlertRule `json:"outTraffic"`
 }
 
 // Logging configuration for system and service logging
@@ -84,11 +83,10 @@ func New(fileName string) (config *Config, err error) {
 	config = &Config{
 		DefaultServiceTTL: 30,
 		Monitoring: Monitoring{
-			SendPeriod:          Duration{1 * time.Minute},
-			PollPeriod:          Duration{10 * time.Second},
-			MaxAlertsPerMessage: 10,
-			MaxOfflineMessages:  25,
-			NetnsBridgeIP:       "172.19.0.0/16"},
+			SendPeriod:         Duration{1 * time.Minute},
+			PollPeriod:         Duration{10 * time.Second},
+			MaxOfflineMessages: 25,
+			NetnsBridgeIP:      "172.19.0.0/16"},
 		Logging: Logging{
 			MaxPartSize: 524288},
 		Alerts: Alerts{

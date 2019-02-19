@@ -116,12 +116,6 @@ The configuration file has JSON format. Following is JSON schema:
                     "minimum": 0,
                     "default": 25
                 },
-                "maxAlertsPerMessage": {
-                    "description": "Indicates how many alerts of each type may contains in one monitoring message",
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 10
-                },
                 "netnsBridgeIP": {
                     "description": "Specifies netns bridge subnet to count as local traffic. Should be set if netns bridge subnet is changed",
                     "type": "string",

@@ -62,41 +62,24 @@ type ServiceAlertRules struct {
 	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
 }
 
-// AlertData alert element
-type AlertData struct {
-	Value     uint64    `json:"value"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// MonitoringAlerts arras with alerts
-type MonitoringAlerts struct {
-	RAM        []AlertData `json:"ram"`
-	CPU        []AlertData `json:"cpu"`
-	UsedDisk   []AlertData `json:"usedDisk"`
-	InTraffic  []AlertData `json:"inTraffic"`
-	OutTraffic []AlertData `json:"outTraffic"`
-}
-
 // ServiceMonitoringData monitoring data for service
 type ServiceMonitoringData struct {
-	ServiceID  string           `json:"serviceId"`
-	RAM        uint64           `json:"ram"`
-	CPU        uint64           `json:"cpu"`
-	UsedDisk   uint64           `json:"usedDisk"`
-	InTraffic  uint64           `json:"inTraffic"`
-	OutTraffic uint64           `json:"outTraffic"`
-	Alerts     MonitoringAlerts `json:"alerts"`
+	ServiceID  string `json:"serviceId"`
+	RAM        uint64 `json:"ram"`
+	CPU        uint64 `json:"cpu"`
+	UsedDisk   uint64 `json:"usedDisk"`
+	InTraffic  uint64 `json:"inTraffic"`
+	OutTraffic uint64 `json:"outTraffic"`
 }
 
 // MonitoringData define monitoring data structure
 type MonitoringData struct {
 	Global struct {
-		RAM        uint64           `json:"ram"`
-		CPU        uint64           `json:"cpu"`
-		UsedDisk   uint64           `json:"usedDisk"`
-		InTraffic  uint64           `json:"inTraffic"`
-		OutTraffic uint64           `json:"outTraffic"`
-		Alerts     MonitoringAlerts `json:"alerts"`
+		RAM        uint64 `json:"ram"`
+		CPU        uint64 `json:"cpu"`
+		UsedDisk   uint64 `json:"usedDisk"`
+		InTraffic  uint64 `json:"inTraffic"`
+		OutTraffic uint64 `json:"outTraffic"`
 	} `json:"global"`
 	ServicesData []ServiceMonitoringData `json:"servicesData"`
 }

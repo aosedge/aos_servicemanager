@@ -28,6 +28,14 @@ func init() {
 }
 
 /*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type testAlerts struct {
+	callback func(serviceID, resource string, time time.Time, value uint64)
+}
+
+/*******************************************************************************
  * Vars
  ******************************************************************************/
 
@@ -366,6 +374,10 @@ func cleanup() (err error) {
 	return nil
 }
 
+func (instance *testAlerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
+	instance.callback(source, resource, time, value)
+}
+
 /*******************************************************************************
  * Main
  ******************************************************************************/
@@ -390,19 +402,22 @@ func TestMain(m *testing.M) {
 
 func TestAlertProcessor(t *testing.T) {
 	var sourceValue uint64
-	destination := make([]amqp.AlertData, 0, 2)
+	destination := make([]uint64, 0, 2)
 
 	alert := createAlertProcessor(
 		"Test",
 		&sourceValue,
-		&destination,
+		func(time time.Time, value uint64) {
+			log.Debugf("T: %s, %d", time, value)
+			destination = append(destination, value)
+		},
 		config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 3 * time.Second},
 			MinThreshold: 80,
 			MaxThreshold: 90})
 
 	values := []uint64{50, 91, 79, 92, 93, 94, 95, 94, 79, 91, 92, 93, 94, 32, 91, 92, 93, 94, 95, 96}
-	alertsCount := []int{0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2}
+	alertsCount := []int{0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3}
 
 	currentTime := time.Now()
 
@@ -425,7 +440,7 @@ func TestPeriodicReport(t *testing.T) {
 			MaxOfflineMessages: 10,
 			SendPeriod:         config.Duration{Duration: sendDuration},
 			PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		db)
+		db, nil)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -462,14 +477,15 @@ func TestPeriodicReport(t *testing.T) {
 func TestSystemAlerts(t *testing.T) {
 	sendDuration := 1 * time.Second
 
+	alertMap := make(map[string]int)
+
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages:  10,
-				SendPeriod:          config.Duration{Duration: sendDuration},
-				PollPeriod:          config.Duration{Duration: 1 * time.Second},
-				MaxAlertsPerMessage: 10,
+				MaxOfflineMessages: 10,
+				SendPeriod:         config.Duration{Duration: sendDuration},
+				PollPeriod:         config.Duration{Duration: 1 * time.Second},
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
@@ -490,7 +506,9 @@ func TestSystemAlerts(t *testing.T) {
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
 					MaxThreshold: 0}}},
-		db)
+		db, &testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
+			alertMap[resource] = alertMap[resource] + 1
+		}})
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -498,22 +516,17 @@ func TestSystemAlerts(t *testing.T) {
 
 	for {
 		select {
-		case data := <-monitor.DataChannel:
-			if len(data.Global.Alerts.CPU) != 1 {
-				t.Errorf("Wrong number of CPU alerts: %d", len(data.Global.Alerts.CPU))
+		case <-monitor.DataChannel:
+			for resource, numAlerts := range alertMap {
+				if numAlerts != 1 {
+					t.Errorf("Wrong number of %s alerts: %d", resource, numAlerts)
+				}
 			}
-			if len(data.Global.Alerts.RAM) != 1 {
-				t.Errorf("Wrong number of RAM alerts: %d", len(data.Global.Alerts.RAM))
+
+			if len(alertMap) != 5 {
+				t.Error("Not enough alerts")
 			}
-			if len(data.Global.Alerts.UsedDisk) != 1 {
-				t.Errorf("Wrong number of Disk alerts: %d", len(data.Global.Alerts.UsedDisk))
-			}
-			if len(data.Global.Alerts.InTraffic) != 1 {
-				t.Errorf("Wrong number of IN traffic alerts: %d", len(data.Global.Alerts.InTraffic))
-			}
-			if len(data.Global.Alerts.OutTraffic) != 1 {
-				t.Errorf("Wrong number of OUT traffic alerts: %d", len(data.Global.Alerts.OutTraffic))
-			}
+
 			return
 
 		case <-time.After(sendDuration * 2):
@@ -525,15 +538,18 @@ func TestSystemAlerts(t *testing.T) {
 func TestServices(t *testing.T) {
 	sendDuration := 2 * time.Second
 
+	alertMap := make(map[string]int)
+
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages:  10,
-				SendPeriod:          config.Duration{Duration: sendDuration},
-				PollPeriod:          config.Duration{Duration: 1 * time.Second},
-				MaxAlertsPerMessage: 10}},
-		db)
+				MaxOfflineMessages: 10,
+				SendPeriod:         config.Duration{Duration: sendDuration},
+				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
+		db, &testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
+			alertMap[resource] = alertMap[resource] + 1
+		}})
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -620,18 +636,14 @@ func TestServices(t *testing.T) {
 				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
 			}
 
-			for _, serviceData := range data.ServicesData {
-				if len(serviceData.Alerts.CPU) != 1 {
-					t.Errorf("Wrong number of CPU alerts: %d", len(serviceData.Alerts.CPU))
+			for resource, numAlerts := range alertMap {
+				if numAlerts != 2 {
+					t.Errorf("Wrong number of %s alerts: %d", resource, numAlerts)
 				}
+			}
 
-				if len(serviceData.Alerts.RAM) != 1 {
-					t.Errorf("Wrong number of RAM alerts: %d", len(serviceData.Alerts.RAM))
-				}
-
-				if len(serviceData.Alerts.UsedDisk) != 1 {
-					t.Errorf("Wrong number of Disk alerts: %d", len(serviceData.Alerts.UsedDisk))
-				}
+			if len(alertMap) != 5 {
+				t.Error("Not enough alerts")
 			}
 
 			terminate = true
@@ -640,6 +652,8 @@ func TestServices(t *testing.T) {
 			t.Fatal("Monitoring data timeout")
 		}
 	}
+
+	alertMap = make(map[string]int)
 
 	err = monitor.StopMonitorService("Service1")
 	if err != nil {
@@ -655,18 +669,8 @@ func TestServices(t *testing.T) {
 				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
 			}
 
-			for _, serviceData := range data.ServicesData {
-				if len(serviceData.Alerts.CPU) != 0 {
-					t.Errorf("Wrong number of CPU alerts: %d", len(serviceData.Alerts.CPU))
-				}
-
-				if len(serviceData.Alerts.RAM) != 0 {
-					t.Errorf("Wrong number of RAM alerts: %d", len(serviceData.Alerts.RAM))
-				}
-
-				if len(serviceData.Alerts.UsedDisk) != 0 {
-					t.Errorf("Wrong number of Disk alerts: %d", len(serviceData.Alerts.UsedDisk))
-				}
+			if len(alertMap) != 0 {
+				t.Error("Not enough alerts")
 			}
 
 			terminate = true
@@ -697,11 +701,10 @@ func TestTrafficLimit(t *testing.T) {
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages:  256,
-				SendPeriod:          config.Duration{Duration: sendDuration},
-				PollPeriod:          config.Duration{Duration: 1 * time.Second},
-				MaxAlertsPerMessage: 10}},
-		db)
+				MaxOfflineMessages: 256,
+				SendPeriod:         config.Duration{Duration: sendDuration},
+				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
+		db, nil)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
