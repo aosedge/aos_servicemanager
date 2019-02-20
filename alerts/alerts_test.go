@@ -457,3 +457,24 @@ func TestGetResourceAlerts(t *testing.T) {
 		t.Errorf("Result failed: %s", err)
 	}
 }
+
+func TestGetServiceManagerAlerts(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+		log.Error(messages[len(messages)-1])
+	}
+
+	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "servicemanager", nil, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}

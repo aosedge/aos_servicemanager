@@ -2,6 +2,7 @@
 package alerts
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +71,8 @@ func New(config *config.Config, db *database.Database) (instance *Alerts, err er
 		return nil, err
 	}
 
+	log.AddHook(instance)
+
 	return instance, nil
 }
 
@@ -109,6 +112,31 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 		Payload: amqp.ResourceAlert{
 			Parameter: resource,
 			Value:     value}})
+}
+
+// Levels returns log levels which should be hooked (log Hook interface)
+func (instance *Alerts) Levels() (levels []log.Level) {
+	return []log.Level{log.ErrorLevel, log.FatalLevel, log.PanicLevel}
+}
+
+// Fire called to hook selected log (log hook interface)
+func (instance *Alerts) Fire(entry *log.Entry) (err error) {
+	instance.mutex.Lock()
+	defer instance.mutex.Unlock()
+
+	message := entry.Message
+
+	for field, value := range entry.Data {
+		message = message + fmt.Sprintf(" %s=%v", field, value)
+	}
+
+	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
+		Timestamp: entry.Time,
+		Tag:       amqp.AlertSystemError,
+		Source:    "servicemanager",
+		Payload:   amqp.SystemAlert{Message: message}})
+
+	return nil
 }
 
 /*******************************************************************************
