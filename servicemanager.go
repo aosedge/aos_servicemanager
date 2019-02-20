@@ -12,6 +12,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/alerts"
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
@@ -327,8 +328,15 @@ func main() {
 	}
 	defer db.Close()
 
+	// Create alerts
+	alerts, err := alerts.New(config, db)
+	if err != nil {
+		log.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alerts.Close()
+
 	// Create monitor
-	monitor, err := monitoring.New(config, db, nil)
+	monitor, err := monitoring.New(config, db, alerts)
 	if err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
