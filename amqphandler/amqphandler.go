@@ -352,15 +352,33 @@ func (handler *AmqpHandler) Connect(sdURL string, vin string, users []string) (e
 		return err
 	}
 
-	if err := retryHelper(func() (err error) {
-		return handler.setupSendConnection(connectionInfo.SendParams, tlsConfig)
-	}); err != nil {
+	if err = handler.setupConnections("amqps", connectionInfo, tlsConfig); err != nil {
 		return err
 	}
 
-	if err := retryHelper(func() (err error) {
-		return handler.setupReceiveConnection(connectionInfo.ReceiveParams, tlsConfig)
-	}); err != nil {
+	return nil
+}
+
+// ConnectRabbit connects directly to RabbitMQ server without service discovery
+func (handler *AmqpHandler) ConnectRabbit(host, user, password, exchange, consumer, queue string) (err error) {
+	log.WithFields(log.Fields{
+		"host": host,
+		"user": user}).Debug("AMQP direct connect")
+
+	connectionInfo := rabbitConnectioninfo{
+		SendParams: sendParams{
+			Host:     host,
+			User:     user,
+			Password: password,
+			Exchange: exchangeParams{Name: exchange}},
+		ReceiveParams: receiveParams{
+			Host:     host,
+			User:     user,
+			Password: password,
+			Consumer: consumer,
+			Queue:    queueInfo{Name: queue}}}
+
+	if err = handler.setupConnections("amqp", connectionInfo, nil); err != nil {
 		return err
 	}
 
@@ -510,9 +528,25 @@ func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *t
 	return jsonResp.Connection, nil
 }
 
-func (handler *AmqpHandler) setupSendConnection(params sendParams, tlsConfig *tls.Config) (err error) {
+func (handler *AmqpHandler) setupConnections(scheme string, info rabbitConnectioninfo, tlsConfig *tls.Config) (err error) {
+	if err := retryHelper(func() (err error) {
+		return handler.setupSendConnection(scheme, info.SendParams, tlsConfig)
+	}); err != nil {
+		return err
+	}
+
+	if err := retryHelper(func() (err error) {
+		return handler.setupReceiveConnection(scheme, info.ReceiveParams, tlsConfig)
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (handler *AmqpHandler) setupSendConnection(scheme string, params sendParams, tlsConfig *tls.Config) (err error) {
 	urlRabbitMQ := url.URL{
-		Scheme: "amqps",
+		Scheme: scheme,
 		User:   url.UserPassword(params.User, params.Password),
 		Host:   params.Host,
 	}
@@ -609,9 +643,9 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 	}
 }
 
-func (handler *AmqpHandler) setupReceiveConnection(params receiveParams, tlsConfig *tls.Config) (err error) {
+func (handler *AmqpHandler) setupReceiveConnection(scheme string, params receiveParams, tlsConfig *tls.Config) (err error) {
 	urlRabbitMQ := url.URL{
-		Scheme: "amqps",
+		Scheme: scheme,
 		User:   url.UserPassword(params.User, params.Password),
 		Host:   params.Host,
 	}
