@@ -3,7 +3,6 @@ package amqphandler
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -217,7 +216,7 @@ type vehicleStatus struct {
 }
 
 type desiredStatus struct {
-	Services string `json:"services"`
+	Services []byte `json:"services"`
 }
 
 type newState struct {
@@ -759,13 +758,8 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 	}
 }
 
-func decodeServices(data string) (services []ServiceInfoFromCloud, err error) {
-	cmsData, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return nil, err
-	}
-
-	decryptData, err := fcrypt.DecryptMetadata(cmsData)
+func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
+	decryptData, err := fcrypt.DecryptMetadata(data)
 	if err != nil {
 		return nil, err
 	}
