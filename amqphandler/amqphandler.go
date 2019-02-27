@@ -168,44 +168,37 @@ type serviceDiscoveryRequest struct {
 	Users   []string `json:"users"`
 }
 
+type messageHeader struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+}
+
 // messageMonitor structure which define AOS monitoring message
 type messageMonitor struct {
-	Version     uint64         `json:"version"`
-	MessageType string         `json:"messageType"`
-	Timestamp   time.Time      `json:"timestamp"`
-	Data        MonitoringData `json:"data"`
+	Timestamp time.Time      `json:"timestamp"`
+	Data      MonitoringData `json:"data"`
 }
 
 type vehicleStatus struct {
-	Version     uint64        `json:"version"`
-	MessageType string        `json:"messageType"`
-	Services    []ServiceInfo `json:"services"`
+	Services []ServiceInfo `json:"services"`
 }
 
 type desiredStatus struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	Services    string `json:"services"`
+	Services string `json:"services"`
 }
 
 type newState struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	ServiceID   string `json:"serviceId"`
-	Checksum    string `json:"stateChecksum"`
-	State       string `json:"state"`
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"stateChecksum"`
+	State     string `json:"state"`
 }
 
 type stateRequest struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	ServiceID   string `json:"serviceId"`
-	Default     bool   `json:"default"`
+	ServiceID string `json:"serviceId"`
+	Default   bool   `json:"default"`
 }
 
 type pushServiceLog struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
 	PushServiceLog
 }
 
@@ -254,30 +247,6 @@ type queueInfo struct {
 	DeleteWhenUnused bool   `json:"deleteWhenUnused"`
 	Exclusive        bool   `json:"exclusive"`
 	NoWait           bool   `json:"noWait"`
-}
-
-type stateAcceptance struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	StateAcceptance
-}
-
-type updateState struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	UpdateState
-}
-
-type requestServiceLog struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	RequestServiceLog
-}
-
-type requestServiceCrashLog struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-	RequestServiceCrashLog
 }
 
 /*******************************************************************************
@@ -400,66 +369,95 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 	return nil
 }
 
-// SendInitialSetup sends initial list oaf available services
+// SendInitialSetup sends initial list of available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", vehicleStatus{
-		Version:     1,
-		MessageType: vehicleStatusStr,
-		Services:    serviceList}}
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		vehicleStatus
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: vehicleStatusStr},
+		vehicleStatus: vehicleStatus{
+			Services: serviceList}}}
 
 	return nil
 }
 
 // SendServiceStatusMsg sends message with service status
 func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", vehicleStatus{
-		Version:     1,
-		MessageType: serviceStatusStr,
-		Services:    []ServiceInfo{serviceStatus}}}
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		vehicleStatus
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: serviceStatusStr},
+		vehicleStatus: vehicleStatus{
+			Services: []ServiceInfo{serviceStatus}}}}
 
 	return nil
 }
 
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
-	handler.sendChannel <- Message{"", messageMonitor{
-		Version:     1,
-		MessageType: monitoringDataStr,
-		Timestamp:   time.Now(),
-		Data:        monitoringData}}
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		messageMonitor
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: monitoringDataStr},
+		messageMonitor: messageMonitor{
+			Timestamp: time.Now(),
+			Data:      monitoringData}}}
 
 	return nil
 }
 
 // SendNewState sends new state message
 func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
-	handler.sendChannel <- Message{correlationID, newState{
-		Version:     1,
-		MessageType: newStateStr,
-		ServiceID:   serviceID,
-		State:       state,
-		Checksum:    checksum}}
+	handler.sendChannel <- Message{correlationID, struct {
+		messageHeader
+		newState
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: newStateStr},
+		newState: newState{
+			ServiceID: serviceID,
+			State:     state,
+			Checksum:  checksum}}}
 
 	return nil
 }
 
 // SendStateRequest sends state request message
 func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
-	handler.sendChannel <- Message{"", stateRequest{
-		Version:     1,
-		MessageType: stateRequestStr,
-		ServiceID:   serviceID,
-		Default:     defaultState}}
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		stateRequest
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: stateRequestStr},
+		stateRequest: stateRequest{
+			ServiceID: serviceID,
+			Default:   defaultState}}}
 
 	return nil
 }
 
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
-	handler.sendChannel <- Message{"", pushServiceLog{
-		Version:        1,
-		MessageType:    pushServiceLogStr,
-		PushServiceLog: serviceLog}}
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		pushServiceLog
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: pushServiceLogStr},
+		pushServiceLog: pushServiceLog{serviceLog}}}
 
 	return nil
 }
@@ -709,9 +707,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				"message":      string(data.Body),
 				"corrlationId": data.CorrelationId}).Debug("AMQP received message")
 
-			header := struct {
-				MessageType string `json:"messageType"`
-			}{}
+			header := messageHeader{}
 
 			if err := json.Unmarshal(data.Body, &header); err != nil {
 				log.Errorf("AMQP consumer error: %s", err)
@@ -736,44 +732,44 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				handler.MessageChannel <- Message{data.CorrelationId, services}
 
 			case stateAcceptanceStr:
-				var acceptance stateAcceptance
+				var stateAcceptance StateAcceptance
 
-				if err := json.Unmarshal(data.Body, &acceptance); err != nil {
+				if err := json.Unmarshal(data.Body, &stateAcceptance); err != nil {
 					log.Errorf("Can't parse message body: %s", err)
 					continue
 				}
 
-				handler.MessageChannel <- Message{data.CorrelationId, acceptance.StateAcceptance}
+				handler.MessageChannel <- Message{data.CorrelationId, stateAcceptance}
 
 			case updateStateStr:
-				var update updateState
+				var updateState UpdateState
 
-				if err := json.Unmarshal(data.Body, &update); err != nil {
+				if err := json.Unmarshal(data.Body, &updateState); err != nil {
 					log.Errorf("Can't parse message body: %s", err)
 					continue
 				}
 
-				handler.MessageChannel <- Message{data.CorrelationId, update.UpdateState}
+				handler.MessageChannel <- Message{data.CorrelationId, updateState}
 
 			case requestServiceLogStr:
-				var request requestServiceLog
+				var requestServiceLog RequestServiceLog
 
-				if err := json.Unmarshal(data.Body, &request); err != nil {
+				if err := json.Unmarshal(data.Body, &requestServiceLog); err != nil {
 					log.Errorf("Can't parse message body: %s", err)
 					continue
 				}
 
-				handler.MessageChannel <- Message{data.CorrelationId, request.RequestServiceLog}
+				handler.MessageChannel <- Message{data.CorrelationId, requestServiceLog}
 
 			case requestServiceCrashLogStr:
-				var request requestServiceCrashLog
+				var requestServiceCrashLog RequestServiceCrashLog
 
-				if err := json.Unmarshal(data.Body, &request); err != nil {
+				if err := json.Unmarshal(data.Body, &requestServiceCrashLog); err != nil {
 					log.Errorf("Can't parse message body: %s", err)
 					continue
 				}
 
-				handler.MessageChannel <- Message{data.CorrelationId, request.RequestServiceCrashLog}
+				handler.MessageChannel <- Message{data.CorrelationId, requestServiceCrashLog}
 
 			default:
 				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
