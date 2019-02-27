@@ -19,6 +19,39 @@ import (
 )
 
 /*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const (
+	sendChannelSize    = 32
+	receiveChannelSize = 16
+	retryChannelSize   = 8
+
+	connectionRetry = 3
+)
+
+const (
+	desiredStatusStr          = "desiredStatus"
+	stateAcceptanceStr        = "stateAcceptance"
+	updateStateStr            = "updateState"
+	requestServiceLogStr      = "requestServiceLog"
+	requestServiceCrashLogStr = "requestServiceCrashLog"
+
+	vehicleStatusStr  = "vehicleStatus"
+	serviceStatusStr  = "serviceStatus"
+	monitoringDataStr = "monitoringData"
+	newStateStr       = "newState"
+	stateRequestStr   = "stateRequest"
+	pushServiceLogStr = "pushServiceLog"
+)
+
+// Alert tags
+const (
+	AlertSystemError = "systemError"
+	AlertResource    = "resourceAlert"
+)
+
+/*******************************************************************************
  * Types
  ******************************************************************************/
 
@@ -253,34 +286,13 @@ type queueInfo struct {
  * Variables
  ******************************************************************************/
 
-const (
-	sendChannelSize    = 32
-	receiveChannelSize = 16
-	retryChannelSize   = 8
-
-	connectionRetry = 3
-)
-
-const (
-	desiredStatusStr          = "desiredStatus"
-	stateAcceptanceStr        = "stateAcceptance"
-	updateStateStr            = "updateState"
-	requestServiceLogStr      = "requestServiceLog"
-	requestServiceCrashLogStr = "requestServiceCrashLog"
-
-	vehicleStatusStr  = "vehicleStatus"
-	serviceStatusStr  = "serviceStatus"
-	monitoringDataStr = "monitoringData"
-	newStateStr       = "newState"
-	stateRequestStr   = "stateRequest"
-	pushServiceLogStr = "pushServiceLog"
-)
-
-// Alert tags
-const (
-	AlertSystemError = "systemError"
-	AlertResource    = "resourceAlert"
-)
+var messageMap = map[string]func() interface{}{
+	desiredStatusStr:          func() interface{} { return &desiredStatus{} },
+	stateAcceptanceStr:        func() interface{} { return &StateAcceptance{} },
+	updateStateStr:            func() interface{} { return &UpdateState{} },
+	requestServiceLogStr:      func() interface{} { return &RequestServiceLog{} },
+	requestServiceCrashLogStr: func() interface{} { return &RequestServiceCrashLog{} },
+}
 
 /*******************************************************************************
  * Public
@@ -698,83 +710,51 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 			return
 
-		case data, ok := <-deliveryChannel:
+		case delivery, ok := <-deliveryChannel:
 			if !ok {
 				return
 			}
 
 			log.WithFields(log.Fields{
-				"message":      string(data.Body),
-				"corrlationId": data.CorrelationId}).Debug("AMQP received message")
+				"message":      string(delivery.Body),
+				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
 
 			header := messageHeader{}
 
-			if err := json.Unmarshal(data.Body, &header); err != nil {
-				log.Errorf("AMQP consumer error: %s", err)
-				break
+			if err := json.Unmarshal(delivery.Body, &header); err != nil {
+				log.Errorf("Can't parse message body: %s", err)
+				continue
 			}
 
-			switch header.MessageType {
-			case desiredStatusStr:
-				var status desiredStatus
+			messageType, ok := messageMap[header.MessageType]
+			if !ok {
+				log.Errorf("AMQP unsupported message type: %s", header.MessageType)
+				continue
+			}
 
-				if err := json.Unmarshal(data.Body, &status); err != nil {
-					log.Errorf("Can't parse message body: %s", err)
+			data := messageType()
+
+			if err := json.Unmarshal(delivery.Body, data); err != nil {
+				log.Errorf("Can't parse message body: %s", err)
+				continue
+			}
+
+			if header.MessageType == desiredStatusStr {
+				var err error
+
+				encodedData, ok := data.(*desiredStatus)
+				if !ok {
+					log.Error("Wrong data type: expect desired status")
 					continue
 				}
 
-				services, err := decodeServices(status.Services)
-				if err != nil {
+				if data, err = decodeServices(encodedData.Services); err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
 				}
-
-				handler.MessageChannel <- Message{data.CorrelationId, services}
-
-			case stateAcceptanceStr:
-				var stateAcceptance StateAcceptance
-
-				if err := json.Unmarshal(data.Body, &stateAcceptance); err != nil {
-					log.Errorf("Can't parse message body: %s", err)
-					continue
-				}
-
-				handler.MessageChannel <- Message{data.CorrelationId, stateAcceptance}
-
-			case updateStateStr:
-				var updateState UpdateState
-
-				if err := json.Unmarshal(data.Body, &updateState); err != nil {
-					log.Errorf("Can't parse message body: %s", err)
-					continue
-				}
-
-				handler.MessageChannel <- Message{data.CorrelationId, updateState}
-
-			case requestServiceLogStr:
-				var requestServiceLog RequestServiceLog
-
-				if err := json.Unmarshal(data.Body, &requestServiceLog); err != nil {
-					log.Errorf("Can't parse message body: %s", err)
-					continue
-				}
-
-				handler.MessageChannel <- Message{data.CorrelationId, requestServiceLog}
-
-			case requestServiceCrashLogStr:
-				var requestServiceCrashLog RequestServiceCrashLog
-
-				if err := json.Unmarshal(data.Body, &requestServiceCrashLog); err != nil {
-					log.Errorf("Can't parse message body: %s", err)
-					continue
-				}
-
-				handler.MessageChannel <- Message{data.CorrelationId, requestServiceCrashLog}
-
-			default:
-				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
-				continue
 			}
+
+			handler.MessageChannel <- Message{delivery.CorrelationId, data}
 		}
 	}
 }

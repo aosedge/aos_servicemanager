@@ -119,35 +119,35 @@ func processAmqpMessage(
 			}
 		}
 
-	case amqp.StateAcceptance:
+	case *amqp.StateAcceptance:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID,
 			"result":    data.Result}).Info("Receive state acceptance")
 
-		if err := launcherHandler.StateAcceptance(data, message.CorrelationID); err != nil {
+		if err := launcherHandler.StateAcceptance(*data, message.CorrelationID); err != nil {
 			log.WithField("serviceID", data.ServiceID).Errorf("Accept state error: %s", err)
 		}
 
-	case amqp.UpdateState:
+	case *amqp.UpdateState:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID,
 			"checksum":  data.Checksum}).Info("Receive update state")
 
-		launcherHandler.UpdateState(data)
+		launcherHandler.UpdateState(*data)
 
-	case amqp.RequestServiceLog:
+	case *amqp.RequestServiceLog:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID,
 			"from":      data.From,
 			"till":      data.Till}).Info("Receive request service log")
 
-		loggingHandler.GetServiceLog(data)
+		loggingHandler.GetServiceLog(*data)
 
-	case amqp.RequestServiceCrashLog:
+	case *amqp.RequestServiceCrashLog:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID}).Info("Receive request service crash log")
 
-		loggingHandler.GetServiceCrashLog(data)
+		loggingHandler.GetServiceCrashLog(*data)
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
