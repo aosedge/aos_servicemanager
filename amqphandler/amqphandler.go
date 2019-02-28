@@ -106,14 +106,17 @@ type ServiceMonitoringData struct {
 
 // MonitoringData define monitoring data structure
 type MonitoringData struct {
-	Global struct {
-		RAM        uint64 `json:"ram"`
-		CPU        uint64 `json:"cpu"`
-		UsedDisk   uint64 `json:"usedDisk"`
-		InTraffic  uint64 `json:"inTraffic"`
-		OutTraffic uint64 `json:"outTraffic"`
-	} `json:"global"`
-	ServicesData []ServiceMonitoringData `json:"servicesData"`
+	Timestamp time.Time `json:"timestamp"`
+	Data      struct {
+		Global struct {
+			RAM        uint64 `json:"ram"`
+			CPU        uint64 `json:"cpu"`
+			UsedDisk   uint64 `json:"usedDisk"`
+			InTraffic  uint64 `json:"inTraffic"`
+			OutTraffic uint64 `json:"outTraffic"`
+		} `json:"global"`
+		ServicesData []ServiceMonitoringData `json:"servicesData"`
+	} `json:"data"`
 }
 
 // ServiceInfo struct with service information
@@ -203,12 +206,6 @@ type serviceDiscoveryRequest struct {
 type messageHeader struct {
 	Version     uint64 `json:"version"`
 	MessageType string `json:"messageType"`
-}
-
-// messageMonitor structure which define AOS monitoring message
-type messageMonitor struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Data      MonitoringData `json:"data"`
 }
 
 type vehicleStatus struct {
@@ -414,14 +411,12 @@ func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err er
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
 	handler.sendChannel <- Message{"", struct {
 		messageHeader
-		messageMonitor
+		MonitoringData
 	}{
 		messageHeader: messageHeader{
 			Version:     1,
 			MessageType: monitoringDataStr},
-		messageMonitor: messageMonitor{
-			Timestamp: time.Now(),
-			Data:      monitoringData}}}
+		MonitoringData: monitoringData}}
 
 	return nil
 }

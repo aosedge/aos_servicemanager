@@ -632,8 +632,8 @@ func TestServices(t *testing.T) {
 	for terminate != true {
 		select {
 		case data := <-monitor.DataChannel:
-			if len(data.ServicesData) != 2 {
-				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			if len(data.Data.ServicesData) != 2 {
+				t.Errorf("Wrong number of services: %d", len(data.Data.ServicesData))
 			}
 
 			for resource, numAlerts := range alertMap {
@@ -665,8 +665,8 @@ func TestServices(t *testing.T) {
 	for terminate != true {
 		select {
 		case data := <-monitor.DataChannel:
-			if len(data.ServicesData) != 1 {
-				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+			if len(data.Data.ServicesData) != 1 {
+				t.Errorf("Wrong number of services: %d", len(data.Data.ServicesData))
 			}
 
 			if len(alertMap) != 0 {
