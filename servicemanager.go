@@ -115,7 +115,7 @@ func processAmqpMessage(
 					"id":      service.serviceInfo.ID,
 					"version": service.serviceInfo.Version}).Info("Remove service")
 
-				launcherHandler.RemoveService(service.serviceInfo.ID)
+				launcherHandler.UninstallService(service.serviceInfo.ID)
 			}
 		}
 
@@ -174,7 +174,7 @@ func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStat
 				"version": status.Version}).Info("Service successfully installed")
 		}
 
-	case launcher.ActionRemove:
+	case launcher.ActionUninstall:
 		if status.Err != nil {
 			info.Status = "error"
 			info.Error = "Can't remove service"

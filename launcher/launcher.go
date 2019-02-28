@@ -66,7 +66,7 @@ const (
 // Action
 const (
 	ActionInstall = iota
-	ActionRemove
+	ActionUninstall
 	ActionStart
 	ActionStop
 	ActionUpdateState
@@ -277,9 +277,9 @@ func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) 
 	launcher.actionHandler.PutInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo, launcher.doAction})
 }
 
-// RemoveService stops and removes service
-func (launcher *Launcher) RemoveService(id string) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionRemove, id, nil, launcher.doAction})
+// UninstallService stops and removes service
+func (launcher *Launcher) UninstallService(id string) {
+	launcher.actionHandler.PutInQueue(serviceAction{ActionUninstall, id, nil, launcher.doAction})
 }
 
 // GetServicesInfo returns information about all installed services
@@ -454,7 +454,7 @@ func (launcher *Launcher) doAction(action actionType, id string, data interface{
 		serviceInfo := data.(amqp.ServiceInfoFromCloud)
 		status.Version = serviceInfo.Version
 
-		status.Err = launcher.doActionInstall(serviceInfo)
+		status.Err = launcher.installService(serviceInfo)
 
 		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
 		if err != nil {
@@ -463,14 +463,14 @@ func (launcher *Launcher) doAction(action actionType, id string, data interface{
 
 		status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
 
-	case ActionRemove:
-		status.Version, status.Err = launcher.doActionRemove(status.ID)
+	case ActionUninstall:
+		status.Version, status.Err = launcher.uninstallService(status.ID)
 	}
 
 	launcher.StatusChannel <- status
 }
 
-func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
+func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
 	if launcher.users == nil {
 		return errors.New("Users are not set")
 	}
@@ -543,7 +543,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	}
 
 	if !serviceExists {
-		if err = launcher.installService(newService); err != nil {
+		if err = launcher.addService(newService); err != nil {
 			panic("Install failed")
 		}
 	} else {
@@ -555,7 +555,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 	return nil
 }
 
-func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) {
+func (launcher *Launcher) uninstallService(id string) (version uint64, err error) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return 0, err
@@ -902,7 +902,7 @@ func (launcher *Launcher) prepareService(installDir string,
 	return service, nil
 }
 
-func (launcher *Launcher) installService(service database.ServiceEntry) (err error) {
+func (launcher *Launcher) addService(service database.ServiceEntry) (err error) {
 	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
@@ -942,7 +942,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 				launcher.removeService(oldService)
 
 				launcher.StatusChannel <- ActionStatus{
-					Action:  ActionRemove,
+					Action:  ActionUninstall,
 					ID:      oldService.ID,
 					Version: oldService.Version,
 					Err:     nil}
@@ -973,7 +973,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 	}
 
 	launcher.StatusChannel <- ActionStatus{
-		Action:  ActionRemove,
+		Action:  ActionUninstall,
 		ID:      oldService.ID,
 		Version: oldService.Version,
 		Err:     nil}

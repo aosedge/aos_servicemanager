@@ -476,18 +476,18 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	numInstallServices := 10
-	numRemoveServices := 5
+	numUninstallServices := 5
 
 	// install services
 	for i := 0; i < numInstallServices; i++ {
 		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
 	}
 	// remove services
-	for i := 0; i < numRemoveServices; i++ {
-		launcher.RemoveService(fmt.Sprintf("service%d", i))
+	for i := 0; i < numUninstallServices; i++ {
+		launcher.UninstallService(fmt.Sprintf("service%d", i))
 	}
 
-	for i := 0; i < numInstallServices+numRemoveServices; i++ {
+	for i := 0; i < numInstallServices+numUninstallServices; i++ {
 		if status := <-launcher.StatusChannel; status.Err != nil {
 			if status.Action == ActionInstall {
 				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
@@ -501,7 +501,7 @@ func TestInstallRemove(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
-	if len(services) != numInstallServices-numRemoveServices {
+	if len(services) != numInstallServices-numUninstallServices {
 		t.Errorf("Wrong service quantity")
 	}
 	for _, service := range services {
@@ -513,11 +513,11 @@ func TestInstallRemove(t *testing.T) {
 	time.Sleep(time.Second * 2)
 
 	// remove remaining services
-	for i := numRemoveServices; i < numInstallServices; i++ {
-		launcher.RemoveService(fmt.Sprintf("service%d", i))
+	for i := numUninstallServices; i < numInstallServices; i++ {
+		launcher.UninstallService(fmt.Sprintf("service%d", i))
 	}
 
-	for i := 0; i < numInstallServices-numRemoveServices; i++ {
+	for i := 0; i < numInstallServices-numUninstallServices; i++ {
 		if status := <-launcher.StatusChannel; status.Err != nil {
 			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 		}
@@ -590,7 +590,7 @@ func TestAutoStart(t *testing.T) {
 
 	// remove services
 	for i := 0; i < numServices; i++ {
-		launcher.RemoveService(fmt.Sprintf("service%d", i))
+		launcher.UninstallService(fmt.Sprintf("service%d", i))
 	}
 
 	for i := 0; i < numServices; i++ {
@@ -1041,7 +1041,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 
-	launcher.RemoveService("Service1")
+	launcher.UninstallService("Service1")
 	if status := <-launcher.StatusChannel; status.Err != nil {
 		t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
 	}
