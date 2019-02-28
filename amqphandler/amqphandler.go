@@ -395,8 +395,8 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 	return nil
 }
 
-// SendServiceStatusMsg sends message with service status
-func (handler *AmqpHandler) SendServiceStatusMsg(serviceStatus ServiceInfo) (err error) {
+// SendServiceStatus sends message with service status
+func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
 	handler.sendChannel <- Message{"", struct {
 		messageHeader
 		vehicleStatus

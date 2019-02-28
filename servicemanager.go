@@ -193,7 +193,7 @@ func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStat
 		}
 	}
 
-	if err = amqpHandler.SendServiceStatusMsg(info); err != nil {
+	if err = amqpHandler.SendServiceStatus(info); err != nil {
 		return err
 	}
 
