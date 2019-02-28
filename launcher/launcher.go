@@ -447,16 +447,16 @@ func (launcher *Launcher) doAction(action actionType, id string, data interface{
 
 		status.Err = launcher.doActionInstall(serviceInfo)
 
+		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
+		if err != nil {
+			log.Errorf("Can't get users entry: %s", err)
+		}
+
+		status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
+
 	case ActionRemove:
 		status.Version, status.Err = launcher.doActionRemove(status.ID)
 	}
-
-	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
-	if err != nil {
-		log.Errorf("Can't get users entry: %s", err)
-	}
-
-	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
 
 	launcher.StatusChannel <- status
 }
