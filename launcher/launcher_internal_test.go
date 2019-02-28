@@ -79,8 +79,8 @@ func init() {
  * Private
  ******************************************************************************/
 
-func newTestLauncher(downloader downloadItf, monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db, monitoring)
+func newTestLauncher(downloader downloader, monitor ServiceMonitor) (launcher *Launcher, err error) {
+	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db, monitor)
 	if err != nil {
 		return launcher, err
 	}
@@ -269,7 +269,7 @@ func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
 }
 
 func (launcher *Launcher) removeAllServices() (err error) {
-	services, err := launcher.db.GetServices()
+	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		return err
 	}
 
-	services, err = launcher.db.GetServices()
+	services, err = launcher.serviceProvider.GetServices()
 	if err != nil {
 		return err
 	}
@@ -304,7 +304,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		return errors.New("Can't remove all services")
 	}
 
-	usersList, err := launcher.db.GetUsersList()
+	usersList, err := launcher.serviceProvider.GetUsersList()
 	if err != nil {
 		return err
 	}
@@ -418,7 +418,7 @@ func generateConfig(imagePath string) (err error) {
 }
 
 func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.ServerConn, err error) {
-	service, err := launcher.db.GetService(serviceID)
+	service, err := launcher.serviceProvider.GetService(serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +749,7 @@ func TestNetworkSpeed(t *testing.T) {
 	for i := 0; i < numServices; i++ {
 		serviceID := fmt.Sprintf("service%d", i)
 
-		service, err := launcher.db.GetService(serviceID)
+		service, err := launcher.serviceProvider.GetService(serviceID)
 		if err != nil {
 			t.Errorf("Can't get service: %s", err)
 			continue
@@ -853,7 +853,7 @@ func TestUsersServices(t *testing.T) {
 			t.Fatalf("Can't set users: %s", err)
 		}
 
-		services, err := launcher.db.GetUsersServices(users)
+		services, err := launcher.serviceProvider.GetUsersServices(users)
 		if err != nil {
 			t.Fatalf("Can't get users services: %s", err)
 		}
@@ -873,7 +873,7 @@ func TestUsersServices(t *testing.T) {
 
 		time.Sleep(time.Second * 2)
 
-		services, err = launcher.db.GetServices()
+		services, err = launcher.serviceProvider.GetServices()
 		if err != nil {
 			t.Fatalf("Can't get services: %s", err)
 		}
@@ -881,7 +881,7 @@ func TestUsersServices(t *testing.T) {
 		count := 0
 		for _, service := range services {
 			if service.State == stateRunning {
-				exist, err := launcher.db.IsUsersService(users, service.ID)
+				exist, err := launcher.serviceProvider.IsUsersService(users, service.ID)
 				if err != nil {
 					t.Errorf("Can't check users service: %s", err)
 				}
@@ -906,7 +906,7 @@ func TestUsersServices(t *testing.T) {
 
 		time.Sleep(time.Second * 2)
 
-		services, err := launcher.db.GetServices()
+		services, err := launcher.serviceProvider.GetServices()
 		if err != nil {
 			t.Fatalf("Can't get services: %s", err)
 		}
@@ -914,7 +914,7 @@ func TestUsersServices(t *testing.T) {
 		count := 0
 		for _, service := range services {
 			if service.State == stateRunning {
-				exist, err := launcher.db.IsUsersService(users, service.ID)
+				exist, err := launcher.serviceProvider.IsUsersService(users, service.ID)
 				if err != nil {
 					t.Errorf("Can't check users service: %s", err)
 				}
@@ -958,13 +958,13 @@ func TestServiceTTL(t *testing.T) {
 		}
 	}
 
-	services, err := launcher.db.GetServices()
+	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
 		t.Fatalf("Can't get services: %s", err)
 	}
 
 	for _, service := range services {
-		if err = launcher.db.SetServiceStartTime(service.ID, service.StartAt.Add(-time.Hour*24*30)); err != nil {
+		if err = launcher.serviceProvider.SetServiceStartTime(service.ID, service.StartAt.Add(-time.Hour*24*30)); err != nil {
 			t.Errorf("Can't set service start time: %s", err)
 		}
 	}
@@ -973,7 +973,7 @@ func TestServiceTTL(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	services, err = launcher.db.GetServices()
+	services, err = launcher.serviceProvider.GetServices()
 	if err != nil {
 		t.Fatalf("Can't get services: %s", err)
 	}
@@ -982,7 +982,7 @@ func TestServiceTTL(t *testing.T) {
 		t.Fatal("Wrong service quantity")
 	}
 
-	usersList, err := launcher.db.GetUsersList()
+	usersList, err := launcher.serviceProvider.GetUsersList()
 	if err != nil {
 		t.Fatalf("Can't get users list: %s", err)
 	}

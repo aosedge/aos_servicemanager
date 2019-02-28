@@ -74,6 +74,35 @@ const (
  * Types
  ******************************************************************************/
 
+// ServiceProvider provides API to create, remove or access services DB
+type ServiceProvider interface {
+	AddService(entry database.ServiceEntry) (err error)
+	UpdateService(entry database.ServiceEntry) (err error)
+	RemoveService(id string) (err error)
+	GetService(id string) (entry database.ServiceEntry, err error)
+	GetServices() (entries []database.ServiceEntry, err error)
+	GetServiceByServiceName(serviceName string) (entry database.ServiceEntry, err error)
+	SetServiceStatus(id string, status int) (err error)
+	SetServiceState(id string, state int) (err error)
+	SetServiceStartTime(id string, time time.Time) (err error)
+	AddUsersService(users []string, serviceID string) (err error)
+	RemoveUsersService(users []string, serviceID string) (err error)
+	GetUsersServices(users []string) (entries []database.ServiceEntry, err error)
+	IsUsersService(users []string, id string) (result bool, err error)
+	GetUsersList() (usersList [][]string, err error)
+	DeleteUsersByServiceID(id string) (err error)
+	GetUsersEntry(users []string, serviceID string) (entry database.UsersEntry, err error)
+	GetUsersEntriesByServiceID(serviceID string) (entries []database.UsersEntry, err error)
+	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
+	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
+}
+
+// ServiceMonitor provides API to start/stop service monitoring
+type ServiceMonitor interface {
+	StartMonitorService(serviceID string, monitoringConfig monitoring.ServiceMonitoringConfig) (err error)
+	StopMonitorService(serviceID string) (err error)
+}
+
 type actionType int
 
 // ActionStatus status of performed action
@@ -99,7 +128,7 @@ type StateRequest struct {
 	Default   bool
 }
 
-type downloadItf interface {
+type downloader interface {
 	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
 }
 
@@ -112,15 +141,15 @@ type Launcher struct {
 	// StateRequestChannel used to request last or default service state
 	StateRequestChannel chan StateRequest
 
-	db      database.ServiceItf
-	monitor monitoring.ServiceMonitoringItf
-	systemd *dbus.Conn
-	config  *config.Config
+	serviceProvider ServiceProvider
+	monitor         ServiceMonitor
+	systemd         *dbus.Conn
+	config          *config.Config
 
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
 
-	downloader downloadItf
+	downloader downloader
 
 	users []string
 
@@ -137,15 +166,11 @@ type Launcher struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, db database.ServiceItf,
-	monitoring monitoring.ServiceMonitoringItf) (launcher *Launcher, err error) {
+func New(config *config.Config, serviceProvider ServiceProvider,
+	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	launcher = &Launcher{}
-
-	launcher.db = db
-	launcher.config = config
-	launcher.monitor = monitoring
+	launcher = &Launcher{serviceProvider: serviceProvider, config: config, monitor: monitor}
 
 	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -155,7 +180,7 @@ func New(config *config.Config, db database.ServiceItf,
 		return nil, err
 	}
 
-	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, db,
+	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, serviceProvider,
 		launcher.NewStateChannel, launcher.StateRequestChannel); err != nil {
 		return nil, err
 	}
@@ -229,7 +254,7 @@ func (launcher *Launcher) Close() {
 func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err error) {
 	log.WithField("id", id).Debug("Get service version")
 
-	service, err := launcher.db.GetService(id)
+	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return version, err
 	}
@@ -253,7 +278,7 @@ func (launcher *Launcher) RemoveService(id string) {
 func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
 	log.Debug("Get services info")
 
-	services, err := launcher.db.GetUsersServices(launcher.users)
+	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
 		return info, err
 	}
@@ -263,7 +288,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	for i, service := range services {
 		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: statusStr[service.Status]}
 
-		entry, err := launcher.db.GetUsersEntry(launcher.users, service.ID)
+		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
 		if err != nil {
 			return info, err
 		}
@@ -426,7 +451,7 @@ func (launcher *Launcher) doAction(action actionType, id string, data interface{
 		status.Version, status.Err = launcher.doActionRemove(status.ID)
 	}
 
-	entry, err := launcher.db.GetUsersEntry(launcher.users, id)
+	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
 	if err != nil {
 		log.Errorf("Can't get users entry: %s", err)
 	}
@@ -441,7 +466,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 		return errors.New("Users are not set")
 	}
 
-	service, err := launcher.db.GetService(serviceInfo.ID)
+	service, err := launcher.serviceProvider.GetService(serviceInfo.ID)
 	if err != nil && err != database.ErrNotExist {
 		return err
 	}
@@ -522,7 +547,7 @@ func (launcher *Launcher) doActionInstall(serviceInfo amqp.ServiceInfoFromCloud)
 }
 
 func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) {
-	service, err := launcher.db.GetService(id)
+	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return 0, err
 	}
@@ -537,7 +562,7 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 		return version, err
 	}
 
-	entry, err := launcher.db.GetUsersEntry(launcher.users, service.ID)
+	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
 	if err != nil {
 		return version, err
 	}
@@ -552,7 +577,7 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 		}
 	}
 
-	if err = launcher.db.RemoveUsersService(launcher.users, service.ID); err != nil {
+	if err = launcher.serviceProvider.RemoveUsersService(launcher.users, service.ID); err != nil {
 		return version, err
 	}
 
@@ -561,7 +586,7 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 
 func (launcher *Launcher) doUpdateState(action actionType, id string, data interface{}) {
 
-	service, err := launcher.db.GetService(id)
+	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		log.Errorf("Can't get service: %s", err)
 		return
@@ -590,7 +615,7 @@ func (launcher *Launcher) doUpdateState(action actionType, id string, data inter
 }
 
 func (launcher *Launcher) updateServiceState(id string, state int, status int) (err error) {
-	service, err := launcher.db.GetService(id)
+	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return err
 	}
@@ -604,7 +629,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	if service.State != state {
 		log.WithField("id", id).Debugf("Set service state: %s", stateStr[state])
 
-		if err = launcher.db.SetServiceState(id, state); err != nil {
+		if err = launcher.serviceProvider.SetServiceState(id, state); err != nil {
 			return err
 		}
 	}
@@ -612,7 +637,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	if service.Status != status {
 		log.WithField("id", id).Debugf("Set service status: %s", statusStr[status])
 
-		if err = launcher.db.SetServiceStatus(id, status); err != nil {
+		if err = launcher.serviceProvider.SetServiceStatus(id, status); err != nil {
 			return err
 		}
 	}
@@ -652,7 +677,7 @@ func (launcher *Launcher) restartService(service database.ServiceEntry) (err err
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
-	if err = launcher.db.SetServiceStartTime(service.ID, time.Now()); err != nil {
+	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
@@ -678,7 +703,7 @@ func (launcher *Launcher) startService(service database.ServiceEntry) (err error
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
-	if err = launcher.db.SetServiceStartTime(service.ID, time.Now()); err != nil {
+	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
@@ -690,7 +715,7 @@ func (launcher *Launcher) startService(service database.ServiceEntry) (err error
 func (launcher *Launcher) startServices() {
 	log.WithField("users", launcher.users).Debug("Start user services")
 
-	services, err := launcher.db.GetUsersServices(launcher.users)
+	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
 		log.Errorf("Can't start services: %s", err)
 	}
@@ -753,12 +778,12 @@ func (launcher *Launcher) stopServices() {
 	var err error
 
 	if launcher.users == nil {
-		services, err = launcher.db.GetServices()
+		services, err = launcher.serviceProvider.GetServices()
 		if err != nil {
 			log.Errorf("Can't stop services: %s", err)
 		}
 	} else {
-		services, err = launcher.db.GetUsersServices(launcher.users)
+		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
 		if err != nil {
 			log.Errorf("Can't stop services: %s", err)
 		}
@@ -782,7 +807,7 @@ func (launcher *Launcher) stopServices() {
 func (launcher *Launcher) restoreService(service database.ServiceEntry) (retErr error) {
 	log.WithField("id", service.ID).Warn("Restore previous service version")
 
-	if err := launcher.db.UpdateService(service); err != nil {
+	if err := launcher.serviceProvider.UpdateService(service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't update service in DB: %s", err)
 			retErr = err
@@ -848,7 +873,7 @@ func (launcher *Launcher) prepareService(installDir string,
 }
 
 func (launcher *Launcher) installService(service database.ServiceEntry) (err error) {
-	// We can't remove service if it is not in DB. Just return error and rollback will be
+	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
 	if err = setUserFSQuota(launcher.config.WorkingDir,
@@ -856,7 +881,7 @@ func (launcher *Launcher) installService(service database.ServiceEntry) (err err
 		return err
 	}
 
-	if err = launcher.db.AddService(service); err != nil {
+	if err = launcher.serviceProvider.AddService(service); err != nil {
 		return err
 	}
 
@@ -905,7 +930,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Set service quota failed")
 	}
 
-	if err = launcher.db.UpdateService(newService); err != nil {
+	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
 		panic("Update service failed")
 	}
 
@@ -942,7 +967,7 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	entries, err := launcher.db.GetUsersEntriesByServiceID(service.ID)
+	entries, err := launcher.serviceProvider.GetUsersEntriesByServiceID(service.ID)
 	if err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't get users entry: %s", err)
@@ -965,14 +990,14 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	if err := launcher.db.DeleteUsersByServiceID(service.ID); err != nil {
+	if err := launcher.serviceProvider.DeleteUsersByServiceID(service.ID); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't delete users from DB: %s", err)
 			retErr = err
 		}
 	}
 
-	if err := launcher.db.RemoveService(service.ID); err != nil {
+	if err := launcher.serviceProvider.RemoveService(service.ID); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't remove service from DB: %s", err)
 			retErr = err
@@ -1087,7 +1112,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 			return err
 		}
 
-		entry, err := launcher.db.GetUsersEntry(launcher.users, service.ID)
+		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
 		if err != nil {
 			return err
 		}
@@ -1245,12 +1270,12 @@ func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clear
 }
 
 func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error) {
-	exist, err := launcher.db.IsUsersService(launcher.users, serviceID)
+	exist, err := launcher.serviceProvider.IsUsersService(launcher.users, serviceID)
 	if err != nil {
 		return err
 	}
 	if !exist {
-		if err = launcher.db.AddUsersService(launcher.users, serviceID); err != nil {
+		if err = launcher.serviceProvider.AddUsersService(launcher.users, serviceID); err != nil {
 			return err
 		}
 	}
@@ -1261,12 +1286,12 @@ func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error)
 func (launcher *Launcher) cleanServicesDB() (err error) {
 	log.Debug("Clean services DB")
 
-	startedServices, err := launcher.db.GetUsersServices(launcher.users)
+	startedServices, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
 		return err
 	}
 
-	allServices, err := launcher.db.GetServices()
+	allServices, err := launcher.serviceProvider.GetServices()
 	if err != nil {
 		return err
 	}

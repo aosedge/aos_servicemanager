@@ -29,17 +29,25 @@ const (
  * Types
  ******************************************************************************/
 
-// ResourceAlertsItf interface to send resource alerts
-type ResourceAlertsItf interface {
-	SendResourceAlert(source, resource string, time time.Time, value uint64)
+// ServiceProvider provides service entry
+type ServiceProvider interface {
+	GetService(id string) (entry database.ServiceEntry, err error)
+	GetServiceByServiceName(serviceName string) (entry database.ServiceEntry, err error)
+}
+
+// CursorStorage provides API to set and get journal cursor
+type CursorStorage interface {
+	SetJournalCursor(cursor string) (err error)
+	GetJournalCursor() (cursor string, err error)
 }
 
 // Alerts instance
 type Alerts struct {
 	AlertsChannel chan amqp.Alerts
 
-	config config.Alerts
-	db     *database.Database
+	config          config.Alerts
+	cursorStorage   CursorStorage
+	serviceProvider ServiceProvider
 
 	alerts amqp.Alerts
 
@@ -55,10 +63,12 @@ type Alerts struct {
  ******************************************************************************/
 
 // New creates new alerts object
-func New(config *config.Config, db *database.Database) (instance *Alerts, err error) {
+func New(config *config.Config,
+	serviceProvider ServiceProvider,
+	cursorStorage CursorStorage) (instance *Alerts, err error) {
 	log.Debug("New alerts")
 
-	instance = &Alerts{config: config.Alerts, db: db}
+	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage, serviceProvider: serviceProvider}
 
 	instance.AlertsChannel = make(chan amqp.Alerts, alertsChannelSize)
 	instance.closeChannel = make(chan bool)
@@ -100,7 +110,7 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 
 	var version *uint64
 
-	if service, err := instance.db.GetService(source); err == nil {
+	if service, err := instance.serviceProvider.GetService(source); err == nil {
 		version = &service.Version
 	}
 
@@ -172,7 +182,7 @@ func (instance *Alerts) setupJournal() (err error) {
 		return err
 	}
 
-	cursor, err := instance.db.GetJournalCursor()
+	cursor, err := instance.cursorStorage.GetJournalCursor()
 	if err != nil {
 		return err
 	}
@@ -234,7 +244,7 @@ func (instance *Alerts) processJournal() (err error) {
 			}
 
 			if cursor != instance.cursor {
-				if err = instance.db.SetJournalCursor(cursor); err != nil {
+				if err = instance.cursorStorage.SetJournalCursor(cursor); err != nil {
 					return err
 				}
 
@@ -260,7 +270,7 @@ func (instance *Alerts) processJournal() (err error) {
 			unit := entry.Fields["UNIT"]
 
 			if strings.HasPrefix(unit, "aos") {
-				service, err := instance.db.GetServiceByServiceName(unit)
+				service, err := instance.serviceProvider.GetServiceByServiceName(unit)
 				if err != nil {
 					continue
 				}

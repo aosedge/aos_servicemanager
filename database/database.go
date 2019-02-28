@@ -34,42 +34,6 @@ var ErrVersionMismatch = errors.New("Version mismatch")
  * Types
  ******************************************************************************/
 
-// ServiceItf provides API to create, remove or access services DB
-type ServiceItf interface {
-	AddService(entry ServiceEntry) (err error)
-	UpdateService(entry ServiceEntry) (err error)
-	RemoveService(id string) (err error)
-	GetService(id string) (entry ServiceEntry, err error)
-	GetServices() (entries []ServiceEntry, err error)
-	GetServiceByServiceName(serviceName string) (entry ServiceEntry, err error)
-	SetServiceStatus(id string, status int) (err error)
-	SetServiceState(id string, state int) (err error)
-	SetServiceStartTime(id string, time time.Time) (err error)
-	AddUsersService(users []string, serviceID string) (err error)
-	RemoveUsersService(users []string, serviceID string) (err error)
-	GetUsersServices(users []string) (entries []ServiceEntry, err error)
-	IsUsersService(users []string, id string) (result bool, err error)
-	GetUsersList() (usersList [][]string, err error)
-	DeleteUsersByServiceID(id string) (err error)
-	GetUsersEntry(users []string, serviceID string) (entry UsersEntry, err error)
-	GetUsersEntriesByServiceID(serviceID string) (entries []UsersEntry, err error)
-	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
-	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
-}
-
-// MonitoringItf provides API to create, remove or access monitoring DB
-type MonitoringItf interface {
-	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
-	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
-	RemoveTrafficMonitorData(chain string) (err error)
-}
-
-// JournalItf provides API to set and get journal cursor
-type JournalItf interface {
-	SetJournalCursor(cursor string) (err error)
-	GetJournalCursor() (cursor string, err error)
-}
-
 // Database structure with database information
 type Database struct {
 	sql *sql.DB

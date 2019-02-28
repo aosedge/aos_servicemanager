@@ -329,7 +329,7 @@ func main() {
 	defer db.Close()
 
 	// Create alerts
-	alerts, err := alerts.New(config, db)
+	alerts, err := alerts.New(config, db, db)
 	if err != nil {
 		log.Fatalf("Can't create alerts: %s", err)
 	}

@@ -29,12 +29,17 @@ const (
  * Types
  ******************************************************************************/
 
+// ServiceProvider provides service entry
+type ServiceProvider interface {
+	GetService(id string) (entry database.ServiceEntry, err error)
+}
+
 // Logging instance
 type Logging struct {
 	LogChannel chan amqp.PushServiceLog
 
-	db     database.ServiceItf
-	config config.Logging
+	serviceProvider ServiceProvider
+	config          config.Logging
 }
 
 /*******************************************************************************
@@ -42,10 +47,10 @@ type Logging struct {
  ******************************************************************************/
 
 // New creates new logging object
-func New(config *config.Config, db database.ServiceItf) (instance *Logging, err error) {
+func New(config *config.Config, serviceProvider ServiceProvider) (instance *Logging, err error) {
 	log.Debug("New logging")
 
-	instance = &Logging{db: db, config: config.Logging}
+	instance = &Logging{serviceProvider: serviceProvider, config: config.Logging}
 
 	instance.LogChannel = make(chan amqp.PushServiceLog, logChannelSize)
 
@@ -100,7 +105,7 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 
 	var service database.ServiceEntry
 
-	service, err = instance.db.GetService(request.ServiceID)
+	service, err = instance.serviceProvider.GetService(request.ServiceID)
 	if err != nil {
 		panic("Can't get service")
 	}
@@ -191,7 +196,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 	var service database.ServiceEntry
 
-	service, err = instance.db.GetService(request.ServiceID)
+	service, err = instance.serviceProvider.GetService(request.ServiceID)
 	if err != nil {
 		panic("Can't get service")
 	}

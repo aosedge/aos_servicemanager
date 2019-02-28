@@ -99,7 +99,7 @@ func (handler *imageHandler) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	return outputFile, nil
 }
 
-func downloadAndUnpackImage(downloader downloadItf, serviceInfo amqp.ServiceInfoFromCloud, installDir string) (err error) {
+func downloadAndUnpackImage(downloader downloader, serviceInfo amqp.ServiceInfoFromCloud, installDir string) (err error) {
 	// download image
 	image, err := downloader.downloadService(serviceInfo)
 	if image != "" {

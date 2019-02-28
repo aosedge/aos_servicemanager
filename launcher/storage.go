@@ -39,7 +39,7 @@ const (
  ******************************************************************************/
 
 type storageHandler struct {
-	db                  database.ServiceItf
+	serviceProvider     ServiceProvider
 	storagePath         string
 	mutex               sync.Mutex
 	watcher             *fsnotify.Watcher
@@ -64,10 +64,10 @@ type stateParams struct {
  * Storage related API
  ******************************************************************************/
 
-func newStorageHandler(workingDir string, db database.ServiceItf,
+func newStorageHandler(workingDir string, serviceProvider ServiceProvider,
 	newStateChannel chan<- NewState, stateRequestChannel chan<- StateRequest) (handler *storageHandler, err error) {
 	handler = &storageHandler{
-		db:                  db,
+		serviceProvider:     serviceProvider,
 		storagePath:         path.Join(workingDir, storageDir),
 		newStateChannel:     newStateChannel,
 		stateRequestChannel: stateRequestChannel}
@@ -106,7 +106,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		"storageLimit": service.StorageLimit,
 		"stateLimit":   service.StateLimit}).Debug("Mount storage folder")
 
-	entry, err := handler.db.GetUsersEntry(users, service.ID)
+	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 			os.RemoveAll(entry.StorageFolder)
 		}
 
-		if err = handler.db.SetUsersStorageFolder(users, service.ID, ""); err != nil {
+		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, ""); err != nil {
 			return err
 		}
 
@@ -144,7 +144,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 			return err
 		}
 
-		if err = handler.db.SetUsersStorageFolder(users, service.ID, entry.StorageFolder); err != nil {
+		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, entry.StorageFolder); err != nil {
 			return err
 		}
 
@@ -158,7 +158,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 			}
 		}
 
-		if err = handler.db.SetUsersStateChecksum(users, service.ID, []byte{}); err != nil {
+		if err = handler.serviceProvider.SetUsersStateChecksum(users, service.ID, []byte{}); err != nil {
 			return err
 		}
 	}
@@ -184,7 +184,7 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 		return nil
 	}
 
-	entry, err := handler.db.GetUsersEntry(users, service.ID)
+	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
 	if err != nil {
 		if err == database.ErrNotExist {
 			return nil
@@ -240,7 +240,7 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 		return errors.New("State is too big")
 	}
 
-	entry, err := handler.db.GetUsersEntry(users, service.ID)
+	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 		return err
 	}
 
-	if err = handler.db.SetUsersStateChecksum(users, service.ID, sumBytes); err != nil {
+	if err = handler.serviceProvider.SetUsersStateChecksum(users, service.ID, sumBytes); err != nil {
 		return err
 	}
 
@@ -264,7 +264,7 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 func (handler *storageHandler) startStateWatching(users []string, service database.ServiceEntry) (err error) {
 	// no mutex as it is called from locked context
 
-	entry, err := handler.db.GetUsersEntry(users, service.ID)
+	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
 	if err != nil {
 		return err
 	}
@@ -340,7 +340,7 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 			"serviceID":     state.serviceID,
 			"correlationID": state.correlationID}).Debug("State is accepted")
 
-		if err := handler.db.SetUsersStateChecksum(state.users, state.serviceID, checksum); err != nil {
+		if err := handler.serviceProvider.SetUsersStateChecksum(state.users, state.serviceID, checksum); err != nil {
 			log.WithField("serviceID", state.serviceID).Errorf("Can't set state checksum: %s", err)
 		}
 	} else {

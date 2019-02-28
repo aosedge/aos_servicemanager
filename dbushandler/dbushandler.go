@@ -48,10 +48,15 @@ const intro = `
  * Types
  ******************************************************************************/
 
+// ServiceProvider provides service entry
+type ServiceProvider interface {
+	GetService(id string) (entry database.ServiceEntry, err error)
+}
+
 // DBusHandler d-bus interface structure
 type DBusHandler struct {
-	db       database.ServiceItf
-	dbusConn *dbus.Conn
+	serviceProvider ServiceProvider
+	dbusConn        *dbus.Conn
 }
 
 /*******************************************************************************
@@ -59,7 +64,7 @@ type DBusHandler struct {
  ******************************************************************************/
 
 // New creates and launch d-bus server
-func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
+func New(serviceProvider ServiceProvider) (dbusHandler *DBusHandler, err error) {
 	conn, err := dbus.SessionBus()
 	if err != nil {
 		return dbusHandler, err
@@ -75,7 +80,7 @@ func New(db database.ServiceItf) (dbusHandler *DBusHandler, err error) {
 
 	log.Debug("Start D-Bus server")
 
-	server := DBusHandler{dbusConn: conn, db: db}
+	server := DBusHandler{dbusConn: conn, serviceProvider: serviceProvider}
 
 	conn.Export(server, ObjectPath, InterfaceName)
 	conn.Export(introspect.Introspectable(intro), ObjectPath,
@@ -107,7 +112,7 @@ func (dbusHandler *DBusHandler) Close() (err error) {
 
 // GetPermission get permossion d-bus method
 func (dbusHandler DBusHandler) GetPermission(token string) (result, status string, dbusErr *dbus.Error) {
-	service, err := dbusHandler.db.GetService(token)
+	service, err := dbusHandler.serviceProvider.GetService(token)
 	if err != nil {
 		return "", err.Error(), nil
 	}

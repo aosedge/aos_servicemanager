@@ -20,7 +20,6 @@ import (
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/alerts"
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
@@ -43,18 +42,24 @@ const (
  * Types
  ******************************************************************************/
 
-// ServiceMonitoringItf provides API to start/stop service monitoring
-type ServiceMonitoringItf interface {
-	StartMonitorService(serviceID string, monitoringConfig ServiceMonitoringConfig) (err error)
-	StopMonitorService(serviceID string) (err error)
+// TrafficStorage provides API to create, remove or access monitoring data
+type TrafficStorage interface {
+	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
+	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
+	RemoveTrafficMonitorData(chain string) (err error)
+}
+
+// ResourceAlertSender interface to send resource alerts
+type ResourceAlertSender interface {
+	SendResourceAlert(source, resource string, time time.Time, value uint64)
 }
 
 // Monitor instance
 type Monitor struct {
 	DataChannel chan amqp.MonitoringData
 
-	db             database.MonitoringItf
-	resourceAlerts alerts.ResourceAlertsItf
+	trafficStorage TrafficStorage
+	resourceAlerts ResourceAlertSender
 
 	iptables      *iptables.IPTables
 	trafficPeriod int
@@ -118,15 +123,15 @@ var ErrDisabled = errors.New("Monitoring is disabled")
  ******************************************************************************/
 
 // New creates new monitor instance
-func New(config *config.Config, db database.MonitoringItf,
-	resourceAlerts alerts.ResourceAlertsItf) (monitor *Monitor, err error) {
+func New(config *config.Config, trafficStorage TrafficStorage,
+	resourceAlerts ResourceAlertSender) (monitor *Monitor, err error) {
 	log.Debug("Create monitor")
 
 	if config.Monitoring.Disabled {
 		return nil, ErrDisabled
 	}
 
-	monitor = &Monitor{db: db, resourceAlerts: resourceAlerts}
+	monitor = &Monitor{trafficStorage: trafficStorage, resourceAlerts: resourceAlerts}
 
 	monitor.DataChannel = make(chan amqp.MonitoringData, config.Monitoring.MaxOfflineMessages)
 
@@ -615,7 +620,7 @@ func (monitor *Monitor) processTraffic() {
 
 func (monitor *Monitor) saveTraffic() {
 	for chain, traffic := range monitor.trafficMap {
-		if err := monitor.db.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue); err != nil {
+		if err := monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue); err != nil {
 			log.WithField("chain", chain).Errorf("Can't set traffic data: %s", err)
 		}
 	}
@@ -803,7 +808,7 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 	traffic := trafficMonitoring{addresses: addresses}
 
 	if traffic.lastUpdate, traffic.initialValue, err =
-		monitor.db.GetTrafficMonitorData(chain); err != nil && err != database.ErrNotExist {
+		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && err != database.ErrNotExist {
 		return err
 	}
 
@@ -870,7 +875,7 @@ func (monitor *Monitor) deleteTrafficChain(chain, rootChain string) (err error) 
 
 	// Store traffic data to DB
 	if traffic, ok := monitor.trafficMap[chain]; ok {
-		monitor.db.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
+		monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
 	}
 
 	delete(monitor.trafficMap, chain)
