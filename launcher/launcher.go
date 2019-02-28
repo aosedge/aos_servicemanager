@@ -274,12 +274,12 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo, launcher.doAction})
+	launcher.actionHandler.PutInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo, launcher.doActionInstall})
 }
 
 // UninstallService stops and removes service
 func (launcher *Launcher) UninstallService(id string) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionUninstall, id, nil, launcher.doAction})
+	launcher.actionHandler.PutInQueue(serviceAction{ActionUninstall, id, nil, launcher.doActionUninstall})
 }
 
 // GetServicesInfo returns information about all installed services
@@ -446,26 +446,33 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 	return true
 }
 
-func (launcher *Launcher) doAction(action actionType, id string, data interface{}) {
+func (launcher *Launcher) doActionInstall(action actionType, id string, data interface{}) {
 	status := ActionStatus{Action: action, ID: id}
-
-	switch action {
-	case ActionInstall:
-		serviceInfo := data.(amqp.ServiceInfoFromCloud)
-		status.Version = serviceInfo.Version
-
-		status.Err = launcher.installService(serviceInfo)
-
-		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
-		if err != nil {
-			log.Errorf("Can't get users entry: %s", err)
-		}
-
-		status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
-
-	case ActionUninstall:
-		status.Version, status.Err = launcher.uninstallService(status.ID)
+	serviceInfo, ok := data.(amqp.ServiceInfoFromCloud)
+	if !ok {
+		status.Err = errors.New("wrong data type")
+		launcher.StatusChannel <- status
+		return
 	}
+
+	status.Version = serviceInfo.Version
+	status.Err = launcher.installService(serviceInfo)
+
+	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
+	if err != nil {
+		status.Err = err
+		launcher.StatusChannel <- status
+		return
+	}
+
+	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
+
+	launcher.StatusChannel <- status
+}
+
+func (launcher *Launcher) doActionUninstall(action actionType, id string, data interface{}) {
+	status := ActionStatus{Action: action, ID: id}
+	status.Version, status.Err = launcher.uninstallService(status.ID)
 
 	launcher.StatusChannel <- status
 }
