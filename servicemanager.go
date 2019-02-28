@@ -124,9 +124,7 @@ func processAmqpMessage(
 			"serviceID": data.ServiceID,
 			"result":    data.Result}).Info("Receive state acceptance")
 
-		if err := launcherHandler.StateAcceptance(*data, message.CorrelationID); err != nil {
-			log.WithField("serviceID", data.ServiceID).Errorf("Accept state error: %s", err)
-		}
+		launcherHandler.StateAcceptance(*data, message.CorrelationID)
 
 	case *amqp.UpdateState:
 		log.WithFields(log.Fields{

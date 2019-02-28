@@ -67,7 +67,10 @@ const (
 const (
 	ActionInstall = iota
 	ActionRemove
+	ActionStart
+	ActionStop
 	ActionUpdateState
+	ActionStateAcceptance
 )
 
 /*******************************************************************************
@@ -159,6 +162,11 @@ type Launcher struct {
 	runcPath         string
 	netnsPath        string
 	wonderShaperPath string
+}
+
+type stateAcceptance struct {
+	correlationID string
+	acceptance    amqp.StateAcceptance
 }
 
 /*******************************************************************************
@@ -323,8 +331,9 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 }
 
 // StateAcceptance notifies launcher about new state acceptance
-func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
-	return launcher.storageHandler.StateAcceptance(acceptance, correlationID)
+func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) {
+	launcher.actionHandler.PutInQueue(serviceAction{ActionStateAcceptance, acceptance.ServiceID,
+		stateAcceptance{correlationID, acceptance}, launcher.doStateAcceptance})
 }
 
 // UpdateState updates service state
@@ -585,7 +594,6 @@ func (launcher *Launcher) doActionRemove(id string) (version uint64, err error) 
 }
 
 func (launcher *Launcher) doUpdateState(action actionType, id string, data interface{}) {
-
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		log.Errorf("Can't get service: %s", err)
@@ -610,6 +618,19 @@ func (launcher *Launcher) doUpdateState(action actionType, id string, data inter
 
 	if err = launcher.startService(service); err != nil {
 		log.Errorf("Can't start service: %s", err)
+		return
+	}
+}
+
+func (launcher *Launcher) doStateAcceptance(action actionType, id string, data interface{}) {
+	stateAcceptance, ok := data.(stateAcceptance)
+	if !ok {
+		log.Error("Wrong data type")
+		return
+	}
+
+	if err := launcher.storageHandler.StateAcceptance(stateAcceptance.acceptance, stateAcceptance.correlationID); err != nil {
+		log.Errorf("Can't accept state: %s", err)
 		return
 	}
 }
@@ -724,14 +745,16 @@ func (launcher *Launcher) startServices() {
 
 	// Start all services in parallel
 	for _, service := range services {
-		go func(service database.ServiceEntry) {
-			err := launcher.startService(service)
-			if err != nil {
-				log.WithField("id", service.ID).Errorf("Can't start service: %s", err)
-			}
+		launcher.actionHandler.PutInQueue(serviceAction{ActionStart, service.ID, service,
+			func(action actionType, id string, data interface{}) {
+				service, ok := data.(database.ServiceEntry)
+				if !ok {
+					statusChannel <- errors.New("wrong data type")
+					return
+				}
 
-			statusChannel <- err
-		}(service)
+				statusChannel <- launcher.startService(service)
+			}})
 	}
 
 	// Wait all services are started
@@ -793,9 +816,16 @@ func (launcher *Launcher) stopServices() {
 
 	// Stop all services in parallel
 	for _, service := range services {
-		go func(service database.ServiceEntry) {
-			statusChannel <- launcher.stopService(service)
-		}(service)
+		launcher.actionHandler.PutInQueue(serviceAction{ActionStop, service.ID, service,
+			func(action actionType, id string, data interface{}) {
+				service, ok := data.(database.ServiceEntry)
+				if !ok {
+					statusChannel <- errors.New("wrong data type")
+					return
+				}
+
+				statusChannel <- launcher.stopService(service)
+			}})
 	}
 
 	// Wait all services are stopped

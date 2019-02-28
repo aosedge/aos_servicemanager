@@ -1142,10 +1142,7 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", newState.State)
 		}
 
-		if err = launcher.StateAcceptance(amqp.StateAcceptance{
-			Result: "accepted"}, newState.CorrelationID); err != nil {
-			t.Errorf("Can't accept state: %s", err)
-		}
+		launcher.StateAcceptance(amqp.StateAcceptance{Result: "accepted"}, newState.CorrelationID)
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1165,11 +1162,7 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", newState.State)
 		}
 
-		if err = launcher.StateAcceptance(amqp.StateAcceptance{
-			Result: "rejected",
-			Reason: "just because"}, newState.CorrelationID); err != nil {
-			t.Errorf("Can't reject state: %s", err)
-		}
+		launcher.StateAcceptance(amqp.StateAcceptance{Result: "rejected", Reason: "just because"}, newState.CorrelationID)
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
