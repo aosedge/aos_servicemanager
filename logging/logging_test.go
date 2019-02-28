@@ -236,7 +236,7 @@ func checkEmptyLog(t *testing.T, logChannel chan amqp.PushServiceLog) {
 				return
 			}
 
-			if result.Data != nil {
+			if (result.Data == nil) || len(*result.Data) != 0 {
 				t.Error("Empty log expected")
 				return
 			}
