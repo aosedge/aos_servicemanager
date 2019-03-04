@@ -488,12 +488,8 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices+numUninstallServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			if status.Action == ActionInstall {
-				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
-			} else {
-				t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
-			}
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s", status.Error, status.ID)
 		}
 	}
 
@@ -518,8 +514,8 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices-numUninstallServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
 
@@ -554,8 +550,8 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s", status.Error, status.ID)
 		}
 	}
 
@@ -594,8 +590,8 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
 
@@ -632,12 +628,12 @@ func TestErrors(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		status := <-launcher.StatusChannel
 		switch {
-		case status.Version == 5 && status.Err != nil:
-			t.Errorf("Can't install service %s version %d: %s", status.ID, status.Version, status.Err)
-		case status.Version == 4 && status.Err == nil:
+		case status.Version == 5 && status.Error != "":
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		case status.Version == 4 && status.Error == "":
 			t.Errorf("Service %s version %d should not be installed", status.ID, status.Version)
-		case status.Version == 6 && status.Err != nil:
-			t.Errorf("Can't install service %s version %d: %s", status.ID, status.Version, status.Err)
+		case status.Version == 6 && status.Error != "":
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
 
@@ -680,8 +676,8 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
@@ -703,8 +699,8 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
 
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	n, _, err = serverConn.ReadFromUDP(buf)
@@ -741,8 +737,8 @@ func TestNetworkSpeed(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
 
@@ -818,8 +814,8 @@ func TestVisPermissions(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	service, err := db.GetService("service0")
@@ -866,8 +862,8 @@ func TestUsersServices(t *testing.T) {
 			launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("user%d_service%d", i, j)})
 		}
 		for i := 0; i < numServices; i++ {
-			if status := <-launcher.StatusChannel; status.Err != nil {
-				t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+			if status := <-launcher.StatusChannel; status.Error != "" {
+				t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 			}
 		}
 
@@ -953,8 +949,8 @@ func TestServiceTTL(t *testing.T) {
 		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
 	}
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Err != nil {
-			t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+		if status := <-launcher.StatusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
 
@@ -1023,8 +1019,8 @@ func TestServiceMonitoring(t *testing.T) {
 			MaxThreshold: 20}}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", ServiceMonitoring: &serviceAlerts})
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Errorf("Can't install service %s: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	select {
@@ -1042,8 +1038,8 @@ func TestServiceMonitoring(t *testing.T) {
 	}
 
 	launcher.UninstallService("Service1")
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Errorf("Can't remove service %s: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	select {
@@ -1073,8 +1069,8 @@ func TestServiceStorage(t *testing.T) {
 	}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	ftp, err := launcher.connectToFtp("service0")
@@ -1110,8 +1106,8 @@ func TestServiceState(t *testing.T) {
 	}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	ftp, err := launcher.connectToFtp("service0")
@@ -1208,8 +1204,8 @@ func TestServiceState(t *testing.T) {
 	// Check state after update
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
-	if status := <-launcher.StatusChannel; status.Err != nil {
-		t.Fatalf("Can't install %s service: %s", status.ID, status.Err)
+	if status := <-launcher.StatusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {

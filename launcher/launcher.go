@@ -108,15 +108,6 @@ type ServiceMonitor interface {
 
 type actionType int
 
-// ActionStatus status of performed action
-type ActionStatus struct {
-	Action        actionType
-	ID            string
-	Version       uint64
-	StateChecksum string
-	Err           error
-}
-
 // NewState new state message
 type NewState struct {
 	CorrelationID string
@@ -138,7 +129,7 @@ type downloader interface {
 // Launcher instance
 type Launcher struct {
 	// StatusChannel used to return execute command statuses
-	StatusChannel chan ActionStatus
+	StatusChannel chan amqp.ServiceInfo
 	// NewStateChannel used to notify about new service state
 	NewStateChannel chan NewState
 	// StateRequestChannel used to request last or default service state
@@ -180,7 +171,7 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 
 	launcher = &Launcher{serviceProvider: serviceProvider, config: config, monitor: monitor}
 
-	launcher.StatusChannel = make(chan ActionStatus, maxExecutedActions)
+	launcher.StatusChannel = make(chan amqp.ServiceInfo, maxExecutedActions)
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 	launcher.StateRequestChannel = make(chan StateRequest, stateChannelSize)
 
@@ -447,22 +438,30 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 }
 
 func (launcher *Launcher) doActionInstall(action actionType, id string, data interface{}) {
-	status := ActionStatus{Action: action, ID: id}
+	status := amqp.ServiceInfo{ID: id, Status: "installed"}
+
+	defer func() {
+		if r := recover(); r != nil {
+			status.Status = "error"
+			status.Error = "Can't install service: " + r.(string)
+			launcher.StatusChannel <- status
+		}
+	}()
+
 	serviceInfo, ok := data.(amqp.ServiceInfoFromCloud)
 	if !ok {
-		status.Err = errors.New("wrong data type")
-		launcher.StatusChannel <- status
-		return
+		panic("wrong data type")
 	}
 
 	status.Version = serviceInfo.Version
-	status.Err = launcher.installService(serviceInfo)
+
+	if err := launcher.installService(serviceInfo); err != nil {
+		panic(err.Error())
+	}
 
 	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
 	if err != nil {
-		status.Err = err
-		launcher.StatusChannel <- status
-		return
+		panic(err.Error())
 	}
 
 	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
@@ -471,8 +470,14 @@ func (launcher *Launcher) doActionInstall(action actionType, id string, data int
 }
 
 func (launcher *Launcher) doActionUninstall(action actionType, id string, data interface{}) {
-	status := ActionStatus{Action: action, ID: id}
-	status.Version, status.Err = launcher.uninstallService(status.ID)
+	var err error
+
+	status := amqp.ServiceInfo{ID: id, Status: "removed"}
+	status.Version, err = launcher.uninstallService(status.ID)
+	if err != nil {
+		status.Status = "error"
+		status.Error = err.Error()
+	}
 
 	launcher.StatusChannel <- status
 }
@@ -948,11 +953,10 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 			if err := launcher.restoreService(oldService); err != nil {
 				launcher.removeService(oldService)
 
-				launcher.StatusChannel <- ActionStatus{
-					Action:  ActionUninstall,
+				launcher.StatusChannel <- amqp.ServiceInfo{
 					ID:      oldService.ID,
 					Version: oldService.Version,
-					Err:     nil}
+					Status:  "removed"}
 			}
 		}
 	}()
@@ -979,11 +983,10 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Remove service dir failed")
 	}
 
-	launcher.StatusChannel <- ActionStatus{
-		Action:  ActionUninstall,
+	launcher.StatusChannel <- amqp.ServiceInfo{
 		ID:      oldService.ID,
 		Version: oldService.Version,
-		Err:     nil}
+		Status:  "removed"}
 
 	return nil
 }

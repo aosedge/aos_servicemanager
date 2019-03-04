@@ -154,50 +154,6 @@ func processAmqpMessage(
 	return nil
 }
 
-func sendServiceStatus(amqpHandler *amqp.AmqpHandler, status launcher.ActionStatus) (err error) {
-	info := amqp.ServiceInfo{ID: status.ID, Version: status.Version, StateChecksum: status.StateChecksum}
-
-	switch status.Action {
-	case launcher.ActionInstall:
-		if status.Err != nil {
-			info.Status = "error"
-			info.Error = "Can't install service"
-
-			log.WithFields(log.Fields{
-				"id":      status.ID,
-				"version": status.Version}).Errorf("Can't install service: %s", status.Err)
-		} else {
-			info.Status = "installed"
-
-			log.WithFields(log.Fields{
-				"id":      status.ID,
-				"version": status.Version}).Info("Service successfully installed")
-		}
-
-	case launcher.ActionUninstall:
-		if status.Err != nil {
-			info.Status = "error"
-			info.Error = "Can't remove service"
-
-			log.WithFields(log.Fields{
-				"id":      status.ID,
-				"version": status.Version}).Errorf("Can't remove service: %s", status.Err)
-		} else {
-			info.Status = "removed"
-
-			log.WithFields(log.Fields{
-				"id":      status.ID,
-				"version": status.Version}).Info("Service successfully removed")
-		}
-	}
-
-	if err = amqpHandler.SendServiceStatus(info); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func run(
 	amqpHandler *amqp.AmqpHandler,
 	launcherHandler *launcher.Launcher,
@@ -228,7 +184,7 @@ func run(
 			}
 
 		case status := <-launcherHandler.StatusChannel:
-			if err := sendServiceStatus(amqpHandler, status); err != nil {
+			if err = amqpHandler.SendServiceStatus(status); err != nil {
 				log.Errorf("Error send service status message: %s", err)
 			}
 
