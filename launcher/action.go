@@ -25,10 +25,9 @@ type actionHandler struct {
 }
 
 type serviceAction struct {
-	action   actionType
 	id       string
 	data     interface{}
-	doAction func(actionType, string, interface{})
+	doAction func(string, interface{})
 }
 
 /*******************************************************************************
@@ -74,7 +73,7 @@ func (handler *actionHandler) isIDInWorkQueue(id string) (result bool) {
 func (handler *actionHandler) processAction(item *list.Element) {
 	action := item.Value.(serviceAction)
 
-	action.doAction(action.action, action.id, action.data)
+	action.doAction(action.id, action.data)
 
 	handler.mutex.Lock()
 	defer handler.mutex.Unlock()

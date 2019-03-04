@@ -63,16 +63,6 @@ const (
 	stateStopped
 )
 
-// Action
-const (
-	ActionInstall = iota
-	ActionUninstall
-	ActionStart
-	ActionStop
-	ActionUpdateState
-	ActionStateAcceptance
-)
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -265,12 +255,12 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionInstall, serviceInfo.ID, serviceInfo, launcher.doActionInstall})
+	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, serviceInfo, launcher.doActionInstall})
 }
 
 // UninstallService stops and removes service
 func (launcher *Launcher) UninstallService(id string) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionUninstall, id, nil, launcher.doActionUninstall})
+	launcher.actionHandler.PutInQueue(serviceAction{id, nil, launcher.doActionUninstall})
 }
 
 // GetServicesInfo returns information about all installed services
@@ -323,13 +313,13 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 // StateAcceptance notifies launcher about new state acceptance
 func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionStateAcceptance, acceptance.ServiceID,
+	launcher.actionHandler.PutInQueue(serviceAction{acceptance.ServiceID,
 		stateAcceptance{correlationID, acceptance}, launcher.doStateAcceptance})
 }
 
 // UpdateState updates service state
 func (launcher *Launcher) UpdateState(state amqp.UpdateState) {
-	launcher.actionHandler.PutInQueue(serviceAction{ActionUpdateState, state.ServiceID, state, launcher.doUpdateState})
+	launcher.actionHandler.PutInQueue(serviceAction{state.ServiceID, state, launcher.doUpdateState})
 }
 
 // Cleanup deletes all AOS services, their storages and states
@@ -437,7 +427,7 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 	return true
 }
 
-func (launcher *Launcher) doActionInstall(action actionType, id string, data interface{}) {
+func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 	status := amqp.ServiceInfo{ID: id, Status: "installed"}
 
 	defer func() {
@@ -469,7 +459,7 @@ func (launcher *Launcher) doActionInstall(action actionType, id string, data int
 	launcher.StatusChannel <- status
 }
 
-func (launcher *Launcher) doActionUninstall(action actionType, id string, data interface{}) {
+func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
 	var err error
 
 	status := amqp.ServiceInfo{ID: id, Status: "removed"}
@@ -605,7 +595,7 @@ func (launcher *Launcher) uninstallService(id string) (version uint64, err error
 	return version, nil
 }
 
-func (launcher *Launcher) doUpdateState(action actionType, id string, data interface{}) {
+func (launcher *Launcher) doUpdateState(id string, data interface{}) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		log.Errorf("Can't get service: %s", err)
@@ -634,7 +624,7 @@ func (launcher *Launcher) doUpdateState(action actionType, id string, data inter
 	}
 }
 
-func (launcher *Launcher) doStateAcceptance(action actionType, id string, data interface{}) {
+func (launcher *Launcher) doStateAcceptance(id string, data interface{}) {
 	stateAcceptance, ok := data.(stateAcceptance)
 	if !ok {
 		log.Error("Wrong data type")
@@ -757,8 +747,8 @@ func (launcher *Launcher) startServices() {
 
 	// Start all services in parallel
 	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{ActionStart, service.ID, service,
-			func(action actionType, id string, data interface{}) {
+		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+			func(id string, data interface{}) {
 				service, ok := data.(database.ServiceEntry)
 				if !ok {
 					statusChannel <- errors.New("wrong data type")
@@ -828,8 +818,8 @@ func (launcher *Launcher) stopServices() {
 
 	// Stop all services in parallel
 	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{ActionStop, service.ID, service,
-			func(action actionType, id string, data interface{}) {
+		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+			func(id string, data interface{}) {
 				service, ok := data.(database.ServiceEntry)
 				if !ok {
 					statusChannel <- errors.New("wrong data type")
