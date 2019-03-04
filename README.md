@@ -12,13 +12,14 @@ See architecture [document](doc/architecture.md) for more details.
 
 # Build
 
-## Required packages
+## Required GO packages
 
 To build SM, following additional packages should be installed:
 * github.com/anexia-it/fsquota
 * github.com/cavaliercoder/grab
-* github.com/coreos/go-iptables/iptables
-* github.com/coreos/go-systemd/dbus
+* github.com/coreos/go-iptables
+* github.com/coreos/go-systemd
+* github.com/coreos/pkg
 * github.com/fsnotify/fsnotify
 * github.com/godbus/dbus
 * github.com/google/uuid
@@ -29,6 +30,9 @@ To build SM, following additional packages should be installed:
 * github.com/sirupsen/logrus
 * github.com/streadway/amqp
 
+## Required native packages
+* libsystemd-dev
+
 ## Native build
 
 ```
@@ -37,8 +41,14 @@ go build
 
 ## ARM 64 build
 
+Install arm64 toolchain:
 ```
-CC=arm-linux-gnueabi-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64
+sudo apt install gcc-aarch64-linux-gnu
+```
+Build:
+
+```
+CC=gcc-aarch64-linux-gnu CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go buld
 ```
 
 # Configuration
