@@ -43,7 +43,8 @@ type VisClient struct {
 	vin   string
 	users []string
 
-	mutex     sync.Mutex
+	sync.Mutex
+
 	requestID uint64
 
 	subscribeMap sync.Map
@@ -92,8 +93,8 @@ func New() (vis *VisClient, err error) {
 
 // Connect connects to the VIS
 func (vis *VisClient) Connect(url string) (err error) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	log.WithField("url", url).Debug("Connect to VIS")
 
@@ -127,24 +128,24 @@ func (vis *VisClient) Connect(url string) (err error) {
 
 // Disconnect disconnects from the VIS
 func (vis *VisClient) Disconnect() (err error) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	return vis.disconnect()
 }
 
 // IsConnected returns true if connected to VIS
 func (vis *VisClient) IsConnected() (result bool) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	return vis.isConnected
 }
 
 // GetVIN returns VIN
 func (vis *VisClient) GetVIN() (vin string, err error) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	if vis.webConn == nil {
 		return "", errors.New("Not connected to VIS")
@@ -175,8 +176,8 @@ func (vis *VisClient) GetVIN() (vin string, err error) {
 
 // GetUsers returns user list
 func (vis *VisClient) GetUsers() (users []string, err error) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	if vis.webConn == nil {
 		return nil, errors.New("Not connected to VIS")
@@ -344,8 +345,8 @@ func (vis *VisClient) processMessages() {
 	for {
 		_, message, err := vis.webConn.ReadMessage()
 		if err != nil {
-			vis.mutex.Lock()
-			defer vis.mutex.Unlock()
+			vis.Lock()
+			defer vis.Unlock()
 
 			if vis.isConnected {
 				vis.webConn.Close()
@@ -400,8 +401,8 @@ func (vis *VisClient) setUsers(rsp *visResponse) (err error) {
 }
 
 func (vis *VisClient) handleUsersChanged(rsp *visResponse) {
-	vis.mutex.Lock()
-	defer vis.mutex.Unlock()
+	vis.Lock()
+	defer vis.Unlock()
 
 	if err := vis.setUsers(rsp); err != nil {
 		log.Errorf("Can't set users: %s", err)

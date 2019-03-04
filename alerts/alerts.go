@@ -51,9 +51,10 @@ type Alerts struct {
 
 	alerts amqp.Alerts
 
+	sync.Mutex
+
 	journal      *sdjournal.Journal
 	cursor       string
-	mutex        sync.Mutex
 	ticker       *time.Ticker
 	closeChannel chan bool
 }
@@ -99,8 +100,8 @@ func (instance *Alerts) Close() {
 
 // SendResourceAlert sends resource alert
 func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
-	instance.mutex.Lock()
-	defer instance.mutex.Unlock()
+	instance.Lock()
+	defer instance.Unlock()
 
 	log.WithFields(log.Fields{
 		"timestamp": time,
@@ -131,8 +132,8 @@ func (instance *Alerts) Levels() (levels []log.Level) {
 
 // Fire called to hook selected log (log hook interface)
 func (instance *Alerts) Fire(entry *log.Entry) (err error) {
-	instance.mutex.Lock()
-	defer instance.mutex.Unlock()
+	instance.Lock()
+	defer instance.Unlock()
 
 	message := entry.Message
 
@@ -215,12 +216,12 @@ func (instance *Alerts) setupJournal() (err error) {
 					log.Errorf("Journal process error: %s", err)
 				}
 
-				instance.mutex.Lock()
+				instance.Lock()
 				if len(instance.alerts.Data) != 0 {
 					instance.AlertsChannel <- instance.alerts
 					instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 				}
-				instance.mutex.Unlock()
+				instance.Unlock()
 
 			case <-instance.closeChannel:
 				return
@@ -292,8 +293,8 @@ func (instance *Alerts) processJournal() (err error) {
 			Version:   version,
 			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}}
 
-		instance.mutex.Lock()
+		instance.Lock()
 		instance.alerts.Data = append(instance.alerts.Data, item)
-		instance.mutex.Unlock()
+		instance.Unlock()
 	}
 }

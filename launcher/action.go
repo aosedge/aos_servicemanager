@@ -18,7 +18,7 @@ const (
  ******************************************************************************/
 
 type actionHandler struct {
-	mutex sync.Mutex
+	sync.Mutex
 
 	waitQueue *list.List
 	workQueue *list.List
@@ -44,8 +44,8 @@ func newActionHandler() (handler *actionHandler, err error) {
 }
 
 func (handler *actionHandler) PutInQueue(action serviceAction) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	if handler.isIDInWorkQueue(action.id) {
 		handler.waitQueue.PushBack(action)
@@ -75,8 +75,8 @@ func (handler *actionHandler) processAction(item *list.Element) {
 
 	action.doAction(action.id, action.data)
 
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	handler.workQueue.Remove(item)
 

@@ -39,9 +39,9 @@ const (
  ******************************************************************************/
 
 type storageHandler struct {
-	serviceProvider     ServiceProvider
-	storagePath         string
-	mutex               sync.Mutex
+	serviceProvider ServiceProvider
+	storagePath     string
+	sync.Mutex
 	watcher             *fsnotify.Watcher
 	statesMap           map[string]*stateParams
 	newStateChannel     chan<- NewState
@@ -98,8 +98,8 @@ func (handler *storageHandler) Close() {
 }
 
 func (handler *storageHandler) MountStorageFolder(users []string, service database.ServiceEntry) (err error) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	log.WithFields(log.Fields{
 		"serviceID":    service.ID,
@@ -177,8 +177,8 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 }
 
 func (handler *storageHandler) StopStateWatching(users []string, service database.ServiceEntry) (err error) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	if service.StateLimit == 0 {
 		return nil
@@ -197,8 +197,8 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 }
 
 func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	for _, state := range handler.statesMap {
 		if state.correlationID == correlationID {
@@ -223,8 +223,8 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 
 func (handler *storageHandler) UpdateState(users []string, service database.ServiceEntry,
 	state, checksum string) (err error) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	log.WithFields(log.Fields{
 		"serviceID":  service.ID,
@@ -332,8 +332,8 @@ func (handler *storageHandler) stopStateWatching(stateFileName, storageFolder st
 }
 
 func (handler *storageHandler) handleStateAcception(state *stateParams, checksum []byte) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	if state.stateAccepted {
 		log.WithFields(log.Fields{
@@ -353,8 +353,8 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 }
 
 func (handler *storageHandler) stateChanged(fileName string, state *stateParams) {
-	handler.mutex.Lock()
-	defer handler.mutex.Unlock()
+	handler.Lock()
+	defer handler.Unlock()
 
 	log.WithField("serviceID", state.serviceID).Debug("State changed")
 
@@ -408,7 +408,7 @@ func (handler *storageHandler) processWatcher() {
 				return
 			}
 
-			handler.mutex.Lock()
+			handler.Lock()
 
 			if state, ok := handler.statesMap[event.Name]; ok {
 				log.WithField("file", event.Name).Debug("File changed")
@@ -428,7 +428,7 @@ func (handler *storageHandler) processWatcher() {
 				}
 			}
 
-			handler.mutex.Unlock()
+			handler.Unlock()
 
 		case err, ok := <-handler.watcher.Errors:
 			if !ok {

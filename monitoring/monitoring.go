@@ -74,7 +74,8 @@ type Monitor struct {
 	sendTimer *time.Ticker
 	pollTimer *time.Ticker
 
-	mutex      sync.Mutex
+	sync.Mutex
+
 	dataToSend amqp.MonitoringData
 
 	alertProcessors *list.List
@@ -222,8 +223,8 @@ func (monitor *Monitor) Close() {
 
 // StartMonitorService starts monitoring service
 func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig ServiceMonitoringConfig) (err error) {
-	monitor.mutex.Lock()
-	defer monitor.mutex.Unlock()
+	monitor.Lock()
+	defer monitor.Unlock()
 
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		log.WithField("id", serviceID).Warning("Service already under monitoring")
@@ -354,8 +355,8 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 // StopMonitorService stops monitoring service
 func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
-	monitor.mutex.Lock()
-	defer monitor.mutex.Unlock()
+	monitor.Lock()
+	defer monitor.Unlock()
 
 	log.WithField("id", serviceID).Debug("Stop service monitoring")
 
@@ -416,18 +417,18 @@ func (monitor *Monitor) run() error {
 	for {
 		select {
 		case <-monitor.sendTimer.C:
-			monitor.mutex.Lock()
+			monitor.Lock()
 			monitor.sendMonitoringData()
 			monitor.saveTraffic()
-			monitor.mutex.Unlock()
+			monitor.Unlock()
 
 		case <-monitor.pollTimer.C:
-			monitor.mutex.Lock()
+			monitor.Lock()
 			monitor.processTraffic()
 			monitor.getCurrentSystemData()
 			monitor.getCurrentServicesData()
 			monitor.processAlerts()
-			monitor.mutex.Unlock()
+			monitor.Unlock()
 		}
 	}
 }
