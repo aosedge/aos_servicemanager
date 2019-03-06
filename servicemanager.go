@@ -160,6 +160,7 @@ func run(
 	visHandler *visclient.VisClient,
 	monitorHandler *monitoring.Monitor,
 	loggingHandler *logging.Logging,
+	alertsHandler *alerts.Alerts,
 	terminateChannel chan os.Signal) (err error) {
 
 	var monitorDataChannel chan amqp.MonitoringData
@@ -207,6 +208,11 @@ func run(
 		case logData := <-loggingHandler.LogChannel:
 			if err := amqpHandler.SendServiceLog(logData); err != nil {
 				log.Errorf("Error send service log: %s", err)
+			}
+
+		case alerts := <-alertsHandler.AlertsChannel:
+			if err := amqpHandler.SendAlerts(alerts); err != nil {
+				log.Errorf("Error send alerts: %s", err)
 			}
 
 		case users := <-visHandler.UsersChangedChannel:
@@ -381,7 +387,7 @@ func main() {
 		}
 
 		if err = run(amqpHandler, launcherHandler, vis,
-			monitor, logging, terminateChannel); err != nil {
+			monitor, logging, alerts, terminateChannel); err != nil {
 			if err == errQuit {
 				return
 			}

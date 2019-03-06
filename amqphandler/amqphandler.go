@@ -42,6 +42,7 @@ const (
 	newStateStr       = "newState"
 	stateRequestStr   = "stateRequest"
 	pushServiceLogStr = "pushServiceLog"
+	alertsStr         = "alerts"
 )
 
 // Alert tags
@@ -187,7 +188,7 @@ type SystemAlert struct {
 
 // ResourceAlert resource alert structure
 type ResourceAlert struct {
-	Parameter string `json:"paramater"`
+	Parameter string `json:"parameter"`
 	Value     uint64 `json:"value"`
 }
 
@@ -460,6 +461,20 @@ func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error
 			Version:     1,
 			MessageType: pushServiceLogStr},
 		PushServiceLog: serviceLog}}
+
+	return nil
+}
+
+// SendAlerts sends alerts message
+func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
+	handler.sendChannel <- Message{"", struct {
+		messageHeader
+		Alerts
+	}{
+		messageHeader: messageHeader{
+			Version:     1,
+			MessageType: alertsStr},
+		Alerts: alerts}}
 
 	return nil
 }

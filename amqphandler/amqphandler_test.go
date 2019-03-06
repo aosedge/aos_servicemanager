@@ -280,6 +280,31 @@ func TestReceiveMessages(t *testing.T) {
 		Data:      &[]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 		Error:     &pushServiceLogError}
 
+	var alertVersion uint64 = 2
+
+	alertsData := amqphandler.Alerts{
+		Data: []amqphandler.AlertItem{
+			amqphandler.AlertItem{
+				Timestamp: time.Now().Local(),
+				Tag:       amqphandler.AlertSystemError,
+				Source:    "system",
+				Payload:   map[string]interface{}{"Message": "System error"},
+			},
+			amqphandler.AlertItem{
+				Timestamp: time.Now().Local(),
+				Tag:       amqphandler.AlertSystemError,
+				Source:    "service 1",
+				Version:   &alertVersion,
+				Payload:   map[string]interface{}{"Message": "Service crashed"},
+			},
+			amqphandler.AlertItem{
+				Timestamp: time.Now().Local(),
+				Tag:       amqphandler.AlertResource,
+				Source:    "system",
+				Payload:   map[string]interface{}{"Parameter": "cpu", "Value": float64(100)},
+			},
+		}}
+
 	testData := []messageDesc{
 		messageDesc{
 			call: func() error {
@@ -407,6 +432,26 @@ func TestReceiveMessages(t *testing.T) {
 				return &struct {
 					messageHeader
 					amqphandler.PushServiceLog
+				}{}
+			},
+		},
+
+		messageDesc{
+			call: func() error {
+				return amqpHandler.SendAlerts(alertsData)
+			},
+			data: &struct {
+				messageHeader
+				amqphandler.Alerts
+			}{
+				messageHeader: messageHeader{
+					Version:     1,
+					MessageType: "alerts"},
+				Alerts: alertsData},
+			getDataType: func() interface{} {
+				return &struct {
+					messageHeader
+					amqphandler.Alerts
 				}{}
 			},
 		},
