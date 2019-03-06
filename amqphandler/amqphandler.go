@@ -227,10 +227,6 @@ type stateRequest struct {
 	Default   bool   `json:"default"`
 }
 
-type pushServiceLog struct {
-	PushServiceLog
-}
-
 type serviceDiscoveryResp struct {
 	Version    uint64               `json:"version"`
 	Connection rabbitConnectioninfo `json:"connection"`
@@ -458,12 +454,12 @@ func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
 	handler.sendChannel <- Message{"", struct {
 		messageHeader
-		pushServiceLog
+		PushServiceLog
 	}{
 		messageHeader: messageHeader{
 			Version:     1,
 			MessageType: pushServiceLogStr},
-		pushServiceLog: pushServiceLog{serviceLog}}}
+		PushServiceLog: serviceLog}}
 
 	return nil
 }
