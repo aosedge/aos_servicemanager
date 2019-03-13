@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	reconnectTimeout = 3 * time.Second
+	reconnectTimeout = 10 * time.Second
 )
 
 // GitSummary provided by govvv at compile-time
