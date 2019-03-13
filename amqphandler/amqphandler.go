@@ -47,8 +47,9 @@ const (
 
 // Alert tags
 const (
-	AlertSystemError = "systemError"
-	AlertResource    = "resourceAlert"
+	AlertTagSystemError = "systemError"
+	AlertTagResource    = "resourceAlert"
+	AlertTagAosCore     = "aosCore"
 )
 
 /*******************************************************************************

@@ -117,7 +117,7 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 
 	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
 		Timestamp: time,
-		Tag:       amqp.AlertResource,
+		Tag:       amqp.AlertTagResource,
 		Source:    source,
 		Version:   version,
 		Payload: amqp.ResourceAlert{
@@ -143,7 +143,7 @@ func (instance *Alerts) Fire(entry *log.Entry) (err error) {
 
 	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
 		Timestamp: entry.Time,
-		Tag:       amqp.AlertSystemError,
+		Tag:       amqp.AlertTagAosCore,
 		Source:    "servicemanager",
 		Payload:   amqp.SystemAlert{Message: message}})
 
@@ -292,7 +292,7 @@ func (instance *Alerts) processJournal() (err error) {
 
 		item := amqp.AlertItem{
 			Timestamp: t,
-			Tag:       amqp.AlertSystemError,
+			Tag:       amqp.AlertTagSystemError,
 			Source:    source,
 			Version:   version,
 			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}}
