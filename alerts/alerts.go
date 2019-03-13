@@ -218,8 +218,12 @@ func (instance *Alerts) setupJournal() (err error) {
 
 				instance.Lock()
 				if len(instance.alerts.Data) != 0 {
-					instance.AlertsChannel <- instance.alerts
-					instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+					if len(instance.AlertsChannel) < cap(instance.AlertsChannel) {
+						instance.AlertsChannel <- instance.alerts
+						instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+					} else {
+						log.Warn("Skip sending alerts. Channel full.")
+					}
 				}
 				instance.Unlock()
 
