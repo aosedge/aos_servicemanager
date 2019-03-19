@@ -74,7 +74,7 @@ func New(config *config.Config,
 	instance.AlertsChannel = make(chan amqp.Alerts, alertsChannelSize)
 	instance.closeChannel = make(chan bool)
 
-	instance.ticker = time.NewTicker(instance.config.PollPeriod.Duration)
+	instance.ticker = time.NewTicker(instance.config.SendPeriod.Duration)
 
 	instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 

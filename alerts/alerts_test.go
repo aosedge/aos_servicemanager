@@ -243,7 +243,7 @@ func TestMain(m *testing.M) {
 func TestGetSystemError(t *testing.T) {
 	const numMessages = 5
 
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -323,7 +323,7 @@ func TestGetOfflineSystemError(t *testing.T) {
 	const numMessages = 5
 
 	// Open and close to store cursor
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -351,7 +351,7 @@ func TestGetOfflineSystemError(t *testing.T) {
 	}
 
 	// Open again
-	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -364,7 +364,7 @@ func TestGetOfflineSystemError(t *testing.T) {
 }
 
 func TestGetServiceError(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -395,7 +395,7 @@ func TestGetServiceError(t *testing.T) {
 }
 
 func TestGetResourceAlerts(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -463,7 +463,7 @@ func TestGetResourceAlerts(t *testing.T) {
 func TestGetServiceManagerAlerts(t *testing.T) {
 	const numMessages = 5
 
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{PollPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}

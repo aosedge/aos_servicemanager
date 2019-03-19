@@ -49,7 +49,7 @@ func createConfigFile() (err error) {
 		"maxPartSize": 1024
 	},
 	"alerts": {
-		"pollPeriod": "00:00:10"
+		"sendPeriod": "00:00:20"
 	}
 }`
 
@@ -230,7 +230,7 @@ func TestGetAlertsConfig(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Alerts.PollPeriod.Duration != 10*time.Second {
-		t.Errorf("Wrong poll period value: %s", config.Alerts.PollPeriod)
+	if config.Alerts.SendPeriod.Duration != 20*time.Second {
+		t.Errorf("Wrong poll period value: %s", config.Alerts.SendPeriod)
 	}
 }
