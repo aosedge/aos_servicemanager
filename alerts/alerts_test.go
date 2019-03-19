@@ -243,7 +243,9 @@ func TestMain(m *testing.M) {
 func TestGetSystemError(t *testing.T) {
 	const numMessages = 5
 
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -323,7 +325,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 	const numMessages = 5
 
 	// Open and close to store cursor
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -351,7 +355,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 	}
 
 	// Open again
-	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -364,7 +370,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 }
 
 func TestGetServiceError(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -395,7 +403,9 @@ func TestGetServiceError(t *testing.T) {
 }
 
 func TestGetResourceAlerts(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -463,7 +473,9 @@ func TestGetResourceAlerts(t *testing.T) {
 func TestGetServiceManagerAlerts(t *testing.T) {
 	const numMessages = 5
 
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{SendPeriod: config.Duration{Duration: 1 * time.Second}}}, db, db)
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 1024}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -478,5 +490,36 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 
 	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "servicemanager", nil, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestAlertsMaxMessageSize(t *testing.T) {
+	const numMessages = 5
+	// the size of one message ~154 bytes:
+	// {"timestamp":"2019-03-28T16:54:58.500221705+02:00","tag":"aosCore","source":"servicemanager","payload":{"message":"884a0472-5ce3-4da6-acff-088ce3959cd3"}}
+	// Set MaxMessageSize to 500 to allow only 3 messages to come
+	const numExpectedMessages = 3
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:     config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize: 500}}, db, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	for i := 0; i < numMessages; i++ {
+		// One message size is: timestamp 24 + tag "aosCore" 7 + source "servicemanager" 14 + uuid 36 = 81
+		log.Error(uuid.New().String())
+	}
+
+	select {
+	case alerts := <-alertsHandler.AlertsChannel:
+		if len(alerts.Data) != numExpectedMessages {
+			t.Errorf("Wrong message count received: %d", len(alerts.Data))
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Errorf("Result failed: %s", errTimeout)
 	}
 }

@@ -49,7 +49,8 @@ func createConfigFile() (err error) {
 		"maxPartSize": 1024
 	},
 	"alerts": {
-		"sendPeriod": "00:00:20"
+		"sendPeriod": "00:00:20",
+		"maxMessageSize": 1024
 	}
 }`
 
@@ -232,5 +233,9 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	if config.Alerts.SendPeriod.Duration != 20*time.Second {
 		t.Errorf("Wrong poll period value: %s", config.Alerts.SendPeriod)
+	}
+
+	if config.Alerts.MaxMessageSize != 1024 {
+		t.Errorf("Wrong max message size value: %d", config.Alerts.MaxMessageSize)
 	}
 }

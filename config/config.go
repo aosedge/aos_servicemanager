@@ -54,7 +54,8 @@ type Logging struct {
 
 // Alerts configuration for alerts
 type Alerts struct {
-	SendPeriod Duration `json:"sendPeriod"`
+	SendPeriod     Duration `json:"sendPeriod"`
+	MaxMessageSize int      `json:"maxMessagesize"`
 }
 
 // Config instance
@@ -90,7 +91,8 @@ func New(fileName string) (config *Config, err error) {
 		Logging: Logging{
 			MaxPartSize: 524288},
 		Alerts: Alerts{
-			SendPeriod: Duration{10 * time.Second}}}
+			SendPeriod:     Duration{10 * time.Second},
+			MaxMessageSize: 65536}}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err

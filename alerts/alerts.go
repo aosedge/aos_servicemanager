@@ -2,6 +2,7 @@
 package alerts
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -49,7 +50,9 @@ type Alerts struct {
 	cursorStorage   CursorStorage
 	serviceProvider ServiceProvider
 
-	alerts amqp.Alerts
+	alertsSize    int
+	skippedAlerts uint32
+	alerts        amqp.Alerts
 
 	sync.Mutex
 
@@ -100,14 +103,11 @@ func (instance *Alerts) Close() {
 
 // SendResourceAlert sends resource alert
 func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
-	instance.Lock()
-	defer instance.Unlock()
-
 	log.WithFields(log.Fields{
 		"timestamp": time,
 		"source":    source,
 		"resource":  resource,
-		"value":     value}).Debug("Alert")
+		"value":     value}).Debug("Resource alert")
 
 	var version *uint64
 
@@ -115,7 +115,7 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 		version = &service.Version
 	}
 
-	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
+	instance.addAlert(amqp.AlertItem{
 		Timestamp: time,
 		Tag:       amqp.AlertTagResource,
 		Source:    source,
@@ -132,16 +132,13 @@ func (instance *Alerts) Levels() (levels []log.Level) {
 
 // Fire called to hook selected log (log hook interface)
 func (instance *Alerts) Fire(entry *log.Entry) (err error) {
-	instance.Lock()
-	defer instance.Unlock()
-
 	message := entry.Message
 
 	for field, value := range entry.Data {
 		message = message + fmt.Sprintf(" %s=%v", field, value)
 	}
 
-	instance.alerts.Data = append(instance.alerts.Data, amqp.AlertItem{
+	instance.addAlert(amqp.AlertItem{
 		Timestamp: entry.Time,
 		Tag:       amqp.AlertTagAosCore,
 		Source:    "servicemanager",
@@ -216,16 +213,7 @@ func (instance *Alerts) setupJournal() (err error) {
 					log.Errorf("Journal process error: %s", err)
 				}
 
-				instance.Lock()
-				if len(instance.alerts.Data) != 0 {
-					if len(instance.AlertsChannel) < cap(instance.AlertsChannel) {
-						instance.AlertsChannel <- instance.alerts
-						instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
-					} else {
-						log.Warn("Skip sending alerts. Channel full.")
-					}
-				}
-				instance.Unlock()
+				instance.sendAlerts()
 
 			case <-instance.closeChannel:
 				return
@@ -288,17 +276,47 @@ func (instance *Alerts) processJournal() (err error) {
 		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
 			int64((entry.RealtimeTimestamp%1000000)*1000))
 
-		log.WithFields(log.Fields{"timestamp": t, "message": entry.Fields["MESSAGE"]}).Debug("Alert")
+		log.WithFields(log.Fields{"time": t, "message": entry.Fields["MESSAGE"]}).Debug("System alert")
 
-		item := amqp.AlertItem{
+		instance.addAlert(amqp.AlertItem{
 			Timestamp: t,
 			Tag:       amqp.AlertTagSystemError,
 			Source:    source,
 			Version:   version,
-			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}}
+			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
+	}
+}
 
-		instance.Lock()
+func (instance *Alerts) addAlert(item amqp.AlertItem) {
+	instance.Lock()
+	defer instance.Unlock()
+
+	data, _ := json.Marshal(item)
+	instance.alertsSize += len(data)
+
+	if int(instance.alertsSize) <= instance.config.MaxMessageSize {
 		instance.alerts.Data = append(instance.alerts.Data, item)
-		instance.Unlock()
+	} else {
+		instance.skippedAlerts++
+	}
+}
+
+func (instance *Alerts) sendAlerts() {
+	instance.Lock()
+	defer instance.Unlock()
+
+	if instance.alertsSize != 0 {
+		if len(instance.AlertsChannel) < cap(instance.AlertsChannel) {
+			instance.AlertsChannel <- instance.alerts
+
+			instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+			if instance.skippedAlerts != 0 {
+				log.WithField("count", instance.skippedAlerts).Warn("Alerts skipped due to size limit")
+			}
+			instance.skippedAlerts = 0
+			instance.alertsSize = 0
+		} else {
+			log.Warn("Skip sending alerts due to channel is full")
+		}
 	}
 }
