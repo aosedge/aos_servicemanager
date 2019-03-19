@@ -112,9 +112,9 @@ func waitResult(alertsChannel <-chan amqp.Alerts, timeout time.Duration, checkAl
 	}
 }
 
-func waitSystemAlerts(alertsChannel <-chan amqp.Alerts, timeout time.Duration, source string, version *uint64, data []string) (err error) {
+func waitAlerts(alertsChannel <-chan amqp.Alerts, timeout time.Duration, tag, source string, version *uint64, data []string) (err error) {
 	return waitResult(alertsChannel, timeout, func(alert amqp.AlertItem) (success bool, err error) {
-		if alert.Tag != amqp.AlertSystemError {
+		if alert.Tag != tag {
 			return false, nil
 		}
 
@@ -269,7 +269,8 @@ func TestGetSystemError(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "system", nil, messages); err != nil {
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
+		amqp.AlertTagSystemError, "system", nil, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 
@@ -299,7 +300,7 @@ func TestGetSystemError(t *testing.T) {
 
 	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
 		func(alert amqp.AlertItem) (success bool, err error) {
-			if alert.Tag == amqp.AlertSystemError {
+			if alert.Tag == amqp.AlertTagSystemError {
 				for _, originMessage := range messages {
 					systemAlert, ok := (alert.Payload.(amqp.SystemAlert))
 					if !ok {
@@ -357,7 +358,7 @@ func TestGetOfflineSystemError(t *testing.T) {
 	defer alertsHandler.Close()
 
 	// Check all offline messages are handled
-	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "system", nil, messages); err != nil {
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagSystemError, "system", nil, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -387,7 +388,8 @@ func TestGetServiceError(t *testing.T) {
 
 	var version uint64 = 0
 
-	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "service0", &version, messages); err != nil {
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
+		amqp.AlertTagSystemError, "service0", &version, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -425,7 +427,7 @@ func TestGetResourceAlerts(t *testing.T) {
 
 	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
 		func(alert amqp.AlertItem) (success bool, err error) {
-			if alert.Tag != amqp.AlertResource {
+			if alert.Tag != amqp.AlertTagResource {
 				return false, nil
 			}
 
@@ -474,7 +476,7 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 		log.Error(messages[len(messages)-1])
 	}
 
-	if err = waitSystemAlerts(alertsHandler.AlertsChannel, 5*time.Second, "servicemanager", nil, messages); err != nil {
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "servicemanager", nil, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
