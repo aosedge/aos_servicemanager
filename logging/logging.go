@@ -140,7 +140,9 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 
 	var archInstance *archivator
 
-	if archInstance, err = newArchivator(instance.LogChannel, instance.config.MaxPartSize); err != nil {
+	if archInstance, err = newArchivator(instance.LogChannel,
+		instance.config.MaxPartSize,
+		instance.config.MaxPartCount); err != nil {
 		panic("Can't create archivator")
 	}
 
@@ -168,6 +170,10 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 		}
 
 		if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
+			if err == errMaxPartCount {
+				log.Warn(err)
+				break
+			}
 			panic("Can't archive log")
 		}
 	}
@@ -255,7 +261,9 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 	var archInstance *archivator
 
-	if archInstance, err = newArchivator(instance.LogChannel, instance.config.MaxPartSize); err != nil {
+	if archInstance, err = newArchivator(instance.LogChannel,
+		instance.config.MaxPartSize,
+		instance.config.MaxPartCount); err != nil {
 		panic("Can't create archivator")
 	}
 

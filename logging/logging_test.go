@@ -271,7 +271,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
@@ -312,7 +312,7 @@ func TestGetServiceLog(t *testing.T) {
 }
 
 func TestGetWrongServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
@@ -339,7 +339,7 @@ func TestGetWrongServiceLog(t *testing.T) {
 }
 
 func TestGetEmptyLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
@@ -365,7 +365,7 @@ func TestGetEmptyLog(t *testing.T) {
 }
 
 func TestGetServiceCrashLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024}}, db)
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
@@ -394,4 +394,74 @@ func TestGetServiceCrashLog(t *testing.T) {
 		LogID:     "log2"})
 
 	checkReceivedLog(t, logging.LogChannel, from, till)
+}
+
+func TestMaxPartCountLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 512, MaxPartCount: 2}}, db)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	from := time.Now()
+
+	if err = createService("service0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	if err = startService("service0"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(20 * time.Second)
+
+	if err = stopService("service0"); err != nil {
+		t.Fatalf("Can't stop service: %s", err)
+	}
+
+	till := from.Add(20 * time.Second)
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "service0",
+		LogID:     "log0",
+		From:      &from,
+		Till:      &till})
+
+	for {
+		select {
+		case result := <-logging.LogChannel:
+			if result.Error != nil {
+				t.Errorf("Error log received: %s", *result.Error)
+				return
+			}
+
+			if result.Data == nil {
+				t.Error("No data")
+				return
+			}
+
+			if result.PartCount == nil {
+				t.Error("Missing part count")
+				return
+			}
+
+			if *result.PartCount != 2 {
+				t.Errorf("Wrong part count received: %d", *result.PartCount)
+				return
+			}
+
+			if result.Part == nil {
+				t.Error("Missing part")
+				return
+			}
+
+			if *result.Part > *result.PartCount {
+				t.Errorf("Wrong part received: %d", *result.Part)
+				return
+			}
+
+		case <-time.After(1 * time.Second):
+			return
+		}
+	}
 }

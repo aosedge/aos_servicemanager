@@ -46,7 +46,8 @@ func createConfigFile() (err error) {
 		}
 	},
 	"logging": {
-		"maxPartSize": 1024
+		"maxPartSize": 1024,
+		"maxPartCount": 10
 	},
 	"alerts": {
 		"sendPeriod": "00:00:20",
@@ -223,6 +224,10 @@ func TestGetLoggingConfig(t *testing.T) {
 
 	if config.Logging.MaxPartSize != 1024 {
 		t.Errorf("Wrong max part size: %d", config.Logging.MaxPartSize)
+	}
+
+	if config.Logging.MaxPartCount != 10 {
+		t.Errorf("Wrong max part count: %d", config.Logging.MaxPartCount)
 	}
 }
 

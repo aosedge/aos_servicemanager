@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 
 	log "github.com/sirupsen/logrus"
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
@@ -13,20 +14,27 @@ import (
  ******************************************************************************/
 
 type archivator struct {
-	zw          *gzip.Writer
-	logBuffers  []bytes.Buffer
-	logChannel  chan<- amqp.PushServiceLog
-	partCount   uint64
-	partSize    uint64
-	maxPartSize uint64
+	zw           *gzip.Writer
+	logBuffers   []bytes.Buffer
+	logChannel   chan<- amqp.PushServiceLog
+	partCount    uint64
+	partSize     uint64
+	maxPartSize  uint64
+	maxPartCount uint64
 }
+
+/*******************************************************************************
+ * Variables
+ ******************************************************************************/
+
+var errMaxPartCount = errors.New("Max part count reached")
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
 
-func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize uint64) (instance *archivator, err error) {
-	instance = &archivator{logChannel: logChannel, maxPartSize: maxPartSize}
+func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize, maxPartCount uint64) (instance *archivator, err error) {
+	instance = &archivator{logChannel: logChannel, maxPartSize: maxPartSize, maxPartCount: maxPartCount}
 
 	instance.logBuffers = make([]bytes.Buffer, 1)
 
@@ -39,16 +47,20 @@ func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize uint64) (i
 }
 
 func (instance *archivator) addLog(message string) (err error) {
+	log.WithFields(log.Fields{
+		"partSize": instance.partSize + uint64(len(message)),
+		"message":  message}).Debug("Archivate log")
+
+	if instance.partCount >= instance.maxPartCount {
+		return errMaxPartCount
+	}
+
 	count, err := instance.zw.Write([]byte(message))
 	if err != nil {
 		return err
 	}
 
 	instance.partSize += uint64(count)
-
-	log.WithFields(log.Fields{
-		"partSize": instance.partSize,
-		"message":  message}).Debug("Archivate log")
 
 	if instance.partSize > instance.maxPartSize {
 		if err = instance.zw.Close(); err != nil {

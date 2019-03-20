@@ -49,7 +49,8 @@ type Monitoring struct {
 
 // Logging configuration for system and service logging
 type Logging struct {
-	MaxPartSize uint64 `json:"maxPartSize"`
+	MaxPartSize  uint64 `json:"maxPartSize"`
+	MaxPartCount uint64 `json:"maxPartCount"`
 }
 
 // Alerts configuration for alerts
@@ -90,7 +91,8 @@ func New(fileName string) (config *Config, err error) {
 			MaxOfflineMessages: 25,
 			NetnsBridgeIP:      "172.19.0.0/16"},
 		Logging: Logging{
-			MaxPartSize: 524288},
+			MaxPartSize:  524288,
+			MaxPartCount: 20},
 		Alerts: Alerts{
 			SendPeriod:         Duration{10 * time.Second},
 			MaxMessageSize:     65536,
