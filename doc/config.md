@@ -152,6 +152,40 @@ The configuration file has JSON format. Following is JSON schema:
                     "type": "integer",
                     "minimum": 0,
                     "default": 524288
+                },
+                "maxPartCount": {
+                    "description": "Indicates maximum part count",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 20
+                }
+            }
+        },
+        "alerts": {
+            "description": "Alerts parameters",
+            "type": "object",
+            "properties": {
+                "disabled": {
+                    "description": "Enable/disable sending alerts",
+                    "type": "boolean",
+                    "default": false
+                },
+                "sendPeriod": {
+                    "description": "Send alerts minimum period in ISO 8601 format: 01:30:12",
+                    "type": "string",
+                    "default": "00:00:10"
+                },
+                "maxMessageSize": {
+                    "description": "Indicates maximum size of one alerts message",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 65536
+                },
+                "maxOfflineMessages": {
+                    "description": "Indicates how many alert messages to keep when vehicle in offline",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 25
                 }
             }
         }
