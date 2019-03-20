@@ -50,7 +50,8 @@ func createConfigFile() (err error) {
 	},
 	"alerts": {
 		"sendPeriod": "00:00:20",
-		"maxMessageSize": 1024
+		"maxMessageSize": 1024,
+		"maxOfflineMessages": 32
 	}
 }`
 
@@ -237,5 +238,9 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	if config.Alerts.MaxMessageSize != 1024 {
 		t.Errorf("Wrong max message size value: %d", config.Alerts.MaxMessageSize)
+	}
+
+	if config.Alerts.MaxOfflineMessages != 32 {
+		t.Errorf("Wrong max offline message value: %d", config.Alerts.MaxOfflineMessages)
 	}
 }

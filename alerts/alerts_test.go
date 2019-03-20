@@ -244,8 +244,9 @@ func TestGetSystemError(t *testing.T) {
 	const numMessages = 5
 
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -326,8 +327,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 
 	// Open and close to store cursor
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -356,8 +358,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 
 	// Open again
 	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -371,8 +374,9 @@ func TestGetOfflineSystemError(t *testing.T) {
 
 func TestGetServiceError(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -404,8 +408,9 @@ func TestGetServiceError(t *testing.T) {
 
 func TestGetResourceAlerts(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -474,8 +479,9 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 	const numMessages = 5
 
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 1024}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -501,8 +507,9 @@ func TestAlertsMaxMessageSize(t *testing.T) {
 	const numExpectedMessages = 3
 
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:     config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize: 500}}, db, db)
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     500,
+		MaxOfflineMessages: 32}}, db, db)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -521,5 +528,41 @@ func TestAlertsMaxMessageSize(t *testing.T) {
 
 	case <-time.After(5 * time.Second):
 		t.Errorf("Result failed: %s", errTimeout)
+	}
+}
+
+func TestAlertsMaxOfflineMessages(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 3}}, db, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+		log.Error(messages[len(messages)-1])
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	messageCount := 0
+
+	for {
+		select {
+		case <-alertsHandler.AlertsChannel:
+			messageCount++
+
+		case <-time.After(1 * time.Second):
+			if messageCount != 3 {
+				t.Errorf("Wrong message count received: %d", messageCount)
+			}
+			return
+		}
 	}
 }

@@ -22,7 +22,6 @@ import (
  ******************************************************************************/
 
 const (
-	alertsChannelSize   = 32
 	alertsDataAllocSize = 10
 )
 
@@ -74,7 +73,7 @@ func New(config *config.Config,
 
 	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage, serviceProvider: serviceProvider}
 
-	instance.AlertsChannel = make(chan amqp.Alerts, alertsChannelSize)
+	instance.AlertsChannel = make(chan amqp.Alerts, instance.config.MaxOfflineMessages)
 	instance.closeChannel = make(chan bool)
 
 	instance.ticker = time.NewTicker(instance.config.SendPeriod.Duration)
@@ -309,14 +308,15 @@ func (instance *Alerts) sendAlerts() {
 		if len(instance.AlertsChannel) < cap(instance.AlertsChannel) {
 			instance.AlertsChannel <- instance.alerts
 
-			instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 			if instance.skippedAlerts != 0 {
 				log.WithField("count", instance.skippedAlerts).Warn("Alerts skipped due to size limit")
 			}
-			instance.skippedAlerts = 0
-			instance.alertsSize = 0
 		} else {
 			log.Warn("Skip sending alerts due to channel is full")
 		}
+
+		instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+		instance.skippedAlerts = 0
+		instance.alertsSize = 0
 	}
 }
