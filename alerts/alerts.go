@@ -3,6 +3,7 @@ package alerts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -64,6 +65,13 @@ type Alerts struct {
 }
 
 /*******************************************************************************
+ * Variable
+ ******************************************************************************/
+
+// ErrDisabled indicates that alerts is disable in the config
+var ErrDisabled = errors.New("Alerts is disabled")
+
+/*******************************************************************************
  * Public
  ******************************************************************************/
 
@@ -72,6 +80,10 @@ func New(config *config.Config,
 	serviceProvider ServiceProvider,
 	cursorStorage CursorStorage) (instance *Alerts, err error) {
 	log.Debug("New alerts")
+
+	if config.Alerts.Disabled {
+		return nil, ErrDisabled
+	}
 
 	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage, serviceProvider: serviceProvider}
 

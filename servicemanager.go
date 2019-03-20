@@ -164,9 +164,14 @@ func run(
 	terminateChannel chan os.Signal) (err error) {
 
 	var monitorDataChannel chan amqp.MonitoringData
+	var alertsChannel chan amqp.Alerts
 
 	if monitorHandler != nil {
 		monitorDataChannel = monitorHandler.DataChannel
+	}
+
+	if alertsHandler != nil {
+		alertsChannel = alertsHandler.AlertsChannel
 	}
 
 	for {
@@ -210,7 +215,7 @@ func run(
 				log.Errorf("Error send service log: %s", err)
 			}
 
-		case alerts := <-alertsHandler.AlertsChannel:
+		case alerts := <-alertsChannel:
 			if err := amqpHandler.SendAlerts(alerts); err != nil {
 				log.Errorf("Error send alerts: %s", err)
 			}
@@ -289,14 +294,20 @@ func main() {
 	defer db.Close()
 
 	// Create alerts
-	alerts, err := alerts.New(config, db, db)
+	alertsHandler, err := alerts.New(config, db, db)
 	if err != nil {
-		log.Fatalf("Can't create alerts: %s", err)
+		if err == alerts.ErrDisabled {
+			log.Warn(err)
+		} else {
+			log.Fatalf("Can't create alerts: %s", err)
+		}
 	}
-	defer alerts.Close()
+	if alertsHandler != nil {
+		defer alertsHandler.Close()
+	}
 
 	// Create monitor
-	monitor, err := monitoring.New(config, db, alerts)
+	monitor, err := monitoring.New(config, db, alertsHandler)
 	if err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
@@ -387,7 +398,7 @@ func main() {
 		}
 
 		if err = run(amqpHandler, launcherHandler, vis,
-			monitor, logging, alerts, terminateChannel); err != nil {
+			monitor, logging, alertsHandler, terminateChannel); err != nil {
 			if err == errQuit {
 				return
 			}
