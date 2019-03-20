@@ -566,3 +566,33 @@ func TestAlertsMaxOfflineMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestDuplicateAlerts(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 25}}, db, db)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, "This is error message")
+		log.Error(messages[len(messages)-1])
+	}
+
+	select {
+	case alerts := <-alertsHandler.AlertsChannel:
+		if len(alerts.Data) != 1 {
+			t.Errorf("Wrong message count received: %d", len(alerts.Data))
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Errorf("Result failed: %s", errTimeout)
+	}
+}

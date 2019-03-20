@@ -4,6 +4,7 @@ package alerts
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,9 +50,10 @@ type Alerts struct {
 	cursorStorage   CursorStorage
 	serviceProvider ServiceProvider
 
-	alertsSize    int
-	skippedAlerts uint32
-	alerts        amqp.Alerts
+	alertsSize       int
+	skippedAlerts    uint32
+	duplicatedAlerts uint32
+	alerts           amqp.Alerts
 
 	sync.Mutex
 
@@ -290,6 +292,12 @@ func (instance *Alerts) addAlert(item amqp.AlertItem) {
 	instance.Lock()
 	defer instance.Unlock()
 
+	if len(instance.alerts.Data) != 0 &&
+		reflect.DeepEqual(instance.alerts.Data[len(instance.alerts.Data)-1].Payload, item.Payload) {
+		instance.duplicatedAlerts++
+		return
+	}
+
 	data, _ := json.Marshal(item)
 	instance.alertsSize += len(data)
 
@@ -311,12 +319,16 @@ func (instance *Alerts) sendAlerts() {
 			if instance.skippedAlerts != 0 {
 				log.WithField("count", instance.skippedAlerts).Warn("Alerts skipped due to size limit")
 			}
+			if instance.duplicatedAlerts != 0 {
+				log.WithField("count", instance.duplicatedAlerts).Warn("Alerts skipped due to duplication")
+			}
 		} else {
 			log.Warn("Skip sending alerts due to channel is full")
 		}
 
 		instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 		instance.skippedAlerts = 0
+		instance.duplicatedAlerts = 0
 		instance.alertsSize = 0
 	}
 }
