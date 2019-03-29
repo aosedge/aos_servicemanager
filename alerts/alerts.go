@@ -193,6 +193,14 @@ func (instance *Alerts) setupJournal() (err error) {
 		return err
 	}
 
+	if err = instance.journal.SeekTail(); err != nil {
+		return err
+	}
+
+	if _, err = instance.journal.Previous(); err != nil {
+		return err
+	}
+
 	cursor, err := instance.cursorStorage.GetJournalCursor()
 	if err != nil {
 		return err
@@ -208,14 +216,6 @@ func (instance *Alerts) setupJournal() (err error) {
 		}
 
 		instance.cursor = cursor
-	} else {
-		if err = instance.journal.SeekTail(); err != nil {
-			return err
-		}
-
-		if _, err = instance.journal.Previous(); err != nil {
-			return err
-		}
 	}
 
 	go func() {
@@ -233,6 +233,7 @@ func (instance *Alerts) setupJournal() (err error) {
 			}
 		}
 	}()
+
 	return nil
 }
 
