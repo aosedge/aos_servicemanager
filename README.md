@@ -48,7 +48,7 @@ sudo apt install gcc-aarch64-linux-gnu
 Build:
 
 ```
-CC=gcc-aarch64-linux-gnu CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go buld
+CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build
 ```
 
 # Configuration
