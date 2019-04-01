@@ -734,7 +734,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 			messageType, ok := messageMap[header.MessageType]
 			if !ok {
-				log.Errorf("AMQP unsupported message type: %s", header.MessageType)
+				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
 				continue
 			}
 
