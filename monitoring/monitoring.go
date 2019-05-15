@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
+
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
@@ -86,7 +88,6 @@ type Monitor struct {
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
 	ServiceDir    string
-	WorkingDir    string
 	UploadLimit   uint64
 	DownloadLimit uint64
 	ServiceRules  *amqp.ServiceAlertRules
@@ -106,7 +107,6 @@ type serviceMonitoring struct {
 	serviceDir             string
 	inChain                string
 	outChain               string
-	workingDir             string
 	process                *process.Process
 	monitoringData         amqp.ServiceMonitoringData
 	alertProcessorElements []*list.Element
@@ -257,7 +257,6 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		serviceDir: monitoringConfig.ServiceDir,
 		inChain:    "AOS_" + chainBase + "_IN",
 		outChain:   "AOS_" + chainBase + "_OUT",
-		workingDir: monitoringConfig.WorkingDir,
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
 
@@ -504,14 +503,10 @@ func (monitor *Monitor) getCurrentServicesData() {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		if value.workingDir != "" {
-			value.monitoringData.UsedDisk, err = getSystemDiskUsage(value.workingDir)
-			if err != nil {
-				log.Errorf("Can't get service Disc usage: %s", err)
-			}
+		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.workingDir, value.process)
+		if err != nil {
+			log.Errorf("Can't get service Disc usage: %s", err)
 		}
-
-		value.monitoringData.UsedDisk = 0
 
 		if traffic, ok := monitor.trafficMap[value.inChain]; ok {
 			value.monitoringData.InTraffic = traffic.currentValue
@@ -683,6 +678,20 @@ func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
 	}
 
 	return v.RSS, nil
+}
+
+// getServiceDiskUsage returns service disk usage in bytes
+func getServiceDiskUsage(path string, p *process.Process) (diskUse uint64, err error) {
+	userName, err := p.Username()
+	if err != nil {
+		return diskUse, err
+	}
+
+	if diskUse, err = platform.GetUserFSQuotaUsage(path, userName); err != nil {
+		return diskUse, err
+	}
+
+	return diskUse, nil
 }
 
 func (monitor *Monitor) setupTrafficMonitor() (err error) {

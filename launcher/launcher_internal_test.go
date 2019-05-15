@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
+
 	"github.com/jlaffaye/ftp"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -1058,7 +1060,8 @@ func TestServiceMonitoring(t *testing.T) {
 }
 
 func TestServiceStorage(t *testing.T) {
-	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 0}, nil)
+	// Set limit for 2 files 8192 bytes length + 1 folder 4k
+	launcher, err := newTestLauncher(&ftpImage{8192*2 + 4096, 0}, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1073,11 +1076,19 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
 	ftp, err := launcher.connectToFtp("service0")
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
 	defer ftp.Quit()
+
+	service, err := launcher.serviceProvider.GetService("service0")
+	if err != nil {
+		t.Errorf("Can't get service: %s", err)
+	}
 
 	testData := make([]byte, 8192)
 
@@ -1085,7 +1096,31 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	if err := ftp.Stor("test2.dat", bytes.NewReader(testData)); err == nil {
+	diskUsage, err := platform.GetUserFSQuotaUsage(launcher.config.WorkingDir, service.UserName)
+	if err != nil {
+		t.Errorf("Can't get disk usage: %s", err)
+	}
+
+	// file size + 1 block 4k for dir
+	if diskUsage != (8192 + 4096) {
+		t.Errorf("Wrong disk usage value: %d", diskUsage)
+	}
+
+	if err := ftp.Stor("test2.dat", bytes.NewReader(testData)); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	diskUsage, err = platform.GetUserFSQuotaUsage(launcher.config.WorkingDir, service.UserName)
+	if err != nil {
+		t.Errorf("Can't get disk usage: %s", err)
+	}
+
+	// 2 files size + 1 block 4k for dir
+	if diskUsage != (8192*2 + 4096) {
+		t.Errorf("Wrong disk usage value: %d", diskUsage)
+	}
+
+	if err := ftp.Stor("test3.dat", bytes.NewReader(testData)); err == nil {
 		t.Errorf("Unexpected nil error")
 	}
 

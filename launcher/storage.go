@@ -20,6 +20,7 @@ import (
 
 	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
 )
 
 /*******************************************************************************
@@ -445,7 +446,7 @@ func createStorageFolder(path, userName string) (folderName string, err error) {
 		return "", err
 	}
 
-	uid, gid, err := getUserUIDGID(userName)
+	uid, gid, err := platform.GetUserUIDGID(userName)
 	if err != nil {
 		return "", err
 	}
@@ -462,7 +463,7 @@ func createStateFile(path, userName string) (err error) {
 		return err
 	}
 
-	uid, gid, err := getUserUIDGID(userName)
+	uid, gid, err := platform.GetUserUIDGID(userName)
 	if err != nil {
 		return err
 	}

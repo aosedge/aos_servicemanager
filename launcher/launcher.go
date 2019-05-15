@@ -25,6 +25,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
 )
 
 /*******************************************************************************
@@ -370,7 +371,7 @@ func Cleanup(workingDir string) (err error) {
 					// Delete service user
 					serviceID := strings.TrimSuffix(strings.TrimPrefix(serviceName, "aos_"), ".service")
 
-					if err := deleteUser(serviceID); err != nil {
+					if err := platform.DeleteUser(serviceID); err != nil {
 						log.WithField("serviceID", serviceID).Error("Can't delete user: ", err)
 					}
 				}
@@ -515,8 +516,8 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 			if !serviceExists {
 				// Remove system user
-				if isUserExist(serviceInfo.ID) {
-					if err := deleteUser(serviceInfo.ID); err != nil {
+				if platform.IsUserExist(serviceInfo.ID) {
+					if err := platform.DeleteUser(serviceInfo.ID); err != nil {
 						log.WithField("serviceID", serviceInfo.ID).Errorf("Can't delete user: %s", err)
 					}
 				}
@@ -846,7 +847,7 @@ func (launcher *Launcher) restoreService(service database.ServiceEntry) (retErr 
 		}
 	}
 
-	if err := setUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
+	if err := platform.SetUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
 			retErr = err
@@ -865,7 +866,7 @@ func (launcher *Launcher) restoreService(service database.ServiceEntry) (retErr 
 
 func (launcher *Launcher) prepareService(installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service database.ServiceEntry, err error) {
-	userName, err := createUser(serviceInfo.ID)
+	userName, err := platform.CreateUser(serviceInfo.ID)
 	if err != nil {
 		return service, err
 	}
@@ -908,7 +909,7 @@ func (launcher *Launcher) addService(service database.ServiceEntry) (err error) 
 	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
-	if err = setUserFSQuota(launcher.config.WorkingDir,
+	if err = platform.SetUserFSQuota(launcher.config.WorkingDir,
 		service.StorageLimit+service.StateLimit, service.UserName); err != nil {
 		return err
 	}
@@ -957,7 +958,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Update service state failed")
 	}
 
-	if err = setUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, newService.UserName); err != nil {
+	if err = platform.SetUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, newService.UserName); err != nil {
 		panic("Set service quota failed")
 	}
 
@@ -1041,7 +1042,7 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	if err := deleteUser(service.ID); err != nil {
+	if err := platform.DeleteUser(service.ID); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't delete user: %s", err)
 			retErr = err
@@ -1142,14 +1143,8 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 			return err
 		}
 
-		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
-		if err != nil {
-			return err
-		}
-
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			ServiceDir:    service.Path,
-			WorkingDir:    entry.StorageFolder,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),
 			ServiceRules:  &rules}); err != nil {
@@ -1216,7 +1211,7 @@ func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *
 	localSpec.Process.Terminal = false
 
 	// assign UID, GID
-	if localSpec.Process.User.UID, localSpec.Process.User.GID, err = getUserUIDGID(userName); err != nil {
+	if localSpec.Process.User.UID, localSpec.Process.User.GID, err = platform.GetUserUIDGID(userName); err != nil {
 		return spec, err
 	}
 

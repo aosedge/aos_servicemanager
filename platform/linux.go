@@ -1,4 +1,4 @@
-package launcher
+package platform
 
 import (
 	"fmt"
@@ -13,20 +13,17 @@ import (
 )
 
 /*******************************************************************************
- * Linux related API
+ * Variables
  ******************************************************************************/
 
 var userMutex sync.Mutex
 
-func serviceIDToUser(serviceID string) (userName string) {
-	// convert id to hashed u32 value
-	hash := fnv.New64a()
-	hash.Write([]byte(serviceID))
+/*******************************************************************************
+ * Public
+ ******************************************************************************/
 
-	return "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
-}
-
-func isUserExist(serviceID string) (result bool) {
+// IsUserExist checks if user exists in the system
+func IsUserExist(serviceID string) (result bool) {
 	userMutex.Lock()
 	defer userMutex.Unlock()
 
@@ -37,7 +34,8 @@ func isUserExist(serviceID string) (result bool) {
 	return false
 }
 
-func createUser(serviceID string) (userName string, err error) {
+// CreateUser creates system user
+func CreateUser(serviceID string) (userName string, err error) {
 	userMutex.Lock()
 	defer userMutex.Unlock()
 
@@ -59,7 +57,8 @@ func createUser(serviceID string) (userName string, err error) {
 	return userName, nil
 }
 
-func deleteUser(serviceID string) (err error) {
+// DeleteUser deletes system user
+func DeleteUser(serviceID string) (err error) {
 	userMutex.Lock()
 	defer userMutex.Unlock()
 
@@ -74,7 +73,8 @@ func deleteUser(serviceID string) (err error) {
 	return nil
 }
 
-func getUserUIDGID(id string) (uid, gid uint32, err error) {
+// GetUserUIDGID returns UID/GID by user name
+func GetUserUIDGID(id string) (uid, gid uint32, err error) {
 	user, err := user.Lookup(id)
 	if err != nil {
 		return 0, 0, err
@@ -93,7 +93,8 @@ func getUserUIDGID(id string) (uid, gid uint32, err error) {
 	return uint32(uid64), uint32(gid64), nil
 }
 
-func setUserFSQuota(path string, limit uint64, userName string) (err error) {
+// SetUserFSQuota sets file system quota for user
+func SetUserFSQuota(path string, limit uint64, userName string) (err error) {
 	supported, _ := fsquota.UserQuotasSupported(path)
 
 	if limit == 0 && !supported {
@@ -116,4 +117,35 @@ func setUserFSQuota(path string, limit uint64, userName string) (err error) {
 	}
 
 	return nil
+}
+
+// GetUserFSQuotaUsage gets file system user usage
+func GetUserFSQuotaUsage(path string, userName string) (byteUsed uint64, err error) {
+	if supported, _ := fsquota.UserQuotasSupported(path); !supported {
+		return byteUsed, nil
+	}
+
+	user, err := user.Lookup(userName)
+	if err != nil {
+		return byteUsed, err
+	}
+
+	info, err := fsquota.GetUserInfo(path, user)
+	if err != nil {
+		return byteUsed, err
+	}
+
+	return info.BytesUsed, nil
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func serviceIDToUser(serviceID string) (userName string) {
+	// convert id to hashed u32 value
+	hash := fnv.New64a()
+	hash.Write([]byte(serviceID))
+
+	return "AOS_" + strconv.FormatUint(hash.Sum64(), 16)
 }
