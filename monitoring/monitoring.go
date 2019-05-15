@@ -682,7 +682,7 @@ func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
 		return ram, err
 	}
 
-	return v.VMS, nil
+	return v.RSS, nil
 }
 
 func (monitor *Monitor) setupTrafficMonitor() (err error) {
