@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"path"
@@ -52,7 +53,7 @@ type serviceManager struct {
  ******************************************************************************/
 
 // GitSummary provided by govvv at compile-time
-var GitSummary string
+var GitSummary = "Unknown"
 
 /*******************************************************************************
  * Init
@@ -433,8 +434,15 @@ func main() {
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
 	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
 	doCleanup := flag.Bool("reset", false, `Removes all services, wipes services and storages and remove DB`)
+	showVersion := flag.Bool("version", false, `Show service manager version`)
 
 	flag.Parse()
+
+	// Show version
+	if *showVersion {
+		fmt.Printf("Version: %s\n", GitSummary)
+		return
+	}
 
 	// Set log level
 	logLevel, err := log.ParseLevel(*strLogLevel)
