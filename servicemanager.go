@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"os"
 	"os/signal"
@@ -24,13 +23,40 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
-const (
-	reconnectTimeout = 10 * time.Second
-)
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const reconnectTimeout = 10 * time.Second
+
+const dbFileName = "servicemanager.db"
+
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type serviceManager struct {
+	alerts   *alerts.Alerts
+	amqp     *amqp.AmqpHandler
+	cfg      *config.Config
+	db       *database.Database
+	dbus     *dbushandler.DBusHandler
+	launcher *launcher.Launcher
+	logging  *logging.Logging
+	monitor  *monitoring.Monitor
+	vis      *visclient.Client
+}
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
 
 // GitSummary provided by govvv at compile-time
 var GitSummary string
-var errQuit = errors.New("Close application")
+
+/*******************************************************************************
+ * Init
+ ******************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -40,31 +66,157 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-func sendInitialSetup(amqpHandler *amqp.AmqpHandler, launcherHandler *launcher.Launcher) (err error) {
-	initialList, err := launcherHandler.GetServicesInfo()
+/*******************************************************************************
+ * ServiceManager
+ ******************************************************************************/
+
+func cleanup(workingDir, dbFile string) {
+	log.Debug("System cleanup")
+
+	if err := launcher.Cleanup(workingDir); err != nil {
+		log.Fatalf("Can't cleanup launcher: %s", err)
+	}
+
+	log.WithField("file", dbFile).Debug("Delete DB file")
+	if err := os.RemoveAll(dbFile); err != nil {
+		log.Fatalf("Can't cleanup database: %s", err)
+	}
+}
+
+func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
+	sm = &serviceManager{cfg: cfg}
+
+	// Initialize fcrypt
+	fcrypt.Init(sm.cfg.Crypt)
+
+	// Create DB
+	dbFile := path.Join(cfg.WorkingDir, dbFileName)
+
+	if sm.db, err = database.New(dbFile); err != nil {
+		if err == database.ErrVersionMismatch {
+			log.Warning("Unsupported database version")
+			cleanup(sm.cfg.WorkingDir, dbFile)
+			sm.db, err = database.New(dbFile)
+		}
+
+		if err != nil {
+			goto err
+		}
+	}
+
+	// Create alerts
+	if sm.alerts, err = alerts.New(sm.cfg, sm.db, sm.db); err != nil {
+		if err == alerts.ErrDisabled {
+			log.Warn(err)
+		} else {
+			goto err
+		}
+	}
+
+	// Create monitor
+	if sm.monitor, err = monitoring.New(sm.cfg, sm.db, sm.alerts); err != nil {
+		if err == monitoring.ErrDisabled {
+			log.Warn(err)
+		} else {
+			goto err
+		}
+	}
+
+	// Create launcher
+	if sm.launcher, err = launcher.New(sm.cfg, sm.db, sm.monitor); err != nil {
+		goto err
+	}
+
+	// Create D-Bus server
+	if sm.dbus, err = dbushandler.New(sm.db); err != nil {
+		goto err
+	}
+
+	// Create VIS client
+	if sm.vis, err = visclient.New(); err != nil {
+		goto err
+	}
+
+	// Create amqp
+	if sm.amqp, err = amqp.New(); err != nil {
+		goto err
+	}
+
+	// Create logging
+	if sm.logging, err = logging.New(sm.cfg, sm.db); err != nil {
+		goto err
+	}
+
+	return sm, nil
+
+err:
+	sm.close()
+
+	return nil, err
+}
+
+func (sm *serviceManager) close() {
+	// Close logging
+	if sm.logging != nil {
+		sm.logging.Close()
+	}
+
+	// Close amqp
+	if sm.amqp != nil {
+		sm.amqp.Close()
+	}
+
+	// Close VIS client
+	if sm.vis != nil {
+		sm.vis.Close()
+	}
+
+	// Close D-Bus server
+	if sm.dbus != nil {
+		sm.dbus.Close()
+	}
+
+	// Close launcher
+	if sm.launcher != nil {
+		sm.launcher.Close()
+	}
+
+	// Close monitor
+	if sm.monitor != nil {
+		sm.monitor.Close()
+	}
+
+	// Close alerts
+	if sm.alerts != nil {
+		sm.alerts.Close()
+	}
+
+	// Close DB
+	if sm.db != nil {
+		sm.db.Close()
+	}
+}
+
+func (sm *serviceManager) sendInitialSetup() (err error) {
+	initialList, err := sm.launcher.GetServicesInfo()
 	if err != nil {
 		log.Fatalf("Can't get services: %s", err)
 	}
 
-	if err = amqpHandler.SendInitialSetup(initialList); err != nil {
+	if err = sm.amqp.SendInitialSetup(initialList); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func processAmqpMessage(
-	message amqp.Message,
-	amqpHandler *amqp.AmqpHandler,
-	launcherHandler *launcher.Launcher,
-	loggingHandler *logging.Logging) (err error) {
+func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
 	case []amqp.ServiceInfoFromCloud:
 		log.WithField("len", len(data)).Info("Receive services info")
 
-		currentList, err := launcherHandler.GetServicesInfo()
+		currentList, err := sm.launcher.GetServicesInfo()
 		if err != nil {
-			log.Errorf("Error getting services info: %s", err)
 			return err
 		}
 
@@ -100,7 +252,7 @@ func processAmqpMessage(
 						"from": service.serviceInfo.Version,
 						"to":   service.serviceInfoFromCloud.Version}).Info("Update service")
 
-					launcherHandler.InstallService(*service.serviceInfoFromCloud)
+					sm.launcher.InstallService(*service.serviceInfoFromCloud)
 				}
 			} else if service.serviceInfoFromCloud != nil {
 				// Install
@@ -108,14 +260,14 @@ func processAmqpMessage(
 					"id":      service.serviceInfoFromCloud.ID,
 					"version": service.serviceInfoFromCloud.Version}).Info("Install service")
 
-				launcherHandler.InstallService(*service.serviceInfoFromCloud)
+				sm.launcher.InstallService(*service.serviceInfoFromCloud)
 			} else if service.serviceInfo != nil {
 				// Remove
 				log.WithFields(log.Fields{
 					"id":      service.serviceInfo.ID,
 					"version": service.serviceInfo.Version}).Info("Remove service")
 
-				launcherHandler.UninstallService(service.serviceInfo.ID)
+				sm.launcher.UninstallService(service.serviceInfo.ID)
 			}
 		}
 
@@ -124,14 +276,14 @@ func processAmqpMessage(
 			"serviceID": data.ServiceID,
 			"result":    data.Result}).Info("Receive state acceptance")
 
-		launcherHandler.StateAcceptance(*data, message.CorrelationID)
+		sm.launcher.StateAcceptance(*data, message.CorrelationID)
 
 	case *amqp.UpdateState:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID,
 			"checksum":  data.Checksum}).Info("Receive update state")
 
-		launcherHandler.UpdateState(*data)
+		sm.launcher.UpdateState(*data)
 
 	case *amqp.RequestServiceLog:
 		log.WithFields(log.Fields{
@@ -139,13 +291,13 @@ func processAmqpMessage(
 			"from":      data.From,
 			"till":      data.Till}).Info("Receive request service log")
 
-		loggingHandler.GetServiceLog(*data)
+		sm.logging.GetServiceLog(*data)
 
 	case *amqp.RequestServiceCrashLog:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID}).Info("Receive request service crash log")
 
-		loggingHandler.GetServiceCrashLog(*data)
+		sm.logging.GetServiceCrashLog(*data)
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
@@ -154,94 +306,127 @@ func processAmqpMessage(
 	return nil
 }
 
-func run(
-	amqpHandler *amqp.AmqpHandler,
-	launcherHandler *launcher.Launcher,
-	visHandler *visclient.VisClient,
-	monitorHandler *monitoring.Monitor,
-	loggingHandler *logging.Logging,
-	alertsHandler *alerts.Alerts,
-	terminateChannel chan os.Signal) (err error) {
-
+func (sm *serviceManager) handleChannels() (err error) {
 	var monitorDataChannel chan amqp.MonitoringData
 	var alertsChannel chan amqp.Alerts
 
-	if monitorHandler != nil {
-		monitorDataChannel = monitorHandler.DataChannel
+	if sm.monitor != nil {
+		monitorDataChannel = sm.monitor.DataChannel
 	}
 
-	if alertsHandler != nil {
-		alertsChannel = alertsHandler.AlertsChannel
+	if sm.alerts != nil {
+		alertsChannel = sm.alerts.AlertsChannel
 	}
 
 	for {
 		select {
-		case <-terminateChannel:
-			return errQuit
-
-		case amqpMessage := <-amqpHandler.MessageChannel:
+		case amqpMessage := <-sm.amqp.MessageChannel:
 			if err, ok := amqpMessage.Data.(error); ok {
-				log.Errorf("Receive amqp error: %s", err)
 				return err
 			}
 
-			if err := processAmqpMessage(amqpMessage, amqpHandler, launcherHandler, loggingHandler); err != nil {
+			if err = sm.processAmqpMessage(amqpMessage); err != nil {
 				log.Errorf("Error processing amqp result: %s", err)
 			}
 
-		case status := <-launcherHandler.StatusChannel:
-			if err = amqpHandler.SendServiceStatus(status); err != nil {
+		case status := <-sm.launcher.StatusChannel:
+			if err = sm.amqp.SendServiceStatus(status); err != nil {
 				log.Errorf("Error send service status message: %s", err)
 			}
 
-		case newState := <-launcherHandler.NewStateChannel:
-			if err := amqpHandler.SendNewState(newState.ServiceID, newState.State,
+		case newState := <-sm.launcher.NewStateChannel:
+			if err := sm.amqp.SendNewState(newState.ServiceID, newState.State,
 				newState.Checksum, newState.CorrelationID); err != nil {
 				log.Errorf("Error send new state message: %s", err)
 			}
 
-		case stateRequest := <-launcherHandler.StateRequestChannel:
-			if err := amqpHandler.SendStateRequest(stateRequest.ServiceID, stateRequest.Default); err != nil {
+		case stateRequest := <-sm.launcher.StateRequestChannel:
+			if err := sm.amqp.SendStateRequest(stateRequest.ServiceID, stateRequest.Default); err != nil {
 				log.Errorf("Error send new state message: %s", err)
 			}
 
 		case data := <-monitorDataChannel:
-			if err := amqpHandler.SendMonitoringData(data); err != nil {
+			if err := sm.amqp.SendMonitoringData(data); err != nil {
 				log.Errorf("Error send monitoring data: %s", err)
 			}
 
-		case logData := <-loggingHandler.LogChannel:
-			if err := amqpHandler.SendServiceLog(logData); err != nil {
+		case logData := <-sm.logging.LogChannel:
+			if err := sm.amqp.SendServiceLog(logData); err != nil {
 				log.Errorf("Error send service log: %s", err)
 			}
 
 		case alerts := <-alertsChannel:
-			if err := amqpHandler.SendAlerts(alerts); err != nil {
+			if err := sm.amqp.SendAlerts(alerts); err != nil {
 				log.Errorf("Error send alerts: %s", err)
 			}
 
-		case users := <-visHandler.UsersChangedChannel:
+		case users := <-sm.vis.UsersChangedChannel:
 			log.WithField("users", users).Info("Users changed")
 			return nil
 
-		case err := <-visHandler.ErrorChannel:
+		case err := <-sm.vis.ErrorChannel:
 			return err
 		}
 	}
 }
 
-func cleanup(workingDir, dbFile string) {
-	log.Debug("System cleanup")
+func (sm *serviceManager) run() {
+	for {
+		var users []string
+		var vin string
+		var err error
 
-	if err := launcher.Cleanup(workingDir); err != nil {
-		log.Fatalf("Can't cleanup launcher: %s", err)
-	}
+		if !sm.vis.IsConnected() {
+			if err = sm.vis.Connect(sm.cfg.VISServerURL); err != nil {
+				log.Errorf("Can't connect to VIS: %s", err)
+				goto reconnect
+			}
+		}
 
-	log.WithField("file", dbFile).Debug("Delete DB file")
-	if err := os.RemoveAll(dbFile); err != nil {
-		log.Fatalf("Can't cleanup database: %s", err)
+		// Get vin code
+		if vin, err = sm.vis.GetVIN(); err != nil {
+			log.Errorf("Can't get VIN: %s", err)
+			sm.vis.Disconnect()
+			goto reconnect
+		}
+
+		// Get users
+		if users, err = sm.vis.GetUsers(); err != nil {
+			log.Errorf("Can't get users: %s", err)
+			sm.vis.Disconnect()
+			goto reconnect
+		}
+
+		if err = sm.launcher.SetUsers(users); err != nil {
+			log.Fatalf("Can't set users: %s", err)
+		}
+
+		// Connect
+		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, vin, users); err != nil {
+			log.Errorf("Can't establish connection: %s", err)
+			goto reconnect
+		}
+
+		if err = sm.sendInitialSetup(); err != nil {
+			log.Errorf("Can't send initial setup: %s", err)
+			goto reconnect
+		}
+
+		if err = sm.handleChannels(); err != nil {
+			log.Errorf("Runtime error: %s", err)
+		}
+
+	reconnect:
+		sm.amqp.Disconnect()
+		<-time.After(reconnectTimeout)
+
+		log.Debug("Reconnecting...")
 	}
 }
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
 
 func main() {
 	// Initialize command line flags
@@ -260,163 +445,33 @@ func main() {
 
 	log.WithFields(log.Fields{"configFile": *configFile, "version": GitSummary}).Info("Start service manager")
 
-	// Create config
-	config, err := config.New(*configFile)
+	cfg, err := config.New(*configFile)
 	if err != nil {
-		log.Fatalf("Error while opening configuration file: %s", err)
+		log.Fatalf("Can't create config: %s", err)
 	}
 
-	dbFile := path.Join(config.WorkingDir, "servicemanager.db")
-
 	if *doCleanup {
-		cleanup(config.WorkingDir, dbFile)
+		cleanup(cfg.WorkingDir, path.Join(cfg.WorkingDir, dbFileName))
 		return
 	}
 
-	// Initialize fcrypt
-	fcrypt.Init(config.Crypt)
-
-	// Create DB
-	db, err := database.New(dbFile)
+	sm, err := newServiceManager(cfg)
 	if err != nil {
-		if err == database.ErrVersionMismatch {
-			log.Warning("Unsupported database version")
-
-			cleanup(config.WorkingDir, dbFile)
-
-			db, err = database.New(dbFile)
-		}
-
-		if err != nil {
-			log.Fatalf("Can't open database: %s", err)
-		}
+		log.Fatalf("Can't create service manager: %s", err)
 	}
-	defer db.Close()
-
-	// Create alerts
-	alertsHandler, err := alerts.New(config, db, db)
-	if err != nil {
-		if err == alerts.ErrDisabled {
-			log.Warn(err)
-		} else {
-			log.Fatalf("Can't create alerts: %s", err)
-		}
-	}
-	if alertsHandler != nil {
-		defer alertsHandler.Close()
-	}
-
-	// Create monitor
-	monitor, err := monitoring.New(config, db, alertsHandler)
-	if err != nil {
-		if err == monitoring.ErrDisabled {
-			log.Warn(err)
-		} else {
-			log.Fatalf("Can't create monitor: %s", err)
-		}
-	}
-
-	// Create launcher
-	launcherHandler, err := launcher.New(config, db, monitor)
-	if err != nil {
-		log.Fatalf("Can't create launcher: %s", err)
-	}
-	defer launcherHandler.Close()
-
-	// Create D-Bus server
-	dbusServer, err := dbushandler.New(db)
-	if err != nil {
-		log.Fatalf("Can't create D-BUS server: %s", err)
-	}
-	defer dbusServer.Close()
-
-	// Create VIS client
-	vis, err := visclient.New()
-	if err != nil {
-		log.Fatalf("Can't connect to VIS: %s", err)
-	}
-	defer vis.Close()
-
-	amqpHandler, err := amqp.New()
-	if err != nil {
-		log.Fatalf("Can't create amqp: %s", err)
-	}
-	defer amqpHandler.Close()
-
-	// Create logging
-	logging, err := logging.New(config, db)
-	if err != nil {
-		log.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
+	defer sm.close()
 
 	// Handle SIGTERM
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
-	for {
-		var (
-			users []string
-			vin   string
-		)
+	go func() {
+		<-terminateChannel
 
-		if !vis.IsConnected() {
-			if err = vis.Connect(config.VISServerURL); err != nil {
-				log.Errorf("Can't connect to VIS: %s", err)
-				goto reconnect
-			}
-		}
+		sm.close()
 
-		// Get vin code
-		if vin, err = vis.GetVIN(); err != nil {
-			log.Errorf("Can't get VIN: %s", err)
-			vis.Disconnect()
-			goto reconnect
-		}
+		os.Exit(1)
+	}()
 
-		// Get users
-		if users, err = vis.GetUsers(); err != nil {
-			log.Errorf("Can't get users: %s", err)
-			vis.Disconnect()
-			goto reconnect
-		}
-
-		err = launcherHandler.SetUsers(users)
-		if err != nil {
-			log.Fatalf("Can't set users: %s", err)
-		}
-
-		// Connect
-		if err = amqpHandler.Connect(config.ServiceDiscoveryURL, vin, users); err != nil {
-			log.Errorf("Can't establish connection: %s", err)
-			goto reconnect
-		}
-
-		if err = sendInitialSetup(amqpHandler, launcherHandler); err != nil {
-			log.Errorf("Can't send initial setup: %s", err)
-			goto reconnect
-		}
-
-		if err = run(amqpHandler, launcherHandler, vis,
-			monitor, logging, alertsHandler, terminateChannel); err != nil {
-			if err == errQuit {
-				return
-			}
-			log.Errorf("Runtime error: %s", err)
-		}
-
-	reconnect:
-
-		amqpHandler.Disconnect()
-
-		select {
-		case <-terminateChannel:
-			// Close application
-			return
-
-		case <-time.After(reconnectTimeout):
-		}
-
-		log.Debug("Reconnecting...")
-	}
+	sm.run()
 }
