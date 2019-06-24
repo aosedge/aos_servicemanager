@@ -286,20 +286,20 @@ func TestReceiveMessages(t *testing.T) {
 		Data: []amqphandler.AlertItem{
 			amqphandler.AlertItem{
 				Timestamp: time.Now().Local(),
-				Tag:       amqphandler.AlertSystemError,
+				Tag:       amqphandler.AlertTagSystemError,
 				Source:    "system",
 				Payload:   map[string]interface{}{"Message": "System error"},
 			},
 			amqphandler.AlertItem{
 				Timestamp: time.Now().Local(),
-				Tag:       amqphandler.AlertSystemError,
+				Tag:       amqphandler.AlertTagSystemError,
 				Source:    "service 1",
 				Version:   &alertVersion,
 				Payload:   map[string]interface{}{"Message": "Service crashed"},
 			},
 			amqphandler.AlertItem{
 				Timestamp: time.Now().Local(),
-				Tag:       amqphandler.AlertResource,
+				Tag:       amqphandler.AlertTagResource,
 				Source:    "system",
 				Payload:   map[string]interface{}{"Parameter": "cpu", "Value": float64(100)},
 			},
