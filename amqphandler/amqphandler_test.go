@@ -181,6 +181,14 @@ func TestSendMessages(t *testing.T) {
 		&amqphandler.RequestServiceCrashLog{
 			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: 1},
 			ServiceID:     "service3", LogID: uuid.New().String()},
+
+		&amqphandler.SystemRevert{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: 1},
+			ImageVersion:  3},
+
+		&amqphandler.SystemUpgrade{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: 1},
+			ImageVersion:  4},
 	}
 
 	for _, message := range testData {
@@ -398,6 +406,50 @@ func TestReceiveMessages(t *testing.T) {
 				Data: alertsData.Data},
 			getDataType: func() interface{} {
 				return &amqphandler.Alerts{}
+			},
+		},
+
+		messageDesc{
+			call: func() error {
+				return amqpHandler.SendSystemRevertStatus("success", "", 3)
+			},
+			data: &amqphandler.SystemRevertStatus{
+				MessageHeader: amqphandler.MessageHeader{
+					Version:     1,
+					MessageType: amqphandler.SystemRevertType},
+				Status:       "success",
+				ImageVersion: 3},
+			getDataType: func() interface{} {
+				return &amqphandler.SystemRevertStatus{}
+			},
+		},
+
+		messageDesc{
+			call: func() error {
+				return amqpHandler.SendSystemUpgradeStatus("failed", "", 4)
+			},
+			data: &amqphandler.SystemUpgradeStatus{
+				MessageHeader: amqphandler.MessageHeader{
+					Version:     1,
+					MessageType: amqphandler.SystemUpgradeType},
+				Status:       "failed",
+				ImageVersion: 4},
+			getDataType: func() interface{} {
+				return &amqphandler.SystemUpgradeStatus{}
+			},
+		},
+
+		messageDesc{
+			call: func() error {
+				return amqpHandler.SendSystemVersion(5)
+			},
+			data: &amqphandler.SystemVersion{
+				MessageHeader: amqphandler.MessageHeader{
+					Version:     1,
+					MessageType: amqphandler.SystemVersionType},
+				ImageVersion: 5},
+			getDataType: func() interface{} {
+				return &amqphandler.SystemVersion{}
 			},
 		},
 	}

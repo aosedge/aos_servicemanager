@@ -35,18 +35,23 @@ const (
 	RequestServiceCrashLogType = "requestServiceCrashLog"
 	RequestServiceLogType      = "requestServiceLog"
 	StateAcceptanceType        = "stateAcceptance"
+	SystemRevertType           = "systemRevert"
+	SystemUpgradeType          = "systemUpgrade"
 	UpdateStateType            = "updateState"
 )
 
 // amqp response types
 const (
-	AlertsType         = "alerts"
-	MonitoringDataType = "monitoringData"
-	NewStateType       = "newState"
-	PushServiceLogType = "pushServiceLog"
-	ServiceStatusType  = "serviceStatus"
-	StateRequestType   = "stateRequest"
-	VehicleStatusType  = "vehicleStatus"
+	AlertsType              = "alerts"
+	MonitoringDataType      = "monitoringData"
+	NewStateType            = "newState"
+	PushServiceLogType      = "pushServiceLog"
+	ServiceStatusType       = "serviceStatus"
+	StateRequestType        = "stateRequest"
+	SystemRevertStatusType  = "systemRevertStatus"
+	SystemUpgradeStatusType = "systemUpgradeStatus"
+	SystemVersionType       = "systemVersion"
+	VehicleStatusType       = "vehicleStatus"
 )
 
 // Alert tags
@@ -107,6 +112,18 @@ type StateAcceptance struct {
 	Checksum  string `json:"checksum"`
 	Result    string `json:"result"`
 	Reason    string `json:"reason"`
+}
+
+// SystemRevert system revert structure
+type SystemRevert struct {
+	MessageHeader
+	ImageVersion uint64 `json:"imageVersion"`
+}
+
+// SystemUpgrade system upgrade structure
+type SystemUpgrade struct {
+	MessageHeader
+	ImageVersion uint64 `json:"imageVersion"`
 }
 
 // UpdateState state update message
@@ -192,6 +209,28 @@ type StateRequest struct {
 	MessageHeader
 	ServiceID string `json:"serviceId"`
 	Default   bool   `json:"default"`
+}
+
+// SystemRevertStatus system revert status structure
+type SystemRevertStatus struct {
+	MessageHeader
+	Status       string  `json:"revertStatus"`
+	Error        *string `json:"error,omitempty"`
+	ImageVersion uint64  `json:"imageVersion"`
+}
+
+// SystemUpgradeStatus system upgrade status structure
+type SystemUpgradeStatus struct {
+	MessageHeader
+	Status       string  `json:"upgradeStatus"`
+	Error        *string `json:"error,omitempty"`
+	ImageVersion uint64  `json:"imageVersion"`
+}
+
+// SystemVersion system version structure
+type SystemVersion struct {
+	MessageHeader
+	ImageVersion uint64 `json:"imageVersion"`
 }
 
 // VehicleStatus vehicle status structure
@@ -305,6 +344,8 @@ var messageMap = map[string]func() interface{}{
 	RequestServiceCrashLogType: func() interface{} { return &RequestServiceCrashLog{} },
 	RequestServiceLogType:      func() interface{} { return &RequestServiceLog{} },
 	StateAcceptanceType:        func() interface{} { return &StateAcceptance{} },
+	SystemRevertType:           func() interface{} { return &SystemRevert{} },
+	SystemUpgradeType:          func() interface{} { return &SystemUpgrade{} },
 	UpdateStateType:            func() interface{} { return &UpdateState{} },
 }
 
@@ -471,6 +512,55 @@ func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
 		MessageType: AlertsType}
 
 	handler.sendChannel <- Message{"", alerts}
+
+	return nil
+}
+
+// SendSystemRevertStatus sends system revert status
+func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error) {
+	errorValue := &revertError
+
+	if revertError == "" {
+		errorValue = nil
+	}
+
+	handler.sendChannel <- Message{"", SystemRevertStatus{
+		MessageHeader: MessageHeader{
+			Version:     1,
+			MessageType: SystemRevertType},
+		Status:       revertStatus,
+		Error:        errorValue,
+		ImageVersion: imageVersion}}
+
+	return nil
+}
+
+// SendSystemUpgradeStatus sends system upgrade status
+func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error) {
+	errorValue := &upgradeError
+
+	if upgradeError == "" {
+		errorValue = nil
+	}
+
+	handler.sendChannel <- Message{"", SystemUpgradeStatus{
+		MessageHeader: MessageHeader{
+			Version:     1,
+			MessageType: SystemUpgradeType},
+		Status:       upgradeStatus,
+		Error:        errorValue,
+		ImageVersion: imageVersion}}
+
+	return nil
+}
+
+// SendSystemVersion sends system version
+func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
+	handler.sendChannel <- Message{"", SystemVersion{
+		MessageHeader: MessageHeader{
+			Version:     1,
+			MessageType: SystemVersionType},
+		ImageVersion: imageVersion}}
 
 	return nil
 }
