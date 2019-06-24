@@ -29,20 +29,24 @@ const (
 	connectionRetry = 3
 )
 
+// amqp request types
 const (
-	desiredStatusStr          = "desiredStatus"
-	stateAcceptanceStr        = "stateAcceptance"
-	updateStateStr            = "updateState"
-	requestServiceLogStr      = "requestServiceLog"
-	requestServiceCrashLogStr = "requestServiceCrashLog"
+	DesiredStatusType          = "desiredStatus"
+	RequestServiceCrashLogType = "requestServiceCrashLog"
+	RequestServiceLogType      = "requestServiceLog"
+	StateAcceptanceType        = "stateAcceptance"
+	UpdateStateType            = "updateState"
+)
 
-	vehicleStatusStr  = "vehicleStatus"
-	serviceStatusStr  = "serviceStatus"
-	monitoringDataStr = "monitoringData"
-	newStateStr       = "newState"
-	stateRequestStr   = "stateRequest"
-	pushServiceLogStr = "pushServiceLog"
-	alertsStr         = "alerts"
+// amqp response types
+const (
+	AlertsType         = "alerts"
+	MonitoringDataType = "monitoringData"
+	NewStateType       = "newState"
+	PushServiceLogType = "pushServiceLog"
+	ServiceStatusType  = "serviceStatus"
+	StateRequestType   = "stateRequest"
+	VehicleStatusType  = "vehicleStatus"
 )
 
 // Alert tags
@@ -68,6 +72,164 @@ type AmqpHandler struct {
 	receiveConnection *amqp.Connection
 }
 
+// MessageHeader message header
+type MessageHeader struct {
+	Version     uint64 `json:"version"`
+	MessageType string `json:"messageType"`
+}
+
+// DesiredStatus desired status message
+type DesiredStatus struct {
+	MessageHeader
+	Services []byte `json:"services"`
+}
+
+// RequestServiceCrashLog request service crash log message
+type RequestServiceCrashLog struct {
+	MessageHeader
+	ServiceID string `json:"serviceId"`
+	LogID     string `json:"logID"`
+}
+
+// RequestServiceLog request service log message
+type RequestServiceLog struct {
+	MessageHeader
+	ServiceID string     `json:"serviceId"`
+	LogID     string     `json:"logID"`
+	From      *time.Time `json:"from"`
+	Till      *time.Time `json:"till"`
+}
+
+// StateAcceptance state acceptance message
+type StateAcceptance struct {
+	MessageHeader
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"checksum"`
+	Result    string `json:"result"`
+	Reason    string `json:"reason"`
+}
+
+// UpdateState state update message
+type UpdateState struct {
+	MessageHeader
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"stateChecksum"`
+	State     string `json:"state"`
+}
+
+// SystemAlert system alert structure
+type SystemAlert struct {
+	Message string `json:"message"`
+}
+
+// ResourceAlert resource alert structure
+type ResourceAlert struct {
+	Parameter string `json:"parameter"`
+	Value     uint64 `json:"value"`
+}
+
+// AlertItem alert item structure
+type AlertItem struct {
+	Timestamp time.Time   `json:"timestamp"`
+	Tag       string      `json:"tag"`
+	Source    string      `json:"source"`
+	Version   *uint64     `json:"version,omitempty"`
+	Payload   interface{} `json:"payload"`
+}
+
+// Alerts alerts message structure
+type Alerts struct {
+	MessageHeader
+	Data []AlertItem `json:"data"`
+}
+
+// NewState new state structure
+type NewState struct {
+	MessageHeader
+	ServiceID string `json:"serviceId"`
+	Checksum  string `json:"stateChecksum"`
+	State     string `json:"state"`
+}
+
+// ServiceMonitoringData monitoring data for service
+type ServiceMonitoringData struct {
+	ServiceID  string `json:"serviceId"`
+	RAM        uint64 `json:"ram"`
+	CPU        uint64 `json:"cpu"`
+	UsedDisk   uint64 `json:"usedDisk"`
+	InTraffic  uint64 `json:"inTraffic"`
+	OutTraffic uint64 `json:"outTraffic"`
+}
+
+// MonitoringData monitoring data structure
+type MonitoringData struct {
+	MessageHeader
+	Timestamp time.Time `json:"timestamp"`
+	Data      struct {
+		Global struct {
+			RAM        uint64 `json:"ram"`
+			CPU        uint64 `json:"cpu"`
+			UsedDisk   uint64 `json:"usedDisk"`
+			InTraffic  uint64 `json:"inTraffic"`
+			OutTraffic uint64 `json:"outTraffic"`
+		} `json:"global"`
+		ServicesData []ServiceMonitoringData `json:"servicesData"`
+	} `json:"data"`
+}
+
+// PushServiceLog push service log structure
+type PushServiceLog struct {
+	MessageHeader
+	LogID     string  `json:"logID"`
+	PartCount *uint64 `json:"partCount,omitempty"`
+	Part      *uint64 `json:"part,omitempty"`
+	Data      *[]byte `json:"data,omitempty"`
+	Error     *string `json:"error,omitempty"`
+}
+
+// StateRequest state request structure
+type StateRequest struct {
+	MessageHeader
+	ServiceID string `json:"serviceId"`
+	Default   bool   `json:"default"`
+}
+
+// VehicleStatus vehicle status structure
+type VehicleStatus struct {
+	MessageHeader
+	Services []ServiceInfo `json:"services"`
+}
+
+// ServiceInfo struct with service information
+type ServiceInfo struct {
+	ID            string `json:"id"`
+	Version       uint64 `json:"version"`
+	Status        string `json:"status"`
+	Error         string `json:"error"`
+	StateChecksum string `json:"stateChecksum"`
+}
+
+// Message structure used to send/receive data by amqp
+type Message struct {
+	CorrelationID string
+	Data          interface{}
+}
+
+type serviceDiscoveryRequest struct {
+	Version uint64   `json:"version"`
+	VIN     string   `json:"VIN"`
+	Users   []string `json:"users"`
+}
+
+// ServiceAlertRules define service monitoring alerts rules
+type ServiceAlertRules struct {
+	RAM        *config.AlertRule `json:"ram,omitempty"`
+	CPU        *config.AlertRule `json:"cpu,omitempty"`
+	UsedDisk   *config.AlertRule `json:"usedDisk,omitempty"`
+	InTraffic  *config.AlertRule `json:"inTraffic,omitempty"`
+	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
+}
+
 // ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
 	ID                     string             `json:"id"`
@@ -85,148 +247,6 @@ type ServiceInfoFromCloud struct {
 	EncryptionMode         string             `json:"encryptionMode"`
 	EncryptionModeParams   string             `json:"encryptionModeParams"`
 	ServiceMonitoring      *ServiceAlertRules `json:"serviceMonitoring,omitempty"`
-}
-
-// ServiceAlertRules define service monitoring alerts rules
-type ServiceAlertRules struct {
-	RAM        *config.AlertRule `json:"ram,omitempty"`
-	CPU        *config.AlertRule `json:"cpu,omitempty"`
-	UsedDisk   *config.AlertRule `json:"usedDisk,omitempty"`
-	InTraffic  *config.AlertRule `json:"inTraffic,omitempty"`
-	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
-}
-
-// ServiceMonitoringData monitoring data for service
-type ServiceMonitoringData struct {
-	ServiceID  string `json:"serviceId"`
-	RAM        uint64 `json:"ram"`
-	CPU        uint64 `json:"cpu"`
-	UsedDisk   uint64 `json:"usedDisk"`
-	InTraffic  uint64 `json:"inTraffic"`
-	OutTraffic uint64 `json:"outTraffic"`
-}
-
-// MonitoringData define monitoring data structure
-type MonitoringData struct {
-	Timestamp time.Time `json:"timestamp"`
-	Data      struct {
-		Global struct {
-			RAM        uint64 `json:"ram"`
-			CPU        uint64 `json:"cpu"`
-			UsedDisk   uint64 `json:"usedDisk"`
-			InTraffic  uint64 `json:"inTraffic"`
-			OutTraffic uint64 `json:"outTraffic"`
-		} `json:"global"`
-		ServicesData []ServiceMonitoringData `json:"servicesData"`
-	} `json:"data"`
-}
-
-// ServiceInfo struct with service information
-type ServiceInfo struct {
-	ID            string `json:"id"`
-	Version       uint64 `json:"version"`
-	Status        string `json:"status"`
-	Error         string `json:"error"`
-	StateChecksum string `json:"stateChecksum"`
-}
-
-// StateAcceptance state acceptance message
-type StateAcceptance struct {
-	ServiceID string `json:"serviceId"`
-	Checksum  string `json:"checksum"`
-	Result    string `json:"result"`
-	Reason    string `json:"reason"`
-}
-
-// UpdateState state update message
-type UpdateState struct {
-	ServiceID string `json:"serviceId"`
-	Checksum  string `json:"stateChecksum"`
-	State     string `json:"state"`
-}
-
-// RequestServiceLog request service log message
-type RequestServiceLog struct {
-	ServiceID string     `json:"serviceId"`
-	LogID     string     `json:"logID"`
-	From      *time.Time `json:"from"`
-	Till      *time.Time `json:"till"`
-}
-
-// RequestServiceCrashLog request service crash log message
-type RequestServiceCrashLog struct {
-	ServiceID string `json:"serviceId"`
-	LogID     string `json:"logID"`
-}
-
-// PushServiceLog push service log structure
-type PushServiceLog struct {
-	LogID     string  `json:"logID"`
-	PartCount *uint64 `json:"partCount,omitempty"`
-	Part      *uint64 `json:"part,omitempty"`
-	Data      *[]byte `json:"data,omitempty"`
-	Error     *string `json:"error,omitempty"`
-}
-
-// Alerts alerts message structure
-type Alerts struct {
-	Data []AlertItem `json:"data"`
-}
-
-// AlertItem alert item structure
-type AlertItem struct {
-	Timestamp time.Time   `json:"timestamp"`
-	Tag       string      `json:"tag"`
-	Source    string      `json:"source"`
-	Version   *uint64     `json:"version,omitempty"`
-	Payload   interface{} `json:"payload"`
-}
-
-// SystemAlert system alert structure
-type SystemAlert struct {
-	Message string `json:"message"`
-}
-
-// ResourceAlert resource alert structure
-type ResourceAlert struct {
-	Parameter string `json:"parameter"`
-	Value     uint64 `json:"value"`
-}
-
-// Message structure used to send/receive data by amqp
-type Message struct {
-	CorrelationID string
-	Data          interface{}
-}
-
-type serviceDiscoveryRequest struct {
-	Version uint64   `json:"version"`
-	VIN     string   `json:"VIN"`
-	Users   []string `json:"users"`
-}
-
-type messageHeader struct {
-	Version     uint64 `json:"version"`
-	MessageType string `json:"messageType"`
-}
-
-type vehicleStatus struct {
-	Services []ServiceInfo `json:"services"`
-}
-
-type desiredStatus struct {
-	Services []byte `json:"services"`
-}
-
-type newState struct {
-	ServiceID string `json:"serviceId"`
-	Checksum  string `json:"stateChecksum"`
-	State     string `json:"state"`
-}
-
-type stateRequest struct {
-	ServiceID string `json:"serviceId"`
-	Default   bool   `json:"default"`
 }
 
 type serviceDiscoveryResp struct {
@@ -281,11 +301,11 @@ type queueInfo struct {
  ******************************************************************************/
 
 var messageMap = map[string]func() interface{}{
-	desiredStatusStr:          func() interface{} { return &desiredStatus{} },
-	stateAcceptanceStr:        func() interface{} { return &StateAcceptance{} },
-	updateStateStr:            func() interface{} { return &UpdateState{} },
-	requestServiceLogStr:      func() interface{} { return &RequestServiceLog{} },
-	requestServiceCrashLogStr: func() interface{} { return &RequestServiceCrashLog{} },
+	DesiredStatusType:          func() interface{} { return &DesiredStatus{} },
+	RequestServiceCrashLogType: func() interface{} { return &RequestServiceCrashLog{} },
+	RequestServiceLogType:      func() interface{} { return &RequestServiceLog{} },
+	StateAcceptanceType:        func() interface{} { return &StateAcceptance{} },
+	UpdateStateType:            func() interface{} { return &UpdateState{} },
 }
 
 /*******************************************************************************
@@ -377,105 +397,80 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list of available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		vehicleStatus
-	}{
-		messageHeader: messageHeader{
+	handler.sendChannel <- Message{"", VehicleStatus{
+		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: vehicleStatusStr},
-		vehicleStatus: vehicleStatus{
-			Services: serviceList}}}
+			MessageType: VehicleStatusType},
+		Services: serviceList}}
 
 	return nil
 }
 
 // SendServiceStatus sends message with service status
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		vehicleStatus
-	}{
-		messageHeader: messageHeader{
+	handler.sendChannel <- Message{"", VehicleStatus{
+		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: serviceStatusStr},
-		vehicleStatus: vehicleStatus{
-			Services: []ServiceInfo{serviceStatus}}}}
+			MessageType: ServiceStatusType},
+		Services: []ServiceInfo{serviceStatus}}}
 
 	return nil
 }
 
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		MonitoringData
-	}{
-		messageHeader: messageHeader{
-			Version:     1,
-			MessageType: monitoringDataStr},
-		MonitoringData: monitoringData}}
+	monitoringData.MessageHeader = MessageHeader{
+		Version:     1,
+		MessageType: MonitoringDataType}
+
+	handler.sendChannel <- Message{"", monitoringData}
 
 	return nil
 }
 
 // SendNewState sends new state message
 func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
-	handler.sendChannel <- Message{correlationID, struct {
-		messageHeader
-		newState
-	}{
-		messageHeader: messageHeader{
+	handler.sendChannel <- Message{correlationID, NewState{
+		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: newStateStr},
-		newState: newState{
-			ServiceID: serviceID,
-			State:     state,
-			Checksum:  checksum}}}
+			MessageType: NewStateType},
+		ServiceID: serviceID,
+		State:     state,
+		Checksum:  checksum}}
 
 	return nil
 }
 
 // SendStateRequest sends state request message
 func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		stateRequest
-	}{
-		messageHeader: messageHeader{
+	handler.sendChannel <- Message{"", StateRequest{
+		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: stateRequestStr},
-		stateRequest: stateRequest{
-			ServiceID: serviceID,
-			Default:   defaultState}}}
+			MessageType: StateRequestType},
+		ServiceID: serviceID,
+		Default:   defaultState}}
 
 	return nil
 }
 
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		PushServiceLog
-	}{
-		messageHeader: messageHeader{
-			Version:     1,
-			MessageType: pushServiceLogStr},
-		PushServiceLog: serviceLog}}
+	serviceLog.MessageHeader = MessageHeader{
+		Version:     1,
+		MessageType: PushServiceLogType}
+
+	handler.sendChannel <- Message{"", serviceLog}
 
 	return nil
 }
 
 // SendAlerts sends alerts message
 func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
-	handler.sendChannel <- Message{"", struct {
-		messageHeader
-		Alerts
-	}{
-		messageHeader: messageHeader{
-			Version:     1,
-			MessageType: alertsStr},
-		Alerts: alerts}}
+	alerts.MessageHeader = MessageHeader{
+		Version:     1,
+		MessageType: AlertsType}
+
+	handler.sendChannel <- Message{"", alerts}
 
 	return nil
 }
@@ -725,7 +720,7 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				"message":      string(delivery.Body),
 				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
 
-			header := messageHeader{}
+			header := MessageHeader{}
 
 			if err := json.Unmarshal(delivery.Body, &header); err != nil {
 				log.Errorf("Can't parse message body: %s", err)
@@ -745,10 +740,10 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				continue
 			}
 
-			if header.MessageType == desiredStatusStr {
+			if header.MessageType == DesiredStatusType {
 				var err error
 
-				encodedData, ok := data.(*desiredStatus)
+				encodedData, ok := data.(*DesiredStatus)
 				if !ok {
 					log.Error("Wrong data type: expect desired status")
 					continue

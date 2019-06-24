@@ -35,12 +35,6 @@ type backendClient struct {
 	errChannel chan *amqp.Error
 }
 
-type sendData struct {
-	version     uint64
-	messageType string
-	data        interface{}
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -119,22 +113,9 @@ func cleanup() {
 	}
 }
 
-func sendMessage(correlationID string, version uint64, messageType string, data interface{}) (err error) {
-	dataJSON, err := json.Marshal(data)
+func sendMessage(correlationID string, message interface{}) (err error) {
+	dataJSON, err := json.Marshal(message)
 	if err != nil {
-		return err
-	}
-
-	tmpData := make(map[string]interface{})
-
-	if err = json.Unmarshal(dataJSON, &tmpData); err != nil {
-		return err
-	}
-
-	tmpData["version"] = version
-	tmpData["messageType"] = messageType
-
-	if dataJSON, err = json.Marshal(tmpData); err != nil {
 		return err
 	}
 
@@ -184,29 +165,36 @@ func TestSendMessages(t *testing.T) {
 		t.Fatalf("Can't connect to server: %s", err)
 	}
 
-	testData := []sendData{
-		sendData{1, "stateAcceptance", &amqphandler.StateAcceptance{
-			ServiceID: "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"}},
-		sendData{1, "updateState", &amqphandler.UpdateState{
-			ServiceID: "service1", Checksum: "0993478847", State: "This is new state"}},
-		sendData{1, "requestServiceLog", &amqphandler.RequestServiceLog{
-			ServiceID: "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}}},
-		sendData{1, "requestServiceCrashLog", &amqphandler.RequestServiceCrashLog{
-			ServiceID: "service3", LogID: uuid.New().String()}},
+	testData := []interface{}{
+		&amqphandler.StateAcceptance{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: 1},
+			ServiceID:     "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"},
+
+		&amqphandler.UpdateState{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: 1},
+			ServiceID:     "service1", Checksum: "0993478847", State: "This is new state"},
+
+		&amqphandler.RequestServiceLog{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: 1},
+			ServiceID:     "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
+
+		&amqphandler.RequestServiceCrashLog{
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: 1},
+			ServiceID:     "service3", LogID: uuid.New().String()},
 	}
 
 	for _, message := range testData {
 		correlationID := uuid.New().String()
 
-		if err = sendMessage(correlationID, message.version, message.messageType, message.data); err != nil {
+		if err = sendMessage(correlationID, message); err != nil {
 			t.Errorf("Can't send message: %s", err)
 			continue
 		}
 
 		select {
 		case receiveMessage := <-amqpHandler.MessageChannel:
-			if !reflect.DeepEqual(message.data, receiveMessage.Data) {
-				t.Errorf("Wrong data received: %v %v", message.data, receiveMessage.Data)
+			if !reflect.DeepEqual(message, receiveMessage.Data) {
+				t.Errorf("Wrong data received: %v %v", message, receiveMessage.Data)
 				continue
 			}
 
@@ -310,19 +298,13 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendInitialSetup(initialSetupData)
 			},
-			data: &struct {
-				messageHeader
-				Services []amqphandler.ServiceInfo
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.VehicleStatus{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "vehicleStatus"},
+					MessageType: amqphandler.VehicleStatusType},
 				Services: initialSetupData},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					Services []amqphandler.ServiceInfo
-				}{}
+				return &amqphandler.VehicleStatus{}
 			},
 		},
 
@@ -330,19 +312,13 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendServiceStatus(initialSetupData[0])
 			},
-			data: &struct {
-				messageHeader
-				Services []amqphandler.ServiceInfo
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.VehicleStatus{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "serviceStatus"},
+					MessageType: amqphandler.ServiceStatusType},
 				Services: []amqphandler.ServiceInfo{initialSetupData[0]}},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					Services []amqphandler.ServiceInfo
-				}{}
+				return &amqphandler.VehicleStatus{}
 			},
 		},
 
@@ -350,19 +326,14 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendMonitoringData(monitoringData)
 			},
-			data: &struct {
-				messageHeader
-				amqphandler.MonitoringData
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.MonitoringData{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "monitoringData"},
-				MonitoringData: monitoringData},
+					MessageType: amqphandler.MonitoringDataType},
+				Timestamp: monitoringData.Timestamp,
+				Data:      monitoringData.Data},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					amqphandler.MonitoringData
-				}{}
+				return &amqphandler.MonitoringData{}
 			},
 		},
 
@@ -371,25 +342,15 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendNewState("service0", "This is state", "12345679", sendNewStateCorrelationID)
 			},
-			data: &struct {
-				messageHeader
-				ServiceID     string
-				StateChecksum string
-				State         string
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.NewState{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "newState"},
-				ServiceID:     "service0",
-				StateChecksum: "12345679",
-				State:         "This is state"},
+					MessageType: amqphandler.NewStateType},
+				ServiceID: "service0",
+				Checksum:  "12345679",
+				State:     "This is state"},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					ServiceID     string
-					StateChecksum string
-					State         string
-				}{}
+				return &amqphandler.NewState{}
 			},
 		},
 
@@ -397,22 +358,14 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendStateRequest("service1", true)
 			},
-			data: &struct {
-				messageHeader
-				ServiceID string
-				Default   bool
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.StateRequest{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "stateRequest"},
+					MessageType: amqphandler.StateRequestType},
 				ServiceID: "service1",
 				Default:   true},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					ServiceID string
-					Default   bool
-				}{}
+				return &amqphandler.StateRequest{}
 			},
 		},
 
@@ -420,19 +373,17 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendServiceLog(pushServiceLogData)
 			},
-			data: &struct {
-				messageHeader
-				amqphandler.PushServiceLog
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.PushServiceLog{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "pushServiceLog"},
-				PushServiceLog: pushServiceLogData},
+					MessageType: amqphandler.PushServiceLogType},
+				LogID:     pushServiceLogData.LogID,
+				PartCount: pushServiceLogData.PartCount,
+				Part:      pushServiceLogData.Part,
+				Data:      pushServiceLogData.Data,
+				Error:     pushServiceLogData.Error},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					amqphandler.PushServiceLog
-				}{}
+				return &amqphandler.PushServiceLog{}
 			},
 		},
 
@@ -440,19 +391,13 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendAlerts(alertsData)
 			},
-			data: &struct {
-				messageHeader
-				amqphandler.Alerts
-			}{
-				messageHeader: messageHeader{
+			data: &amqphandler.Alerts{
+				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: "alerts"},
-				Alerts: alertsData},
+					MessageType: amqphandler.AlertsType},
+				Data: alertsData.Data},
 			getDataType: func() interface{} {
-				return &struct {
-					messageHeader
-					amqphandler.Alerts
-				}{}
+				return &amqphandler.Alerts{}
 			},
 		},
 	}
