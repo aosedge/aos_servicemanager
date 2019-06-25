@@ -16,8 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
-
 	"github.com/jlaffaye/ftp"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -26,6 +24,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
 )
 
 /*******************************************************************************
