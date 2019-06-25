@@ -57,6 +57,17 @@ type testMonitor struct {
 	stopChannel  chan string
 }
 
+type stateRequest struct {
+	serviceID    string
+	defaultState bool
+}
+
+// Test sender
+type testSender struct {
+	statusChannel       chan amqp.ServiceInfo
+	stateRequestChannel chan stateRequest
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -80,8 +91,8 @@ func init() {
  * Private
  ******************************************************************************/
 
-func newTestLauncher(downloader downloader, monitor ServiceMonitor) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, db, monitor)
+func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
+	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, sender, db, monitor)
 	if err != nil {
 		return launcher, err
 	}
@@ -247,6 +258,7 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 
 	return outputFile, nil
 }
+
 func newTestMonitor() (monitor *testMonitor, err error) {
 	monitor = &testMonitor{}
 
@@ -265,6 +277,27 @@ func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig 
 
 func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
 	monitor.stopChannel <- serviceID
+
+	return nil
+}
+
+func newTestSender() (sender *testSender) {
+	sender = &testSender{}
+
+	sender.statusChannel = make(chan amqp.ServiceInfo, maxExecutedActions)
+	sender.stateRequestChannel = make(chan stateRequest, 32)
+
+	return sender
+}
+
+func (sender *testSender) SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error) {
+	sender.statusChannel <- serviceStatus
+
+	return nil
+}
+
+func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) (err error) {
+	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
 
 	return nil
 }
@@ -332,7 +365,7 @@ func setup() (err error) {
 func cleanup() (err error) {
 	defer db.Close()
 
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -466,7 +499,9 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemove(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -489,7 +524,7 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices+numUninstallServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s", status.Error, status.ID)
 		}
 	}
@@ -515,7 +550,7 @@ func TestInstallRemove(t *testing.T) {
 	}
 
 	for i := 0; i < numInstallServices-numUninstallServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
@@ -534,7 +569,9 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func TestAutoStart(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -551,7 +588,7 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s", status.Error, status.ID)
 		}
 	}
@@ -560,7 +597,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), nil)
+	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -591,7 +628,7 @@ func TestAutoStart(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
@@ -610,7 +647,9 @@ func TestAutoStart(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -627,7 +666,7 @@ func TestErrors(t *testing.T) {
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 6})
 
 	for i := 0; i < 3; i++ {
-		status := <-launcher.StatusChannel
+		status := <-sender.statusChannel
 		switch {
 		case status.Version == 5 && status.Error != "":
 			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
@@ -654,7 +693,9 @@ func TestErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -677,7 +718,7 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -700,7 +741,7 @@ func TestUpdate(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
 
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -721,7 +762,9 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestNetworkSpeed(t *testing.T) {
-	launcher, err := newTestLauncher(new(iperfImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(iperfImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -738,7 +781,7 @@ func TestNetworkSpeed(t *testing.T) {
 	}
 
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
@@ -803,7 +846,9 @@ func TestNetworkSpeed(t *testing.T) {
 }
 
 func TestVisPermissions(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -815,7 +860,7 @@ func TestVisPermissions(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
 
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -834,7 +879,9 @@ func TestVisPermissions(t *testing.T) {
 }
 
 func TestUsersServices(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -863,7 +910,7 @@ func TestUsersServices(t *testing.T) {
 			launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("user%d_service%d", i, j)})
 		}
 		for i := 0; i < numServices; i++ {
-			if status := <-launcher.StatusChannel; status.Error != "" {
+			if status := <-sender.statusChannel; status.Error != "" {
 				t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 			}
 		}
@@ -933,7 +980,9 @@ func TestUsersServices(t *testing.T) {
 }
 
 func TestServiceTTL(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -950,7 +999,7 @@ func TestServiceTTL(t *testing.T) {
 		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)})
 	}
 	for i := 0; i < numServices; i++ {
-		if status := <-launcher.StatusChannel; status.Error != "" {
+		if status := <-sender.statusChannel; status.Error != "" {
 			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 		}
 	}
@@ -990,12 +1039,14 @@ func TestServiceTTL(t *testing.T) {
 }
 
 func TestServiceMonitoring(t *testing.T) {
+	sender := newTestSender()
+
 	monitor, err := newTestMonitor()
 	if err != nil {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(new(pythonImage), monitor)
+	launcher, err := newTestLauncher(new(pythonImage), sender, monitor)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1020,7 +1071,7 @@ func TestServiceMonitoring(t *testing.T) {
 			MaxThreshold: 20}}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", ServiceMonitoring: &serviceAlerts})
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -1039,7 +1090,7 @@ func TestServiceMonitoring(t *testing.T) {
 	}
 
 	launcher.UninstallService("Service1")
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -1059,8 +1110,10 @@ func TestServiceMonitoring(t *testing.T) {
 }
 
 func TestServiceStorage(t *testing.T) {
+	sender := newTestSender()
+
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
-	launcher, err := newTestLauncher(&ftpImage{8192*2 + 4096, 0}, nil)
+	launcher, err := newTestLauncher(&ftpImage{8192*2 + 4096, 0}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1071,7 +1124,7 @@ func TestServiceStorage(t *testing.T) {
 	}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -1129,7 +1182,9 @@ func TestServiceStorage(t *testing.T) {
 }
 
 func TestServiceState(t *testing.T) {
-	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 256}, nil)
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 256}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1140,7 +1195,7 @@ func TestServiceState(t *testing.T) {
 	}
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
@@ -1199,7 +1254,7 @@ func TestServiceState(t *testing.T) {
 	}
 
 	select {
-	case <-launcher.StateRequestChannel:
+	case <-sender.stateRequestChannel:
 		stateData = "Hello"
 		calcSum := sha3.Sum224([]byte(stateData))
 
@@ -1238,7 +1293,7 @@ func TestServiceState(t *testing.T) {
 	// Check state after update
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
-	if status := <-launcher.StatusChannel; status.Error != "" {
+	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 

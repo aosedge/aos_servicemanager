@@ -123,8 +123,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	// Create amqp
+	if sm.amqp, err = amqp.New(); err != nil {
+		goto err
+	}
+
 	// Create launcher
-	if sm.launcher, err = launcher.New(sm.cfg, sm.db, sm.monitor); err != nil {
+	if sm.launcher, err = launcher.New(sm.cfg, sm.amqp, sm.db, sm.monitor); err != nil {
 		goto err
 	}
 
@@ -135,11 +140,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create VIS client
 	if sm.vis, err = visclient.New(); err != nil {
-		goto err
-	}
-
-	// Create amqp
-	if sm.amqp, err = amqp.New(); err != nil {
 		goto err
 	}
 
@@ -330,19 +330,9 @@ func (sm *serviceManager) handleChannels() (err error) {
 				log.Errorf("Error processing amqp result: %s", err)
 			}
 
-		case status := <-sm.launcher.StatusChannel:
-			if err = sm.amqp.SendServiceStatus(status); err != nil {
-				log.Errorf("Error send service status message: %s", err)
-			}
-
 		case newState := <-sm.launcher.NewStateChannel:
 			if err := sm.amqp.SendNewState(newState.ServiceID, newState.State,
 				newState.Checksum, newState.CorrelationID); err != nil {
-				log.Errorf("Error send new state message: %s", err)
-			}
-
-		case stateRequest := <-sm.launcher.StateRequestChannel:
-			if err := sm.amqp.SendStateRequest(stateRequest.ServiceID, stateRequest.Default); err != nil {
 				log.Errorf("Error send new state message: %s", err)
 			}
 

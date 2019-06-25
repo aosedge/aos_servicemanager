@@ -43,10 +43,10 @@ type storageHandler struct {
 	serviceProvider ServiceProvider
 	storagePath     string
 	sync.Mutex
-	watcher             *fsnotify.Watcher
-	statesMap           map[string]*stateParams
-	newStateChannel     chan<- NewState
-	stateRequestChannel chan<- StateRequest
+	watcher         *fsnotify.Watcher
+	statesMap       map[string]*stateParams
+	newStateChannel chan<- NewState
+	sender          Sender
 }
 
 type stateParams struct {
@@ -66,12 +66,12 @@ type stateParams struct {
  ******************************************************************************/
 
 func newStorageHandler(workingDir string, serviceProvider ServiceProvider,
-	newStateChannel chan<- NewState, stateRequestChannel chan<- StateRequest) (handler *storageHandler, err error) {
+	newStateChannel chan<- NewState, sender Sender) (handler *storageHandler, err error) {
 	handler = &storageHandler{
-		serviceProvider:     serviceProvider,
-		storagePath:         path.Join(workingDir, storageDir),
-		newStateChannel:     newStateChannel,
-		stateRequestChannel: stateRequestChannel}
+		serviceProvider: serviceProvider,
+		storagePath:     path.Join(workingDir, storageDir),
+		newStateChannel: newStateChannel,
+		sender:          sender}
 
 	if _, err = os.Stat(handler.storagePath); err != nil {
 		if !os.IsNotExist(err) {
@@ -296,8 +296,11 @@ func (handler *storageHandler) startStateWatching(users []string, service databa
 		log.WithFields(log.Fields{
 			"serviceID": service.ID,
 			"checksum":  hex.EncodeToString(checksum)}).Warn("State file checksum mistmatch. Send state request")
+
 		// Send state request
-		handler.stateRequestChannel <- StateRequest{ServiceID: state.serviceID}
+		if handler.sender != nil {
+			handler.sender.SendStateRequest(state.serviceID, false)
+		}
 	}
 
 	if err = handler.watcher.Add(entry.StorageFolder); err != nil {
@@ -347,7 +350,9 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 		}
 	} else {
 		// Send state request
-		handler.stateRequestChannel <- StateRequest{ServiceID: state.serviceID}
+		if handler.sender != nil {
+			handler.sender.SendStateRequest(state.serviceID, false)
+		}
 	}
 
 	state.correlationID = ""

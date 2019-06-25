@@ -97,6 +97,12 @@ type ServiceMonitor interface {
 	StopMonitorService(serviceID string) (err error)
 }
 
+// Sender provides API to send messages to the cloud
+type Sender interface {
+	SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error)
+	SendStateRequest(serviceID string, defaultState bool) (err error)
+}
+
 type actionType int
 
 // NewState new state message
@@ -107,25 +113,16 @@ type NewState struct {
 	Checksum      string
 }
 
-// StateRequest state request message
-type StateRequest struct {
-	ServiceID string
-	Default   bool
-}
-
 type downloader interface {
 	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
 }
 
 // Launcher instance
 type Launcher struct {
-	// StatusChannel used to return execute command statuses
-	StatusChannel chan amqp.ServiceInfo
 	// NewStateChannel used to notify about new service state
 	NewStateChannel chan NewState
-	// StateRequestChannel used to request last or default service state
-	StateRequestChannel chan StateRequest
 
+	sender          Sender
 	serviceProvider ServiceProvider
 	monitor         ServiceMonitor
 	systemd         *dbus.Conn
@@ -156,22 +153,20 @@ type stateAcceptance struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, serviceProvider ServiceProvider,
+func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	launcher = &Launcher{serviceProvider: serviceProvider, config: config, monitor: monitor}
+	launcher = &Launcher{sender: sender, serviceProvider: serviceProvider, config: config, monitor: monitor}
 
-	launcher.StatusChannel = make(chan amqp.ServiceInfo, maxExecutedActions)
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
-	launcher.StateRequestChannel = make(chan StateRequest, stateChannelSize)
 
 	if launcher.actionHandler, err = newActionHandler(); err != nil {
 		return nil, err
 	}
 
 	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, serviceProvider,
-		launcher.NewStateChannel, launcher.StateRequestChannel); err != nil {
+		launcher.NewStateChannel, sender); err != nil {
 		return nil, err
 	}
 
@@ -435,7 +430,9 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 		if r := recover(); r != nil {
 			status.Status = "error"
 			status.Error = "Can't install service: " + r.(string)
-			launcher.StatusChannel <- status
+			if launcher.sender != nil {
+				launcher.sender.SendServiceStatus(status)
+			}
 		}
 	}()
 
@@ -457,7 +454,9 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 
 	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
 
-	launcher.StatusChannel <- status
+	if launcher.sender != nil {
+		launcher.sender.SendServiceStatus(status)
+	}
 }
 
 func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
@@ -470,7 +469,9 @@ func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
 		status.Error = err.Error()
 	}
 
-	launcher.StatusChannel <- status
+	if launcher.sender != nil {
+		launcher.sender.SendServiceStatus(status)
+	}
 }
 
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
@@ -943,11 +944,12 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 
 			if err := launcher.restoreService(oldService); err != nil {
 				launcher.removeService(oldService)
-
-				launcher.StatusChannel <- amqp.ServiceInfo{
-					ID:      oldService.ID,
-					Version: oldService.Version,
-					Status:  "removed"}
+				if launcher.sender != nil {
+					launcher.sender.SendServiceStatus(amqp.ServiceInfo{
+						ID:      oldService.ID,
+						Version: oldService.Version,
+						Status:  "removed"})
+				}
 			}
 		}
 	}()
@@ -974,10 +976,12 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Remove service dir failed")
 	}
 
-	launcher.StatusChannel <- amqp.ServiceInfo{
-		ID:      oldService.ID,
-		Version: oldService.Version,
-		Status:  "removed"}
+	if launcher.sender != nil {
+		launcher.sender.SendServiceStatus(amqp.ServiceInfo{
+			ID:      oldService.ID,
+			Version: oldService.Version,
+			Status:  "removed"})
+	}
 
 	return nil
 }
