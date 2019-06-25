@@ -295,7 +295,7 @@ func (handler *storageHandler) startStateWatching(users []string, service databa
 	if !reflect.DeepEqual(entry.StateChecksum, checksum) {
 		log.WithFields(log.Fields{
 			"serviceID": service.ID,
-			"checksum":  checksum}).Warn("State file checksum mistmatch. Send state request")
+			"checksum":  hex.EncodeToString(checksum)}).Warn("State file checksum mistmatch. Send state request")
 		// Send state request
 		handler.stateRequestChannel <- StateRequest{ServiceID: state.serviceID}
 	}
@@ -308,6 +308,7 @@ func (handler *storageHandler) startStateWatching(users []string, service databa
 }
 
 func (handler *storageHandler) stopStateWatching(stateFileName, storageFolder string) (err error) {
+	log.WithFields(log.Fields{"stateFile": stateFileName}).Debug("Stop state watching")
 
 	if state, ok := handler.statesMap[stateFileName]; ok {
 		if err = handler.watcher.Remove(storageFolder); err != nil {
