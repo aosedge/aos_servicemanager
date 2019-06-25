@@ -317,13 +317,13 @@ func (handler *storageHandler) stopStateWatching(stateFileName, storageFolder st
 
 		if state.changeTimer != nil {
 			if state.changeTimer.Stop() {
-				state.changeTimerChannel <- true
+				state.changeTimerChannel <- false
 			}
 		}
 
 		if state.acceptanceTimer != nil {
 			if state.acceptanceTimer.Stop() {
-				state.acceptanceTimerChannel <- true
+				state.acceptanceTimerChannel <- false
 			}
 		}
 
@@ -389,16 +389,29 @@ func (handler *storageHandler) stateChanged(fileName string, state *stateParams)
 
 		// Send new state under unlocked context: when newStateChannel is full it blocks here.
 		// As result, if in offline mode newStateChannel becomes full, we wait here till online mode.
+		// Drop all changes if channel is full
+		if len(handler.newStateChannel) >= cap(handler.newStateChannel) {
+			log.WithField("serviceID", state.serviceID).Error("New state channel is full")
+			handler.Lock()
+			defer handler.Unlock()
+
+			state.correlationID = ""
+			state.acceptanceTimer = nil
+
+			return
+		}
+
 		handler.newStateChannel <- newState
 
 		select {
 		case <-state.acceptanceTimer.C:
 			log.WithField("serviceID", state.serviceID).Error("Waiting state acceptance timeout")
 
-		case <-state.acceptanceTimerChannel:
+		case value := <-state.acceptanceTimerChannel:
+			if value {
+				handler.handleStateAcception(state, checksum)
+			}
 		}
-
-		handler.handleStateAcception(state, checksum)
 	}()
 }
 
