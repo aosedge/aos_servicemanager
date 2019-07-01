@@ -5,7 +5,6 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -72,44 +71,6 @@ func GetTLSConfig() (*tls.Config, error) {
 
 	tlsConfig.BuildNameToCertificate()
 	return tlsConfig, nil
-}
-
-func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
-	var der []byte
-
-	// Try to parse data as PEM. Ignore the rest of the data
-	// ToDo: add support private key and certificate in the same file
-	block, _ := pem.Decode(bytes)
-
-	if block != nil {
-		// bytes is PEM
-		der = block.Bytes
-	} else {
-		der = bytes
-	}
-
-	// Try to load key as PKCS1 container
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// Try to load key as PKCS8 container
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey:
-			return key, nil
-		default:
-			return nil, errors.New("found unsupported private key type in PKCS8 container")
-		}
-	}
-
-	// Try to parse as PCKS8 EC private key
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// This is not a private key
-	return nil, errors.New("failed to parse private key")
 }
 
 func getPrivKey() (*rsa.PrivateKey, error) {
