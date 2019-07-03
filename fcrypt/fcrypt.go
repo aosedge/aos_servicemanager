@@ -79,7 +79,7 @@ func getPrivKey() (*rsa.PrivateKey, error) {
 
 	keyBytes, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("error reading private key: %s", err))
+		return nil, fmt.Errorf("error reading private key: %s", err)
 	}
 
 	if key, err = decodePrivateKey(keyBytes); err != nil {

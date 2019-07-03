@@ -23,7 +23,6 @@ var pkcs7Tests = []pkcs7Case{
 func TestRemovePkcs7Padding(t *testing.T) {
 	for _, c := range pkcs7Tests {
 		out, err := removePkcs7Padding(c.in, c.blocksize)
-		t.Log("Err", err)
 		if (err == nil) != c.ok {
 			t.Errorf("Got unexpected error %v value on test %#v", err, c)
 		}

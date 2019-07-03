@@ -29,11 +29,11 @@ const (
 )
 
 type CryptoSessionKeyInfo struct {
-	sessionKey        []byte `json:"sessionKey"`
-	sessionIV         []byte `json:"sessionIV"`
-	symmetricAlgName  string `json:"symmetricAlgName"`
-	asymmetricAlgName string `json:"asymmetricAlgName"`
-	recipientInfo     string
+	SessionKey        []byte `json:"sessionKey"`
+	SessionIV         []byte `json:"sessionIV"`
+	SymmetricAlgName  string `json:"symmetricAlgName"`
+	AsymmetricAlgName string `json:"asymmetricAlgName"`
+	RecipientInfo     string `json:"recipientInfo"`
 }
 
 type CryptoContext struct {
@@ -53,9 +53,9 @@ type SymmetricCipherContext struct {
 	encrypter   cipher.BlockMode
 }
 
-func CreateContext(conf config.Crypt) (ctx *CryptoContext, err error) {
+func CreateContext(conf config.Crypt) (*CryptoContext, error) {
 	// Create context
-	tmpCtx := &CryptoContext{
+	ctx := &CryptoContext{
 		cryptConfig: conf,
 	}
 
@@ -67,17 +67,15 @@ func CreateContext(conf config.Crypt) (ctx *CryptoContext, err error) {
 			return nil, err
 		}
 
-		tmpCtx.rootCertPool = x509.NewCertPool()
-		if !tmpCtx.rootCertPool.AppendCertsFromPEM(rootCAPEM) {
+		ctx.rootCertPool = x509.NewCertPool()
+		if !ctx.rootCertPool.AppendCertsFromPEM(rootCAPEM) {
 			err = errors.New("invalid or empty CA file")
 			log.Errorf("error appending CA certificate (%s): %s", conf.CACert, err)
 			return nil, err
 		}
 	}
 
-	ctx = tmpCtx
-
-	return
+	return ctx, nil
 }
 
 func (ctx *CryptoContext) LoadOfflineKey() error {
@@ -87,14 +85,13 @@ func (ctx *CryptoContext) LoadOfflineKey() error {
 
 	keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
 	if err != nil {
-		return errors.New(fmt.Sprintf("error reading offline private key from file: %s", err))
+		return fmt.Errorf("error reading offline private key from file: %s", err)
 	}
 
 	return ctx.LoadKeyFromBytes(keyBytes)
 }
 
-func (ctx *CryptoContext) LoadKeyFromBytes(data []byte) error {
-	var err error
+func (ctx *CryptoContext) LoadKeyFromBytes(data []byte) (err error) {
 	ctx.privateKey, err = loadKey(data)
 	return err
 }
@@ -106,7 +103,7 @@ func (ctx *CryptoContext) LoadOnlineKey() error {
 
 	keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
 	if err != nil {
-		return errors.New(fmt.Sprintf("error reading online private key from file: %s", err))
+		return fmt.Errorf("error reading online private key from file: %s", err)
 	}
 
 	ctx.privateKey, err = loadKey(keyBytes)
@@ -121,32 +118,32 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (*Symme
 
 	var err error
 
-	algName, _, _ := decodeAlgNames(keyInfo.symmetricAlgName)
+	algName, _, _ := decodeAlgNames(keyInfo.SymmetricAlgName)
 	keySize, ivSize, err := getSymmetricAlgInfo(algName)
 	if err != nil {
 		return nil, err
 	}
 
-	if ivSize != len(keyInfo.sessionIV) {
+	if ivSize != len(keyInfo.SessionIV) {
 		return nil, errors.New("invalid IV length")
 	}
 
 	ctxSym := CreateSymmetricCipherContext()
 
-	switch strings.ToUpper(keyInfo.asymmetricAlgName) {
+	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 	case "RSA/PKCS1V1_5":
 		clearKey := make([]byte, keySize)
-		err = rsa.DecryptPKCS1v15SessionKey(nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.sessionKey, clearKey)
+		err = rsa.DecryptPKCS1v15SessionKey(nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
 		if err != nil {
 			return nil, err
 		}
-		if err = ctxSym.set(keyInfo.symmetricAlgName, clearKey, keyInfo.sessionIV); err != nil {
+		if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
 			return nil, err
 		}
 
 	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
 		var hashFunc hash.Hash
-		switch strings.ToUpper(keyInfo.asymmetricAlgName) {
+		switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 		case "RSA/OAEP":
 			hashFunc = sha1.New()
 		case "RSA/OAEP-256":
@@ -154,11 +151,11 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (*Symme
 		case "RSA/OAEP-512":
 			hashFunc = sha512.New()
 		}
-		clearKey, err := rsa.DecryptOAEP(hashFunc, nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.sessionKey, nil)
+		clearKey, err := rsa.DecryptOAEP(hashFunc, nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
 		if err != nil {
 			return nil, err
 		}
-		if err = ctxSym.set(keyInfo.symmetricAlgName, clearKey, keyInfo.sessionIV); err != nil {
+		if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
 			return nil, err
 		}
 
@@ -251,27 +248,26 @@ func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
 		paddingName = "PKCS7PADDING"
 	}
 
-	return
+	return algName, modeName, paddingName
 }
 
-func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File) (err error) {
+func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File) error {
 	if !ctx.IsReady() {
 		return errors.New("symmetric key is not ready")
 	}
 	// Get file stat (we need to know file size)
 	inputFileStat, err := encryptedFile.Stat()
 	if err != nil {
-		return
+		return err
 	}
 
 	fileSize := inputFileStat.Size()
 	if fileSize%int64(ctx.decrypter.BlockSize()) != 0 {
-		err = errors.New("file size is incorrect")
-		return
+		return errors.New("file size is incorrect")
 	}
 
 	if _, err = encryptedFile.Seek(0, io.SeekStart); err != nil {
-		return
+		return err
 	}
 
 	chunkEncrypted := make([]byte, fileBlockSize)
@@ -280,8 +276,7 @@ func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File
 	for totalReadSize < fileSize {
 		readSize, errRead := encryptedFile.Read(chunkEncrypted)
 		if errRead != nil && err != io.EOF {
-			err = errRead
-			return
+			return errRead
 		}
 
 		totalReadSize += int64(readSize)
@@ -299,14 +294,14 @@ func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File
 		// Write decrypted chunk to the out file.
 		// We can remove padding, so we should use slice with computed size.
 		if _, err = clearFile.Write(chunkDecrypted[:readSize]); err != nil {
-			return
+			return err
 		}
 	}
 
-	return
+	return nil
 }
 
-func (ctx *SymmetricCipherContext) EncryptFile(clearFile, encryptedFile *os.File) (err error) {
+func (ctx *SymmetricCipherContext) EncryptFile(clearFile, encryptedFile *os.File) error {
 	if !ctx.IsReady() {
 		return errors.New("symmetric key is not ready")
 	}
@@ -314,13 +309,13 @@ func (ctx *SymmetricCipherContext) EncryptFile(clearFile, encryptedFile *os.File
 	// Get file stat (we need to know file size)
 	inputFileStat, err := clearFile.Stat()
 	if err != nil {
-		return
+		return err
 	}
 	fileSize := inputFileStat.Size()
 	writtenSize := int64(0)
 	readSize := 0
 	if _, err = clearFile.Seek(0, io.SeekStart); err != nil {
-		return
+		return err
 	}
 
 	// We need more space if the input file size proportional to the fileBlockSize
@@ -333,20 +328,20 @@ func (ctx *SymmetricCipherContext) EncryptFile(clearFile, encryptedFile *os.File
 			// The last block may need a padding appending
 			currentChunkSize = int(fileSize - writtenSize)
 			if _, err = clearFile.Read(chunkClear[:currentChunkSize]); err != nil {
-				return
+				return err
 			}
 			readSize, err = ctx.appendPadding(chunkClear, currentChunkSize)
 			if err != nil {
-				return
+				return err
 			}
 		} else {
 			if readSize, err = clearFile.Read(chunkClear[:fileBlockSize]); err != nil {
-				return
+				return err
 			}
 		}
 		ctx.encrypter.CryptBlocks(chunkEncrypted, chunkClear[:readSize])
 		if _, err = encryptedFile.Write(chunkEncrypted[:readSize]); err != nil {
-			return
+			return err
 		}
 		writtenSize += int64(readSize)
 	}
@@ -366,7 +361,7 @@ func (ctx *SymmetricCipherContext) loadKey() (err error) {
 	switch strings.ToUpper(ctx.algName) {
 	case "AES128", "AES192", "AES256":
 		if keySizeBits, err = strconv.Atoi(ctx.algName[3:]); err != nil {
-			return
+			return err
 		}
 		if keySizeBits/8 != len(ctx.key) {
 			return errors.New("invalid symmetric key size")
@@ -374,12 +369,12 @@ func (ctx *SymmetricCipherContext) loadKey() (err error) {
 		block, err = aes.NewCipher(ctx.key)
 		if err != nil {
 			log.Errorf("can't create cipher: %s", err)
-			return
+			return err
 		}
-		break
+
 	default:
 		err = errors.New("unsupported cryptographic algorithm: " + ctx.algName)
-		return
+		return err
 	}
 
 	if len(ctx.iv) != block.BlockSize() {
@@ -392,10 +387,10 @@ func (ctx *SymmetricCipherContext) loadKey() (err error) {
 		ctx.encrypter = cipher.NewCBCEncrypter(block, ctx.iv)
 	default:
 		err = errors.New("unsupported encryption mode: " + ctx.modeName)
-		return
+		return err
 	}
 
-	return
+	return nil
 }
 
 func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
@@ -475,33 +470,30 @@ func (ctx *SymmetricCipherContext) appendPkcs7Padding(dataIn []byte, dataLen int
 	fullSize = dataLen + appendSize
 	if dataLen+appendSize > len(dataIn) {
 		err = errors.New("no enough space to add padding")
-		return
+		return 0, err
 	}
 
 	for i := dataLen; i < fullSize; i++ {
 		dataIn[i] = byte(appendSize)
 	}
-	return
+	return fullSize, nil
 }
 
 func (ctx *SymmetricCipherContext) removePkcs7Padding(dataIn []byte, dataLen int) (removedSize int, err error) {
 	blockLen := ctx.decrypter.BlockSize()
 	if dataLen%blockLen != 0 || dataLen == 0 {
-		err = errors.New("padding error (invalid total size)")
-		return
+		return 0, errors.New("padding error (invalid total size)")
 	}
 
 	removedSize = int(dataIn[dataLen-1])
 	if removedSize < 1 || removedSize > blockLen || removedSize > dataLen {
-		err = errors.New("padding error")
-		return
+		return 0, errors.New("padding error")
 	}
 
 	for i := dataLen - removedSize; i < dataLen; i++ {
 		if dataIn[i] != byte(removedSize) {
-			err = errors.New("padding error")
-			return
+			return 0, errors.New("padding error")
 		}
 	}
-	return
+	return removedSize, nil
 }

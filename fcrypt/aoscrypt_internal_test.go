@@ -494,10 +494,10 @@ func TestInvalidParams(t *testing.T) {
 		t.Fatalf("Error loading key: '%v'", err)
 	}
 
-	keyInfo.sessionKey = encryptedKey
-	keyInfo.sessionIV = []byte{1, 2}
-	keyInfo.symmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.asymmetricAlgName = "RSA/PKCS1v1_5"
+	keyInfo.SessionKey = encryptedKey
+	keyInfo.SessionIV = []byte{1, 2}
+	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
 	_, err = ctx.ImportSessionKey(keyInfo)
 	if err == nil {
 		t.Fatalf("Import session key not failed")
@@ -536,10 +536,10 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 	}
 
 	var keyInfo CryptoSessionKeyInfo
-	keyInfo.sessionKey = encryptedKey
-	keyInfo.sessionIV = iv
-	keyInfo.symmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.asymmetricAlgName = "RSA/PKCS1v1_5"
+	keyInfo.SessionKey = encryptedKey
+	keyInfo.SessionIV = iv
+	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
 
 	ctxSym, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
@@ -586,10 +586,10 @@ func TestDecryptSessionKeyOAEP(t *testing.T) {
 	}
 
 	var keyInfo CryptoSessionKeyInfo
-	keyInfo.sessionKey = encryptedKey
-	keyInfo.sessionIV = iv
-	keyInfo.symmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.asymmetricAlgName = "RSA/OAEP"
+	keyInfo.SessionKey = encryptedKey
+	keyInfo.SessionIV = iv
+	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+	keyInfo.AsymmetricAlgName = "RSA/OAEP"
 
 	ctxSym, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
@@ -635,10 +635,10 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 	}
 
 	var keyInfo CryptoSessionKeyInfo
-	keyInfo.sessionKey = encryptedKey
-	keyInfo.sessionIV = iv
-	keyInfo.symmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.asymmetricAlgName = "RSA/PKCS1v1_5"
+	keyInfo.SessionKey = encryptedKey
+	keyInfo.SessionIV = iv
+	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
 	ctxSym, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
@@ -680,10 +680,10 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 	}
 
 	var keyInfo CryptoSessionKeyInfo
-	keyInfo.sessionKey = encryptedKey
-	keyInfo.sessionIV = iv
-	keyInfo.symmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.asymmetricAlgName = "RSA/OAEP"
+	keyInfo.SessionKey = encryptedKey
+	keyInfo.SessionIV = iv
+	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+	keyInfo.AsymmetricAlgName = "RSA/OAEP"
 	_, err = ctx.ImportSessionKey(keyInfo)
 	if err == nil {
 		t.Fatalf("Error decode key: decrypt should raise error")
