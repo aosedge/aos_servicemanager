@@ -120,10 +120,54 @@ type SystemRevert struct {
 	ImageVersion uint64 `json:"imageVersion"`
 }
 
+// UpgradeDecryptionInfo upgrade decryption info
+type UpgradeDecryptionInfo struct {
+	BlockAlg     string `json:"blockAlg"`
+	BlockIv      string `json:"blockIv"`
+	BlockKey     string `json:"blockKey"`
+	AsymAlg      string `json:"asymAlg"`
+	EncryptedKey string `json:"encryptedKey"`
+}
+
+// UpgradeSigns upgrade signs
+type UpgradeSigns struct {
+	ChainName        string   `json:"chainName"`
+	Alg              string   `json:"alg"`
+	Value            string   `json:"value"`
+	TrustedTimestamp string   `json:"trustedTimestamp"`
+	OcspValues       []string `json:"ocspValues"`
+}
+
+// UpgradeFileInfo upgrade file info
+type UpgradeFileInfo struct {
+	Target         string                 `json:"target"`
+	URLs           []string               `json:"urls"`
+	Sha256         []byte                 `json:"sha256"`
+	Sha512         []byte                 `json:"sha512"`
+	Size           uint64                 `json:"size"`
+	DecryptionInfo *UpgradeDecryptionInfo `json:"decryptionInfo,omitempty"`
+	Signs          *UpgradeSigns          `json:"signs,omitempty"`
+}
+
+// UpgradeMetadata upgrade metadata
+type UpgradeMetadata struct {
+	UpgradeType       string            `json:"upgradeType"`
+	Data              []UpgradeFileInfo `json:"data"`
+	CertificateChains []struct {
+		Name         string   `json:"name"`
+		Certificates []string `json:"certificates"`
+	} `json:"certificateChains,omitempty"`
+	Certificates []struct {
+		Fingerprint string `json:"fingerprint"`
+		Certificate string `json:"certificate"`
+	} `json:"certificates,omitempty"`
+}
+
 // SystemUpgrade system upgrade structure
 type SystemUpgrade struct {
 	MessageHeader
-	ImageVersion uint64 `json:"imageVersion"`
+	ImageVersion uint64          `json:"imageVersion"`
+	Metadata     UpgradeMetadata `json:"metadata"`
 }
 
 // UpdateState state update message

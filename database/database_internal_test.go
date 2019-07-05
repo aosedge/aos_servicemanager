@@ -8,6 +8,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************
@@ -592,5 +593,63 @@ func TestGetServiceByServiceName(t *testing.T) {
 	// Clear DB
 	if err = db.removeAllServices(); err != nil {
 		t.Errorf("Can't remove all services: %s", err)
+	}
+}
+
+func TestUpgradeState(t *testing.T) {
+	setUpgradeState := 4
+
+	if err := db.SetUpgradeState(setUpgradeState); err != nil {
+		t.Fatalf("Can't set upgrade state: %s", err)
+	}
+
+	getUpgradeState, err := db.GetUpgradeState()
+	if err != nil {
+		t.Fatalf("Can't get upgrade state: %s", err)
+	}
+
+	if setUpgradeState != getUpgradeState {
+		t.Fatalf("Wrong upgrade state value: %v", getUpgradeState)
+	}
+}
+
+func TestUpgradeMetadata(t *testing.T) {
+	setUpgradeMetadata := amqp.UpgradeMetadata{
+		Data: []amqp.UpgradeFileInfo{
+			amqp.UpgradeFileInfo{
+				Target: "target",
+				URLs:   []string{"url1", "url2", "url3"},
+				Sha256: "sha256",
+				Sha512: "sha512",
+				Size:   1234}}}
+
+	if err := db.SetUpgradeMetadata(setUpgradeMetadata); err != nil {
+		t.Fatalf("Can't set upgrade metadata: %s", err)
+	}
+
+	getUpgradeMetadata, err := db.GetUpgradeMetadata()
+	if err != nil {
+		t.Fatalf("Can't get upgrade metadata: %s", err)
+	}
+
+	if !reflect.DeepEqual(setUpgradeMetadata, getUpgradeMetadata) {
+		t.Fatalf("Wrong upgrade metadata value: %v", getUpgradeMetadata)
+	}
+}
+
+func TestUpgradeVersion(t *testing.T) {
+	setUpgradeVersion := uint64(5)
+
+	if err := db.SetUpgradeVersion(setUpgradeVersion); err != nil {
+		t.Fatalf("Can't set upgrade version: %s", err)
+	}
+
+	getUpgradeVersion, err := db.GetUpgradeVersion()
+	if err != nil {
+		t.Fatalf("Can't get upgrade version: %s", err)
+	}
+
+	if setUpgradeVersion != getUpgradeVersion {
+		t.Fatalf("Wrong upgrade version value: %v", getUpgradeVersion)
 	}
 }

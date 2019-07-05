@@ -21,6 +21,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/logging"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/umclient"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
 )
 
@@ -45,6 +46,7 @@ type serviceManager struct {
 	launcher *launcher.Launcher
 	logging  *logging.Logging
 	monitor  *monitoring.Monitor
+	um       *umclient.Client
 	vis      *visclient.Client
 }
 
@@ -143,6 +145,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		goto err
 	}
 
+	// Create UM client
+	if cfg.UMServerURL != "" {
+		if sm.um, err = umclient.New(sm.cfg, sm.amqp, sm.db); err != nil {
+			goto err
+		}
+	}
+
 	// Create logging
 	if sm.logging, err = logging.New(sm.cfg, sm.db); err != nil {
 		goto err
@@ -165,6 +174,11 @@ func (sm *serviceManager) close() {
 	// Close amqp
 	if sm.amqp != nil {
 		sm.amqp.Close()
+	}
+
+	// Close UM client
+	if sm.um != nil {
+		sm.um.Close()
 	}
 
 	// Close VIS client
@@ -300,6 +314,18 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 		sm.logging.GetServiceCrashLog(*data)
 
+	case *amqp.SystemUpgrade:
+		log.WithFields(log.Fields{
+			"imageVersion": data.ImageVersion}).Info("Receive system upgrade request")
+
+		sm.um.SystemUpgrade(data.ImageVersion, data.Metadata)
+
+	case *amqp.SystemRevert:
+		log.WithFields(log.Fields{
+			"imageVersion": data.ImageVersion}).Info("Receive system revert request")
+
+		sm.um.SystemRevert(data.ImageVersion)
+
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
 	}
@@ -310,6 +336,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 func (sm *serviceManager) handleChannels() (err error) {
 	var monitorDataChannel chan amqp.MonitoringData
 	var alertsChannel chan amqp.Alerts
+	var umErrChannel chan error
 
 	if sm.monitor != nil {
 		monitorDataChannel = sm.monitor.DataChannel
@@ -317,6 +344,10 @@ func (sm *serviceManager) handleChannels() (err error) {
 
 	if sm.alerts != nil {
 		alertsChannel = sm.alerts.AlertsChannel
+	}
+
+	if sm.um != nil {
+		umErrChannel = sm.um.ErrorChannel
 	}
 
 	for {
@@ -357,6 +388,9 @@ func (sm *serviceManager) handleChannels() (err error) {
 
 		case err := <-sm.vis.ErrorChannel:
 			return err
+
+		case err := <-umErrChannel:
+			return err
 		}
 	}
 }
@@ -367,11 +401,16 @@ func (sm *serviceManager) run() {
 		var vin string
 		var err error
 
-		if !sm.vis.IsConnected() {
-			if err = sm.vis.Connect(sm.cfg.VISServerURL); err != nil {
-				log.Errorf("Can't connect to VIS: %s", err)
+		if sm.um != nil {
+			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
+				log.Errorf("Can't connect to UM: %s", err)
 				goto reconnect
 			}
+		}
+
+		if err = sm.vis.Connect(sm.cfg.VISServerURL); err != nil {
+			log.Errorf("Can't connect to VIS: %s", err)
+			goto reconnect
 		}
 
 		// Get vin code
@@ -409,6 +448,9 @@ func (sm *serviceManager) run() {
 
 	reconnect:
 		sm.amqp.Disconnect()
+		sm.vis.Disconnect()
+		sm.um.Disconnect()
+
 		<-time.After(reconnectTimeout)
 
 		log.Debug("Reconnecting...")

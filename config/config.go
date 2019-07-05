@@ -66,7 +66,9 @@ type Config struct {
 	Crypt               Crypt      `json:"fcrypt"`
 	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
 	VISServerURL        string     `json:"visServer"`
+	UMServerURL         string     `json:"umServer"`
 	WorkingDir          string     `json:"workingDir"`
+	UpgradeDir          string     `json:"upgradeDir"`
 	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
 	Monitoring          Monitoring `json:"monitoring"`
 	Logging             Logging    `json:"logging"`

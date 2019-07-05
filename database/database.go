@@ -10,6 +10,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
+
+	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************
@@ -17,7 +19,7 @@ import (
  ******************************************************************************/
 
 const (
-	dbVersion = 2
+	dbVersion = 3
 )
 
 /*******************************************************************************
@@ -646,6 +648,136 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 	return cursor, nil
 }
 
+// SetUpgradeState stores upgrade state
+func (db *Database) SetUpgradeState(state int) (err error) {
+	result, err := db.sql.Exec("UPDATE config SET upgradeState = ?", state)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetUpgradeState returns upgrade state
+func (db *Database) GetUpgradeState() (state int, err error) {
+	stmt, err := db.sql.Prepare("SELECT upgradeState FROM config")
+	if err != nil {
+		return state, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow().Scan(&state)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return state, ErrNotExist
+		}
+
+		return state, err
+	}
+
+	return state, nil
+}
+
+// SetUpgradeMetadata stores upgrade metadata
+func (db *Database) SetUpgradeMetadata(metadata amqp.UpgradeMetadata) (err error) {
+	metadataJSON, err := json.Marshal(&metadata)
+	if err != nil {
+		return err
+	}
+
+	result, err := db.sql.Exec("UPDATE config SET upgradeMetadata = ?", metadataJSON)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetUpgradeMetadata returns upgrade metadata
+func (db *Database) GetUpgradeMetadata() (metadata amqp.UpgradeMetadata, err error) {
+	stmt, err := db.sql.Prepare("SELECT upgradeMetadata FROM config")
+	if err != nil {
+		return metadata, err
+	}
+	defer stmt.Close()
+
+	var metadataJSON []byte
+
+	if err = stmt.QueryRow().Scan(&metadataJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return metadata, ErrNotExist
+		}
+
+		return metadata, err
+	}
+
+	if metadataJSON == nil {
+		return metadata, nil
+	}
+
+	if err = json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return metadata, err
+	}
+
+	return metadata, nil
+}
+
+// SetUpgradeVersion stores upgrade version
+func (db *Database) SetUpgradeVersion(version uint64) (err error) {
+	result, err := db.sql.Exec("UPDATE config SET upgradeVersion = ?", version)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetUpgradeVersion returns upgrade version
+func (db *Database) GetUpgradeVersion() (version uint64, err error) {
+	stmt, err := db.sql.Prepare("SELECT upgradeVersion FROM config")
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	if err = stmt.QueryRow().Scan(&version); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, ErrNotExist
+		}
+
+		return 0, err
+	}
+
+	return version, nil
+}
+
 // Close closes database
 func (db *Database) Close() {
 	db.sql.Close()
@@ -716,11 +848,23 @@ func (db *Database) createConfigTable() (err error) {
 		return nil
 	}
 
-	if _, err = db.sql.Exec(`CREATE TABLE config (version INTEGER, cursor TEXT);`, dbVersion); err != nil {
+	if _, err = db.sql.Exec(
+		`CREATE TABLE config (
+			version INTEGER,
+			cursor TEXT,
+			upgradeState INTEGER,
+			upgradeMetadata BLOB,
+			upgradeVersion INTEGER)`); err != nil {
 		return err
 	}
 
-	if _, err = db.sql.Exec("INSERT INTO config (version, cursor) values(?, ?)", dbVersion, ""); err != nil {
+	if _, err = db.sql.Exec(
+		`INSERT INTO config (
+			version,
+			cursor,
+			upgradeState,
+			upgradeMetadata,
+			upgradeVersion) values(?, ?, ?, ?, ?)`, dbVersion, "", 0, []byte{}, 3); err != nil {
 		return err
 	}
 

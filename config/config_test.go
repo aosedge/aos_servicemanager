@@ -27,7 +27,9 @@ func createConfigFile() (err error) {
 	},
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
+	"upgradeDir" : "/var/aos/upgrade",
 	"visServer" : "wss://localhost:8088",
+	"umServer" : "wss://localhost:8089",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
 		"sendPeriod": "00:05:00",
@@ -162,6 +164,28 @@ func TestGetVisServerURL(t *testing.T) {
 
 	if config.VISServerURL != "wss://localhost:8088" {
 		t.Errorf("Wrong VIS server value: %s", config.VISServerURL)
+	}
+}
+
+func TestGetUMServerURL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.UMServerURL != "wss://localhost:8089" {
+		t.Errorf("Wrong UM server value: %s", config.UMServerURL)
+	}
+}
+
+func TestGetUpgradeDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.UpgradeDir != "/var/aos/upgrade" {
+		t.Errorf("Wrong upgrade dir value: %s", config.UpgradeDir)
 	}
 }
 
