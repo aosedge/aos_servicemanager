@@ -14,14 +14,16 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/cloudflare/cfssl/log"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"hash"
 	"io"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
+
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 )
 
 const (
