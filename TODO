@@ -1,0 +1,3 @@
+1. Make generic package to download and decrypt system images and services
+2. Download services to specific folder (probably same as for image) instead of tmp
+3. Move ServiceEntry and UsersEntry structures to launcher package
