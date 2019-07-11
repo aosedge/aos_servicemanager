@@ -55,7 +55,7 @@ type Request struct {
 	Action    string      `json:"action"`
 	Path      string      `json:"path"`
 	RequestID string      `json:"requestId"`
-	Value     interface{} `json:"value"`
+	Value     interface{} `json:"value,omitempty"`
 }
 
 // Response VIS response message
