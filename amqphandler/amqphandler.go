@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -731,6 +732,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 
 	for {
 		var message Message
+		retry := false
 
 		select {
 		case err := <-errorChannel:
@@ -741,6 +743,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 			return
 
 		case message = <-handler.retryChannel:
+			retry = true
 
 		case message = <-handler.sendChannel:
 		}
@@ -752,9 +755,15 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 				continue
 			}
 
-			log.WithFields(log.Fields{
-				"correlationID": message.CorrelationID,
-				"data":          string(data)}).Debug("AMQP send message")
+			if retry {
+				log.WithFields(log.Fields{
+					"correlationID": message.CorrelationID,
+					"data":          string(data)}).Debug("AMQP retry message")
+			} else {
+				log.WithFields(log.Fields{
+					"correlationID": message.CorrelationID,
+					"data":          string(data)}).Debug("AMQP send message")
+			}
 
 			if err := amqpChannel.Publish(
 				params.Exchange.Name, // exchange
@@ -782,7 +791,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 			}
 
 			if !ok {
-				return
+				handler.MessageChannel <- Message{"", errors.New("receive channel is closed")}
 			}
 		}
 	}
