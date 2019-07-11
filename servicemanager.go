@@ -401,13 +401,6 @@ func (sm *serviceManager) run() {
 		var vin string
 		var err error
 
-		if sm.um != nil {
-			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
-				log.Errorf("Can't connect to UM: %s", err)
-				goto reconnect
-			}
-		}
-
 		if err = sm.vis.Connect(sm.cfg.VISServerURL); err != nil {
 			log.Errorf("Can't connect to VIS: %s", err)
 			goto reconnect
@@ -431,6 +424,13 @@ func (sm *serviceManager) run() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
+		if sm.um != nil {
+			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
+				log.Errorf("Can't connect to UM: %s", err)
+				goto reconnect
+			}
+		}
+
 		// Connect
 		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, vin, users); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
@@ -449,7 +449,9 @@ func (sm *serviceManager) run() {
 	reconnect:
 		sm.amqp.Disconnect()
 		sm.vis.Disconnect()
-		sm.um.Disconnect()
+		if sm.um != nil {
+			sm.um.Disconnect()
+		}
 
 		<-time.After(reconnectTimeout)
 
