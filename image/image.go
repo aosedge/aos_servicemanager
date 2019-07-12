@@ -1,12 +1,12 @@
 package image
 
 import (
-	"crypto/sha256"
-	"crypto/sha512"
 	"errors"
 	"io"
 	"os"
 	"reflect"
+
+	"golang.org/x/crypto/sha3"
 )
 
 /*******************************************************************************
@@ -41,7 +41,7 @@ func CheckFileInfo(fileName string, fileInfo FileInfo) (err error) {
 		return errors.New("file size mistmatch")
 	}
 
-	hash256 := sha256.New()
+	hash256 := sha3.New256()
 
 	if _, err := io.Copy(hash256, file); err != nil {
 		return err
@@ -51,7 +51,7 @@ func CheckFileInfo(fileName string, fileInfo FileInfo) (err error) {
 		return errors.New("checksum sha256 mistmatch")
 	}
 
-	hash512 := sha512.New()
+	hash512 := sha3.New512()
 
 	if _, err = file.Seek(0, 0); err != nil {
 		return err
@@ -83,7 +83,7 @@ func CreateFileInfo(fileName string) (fileInfo FileInfo, err error) {
 
 	fileInfo.Size = uint64(stat.Size())
 
-	hash256 := sha256.New()
+	hash256 := sha3.New256()
 
 	if _, err := io.Copy(hash256, file); err != nil {
 		return fileInfo, err
@@ -91,7 +91,7 @@ func CreateFileInfo(fileName string) (fileInfo FileInfo, err error) {
 
 	fileInfo.Sha256 = hash256.Sum(nil)
 
-	hash512 := sha512.New()
+	hash512 := sha3.New512()
 
 	if _, err = file.Seek(0, 0); err != nil {
 		return fileInfo, err
