@@ -572,7 +572,7 @@ func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError str
 	handler.sendChannel <- Message{"", SystemRevertStatus{
 		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: SystemRevertType},
+			MessageType: SystemRevertStatusType},
 		Status:       revertStatus,
 		Error:        errorValue,
 		ImageVersion: imageVersion}}
@@ -591,7 +591,7 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 	handler.sendChannel <- Message{"", SystemUpgradeStatus{
 		MessageHeader: MessageHeader{
 			Version:     1,
-			MessageType: SystemUpgradeType},
+			MessageType: SystemUpgradeStatusType},
 		Status:       upgradeStatus,
 		Error:        errorValue,
 		ImageVersion: imageVersion}}
