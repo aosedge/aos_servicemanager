@@ -2,11 +2,14 @@ package visclient_test
 
 import (
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"net/url"
 	"os"
 	"testing"
 	"time"
+
+	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
 
 	"github.com/gorilla/websocket"
 
@@ -117,9 +120,9 @@ func TestGetUsers(t *testing.T) {
 func TestUsersChanged(t *testing.T) {
 	newUsers := []string{generateRandomString(10), generateRandomString(10)}
 
-	message, err := json.Marshal(&visclient.Response{
+	message, err := json.Marshal(&visserver.SubscriptionNotification{
 		Action:         "subscription",
-		SubscriptionID: &subscriptionID,
+		SubscriptionID: subscriptionID,
 		Value:          map[string][]string{"Attribute.Vehicle.UserIdentification.Users": newUsers}})
 	if err != nil {
 		t.Fatalf("Error marshal request: %s", err)
@@ -162,31 +165,42 @@ func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.M
 }
 
 func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
-	var req visclient.Request
-	var rsp visclient.Response
+	var header visserver.MessageHeader
 
-	if err = json.Unmarshal(messageIn, &req); err != nil {
+	if err = json.Unmarshal(messageIn, &header); err != nil {
 		return nil, err
 	}
 
-	rsp.Action = req.Action
-	rsp.RequestID = &req.RequestID
+	var rsp interface{}
 
-	switch req.Action {
-	case "subscribe":
-		rsp.SubscriptionID = &subscriptionID
+	switch header.Action {
+	case visserver.ActionSubscribe:
+		rsp = &visserver.SubscribeResponse{
+			MessageHeader:  header,
+			SubscriptionID: subscriptionID}
 
-	case "get":
-		switch req.Path {
-		case "Attribute.Vehicle.VehicleIdentification.VIN":
-			rsp.Value = map[string]string{req.Path: "VIN1234567890"}
+	case visserver.ActionGet:
+		var getReq visserver.GetRequest
 
-		case "Attribute.Vehicle.UserIdentification.Users":
-			rsp.Value = map[string][]string{req.Path: []string{"user1", "user2", "user3"}}
+		getRsp := visserver.GetResponse{
+			MessageHeader: header}
+
+		if err = json.Unmarshal(messageIn, &getReq); err != nil {
+			return nil, err
 		}
 
+		switch getReq.Path {
+		case "Attribute.Vehicle.VehicleIdentification.VIN":
+			getRsp.Value = map[string]string{getReq.Path: "VIN1234567890"}
+
+		case "Attribute.Vehicle.UserIdentification.Users":
+			getRsp.Value = map[string][]string{getReq.Path: []string{"user1", "user2", "user3"}}
+		}
+
+		rsp = &getRsp
+
 	default:
-		rsp.Error = &visclient.ErrorInfo{Number: 401, Reason: "", Message: "Unknown action"}
+		return nil, errors.New("Unknown action")
 	}
 
 	if messageOut, err = json.Marshal(rsp); err != nil {

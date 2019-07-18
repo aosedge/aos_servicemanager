@@ -5,10 +5,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsclient"
+	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
 )
 
 /*******************************************************************************
@@ -41,32 +41,6 @@ type Client struct {
 	subscribeMap sync.Map
 
 	sync.Mutex
-}
-
-// ErrorInfo VIS error info message
-type ErrorInfo struct {
-	Number  int
-	Reason  string
-	Message string
-}
-
-// Request VIS request message
-type Request struct {
-	Action    string      `json:"action"`
-	Path      string      `json:"path"`
-	RequestID string      `json:"requestId"`
-	Value     interface{} `json:"value,omitempty"`
-}
-
-// Response VIS response message
-type Response struct {
-	Action         string      `json:"action"`
-	RequestID      *string     `json:"requestId"`
-	Value          interface{} `json:"value"`
-	Error          *ErrorInfo  `json:"error"`
-	TTL            int64       `json:"TTL"`
-	SubscriptionID *string     `json:"subscriptionId"`
-	Timestamp      int64       `json:"timestamp"`
 }
 
 /*******************************************************************************
@@ -119,14 +93,19 @@ func (vis *Client) IsConnected() (result bool) {
 
 // GetVIN returns VIN
 func (vis *Client) GetVIN() (vin string, err error) {
-	var rsp Response
+	var rsp visserver.GetResponse
 
-	if err = vis.wsClient.SendRequest("RequestID", &Request{Action: "get", RequestID: uuid.New().String(),
-		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}, &rsp); err != nil {
+	req := visserver.GetRequest{
+		MessageHeader: visserver.MessageHeader{
+			Action:    visserver.ActionGet,
+			RequestID: wsclient.GenerateRequestID()},
+		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}
+
+	if err = vis.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
 		return "", err
 	}
 
-	value, err := getValueFromResponse("Attribute.Vehicle.VehicleIdentification.VIN", &rsp)
+	value, err := getValueByPath("Attribute.Vehicle.VehicleIdentification.VIN", rsp.Value)
 	if err != nil {
 		return "", err
 	}
@@ -144,17 +123,22 @@ func (vis *Client) GetVIN() (vin string, err error) {
 // GetUsers returns user list
 func (vis *Client) GetUsers() (users []string, err error) {
 	if vis.users == nil {
-		var rsp Response
+		var rsp visserver.GetResponse
 
-		if err = vis.wsClient.SendRequest("RequestID", &Request{Action: "get", RequestID: uuid.New().String(),
-			Path: "Attribute.Vehicle.UserIdentification.Users"}, &rsp); err != nil {
+		req := visserver.GetRequest{
+			MessageHeader: visserver.MessageHeader{
+				Action:    visserver.ActionGet,
+				RequestID: wsclient.GenerateRequestID()},
+			Path: "Attribute.Vehicle.UserIdentification.Users"}
+
+		if err = vis.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
 			return nil, err
 		}
 
 		vis.Lock()
 		defer vis.Unlock()
 
-		if err = vis.setUsers(&rsp); err != nil {
+		if err = vis.setUsers(rsp.Value); err != nil {
 			return nil, err
 		}
 	}
@@ -174,52 +158,64 @@ func (vis *Client) Close() (err error) {
  ******************************************************************************/
 
 func (vis *Client) messageHandler(message []byte) {
-	var rsp Response
+	var header visserver.MessageHeader
 
-	if err := json.Unmarshal(message, &rsp); err != nil {
+	if err := json.Unmarshal(message, &header); err != nil {
 		log.Errorf("Error parsing VIS response: %s", err)
 		return
 	}
 
-	if rsp.Action == "subscription" {
-		vis.processSubscriptions(&rsp)
+	switch header.Action {
+	case visserver.ActionSubscription:
+		vis.processSubscriptions(message)
+
+	default:
+		log.WithField("action", header.Action).Warning("Unexpected message received")
 	}
 }
 
-func getValueFromResponse(path string, rsp *Response) (value interface{}, err error) {
-	if valueMap, ok := rsp.Value.(map[string]interface{}); ok {
+func getValueByPath(path string, value interface{}) (result interface{}, err error) {
+	if valueMap, ok := value.(map[string]interface{}); ok {
 		if value, ok = valueMap[path]; !ok {
-			return value, errors.New("Path not found")
+			return nil, errors.New("Path not found")
 		}
 		return value, nil
 	}
 
-	if rsp.Value == nil {
-		return value, errors.New("No value found")
+	if value == nil {
+		return result, errors.New("No value found")
 	}
 
-	return rsp.Value, nil
+	return value, nil
 }
 
-func (vis *Client) processSubscriptions(rsp *Response) {
+func (vis *Client) processSubscriptions(message []byte) (err error) {
+	var notification visserver.SubscriptionNotification
+
+	if err = json.Unmarshal(message, &notification); err != nil {
+		return err
+	}
+
 	// serve subscriptions
 	subscriptionFound := false
 	vis.subscribeMap.Range(func(key, value interface{}) bool {
-		if key.(string) == *rsp.SubscriptionID {
+		if key.(string) == notification.SubscriptionID {
 			subscriptionFound = true
-			value.(func(*Response))(rsp)
+			value.(func(interface{}))(notification.Value)
 			return false
 		}
 		return true
 	})
 
 	if !subscriptionFound {
-		log.Warningf("Unexpected subscription id: %v", rsp.SubscriptionID)
+		log.Warningf("Unexpected subscription id: %s", notification.SubscriptionID)
 	}
+
+	return nil
 }
 
-func (vis *Client) setUsers(rsp *Response) (err error) {
-	value, err := getValueFromResponse("Attribute.Vehicle.UserIdentification.Users", rsp)
+func (vis *Client) setUsers(value interface{}) (err error) {
+	value, err = getValueByPath("Attribute.Vehicle.UserIdentification.Users", value)
 	if err != nil {
 		return err
 	}
@@ -242,11 +238,11 @@ func (vis *Client) setUsers(rsp *Response) (err error) {
 	return nil
 }
 
-func (vis *Client) handleUsersChanged(rsp *Response) {
+func (vis *Client) handleUsersChanged(value interface{}) {
 	vis.Lock()
 	defer vis.Unlock()
 
-	if err := vis.setUsers(rsp); err != nil {
+	if err := vis.setUsers(value); err != nil {
 		log.Errorf("Can't set users: %s", err)
 		return
 	}
@@ -256,18 +252,24 @@ func (vis *Client) handleUsersChanged(rsp *Response) {
 	log.WithField("users", vis.users).Debug("Users changed")
 }
 
-func (vis *Client) subscribe(path string, callback func(*Response)) (err error) {
-	var rsp Response
+func (vis *Client) subscribe(path string, callback func(value interface{})) (err error) {
+	var rsp visserver.SubscribeResponse
 
-	if err = vis.wsClient.SendRequest("RequestID", &Request{Action: "subscribe", RequestID: uuid.New().String(), Path: path}, &rsp); err != nil {
+	req := visserver.SubscribeRequest{
+		MessageHeader: visserver.MessageHeader{
+			Action:    visserver.ActionSubscribe,
+			RequestID: wsclient.GenerateRequestID()},
+		Path: path}
+
+	if err = vis.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
 		return err
 	}
 
-	if rsp.SubscriptionID == nil {
+	if rsp.SubscriptionID == "" {
 		return errors.New("No subscriptionID in response")
 	}
 
-	vis.subscribeMap.Store(*rsp.SubscriptionID, callback)
+	vis.subscribeMap.Store(rsp.SubscriptionID, callback)
 
 	return nil
 }
