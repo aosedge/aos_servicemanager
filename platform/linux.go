@@ -51,7 +51,7 @@ func CreateUser(serviceID string) (userName string, err error) {
 	log.WithField("user", userName).Debug("Create user")
 
 	if err = exec.Command("useradd", "-M", userName).Run(); err != nil {
-		return "", fmt.Errorf("Error creating user: %s", err)
+		return "", fmt.Errorf("error creating user: %s", err)
 	}
 
 	return userName, nil

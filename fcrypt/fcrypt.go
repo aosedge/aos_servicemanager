@@ -104,7 +104,7 @@ func getOfflineCert() (*x509.Certificate, error) {
 	var block *pem.Block
 	block, _ = pem.Decode(pemCert)
 	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-		return nil, errors.New("Invalid PEM Block")
+		return nil, errors.New("invalid PEM Block")
 	}
 
 	return x509.ParseCertificate(block.Bytes)
@@ -115,7 +115,7 @@ func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
 	case *rsa.PublicKey:
 		return pub, nil
 	default:
-		return nil, errors.New("Unknown public key type")
+		return nil, errors.New("unknown public key type")
 	}
 
 }
@@ -137,14 +137,14 @@ func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
 			return err
 		}
 	default:
-		return errors.New("Unknown cryptographic algorithm: " + cryptoAlg)
+		return errors.New("unknown cryptographic algorithm: " + cryptoAlg)
 	}
 
 	switch cryptoMode {
 	case "CBC":
 		mode = cipher.NewCBCDecrypter(block, iv)
 	default:
-		return errors.New("Unknown encryption mode: " + cryptoMode)
+		return errors.New("unknown encryption mode: " + cryptoMode)
 	}
 
 	indata, err := ioutil.ReadAll(fin)
@@ -168,7 +168,7 @@ func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
 
 	for block, remainder := pem.Decode([]byte(pemData)); block != nil; block, remainder = pem.Decode(remainder) {
 		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			return nil, errors.New("Invalid PEM Block")
+			return nil, errors.New("invalid PEM Block")
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
@@ -186,7 +186,7 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	}
 
 	if len(certs) == 0 {
-		return nil, errors.New("No certificates found in certificate chain")
+		return nil, errors.New("no certificates found in certificate chain")
 	}
 
 	signCertificate := certs[0]
@@ -242,7 +242,7 @@ func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
 	case "SHA512/256":
 		hashFunc = crypto.SHA512_256
 	default:
-		return errors.New("Unknown hashing algorithm: " + hashAlg)
+		return errors.New("unknown hashing algorithm: " + hashAlg)
 	}
 
 	hash := hashFunc.New()
@@ -267,27 +267,27 @@ func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
 		case "PSS":
 			return rsa.VerifyPSS(key, hashFunc.HashFunc(), h, signature, nil)
 		default:
-			return errors.New("Unknown scheme for RSA signature: " + signatureScheme)
+			return errors.New("unknown scheme for RSA signature: " + signatureScheme)
 		}
 	default:
-		return errors.New("Unknown signature alg: " + signatureAlg)
+		return errors.New("unknown signature alg: " + signatureAlg)
 	}
 }
 
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
 	if l%blocklen != 0 {
-		return nil, errors.New("Padding error")
+		return nil, errors.New("padding error")
 	}
 
 	pl := int(in[l-1])
 	if pl < 1 || pl > blocklen {
-		return nil, errors.New("Padding error")
+		return nil, errors.New("padding error")
 	}
 
 	for i := l - pl; i < l; i++ {
 		if in[i] != byte(pl) {
-			return nil, errors.New("Padding error")
+			return nil, errors.New("padding error")
 		}
 	}
 

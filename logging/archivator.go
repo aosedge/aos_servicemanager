@@ -27,7 +27,7 @@ type archivator struct {
  * Variables
  ******************************************************************************/
 
-var errMaxPartCount = errors.New("Max part count reached")
+var errMaxPartCount = errors.New("max part count reached")
 
 /*******************************************************************************
  * Private

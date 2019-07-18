@@ -200,7 +200,7 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		rsp = &getRsp
 
 	default:
-		return nil, errors.New("Unknown action")
+		return nil, errors.New("unknown action")
 	}
 
 	if messageOut, err = json.Marshal(rsp); err != nil {

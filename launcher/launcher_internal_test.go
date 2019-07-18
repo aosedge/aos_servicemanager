@@ -335,7 +335,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		return err
 	}
 	if len(services) != 0 {
-		return errors.New("Can't remove all services")
+		return errors.New("can't remove all services")
 	}
 
 	usersList, err := launcher.serviceProvider.GetUsersList()
@@ -343,7 +343,7 @@ func (launcher *Launcher) removeAllServices() (err error) {
 		return err
 	}
 	if len(usersList) != 0 {
-		return errors.New("Can't remove all users")
+		return errors.New("can't remove all users")
 	}
 
 	return err

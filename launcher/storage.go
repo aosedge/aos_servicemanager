@@ -219,7 +219,7 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 		}
 	}
 
-	return errors.New("Correlation ID not found")
+	return errors.New("correlation ID not found")
 }
 
 func (handler *storageHandler) UpdateState(users []string, service database.ServiceEntry,
@@ -238,7 +238,7 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 	}
 
 	if len(state) > int(service.StateLimit) {
-		return errors.New("State is too big")
+		return errors.New("state is too big")
 	}
 
 	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
@@ -572,7 +572,7 @@ func checkChecksum(state, checksum string) (err error) {
 	calcSum := sha3.Sum224([]byte(state))
 
 	if !reflect.DeepEqual(calcSum[:], sum) {
-		return errors.New("Wrong checksum")
+		return errors.New("wrong checksum")
 	}
 
 	return nil

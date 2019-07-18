@@ -27,10 +27,10 @@ const (
  ******************************************************************************/
 
 // ErrNotExist is returned when requested entry not exist in DB
-var ErrNotExist = errors.New("Entry doesn't not exist")
+var ErrNotExist = errors.New("entry doesn't not exist")
 
 // ErrVersionMismatch is returned when DB has unsupported DB version
-var ErrVersionMismatch = errors.New("Version mismatch")
+var ErrVersionMismatch = errors.New("version mismatch")
 
 /*******************************************************************************
  * Types

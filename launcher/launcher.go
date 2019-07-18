@@ -476,7 +476,7 @@ func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
 
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
 	if launcher.users == nil {
-		return errors.New("Users are not set")
+		return errors.New("users are not set")
 	}
 
 	service, err := launcher.serviceProvider.GetService(serviceInfo.ID)
@@ -487,7 +487,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	// Skip incorrect version
 	if serviceExists && serviceInfo.Version < service.Version {
-		return errors.New("Version mistmatch")
+		return errors.New("version mistmatch")
 	}
 
 	// If same service version exists, just start the service
@@ -568,7 +568,7 @@ func (launcher *Launcher) uninstallService(id string) (version uint64, err error
 	version = service.Version
 
 	if launcher.users == nil {
-		return version, errors.New("Users are not set")
+		return version, errors.New("users are not set")
 	}
 
 	if err := launcher.stopService(service); err != nil {

@@ -69,7 +69,7 @@ type Alerts struct {
  ******************************************************************************/
 
 // ErrDisabled indicates that alerts is disable in the config
-var ErrDisabled = errors.New("Alerts is disabled")
+var ErrDisabled = errors.New("alerts is disabled")
 
 /*******************************************************************************
  * Public

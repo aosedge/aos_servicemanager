@@ -112,7 +112,7 @@ func (vis *Client) GetVIN() (vin string, err error) {
 
 	ok := false
 	if vis.vin, ok = value.(string); !ok {
-		return "", errors.New("Wrong VIN type")
+		return "", errors.New("wrong VIN type")
 	}
 
 	log.WithField("VIN", vis.vin).Debug("Get VIN")
@@ -177,13 +177,13 @@ func (vis *Client) messageHandler(message []byte) {
 func getValueByPath(path string, value interface{}) (result interface{}, err error) {
 	if valueMap, ok := value.(map[string]interface{}); ok {
 		if value, ok = valueMap[path]; !ok {
-			return nil, errors.New("Path not found")
+			return nil, errors.New("path not found")
 		}
 		return value, nil
 	}
 
 	if value == nil {
-		return result, errors.New("No value found")
+		return result, errors.New("no value found")
 	}
 
 	return value, nil
@@ -222,7 +222,7 @@ func (vis *Client) setUsers(value interface{}) (err error) {
 
 	itfs, ok := value.([]interface{})
 	if !ok {
-		return errors.New("Wrong users type")
+		return errors.New("wrong users type")
 	}
 
 	vis.users = make([]string, len(itfs))
@@ -230,7 +230,7 @@ func (vis *Client) setUsers(value interface{}) (err error) {
 	for i, itf := range itfs {
 		item, ok := itf.(string)
 		if !ok {
-			return errors.New("Wrong users type")
+			return errors.New("wrong users type")
 		}
 		vis.users[i] = item
 	}
@@ -266,7 +266,7 @@ func (vis *Client) subscribe(path string, callback func(value interface{})) (err
 	}
 
 	if rsp.SubscriptionID == "" {
-		return errors.New("No subscriptionID in response")
+		return errors.New("no subscriptionID in response")
 	}
 
 	vis.subscribeMap.Store(rsp.SubscriptionID, callback)

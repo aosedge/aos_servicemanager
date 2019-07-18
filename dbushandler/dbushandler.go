@@ -100,7 +100,7 @@ func (dbusHandler *DBusHandler) Close() (err error) {
 		return err
 	}
 	if reply != dbus.ReleaseNameReplyReleased {
-		return errors.New("Can't release D-Bus interface name")
+		return errors.New("can't release D-Bus interface name")
 	}
 
 	return nil

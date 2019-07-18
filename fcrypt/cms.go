@@ -136,7 +136,7 @@ func decryptCMSKey(ktri *keyTransRecipientInfo,
 	switch {
 	case ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid):
 		if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
-			return nil, errors.New("Extra paramaters for RSA algorithm found")
+			return nil, errors.New("extra paramaters for RSA algorithm found")
 		}
 
 		key, err := privKey.Decrypt(nil, ktri.EncryptedKey, nil)
@@ -148,7 +148,7 @@ func decryptCMSKey(ktri *keyTransRecipientInfo,
 
 		return key, nil
 	default:
-		return nil, errors.New("Unknown public encryption OID")
+		return nil, errors.New("unknown public encryption OID")
 	}
 }
 
@@ -156,12 +156,12 @@ func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 	switch {
 	case eci.ContentEncryptionAlgorithm.Algorithm.Equal(aes256CbcOid):
 		if eci.ContentEncryptionAlgorithm.Parameters.Tag != asn1.TagOctetString {
-			return nil, errors.New("Can't find IV in extended params")
+			return nil, errors.New("can't find IV in extended params")
 		}
 
 		iv := eci.ContentEncryptionAlgorithm.Parameters.Bytes
 		if len(iv) != 16 {
-			return nil, errors.New("Invalid IV length")
+			return nil, errors.New("invalid IV length")
 		}
 
 		block, err := aes.NewCipher(key)
@@ -177,7 +177,7 @@ func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 		return removePkcs7Padding(outdata, 16)
 
 	default:
-		return nil, errors.New("Unknown symmetric algorithm OID")
+		return nil, errors.New("unknown symmetric algorithm OID")
 	}
 }
 
@@ -191,7 +191,7 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 	}
 
 	if !ci.OID.Equal(envelopedDataOid) {
-		return nil, errors.New("Unknown object identifier in ContentInfo")
+		return nil, errors.New("unknown object identifier in ContentInfo")
 	}
 
 	return getContentInfo(ci)
@@ -215,5 +215,5 @@ func DecryptMessage(der []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]
 		}
 	}
 
-	return nil, errors.New("Can't find suiteable recipient")
+	return nil, errors.New("can't find suiteable recipient")
 }

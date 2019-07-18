@@ -117,7 +117,7 @@ type serviceMonitoring struct {
  ******************************************************************************/
 
 // ErrDisabled indicates that monitoring is disable in the config
-var ErrDisabled = errors.New("Monitoring is disabled")
+var ErrDisabled = errors.New("monitoring is disabled")
 
 /*******************************************************************************
  * Public
@@ -744,7 +744,7 @@ func (monitor *Monitor) getTrafficChainBytes(chain string) (value uint64, err er
 		}
 	}
 
-	return 0, errors.New("Statistic for chain not found")
+	return 0, errors.New("statistic for chain not found")
 }
 
 func (monitor *Monitor) setChainState(chain, addresses string, enable bool) (err error) {
@@ -834,7 +834,7 @@ func (monitor *Monitor) editTrafficChain(chain, addresses string) (err error) {
 
 	traffic, ok := monitor.trafficMap[chain]
 	if !ok {
-		return errors.New("Chain doesn't exist")
+		return errors.New("chain doesn't exist")
 	}
 
 	if strings.HasSuffix(chain, "_IN") {
