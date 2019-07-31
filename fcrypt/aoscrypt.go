@@ -449,7 +449,7 @@ func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
 
 func (ctx *SymmetricCipherContext) appendPadding(dataIn []byte, dataLen int) (fullSize int, err error) {
 	switch strings.ToUpper(ctx.paddingName) {
-	case "PKCS7PADDING":
+	case "PKCS7PADDING", "PKCS7":
 		return ctx.appendPkcs7Padding(dataIn, dataLen)
 	default:
 		return 0, errors.New("unsupported padding type")
@@ -458,7 +458,7 @@ func (ctx *SymmetricCipherContext) appendPadding(dataIn []byte, dataLen int) (fu
 
 func (ctx *SymmetricCipherContext) getPaddingSize(dataIn []byte, dataLen int) (removedSize int, err error) {
 	switch strings.ToUpper(ctx.paddingName) {
-	case "PKCS7PADDING":
+	case "PKCS7PADDING", "PKCS7":
 		return ctx.removePkcs7Padding(dataIn, dataLen)
 	default:
 		return 0, errors.New("unsupported padding type")
