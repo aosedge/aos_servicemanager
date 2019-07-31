@@ -41,6 +41,7 @@ type serviceManager struct {
 	alerts   *alerts.Alerts
 	amqp     *amqp.AmqpHandler
 	cfg      *config.Config
+	crypt    *fcrypt.CryptoContext
 	db       *database.Database
 	dbus     *dbushandler.DBusHandler
 	launcher *launcher.Launcher
@@ -89,16 +90,13 @@ func cleanup(workingDir, dbFile string) {
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	sm = &serviceManager{cfg: cfg}
 
-	// Initialize fcrypt
-	fcrypt.Init(sm.cfg.Crypt)
-
 	// Create DB
 	dbFile := path.Join(cfg.WorkingDir, dbFileName)
 
 	if sm.db, err = database.New(dbFile); err != nil {
 		if err == database.ErrVersionMismatch {
 			log.Warning("Unsupported database version")
-			cleanup(sm.cfg.WorkingDir, dbFile)
+			cleanup(cfg.WorkingDir, dbFile)
 			sm.db, err = database.New(dbFile)
 		}
 
@@ -107,8 +105,24 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	// Initialize fcrypt
+	fcrypt.Init(cfg.Crypt)
+
+	// Create crypto context
+	if sm.crypt, err = fcrypt.CreateContext(cfg.Crypt); err != nil {
+		goto err
+	}
+
+	if err = sm.crypt.LoadOfflineKey(); err != nil {
+		goto err
+	}
+
+	if err = sm.crypt.LoadOnlineKey(); err != nil {
+		goto err
+	}
+
 	// Create alerts
-	if sm.alerts, err = alerts.New(sm.cfg, sm.db, sm.db); err != nil {
+	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
 			log.Warn(err)
 		} else {
@@ -117,7 +131,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create monitor
-	if sm.monitor, err = monitoring.New(sm.cfg, sm.db, sm.alerts); err != nil {
+	if sm.monitor, err = monitoring.New(cfg, sm.db, sm.alerts); err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
 		} else {
@@ -131,7 +145,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(sm.cfg, sm.amqp, sm.db, sm.monitor); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.monitor); err != nil {
 		goto err
 	}
 
@@ -147,13 +161,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create UM client
 	if cfg.UMServerURL != "" {
-		if sm.um, err = umclient.New(sm.cfg, sm.amqp, sm.db); err != nil {
+		if sm.um, err = umclient.New(cfg, sm.crypt, sm.amqp, sm.db); err != nil {
 			goto err
 		}
 	}
 
 	// Create logging
-	if sm.logging, err = logging.New(sm.cfg, sm.db); err != nil {
+	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
 		goto err
 	}
 

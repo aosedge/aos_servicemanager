@@ -11,7 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cavaliercoder/grab"
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
+
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_updatemanager/umserver"
 
@@ -46,6 +47,7 @@ type Client struct {
 	ErrorChannel chan error
 
 	sync.Mutex
+	crypt    *fcrypt.CryptoContext
 	sender   Sender
 	storage  Storage
 	wsClient *wsclient.Client
@@ -76,13 +78,20 @@ type Storage interface {
 	GetUpgradeVersion() (version uint64, err error)
 }
 
+// Image provides API to download, decrypt images
+type Image interface {
+	Download(dstDir, url string) (fileName string, err error)
+	Decrypt(srcFileName, dstFileName string, asymAlg, blockAlg string, blockKey, blockIv []byte) (err error)
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new umclient
-func New(config *config.Config, sender Sender, storage Storage) (um *Client, err error) {
+func New(config *config.Config, crypt *fcrypt.CryptoContext, sender Sender, storage Storage) (um *Client, err error) {
 	um = &Client{
+		crypt:       crypt,
 		sender:      sender,
 		storage:     storage,
 		downloadDir: path.Join(config.UpgradeDir, "downloads"),
@@ -381,52 +390,20 @@ func (um *Client) checkFile(fileName string, fileInfo amqp.UpgradeFileInfo) (err
 	return nil
 }
 
-func (um *Client) downloadFile(client *grab.Client, url string) (fileName string, err error) {
-	// This function is called under locked context but we need to unlock for downloads
-	um.Unlock()
-	defer um.Lock()
-
-	log.WithField("url", url).Debug("Start downloading file")
-
-	timer := time.NewTicker(updateDownloadsTime)
-	defer timer.Stop()
-
-	req, err := grab.NewRequest(um.downloadDir, url)
-	if err != nil {
-		return "", err
-	}
-
-	resp := client.Do(req)
-
-	for {
-		select {
-		case <-timer.C:
-			log.WithFields(log.Fields{"complete": resp.BytesComplete(), "total": resp.Size}).Debug("Download progress")
-
-		case <-resp.Done:
-			if err := resp.Err(); err != nil {
-				return "", err
-			}
-
-			log.WithFields(log.Fields{"url": url, "file": resp.Filename}).Debug("Download complete")
-
-			return resp.Filename, nil
-		}
-	}
-}
-
 func (um *Client) downloadImage() {
 	um.Lock()
 	defer um.Unlock()
 
-	var err error
+	image, err := image.New()
+	if err != nil {
+		um.sendUpgradeStatus(umserver.FailedStatus, "can't create image instance")
+		return
+	}
 
 	if len(um.upgradeMetadata.Data) == 0 {
 		um.sendUpgradeStatus(umserver.FailedStatus, "upgrade file list is empty")
 		return
 	}
-
-	client := grab.NewClient()
 
 	for i, data := range um.upgradeMetadata.Data {
 
@@ -454,7 +431,7 @@ func (um *Client) downloadImage() {
 				return
 			}
 
-			if fileName, err = um.downloadFile(client, rawURL); err != nil {
+			if fileName, err = image.Download(um.downloadDir, rawURL); err != nil {
 				log.WithField("url", rawURL).Warningf("Can't download file: %s", err)
 				continue
 			}
@@ -475,9 +452,12 @@ func (um *Client) downloadImage() {
 		}
 
 		if data.DecryptionInfo != nil {
-			// TODO: decrypt and remove downloaded files
+			if err = um.decryptImage(
+				fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), data.DecryptionInfo); err != nil {
+				um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+				return
+			}
 		} else {
-
 			if err = os.Rename(fileName, path.Join(um.upgradeDir, filepath.Base(fileName))); err != nil {
 				um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
 				return
@@ -511,6 +491,37 @@ func (um *Client) clearDirs() (err error) {
 	}
 
 	if err = os.MkdirAll(um.downloadDir, 0755); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (um *Client) decryptImage(srcFileName, dstFileName string, decryptionInfo *amqp.UpgradeDecryptionInfo) (err error) {
+	context, err := um.crypt.ImportSessionKey(fcrypt.CryptoSessionKeyInfo{
+		SymmetricAlgName:  decryptionInfo.BlockAlg,
+		SessionKey:        decryptionInfo.BlockKey,
+		SessionIV:         decryptionInfo.BlockIv,
+		AsymmetricAlgName: decryptionInfo.AsymAlg})
+	if err != nil {
+		return err
+	}
+
+	srcFile, err := os.Open(srcFileName)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.OpenFile(dstFileName, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	log.WithFields(log.Fields{"srcFile": srcFile.Name(), "dstFile": dstFile.Name()}).Debug("Decrypt image")
+
+	if err = context.DecryptFile(srcFile, dstFile); err != nil {
 		return err
 	}
 

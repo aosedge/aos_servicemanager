@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
+
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_updatemanager/umserver"
 
@@ -111,7 +113,12 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Can't create db: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: "tmp/upgrade"}, sender, db)
+	crypt, err := fcrypt.CreateContext(config.Crypt{})
+	if err != nil {
+		log.Fatalf("Can't create crypto context: %s", err)
+	}
+
+	client, err = umclient.New(&config.Config{UpgradeDir: "tmp/upgrade"}, crypt, sender, db)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}

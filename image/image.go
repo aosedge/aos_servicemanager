@@ -5,13 +5,29 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"time"
 
+	"github.com/cavaliercoder/grab"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
+)
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const (
+	updateDownloadsTime = 10 * time.Second
 )
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
+
+// Handler image handler instance
+type Handler struct {
+	grab *grab.Client
+}
 
 // FileInfo file info
 type FileInfo struct {
@@ -23,6 +39,44 @@ type FileInfo struct {
 /*******************************************************************************
  * Public
  ******************************************************************************/
+
+// New creates new image handler
+func New() (image *Handler, err error) {
+	image = &Handler{grab: grab.NewClient()}
+
+	return image, nil
+}
+
+// Download downloads the file by url
+func (image *Handler) Download(destination, url string) (fileName string, err error) {
+	log.WithField("url", url).Debug("Start downloading file")
+
+	timer := time.NewTicker(updateDownloadsTime)
+	defer timer.Stop()
+
+	req, err := grab.NewRequest(destination, url)
+	if err != nil {
+		return "", err
+	}
+
+	resp := image.grab.Do(req)
+
+	for {
+		select {
+		case <-timer.C:
+			log.WithFields(log.Fields{"complete": resp.BytesComplete(), "total": resp.Size}).Debug("Download progress")
+
+		case <-resp.Done:
+			if err := resp.Err(); err != nil {
+				return "", err
+			}
+
+			log.WithFields(log.Fields{"url": url, "file": resp.Filename}).Debug("Download complete")
+
+			return resp.Filename, nil
+		}
+	}
+}
 
 // CheckFileInfo checks if file matches FileInfo
 func CheckFileInfo(fileName string, fileInfo FileInfo) (err error) {

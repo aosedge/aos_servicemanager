@@ -124,10 +124,13 @@ type SystemRevert struct {
 // UpgradeDecryptionInfo upgrade decryption info
 type UpgradeDecryptionInfo struct {
 	BlockAlg     string `json:"blockAlg"`
-	BlockIv      string `json:"blockIv"`
-	BlockKey     string `json:"blockKey"`
+	BlockIv      []byte `json:"blockIv"`
+	BlockKey     []byte `json:"blockKey"`
 	AsymAlg      string `json:"asymAlg"`
-	EncryptedKey string `json:"encryptedKey"`
+	ReceiverInfo *struct {
+		Serial string `json:"serial"`
+		Issuer string `json:"issuer"`
+	} `json:"receiverInfo"`
 }
 
 // UpgradeSigns upgrade signs
