@@ -55,6 +55,22 @@ type SymmetricCipherContext struct {
 	encrypter   cipher.BlockMode
 }
 
+type certificateInfo struct {
+	fingerprint string
+	certificate *x509.Certificate
+}
+
+type certificateChainInfo struct {
+	name         string
+	fingerprints []string
+}
+
+type SignContext struct {
+	cryptoContext         *CryptoContext
+	signCertificates      []certificateInfo
+	signCertificateChains []certificateChainInfo
+}
+
 func CreateContext(conf config.Crypt) (*CryptoContext, error) {
 	// Create context
 	ctx := &CryptoContext{
@@ -78,6 +94,175 @@ func CreateContext(conf config.Crypt) (*CryptoContext, error) {
 	}
 
 	return ctx, nil
+}
+
+func (ctx *CryptoContext) CreateSignContext() (*SignContext, error) {
+	if ctx == nil || ctx.rootCertPool == nil {
+		return nil, errors.New("asymmetric context not initialized")
+	}
+
+	return &SignContext{cryptoContext: ctx}, nil
+}
+
+func (ctx *SignContext) AddCertificate(fingerprint string, asn1Bytes []byte) error {
+	if ctx == nil {
+		return errors.New("sign context not initialized")
+	}
+
+	fingerUpper := strings.ToUpper(fingerprint)
+
+	// Check certificate presents
+	for _, item := range ctx.signCertificates {
+		if item.fingerprint == fingerUpper {
+			return nil
+		}
+	}
+
+	// Parse certificate from ASN1 bytes
+	cert, err := x509.ParseCertificate(asn1Bytes)
+	if err != nil {
+		return fmt.Errorf("error parsing sign certificate: %s", err)
+	}
+
+	// Append the new certificate to the collection
+	ctx.signCertificates = append(ctx.signCertificates, certificateInfo{fingerprint: fingerUpper, certificate: cert})
+	return nil
+}
+
+func (ctx *SignContext) AddCertificateChain(name string, fingerprints []string) error {
+	if ctx == nil {
+		return errors.New("sign context not initialized")
+	}
+
+	if len(fingerprints) == 0 {
+		return errors.New("can not add certificate chain with an empty fingerprint list")
+	}
+
+	// Check certificate presents
+	for _, item := range ctx.signCertificateChains {
+		if item.name == name {
+			return nil
+		}
+	}
+
+	ctx.signCertificateChains = append(
+		ctx.signCertificateChains, certificateChainInfo{name, fingerprints})
+
+	return nil
+}
+
+func (ctx *SignContext) VerifySign(f *os.File, chainName string, algName string, signValue []byte) error {
+	var err error
+	if ctx == nil {
+		return errors.New("sign context not initialized")
+	}
+
+	if len(ctx.signCertificateChains) == 0 || len(ctx.signCertificates) == 0 {
+		return errors.New("sign context not initialized (no certificates)")
+	}
+
+	var chain certificateChainInfo
+	var signCertFingerprint string
+
+	// Find chain
+	for _, chainTmp := range ctx.signCertificateChains {
+		if chainTmp.name == chainName {
+			chain = chainTmp
+			signCertFingerprint = chain.fingerprints[0]
+			break
+		}
+	}
+	if chain.name == "" || len(chain.name) == 0 {
+		return errors.New("unknown chain name")
+	}
+
+	signCert := ctx.getCertificateByFingerprint(signCertFingerprint)
+
+	if signCert == nil {
+		return errors.New("signing certificate is absent")
+	}
+
+	signAlgName, signHash, signPadding := decodeSignAlgNames(algName)
+
+	var hashFunc crypto.Hash
+	switch strings.ToUpper(signHash) {
+	case "SHA256":
+		hashFunc = crypto.SHA256
+	case "SHA384":
+		hashFunc = crypto.SHA384
+	case "SHA512":
+		hashFunc = crypto.SHA512
+	case "SHA512/224":
+		hashFunc = crypto.SHA512_224
+	case "SHA512/256":
+		hashFunc = crypto.SHA512_256
+	default:
+		return errors.New("unknown or unsupported hashing algorithm: " + signHash)
+	}
+
+	hash := hashFunc.New()
+
+	_, err = io.Copy(hash, f)
+	if err != nil {
+		log.Errorf("Error hashing file: %s", err)
+		return err
+	}
+	hashValue := hash.Sum(nil)
+
+	switch signAlgName {
+	case "RSA":
+		publicKey := signCert.PublicKey.(*rsa.PublicKey)
+
+		switch signPadding {
+		case "PKCS1v1_5":
+			err = rsa.VerifyPKCS1v15(publicKey, hashFunc.HashFunc(), hashValue, signValue)
+		case "PSS":
+			err = rsa.VerifyPSS(publicKey, hashFunc.HashFunc(), hashValue, signValue, nil)
+		default:
+			return errors.New("unknown scheme for RSA signature: " + signPadding)
+		}
+	default:
+		return errors.New("unknown or unsupported signature alg: " + signAlgName)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Sign ok
+	// Verify certs
+
+	intermediatePool := x509.NewCertPool()
+	for _, certFingerprints := range chain.fingerprints[1:] {
+		crt := ctx.getCertificateByFingerprint(certFingerprints)
+		if crt == nil {
+			return fmt.Errorf("cannot find certificate in chain fingerprint=%s", certFingerprints)
+		}
+		intermediatePool.AddCert(crt)
+	}
+
+	verifyOptions := x509.VerifyOptions{
+		Intermediates: intermediatePool,
+		Roots:         ctx.cryptoContext.rootCertPool,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+	_, err = signCert.Verify(verifyOptions)
+	if err != nil {
+		log.Error("Error verifying certificate chain")
+		return err
+	}
+
+	return nil
+}
+
+func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Certificate {
+	// Find certificate in the chain
+	for _, certTmp := range ctx.signCertificates {
+		if certTmp.fingerprint == fingerprint {
+			return certTmp.certificate
+		}
+	}
+	return nil
 }
 
 func (ctx *CryptoContext) LoadOfflineKey() error {
@@ -251,6 +436,29 @@ func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
 	}
 
 	return algName, modeName, paddingName
+}
+
+func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
+	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
+	algNamesSlice := strings.Split(algString, "/")
+	if len(algNamesSlice) >= 1 {
+		algName = algNamesSlice[0]
+	} else {
+		algName = ""
+	}
+	if len(algNamesSlice) >= 2 {
+		hashName = algNamesSlice[1]
+	} else {
+		hashName = "SHA256"
+	}
+
+	if len(algNamesSlice) >= 3 {
+		paddingName = algNamesSlice[2]
+	} else {
+		paddingName = "PKCS1v1_5"
+	}
+
+	return algName, hashName, paddingName
 }
 
 func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File) error {

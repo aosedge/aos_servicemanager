@@ -150,18 +150,22 @@ type UpgradeFileInfo struct {
 	Signs          *UpgradeSigns          `json:"signs,omitempty"`
 }
 
+type UpgradeCertificateChain struct {
+	Name         string   `json:"name"`
+	Fingerprints []string `json:"fingerprints"`
+}
+
+type UpgradeCertificate struct {
+	Fingerprint string `json:"fingerprint"`
+	Certificate []byte `json:"certificate"`
+}
+
 // UpgradeMetadata upgrade metadata
 type UpgradeMetadata struct {
-	UpgradeType       string            `json:"upgradeType"`
-	Data              []UpgradeFileInfo `json:"data"`
-	CertificateChains []struct {
-		Name         string   `json:"name"`
-		Certificates []string `json:"certificates"`
-	} `json:"certificateChains,omitempty"`
-	Certificates []struct {
-		Fingerprint string `json:"fingerprint"`
-		Certificate string `json:"certificate"`
-	} `json:"certificates,omitempty"`
+	UpgradeType       string                    `json:"upgradeType"`
+	Data              []UpgradeFileInfo         `json:"data"`
+	CertificateChains []UpgradeCertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []UpgradeCertificate      `json:"certificates,omitempty"`
 }
 
 // SystemUpgrade system upgrade structure

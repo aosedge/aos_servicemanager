@@ -2,6 +2,7 @@ package fcrypt
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
@@ -234,6 +235,32 @@ xiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq
 r+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+
 G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
 rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
+-----END CERTIFICATE-----
+`)
+	RootCert = []byte(`
+-----BEGIN CERTIFICATE-----
+MIIEAjCCAuqgAwIBAgIJAPwk2NFfSDPjMA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
+VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
+YmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9y
+ZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE4MDQx
+MDExMzMwMFoXDTI2MDYyNzExMzMwMFowgY0xFzAVBgNVBAMMDkZ1c2lvbiBSb290
+IENBMSkwJwYJKoZIhvcNAQkBFhp2b2xvZHlteXJfYmFiY2h1a0BlcGFtLmNvbTEN
+MAsGA1UECgwERVBBTTEcMBoGA1UECwwTTm92dXMgT3JkbyBTZWNsb3J1bTENMAsG
+A1UEBwwES3lpdjELMAkGA1UEBhMCVUEwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw
+ggEKAoIBAQC+K2ow2HO7+SUVfOq5tTtmHj4LQijHJ803mLk9pkPef+Glmeyp9HXe
+jDlQC04MeovMBeNTaq0wibf7qas9niXbeXRVzheZIFziMXqRuwLqc0KXdDxIDPTb
+TW3K0HE6M/eAtTfn9+Z/LnkWt4zMXasc02hvufsmIVEuNbc1VhrsJJg5uk88ldPM
+LSF7nff9eYZTHYgCyBkt9aL+fwoXO6eSDSAhjopX3lhdidkM+ni7EOhlN7STmgDM
+WKh9nMjXD5f28PGhtW/dZvn4SzasRE5MeaExIlBmhkWEUgVCyP7LvuQGRUPK+NYz
+FE2CLRuirLCWy1HIt9lLziPjlZ4361mNAgMBAAGjYzBhMB0GA1UdDgQWBBR0Shhz
+OuM95BhD0mWxC1j+KrE6UjAMBgNVHRMEBTADAQH/MAsGA1UdDwQEAwIBBjAlBgNV
+HREEHjAcgRp2b2xvZHlteXJfYmFiY2h1a0BlcGFtLmNvbTANBgkqhkiG9w0BAQsF
+AAOCAQEAl8bv1HTYe3l4Y+g0TVZR7bYL5BNsnGgqy0qS5fu991khXWf+Zwa2MLVn
+YakMnLkjvdHqUpWMJ/S82o2zWGmmuxca56ehjxCiP/nkm4M74yXz2R8cu52WxYnF
+yMvgawzQ6c1yhvZiv/gEE7KdbYRVKLHPgBzfyup21i5ngSlTcMRRS7oOBmoye4qc
+6adq6HtY6X/OnZ9I5xoRN1GcvaLUgUE6igTiVa1pF8kedWhHY7wzTXBxzSvIZkCU
+VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
+0PdFI3jseyLVPVhEzUkuC7mwjb7CeQ==
 -----END CERTIFICATE-----
 `)
 )
@@ -687,5 +714,134 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 	_, err = ctx.ImportSessionKey(keyInfo)
 	if err == nil {
 		t.Fatalf("Error decode key: decrypt should raise error")
+	}
+}
+
+type testUpgradeCertificateChain struct {
+	Name         string   `json:"name"`
+	Fingerprints []string `json:"fingerprints"`
+}
+
+type testUpgradeCertificate struct {
+	Fingerprint string `json:"fingerprint"`
+	Certificate []byte `json:"certificate"`
+}
+
+type testUpgradeSigns struct {
+	ChainName        string   `json:"chainName"`
+	Alg              string   `json:"alg"`
+	Value            []byte   `json:"value"`
+	TrustedTimestamp string   `json:"trustedTimestamp"`
+	OcspValues       []string `json:"ocspValues"`
+}
+
+type testUpgradeFileInfo struct {
+	FileData []byte
+	Signs    *testUpgradeSigns
+}
+
+// UpgradeMetadata upgrade metadata
+type testUpgradeMetadata struct {
+	Data              []testUpgradeFileInfo         `json:"data"`
+	CertificateChains []testUpgradeCertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []testUpgradeCertificate      `json:"certificates,omitempty"`
+}
+
+func TestVerifySignOfComponent(t *testing.T) {
+	cert1, _ := base64.StdEncoding.DecodeString("MIIDmTCCAoGgAwIBAgIUPQwLpw4adg7kY7MUGg3/SkGgAbEwDQYJKoZIhvcNAQELBQAwWzEgMB4GA1UEAwwXQU9TIE9FTSBJbnRlcm1lZGlhdGUgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0FPUzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwNzMxMDg0MzU5WhcNMjIwNzMwMDg0MzU5WjBBMSIwIAYDVQQDDBlBb1MgVGFyZ2V0IFVwZGF0ZXMgU2lnbmVyMQ0wCwYDVQQKDARFUEFNMQwwCgYDVQQLDANBb1MwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDJlnvb/zEu1N9C3xRnEjLivUr/1LeLeBNgFtb9BTk7SJXDkWFzoTryhzeKhTF0EhoFx5qLbxSpwhcoKHi9ds0AngP2amQ7AhWHRgWIwX/phZVHY+rh3iTTYDsdorReUAVDCPEYpus+XfaZfH9/0E/byNq3kIzyL4u7YvZS2+F+LTV/7nvh8U5d9RCPoUfnfGj7InZF7adVLzh32KlBeDkVLJWGdfWQ6lTdk6uoRgsXtT944Q01TGJfUhbgr9MUeyi4k3L0vfXM7wMEIrzf7horhNcT/UyU5Ftc2BI3FQv+zy3LrbnwFZdJ+0gKV7Ibp9LbVSBJb+fBc4U047EGX117AgMBAAGjbzBtMAkGA1UdEwQCMAAwHQYDVR0OBBYEFNGkZujhIhZqnHHAdptjquk1k2uVMB8GA1UdIwQYMBaAFHGorK9rv0A9+zixyID2S7vfxyfgMAsGA1UdDwQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDAzANBgkqhkiG9w0BAQsFAAOCAQEAKjS2CTWEvck1ZFVpNL81Er9MzVvnMNmHDXmkBPO+WcIcQ4RnOZGKfe9z0UX3/bVoAVyBPpVHAkczmxJQTijGC5c6anhXt06uGXyutArlrNFD75ToQOi8JBdBNvB9QfnoYqZ9CHgyYN4sKXGluyGwKMjtwADBBGkV+PR/1KqI+qHvP831Ujylb7WeSOH5RBC6jYB34Mmp5AcnIX4B7HHKFb8NitxX7Kxynua2sUgs5D1eJeOx4v6hTnP8Hto7bBkU9qYaOyJD7H9V6lfyQvxkA8iva5zYvNoQ2zWLnnSK78yrVRphW0J1gB1FW4ZsKvfsbk9fyxpCARyRXhjU8H7SDg==")
+	cert2, _ := base64.StdEncoding.DecodeString("MIIDrjCCApagAwIBAgIJAO2BVuwqJLb6MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNVBAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0FvUzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjM2WhcNMjUwMzE5MTMyMjM2WjBbMSAwHgYDVQQDDBdBT1MgT0VNIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQU9TMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJpf1Zj3yNj/Gl7PRPevf7PYpvMZVgwZRLEuwqfXxvDHYhfb/Kp7xAH7QeZVfB8rINSpJbv1+KcqiCzCZig32H+Iv5cGlyn1xmXCihHySH4/XRyduHGue385dNDyXRExpFGXAru/AhgXGKVaxbfDwE9lnz8yWRFvhNrdPO8/nRNZf1ZOqRaq7YNYC7kRQLgp76Da64/H7OWWy9B82r+fgEKc63ixDWSqaLGcNgIBqHU+Rky/SX/gPUtaCIqJb+CpWZZQlJ2wQ+dv+s+K2AG7O0HSHQkh2BbMcjVDeCcdu477+Mal8+MhhjYzkQmAi1tVOYAzX2H/StCGSYohtpxqT5ECAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQUcaisr2u/QD37OLHIgPZLu9/HJ+AwHwYDVR0jBBgwFoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAM+yZJvfkSQmXYt554Zsy2Wqm1w/ixUV55T3r0JFRFbf5AQ7RNBp7t2dn1cEUA6O4wSK3U1Y7eyrPn/ECNmbZ5QUlHUAN/QUnuJUIe0UEd9k+lO2VLbLK+XamzDlOxPBn94s9C1jeXrwGdeTRVcq73rH1CvIOMhD7rp/syQKFuBfQBwCgfH0CbSRsHRm9xQii/HQYMfD8TMyqrjMKF7s68r7shQG2OGo1HJqfA6f9Cb+i4A1BfeP97lFeyr3OjQtLcQJ/a6nPdGs1Cg94Zl2PBEPFH9ecuYpKt0UqK8x8HRsYru7Wp8wkzMbvlYShI5mwdIpvksg5aqnIhWWGqhDRqg==")
+	cert3, _ := base64.StdEncoding.DecodeString("MIID4TCCAsmgAwIBAgIJAO2BVuwqJLb4MA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYDVQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2JhYmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9yZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE5MDMyMTEzMTQyNVoXDTI1MDMxOTEzMTQyNVowVDEZMBcGA1UEAwwQQW9TIFNlY29uZGFyeSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQW9TMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALyDuKMpBZN/kQFHzKo8N8y1EoPgG5sazSRe0O5xL7lm78hBmp4Vpsm/BYSI8NElkxdOTjqQG6KK0HAyCCfQJ7MnI3G/KnJ9wxD/SWjye0/Wr5ggo1H3kFhSd9HKtuRsZJY6E4BSz4yzburCIILC4ZvS/755OAAFX7g1IEsPeKh8sww1oGLL0xeg8W0CWmWO9PRno5Dl7P5QHR02BKrEwZ/DrpSpsE+ftTczxaPp/tzqp2CDGWYT5NoBfxP3W7zjKmTCECVgM/c29P2/AL4J8xXydDlSujvE9QG5g5UUz/dlBbVXFv0cK0oneADe0D4aRK5sMH2ZsVFaaZAd2laa7+MCAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQUNrDxTEYV6uDVs6xHNU77q9zVmMowHwYDVR0jBBgwFoAUdEoYczrjPeQYQ9JlsQtY/iqxOlIwCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAe1IT/RhZ690PIBlkzLDutf0zfs2Ei6jxTyCYxiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq/5nZBl7P+56h5DcuLJsUb3tCC5pIkV9FYeVCg+Ub5c59b3hlFpqCmxSvDzNnRZZcr+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQrbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==")
+
+	sign_value, _ := base64.StdEncoding.DecodeString("UX+xLpoUDUROtuER/YU1mFRpXx5SD9AVgHT1SRRNadxqtJVz/S0xJcdJw6A8KRmUms7wl4TLe8z0utESJMUZPhgQY06ERSlX3yuBain26qKPDZaMielogQKW5oYgAI9TdGQdTNtHsB0AT4cHVz+E+GKPMjuc3tkc2fsQwWPZPl0mukcjpm6tsUwwX+3WSJfMGQ0P6itgDBLvSxaWZWuS0fZlZ8FSXd8NQjlWWCNf8goQWknxkVptPefORwg5DRb6lGF/dVWGa1miguiHerZVSJfykhEQUK/6zIWFpaGuxm5DG6DjeaRM3V1jbriEV+w1SZR+sCj9BECm5BPVYx5e/w==")
+
+	upgradeMetadata := testUpgradeMetadata{
+		Data: []testUpgradeFileInfo{
+			{
+				FileData: []byte("test"),
+				Signs: &testUpgradeSigns{
+					ChainName:        "8D28D60220B8D08826E283B531A0B1D75359C5EE",
+					Alg:              "RSA/SHA256",
+					Value:            sign_value,
+					TrustedTimestamp: "",
+				},
+			},
+		},
+		CertificateChains: []testUpgradeCertificateChain{
+			{
+				Name: "8D28D60220B8D08826E283B531A0B1D75359C5EE",
+				Fingerprints: []string{
+					"48FAC66F9994BA0EA0BC71EE6E0CAB79A0A2E6DF",
+					"FE232D8F645F9550D2AB559BF3144CAEB6534F69",
+					"EE9E93D52D84CF3CBEB2E327635770458457B7C2",
+				},
+			},
+		},
+		Certificates: []testUpgradeCertificate{
+			{
+				Fingerprint: "48FAC66F9994BA0EA0BC71EE6E0CAB79A0A2E6DF",
+				Certificate: cert1,
+			},
+			{
+				Fingerprint: "FE232D8F645F9550D2AB559BF3144CAEB6534F69",
+				Certificate: cert2,
+			},
+			{
+				Fingerprint: "EE9E93D52D84CF3CBEB2E327635770458457B7C2",
+				Certificate: cert3,
+			},
+		},
+	}
+
+	// Create or use context
+	conf := config.Crypt{}
+
+	mainCtx, err := CreateContext(conf)
+	if err != nil {
+		t.Fatalf("Error creating context: '%v'", err)
+	}
+
+	// Add root cert
+	mainCtx.rootCertPool = x509.NewCertPool()
+	mainCtx.rootCertPool.AppendCertsFromPEM(RootCert)
+
+	signCtx, err := mainCtx.CreateSignContext()
+	if err != nil {
+		t.Fatalf("Error creating sign context: '%v'", err)
+	}
+
+	if len(upgradeMetadata.CertificateChains) == 0 {
+		t.Fatal("Empty certificate chain")
+	}
+
+	for _, cert := range upgradeMetadata.Certificates {
+		err = signCtx.AddCertificate(cert.Fingerprint, cert.Certificate)
+		if err != nil {
+			t.Fatalf("Error parse and add sign certificate: '%v'", err)
+		}
+	}
+
+	for _, certChain := range upgradeMetadata.CertificateChains {
+		err = signCtx.AddCertificateChain(certChain.Name, certChain.Fingerprints)
+		if err != nil {
+			t.Fatalf("Error add sign certificate chain: '%v'", err)
+		}
+	}
+
+	for _, data := range upgradeMetadata.Data {
+
+		tmpFile, err := ioutil.TempFile(os.TempDir(), "aos_update-")
+		if err != nil {
+			t.Fatal("Cannot create temporary file", err)
+		}
+		defer tmpFile.Close()
+		defer os.Remove(tmpFile.Name())
+
+		tmpFile.Write(data.FileData)
+		tmpFile.Seek(0, 0)
+
+		err = signCtx.VerifySign(tmpFile, data.Signs.ChainName, data.Signs.Alg, data.Signs.Value)
+		if err != nil {
+			t.Fatal("Verify fail", err)
+		}
 	}
 }
