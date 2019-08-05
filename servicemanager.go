@@ -451,6 +451,19 @@ func (sm *serviceManager) run() {
 			goto reconnect
 		}
 
+		if sm.um != nil {
+			version, err := sm.um.GetSystemVersion()
+			if err != nil {
+				log.Errorf("Can't get system version: %s", err)
+				goto reconnect
+			}
+
+			if err = sm.amqp.SendSystemVersion(version); err != nil {
+				log.Errorf("Can't send system version: %s", err)
+				goto reconnect
+			}
+		}
+
 		if err = sm.sendInitialSetup(); err != nil {
 			log.Errorf("Can't send initial setup: %s", err)
 			goto reconnect

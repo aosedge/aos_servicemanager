@@ -65,7 +65,6 @@ type Client struct {
 type Sender interface {
 	SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error)
 	SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error)
-	SendSystemVersion(imageVersion uint64) (err error)
 }
 
 // Storage provides API to store/retreive persistent data
@@ -124,28 +123,7 @@ func New(config *config.Config, crypt *fcrypt.CryptoContext, sender Sender, stor
 
 // Connect connects to UM server
 func (um *Client) Connect(url string) (err error) {
-	if err = um.wsClient.Connect(url); err != nil {
-		return err
-	}
-
-	var status umserver.StatusMessage
-
-	if err = um.wsClient.SendRequest("Type", &umserver.GetStatusReq{
-		MessageHeader: umserver.MessageHeader{Type: umserver.StatusType}}, &status); err != nil {
-		return err
-	}
-
-	if err = um.handleSystemStatus(status); err != nil {
-		return err
-	}
-
-	um.imageVersion = status.ImageVersion
-
-	if err = um.sender.SendSystemVersion(um.imageVersion); err != nil {
-		return err
-	}
-
-	return nil
+	return um.wsClient.Connect(url)
 }
 
 // Disconnect disconnects from UM server
@@ -156,6 +134,27 @@ func (um *Client) Disconnect() (err error) {
 // IsConnected returns true if connected to UM server
 func (um *Client) IsConnected() (result bool) {
 	return um.wsClient.IsConnected()
+}
+
+// GetSystemVersion return system version
+func (um *Client) GetSystemVersion() (version uint64, err error) {
+	um.Lock()
+	defer um.Unlock()
+
+	var status umserver.StatusMessage
+
+	if err = um.wsClient.SendRequest("Type", &umserver.GetStatusReq{
+		MessageHeader: umserver.MessageHeader{Type: umserver.StatusType}}, &status); err != nil {
+		return 0, err
+	}
+
+	if err = um.handleSystemStatus(status); err != nil {
+		return 0, err
+	}
+
+	um.imageVersion = status.ImageVersion
+
+	return um.imageVersion, nil
 }
 
 // SystemUpgrade send system upgrade request to UM
@@ -258,6 +257,9 @@ func (um *Client) Close() (err error) {
  ******************************************************************************/
 
 func (um *Client) messageHandler(message []byte) {
+	um.Lock()
+	defer um.Unlock()
+
 	var status umserver.StatusMessage
 
 	if err := json.Unmarshal(message, &status); err != nil {
@@ -277,9 +279,6 @@ func (um *Client) messageHandler(message []byte) {
 }
 
 func (um *Client) handleSystemStatus(status umserver.StatusMessage) (err error) {
-	um.Lock()
-	defer um.Unlock()
-
 	switch {
 	// any update at this moment
 	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umserver.InProgressStatus:
