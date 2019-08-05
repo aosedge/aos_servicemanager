@@ -153,11 +153,13 @@ type UpgradeFileInfo struct {
 	Signs          *UpgradeSigns          `json:"signs,omitempty"`
 }
 
+// UpgradeCertificateChain upgrade certificate chain
 type UpgradeCertificateChain struct {
 	Name         string   `json:"name"`
 	Fingerprints []string `json:"fingerprints"`
 }
 
+// UpgradeCertificate upgrade certificate
 type UpgradeCertificate struct {
 	Fingerprint string `json:"fingerprint"`
 	Certificate []byte `json:"certificate"`
