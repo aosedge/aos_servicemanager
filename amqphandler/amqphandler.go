@@ -137,7 +137,7 @@ type UpgradeDecryptionInfo struct {
 type UpgradeSigns struct {
 	ChainName        string   `json:"chainName"`
 	Alg              string   `json:"alg"`
-	Value            string   `json:"value"`
+	Value            []byte   `json:"value"`
 	TrustedTimestamp string   `json:"trustedTimestamp"`
 	OcspValues       []string `json:"ocspValues"`
 }

@@ -472,6 +472,11 @@ func (um *Client) downloadImage() {
 		}
 	}
 
+	if err = um.checkSigns(); err != nil {
+		um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+		return
+	}
+
 	if err = um.sendUpgradeRequest(); err != nil {
 		um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
 		return
@@ -523,6 +528,45 @@ func (um *Client) decryptImage(srcFileName, dstFileName string, decryptionInfo *
 
 	if err = context.DecryptFile(srcFile, dstFile); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (um *Client) checkSigns() (err error) {
+	context, err := um.crypt.CreateSignContext()
+	if err != nil {
+		return err
+	}
+
+	for _, cert := range um.upgradeMetadata.Certificates {
+		if err = context.AddCertificate(cert.Fingerprint, cert.Certificate); err != nil {
+			return err
+		}
+	}
+
+	for _, chain := range um.upgradeMetadata.CertificateChains {
+		if err = context.AddCertificateChain(chain.Name, chain.Fingerprints); err != nil {
+			return err
+		}
+	}
+
+	for _, data := range um.upgradeMetadata.Data {
+		if data.Signs == nil {
+			continue
+		}
+
+		file, err := os.Open(path.Join(um.upgradeDir, data.URLs[0]))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		log.WithField("file", file.Name()).Debug("Check signature")
+
+		if err = context.VerifySign(file, data.Signs.ChainName, data.Signs.Alg, data.Signs.Value); err != nil {
+			return err
+		}
 	}
 
 	return nil
