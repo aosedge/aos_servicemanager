@@ -413,7 +413,6 @@ func New() (handler *AmqpHandler, err error) {
 
 	handler = &AmqpHandler{}
 
-	handler.MessageChannel = make(chan Message, receiveChannelSize)
 	handler.sendChannel = make(chan Message, sendChannelSize)
 	handler.retryChannel = make(chan Message, retryChannelSize)
 
@@ -684,6 +683,8 @@ func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *t
 }
 
 func (handler *AmqpHandler) setupConnections(scheme string, info rabbitConnectioninfo, tlsConfig *tls.Config) (err error) {
+	handler.MessageChannel = make(chan Message, receiveChannelSize)
+
 	if err := retryHelper(func() (err error) {
 		return handler.setupSendConnection(scheme, info.SendParams, tlsConfig)
 	}); err != nil {
