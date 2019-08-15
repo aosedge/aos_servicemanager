@@ -298,8 +298,8 @@ type ServiceInfo struct {
 	ID            string `json:"id"`
 	Version       uint64 `json:"version"`
 	Status        string `json:"status"`
-	Error         string `json:"error"`
-	StateChecksum string `json:"stateChecksum"`
+	Error         string `json:"error,omitempty"`
+	StateChecksum string `json:"stateChecksum,omitempty"`
 }
 
 // Message structure used to send/receive data by amqp
