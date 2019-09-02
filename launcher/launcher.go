@@ -1149,6 +1149,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			ServiceDir:    service.Path,
+			User:          service.UserName,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),
 			ServiceRules:  &rules}); err != nil {

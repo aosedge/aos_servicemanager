@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"math"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
+	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
@@ -88,6 +90,7 @@ type Monitor struct {
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
 	ServiceDir    string
+	User          string
 	UploadLimit   uint64
 	DownloadLimit uint64
 	ServiceRules  *amqp.ServiceAlertRules
@@ -105,9 +108,9 @@ type trafficMonitoring struct {
 
 type serviceMonitoring struct {
 	serviceDir             string
+	user                   string
 	inChain                string
 	outChain               string
-	process                *process.Process
 	monitoringData         amqp.ServiceMonitoringData
 	alertProcessorElements []*list.Element
 }
@@ -226,14 +229,11 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	monitor.Lock()
 	defer monitor.Unlock()
 
+	load.Misc()
+
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		log.WithField("id", serviceID).Warning("Service already under monitoring")
 		return nil
-	}
-
-	pid, err := GetServicePid(monitoringConfig.ServiceDir)
-	if err != nil {
-		return err
 	}
 
 	ipAddress, err := GetServiceIPAddress(monitoringConfig.ServiceDir)
@@ -242,9 +242,8 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	}
 
 	log.WithFields(log.Fields{
-		"id":  serviceID,
-		"pid": pid,
-		"ip":  ipAddress}).Debug("Start service monitoring")
+		"id": serviceID,
+		"ip": ipAddress}).Debug("Start service monitoring")
 
 	// convert id to hashed u64 value
 	hash := fnv.New64a()
@@ -255,15 +254,11 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 	serviceMonitoring := serviceMonitoring{
 		serviceDir: monitoringConfig.ServiceDir,
+		user:       monitoringConfig.User,
 		inChain:    "AOS_" + chainBase + "_IN",
 		outChain:   "AOS_" + chainBase + "_OUT",
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
-
-	serviceMonitoring.process, err = process.NewProcess(pid)
-	if err != nil {
-		return err
-	}
 
 	if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD", ipAddress); err != nil {
 		return err
@@ -360,7 +355,6 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 	log.WithField("id", serviceID).Debug("Stop service monitoring")
 
 	if _, ok := monitor.serviceMap[serviceID]; !ok {
-		log.WithField("id", serviceID).Warning("Service is not under monitoring")
 		return nil
 	}
 
@@ -449,12 +443,12 @@ func (monitor *Monitor) sendMonitoringData() {
 }
 
 func (monitor *Monitor) getCurrentSystemData() {
-	var err error
-
-	monitor.dataToSend.Data.Global.CPU, err = getSystemCPUUsage()
+	cpu, err := getSystemCPUUsage()
 	if err != nil {
 		log.Errorf("Can't get system CPU: %s", err)
 	}
+
+	monitor.dataToSend.Data.Global.CPU = uint64(math.Round(cpu))
 
 	monitor.dataToSend.Data.Global.RAM, err = getSystemRAMUsage()
 	if err != nil {
@@ -493,17 +487,19 @@ func (monitor *Monitor) getCurrentServicesData() {
 			log.Errorf("Can't update service params: %s", err)
 		}
 
-		value.monitoringData.CPU, err = getServiceCPUUsage(value.process)
+		cpuUsage, err := getServiceCPUUsage(value.user)
 		if err != nil {
 			log.Errorf("Can't get service CPU: %s", err)
 		}
 
-		value.monitoringData.RAM, err = getServiceRAMUsage(value.process)
+		value.monitoringData.CPU = uint64(math.Round(cpuUsage / float64(runtime.NumCPU())))
+
+		value.monitoringData.RAM, err = getServiceRAMUsage(value.user)
 		if err != nil {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.workingDir, value.process)
+		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.workingDir, value.user)
 		if err != nil {
 			log.Errorf("Can't get service Disc usage: %s", err)
 		}
@@ -631,13 +627,15 @@ func (monitor *Monitor) processAlerts() {
 }
 
 // getSystemCPUUsage returns CPU usage in parcent
-func getSystemCPUUsage() (cpuUse uint64, err error) {
+func getSystemCPUUsage() (cpuUse float64, err error) {
 	v, err := cpu.Percent(0, false)
 	if err != nil {
-		return cpuUse, err
+		return 0, err
 	}
 
-	return uint64(math.RoundToEven(v[0])), nil
+	cpuUse = v[0]
+
+	return cpuUse, nil
 }
 
 // getSystemRAMUsage returns RAM usage in bytes
@@ -661,33 +659,60 @@ func getSystemDiskUsage(path string) (discUse uint64, err error) {
 }
 
 // getServiceCPUUsage returns service CPU usage in percent
-func getServiceCPUUsage(p *process.Process) (cpuUse uint64, err error) {
-	v, err := p.CPUPercent()
+func getServiceCPUUsage(user string) (cpuUse float64, err error) {
+	processes, err := process.Processes()
 	if err != nil {
-		return cpuUse, err
+		return 0, err
 	}
 
-	return uint64(math.RoundToEven(v)), nil
+	for _, process := range processes {
+		processUser, err := process.Username()
+		if err != nil {
+			return 0, err
+		}
+
+		if processUser == user {
+			cpu, err := process.CPUPercent()
+			if err != nil {
+				return 0, err
+			}
+
+			cpuUse += cpu
+		}
+	}
+
+	return cpuUse, nil
 }
 
 // getServiceRAMUsage returns service RAM usage in bytes
-func getServiceRAMUsage(p *process.Process) (ram uint64, err error) {
-	v, err := p.MemoryInfo()
+func getServiceRAMUsage(user string) (ram uint64, err error) {
+	processes, err := process.Processes()
 	if err != nil {
-		return ram, err
+		return 0, err
 	}
 
-	return v.RSS, nil
+	for _, process := range processes {
+		processUser, err := process.Username()
+		if err != nil {
+			return 0, err
+		}
+
+		if processUser == user {
+			memInfo, err := process.MemoryInfo()
+			if err != nil {
+				return 0, err
+			}
+
+			ram += memInfo.RSS
+		}
+	}
+
+	return ram, nil
 }
 
 // getServiceDiskUsage returns service disk usage in bytes
-func getServiceDiskUsage(path string, p *process.Process) (diskUse uint64, err error) {
-	userName, err := p.Username()
-	if err != nil {
-		return diskUse, err
-	}
-
-	if diskUse, err = platform.GetUserFSQuotaUsage(path, userName); err != nil {
+func getServiceDiskUsage(path string, user string) (diskUse uint64, err error) {
+	if diskUse, err = platform.GetUserFSQuotaUsage(path, user); err != nil {
 		return diskUse, err
 	}
 
@@ -939,23 +964,6 @@ func (monitor *Monitor) deleteAllTrafficChains() (err error) {
 }
 
 func (monitor *Monitor) updateServiceParams(serviceID string, monitoring *serviceMonitoring) (err error) {
-	pid, err := GetServicePid(monitoring.serviceDir)
-	if err != nil {
-		return err
-	}
-
-	if pid != monitoring.process.Pid {
-		log.WithFields(log.Fields{
-			"serviceID": serviceID,
-			"oldPid":    monitoring.process.Pid,
-			"newPid":    pid}).Warn("Service PID changed")
-
-		monitoring.process, err = process.NewProcess(pid)
-		if err != nil {
-			return err
-		}
-	}
-
 	ipAddress, err := GetServiceIPAddress(monitoring.serviceDir)
 	if err != nil {
 		return err
