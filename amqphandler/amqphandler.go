@@ -339,7 +339,7 @@ type ServiceInfoFromCloud struct {
 	EncryptionAlgorithm    string             `json:"encryptionAlgorithm"`
 	EncryptionMode         string             `json:"encryptionMode"`
 	EncryptionModeParams   string             `json:"encryptionModeParams"`
-	ServiceMonitoring      *ServiceAlertRules `json:"serviceMonitoring,omitempty"`
+	AlertRules             *ServiceAlertRules `json:"alertRules,omitempty"`
 }
 
 type serviceDiscoveryResp struct {

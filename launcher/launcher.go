@@ -884,7 +884,7 @@ func (launcher *Launcher) prepareService(installDir string,
 		return service, err
 	}
 
-	alertRules, err := json.Marshal(serviceInfo.ServiceMonitoring)
+	alertRules, err := json.Marshal(serviceInfo.AlertRules)
 	if err != nil {
 		return service, err
 	}
