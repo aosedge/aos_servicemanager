@@ -668,7 +668,7 @@ func getServiceCPUUsage(user string) (cpuUse float64, err error) {
 	for _, process := range processes {
 		processUser, err := process.Username()
 		if err != nil {
-			return 0, err
+			continue
 		}
 
 		if processUser == user {
@@ -694,7 +694,7 @@ func getServiceRAMUsage(user string) (ram uint64, err error) {
 	for _, process := range processes {
 		processUser, err := process.Username()
 		if err != nil {
-			return 0, err
+			continue
 		}
 
 		if processUser == user {
