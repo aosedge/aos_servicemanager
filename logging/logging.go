@@ -73,7 +73,7 @@ func (instance *Logging) GetServiceLog(request amqp.RequestServiceLog) {
 	go instance.getServiceLog(request)
 }
 
-// GetServiceCrashLog returns service log
+// GetServiceCrashLog returns service crash log
 func (instance *Logging) GetServiceCrashLog(request amqp.RequestServiceCrashLog) {
 	log.WithFields(log.Fields{
 		"serviceID": request.ServiceID,

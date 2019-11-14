@@ -12,16 +12,7 @@ It uses external tools to manage AOS services:
 * `netns` - provide network connection for service containers
 * `wondershaper` - limit service in/out traffic speed
 
-```mermaid
-graph TB
-subgraph AOS Service Manager
-    launcher
-end
-    launcher --- systemd
-    systemd --- runc
-    systemd --- wondershaper
-    runc --- netns
-```
+![](images/launcher.svg)
 
 ## User claim
 
@@ -33,15 +24,7 @@ All time consuming actions (currently install and remove service) are performed 
 
 Install service flowchart:
 
-```mermaid
-graph TB
-Begin(Install Service) --> Exist{If service exists}
-Exist --> |Yes| Version{version > current?}
-Exist --> |No| Install
-Version --> |Yes| Install[Do install]
-Install --> Start[Start Service]
-Version --> |No| Start
-```
+![](images/install_service.svg)
 
 Do install actions:
 * create unique folder name in service directory (service folder)
