@@ -5,3 +5,5 @@ data/services.db
 servicemanager.conf
 data/services/
 data/template.service
+vendor/**
+Gopkg.lock
