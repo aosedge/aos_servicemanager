@@ -29,17 +29,17 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/alerts"
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/launcher"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/logging"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/umclient"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
+	"aos_servicemanager/alerts"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
+	"aos_servicemanager/dbushandler"
+	"aos_servicemanager/fcrypt"
+	"aos_servicemanager/launcher"
+	"aos_servicemanager/logging"
+	"aos_servicemanager/monitoring"
+	"aos_servicemanager/umclient"
+	"aos_servicemanager/visclient"
 )
 
 /*******************************************************************************

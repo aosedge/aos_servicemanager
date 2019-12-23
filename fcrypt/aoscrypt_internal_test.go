@@ -22,11 +22,12 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
 	"io"
 	"io/ioutil"
 	"os"
 	"testing"
+
+	"aos_servicemanager/config"
 )
 
 var (

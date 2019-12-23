@@ -23,9 +23,9 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsclient"
 	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
+
+	"aos_servicemanager/wsclient"
 )
 
 /*******************************************************************************

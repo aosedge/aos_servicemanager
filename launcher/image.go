@@ -32,8 +32,8 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************

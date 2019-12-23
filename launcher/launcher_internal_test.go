@@ -37,11 +37,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/monitoring"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
+	"aos_servicemanager/monitoring"
+	"aos_servicemanager/platform"
 )
 
 /*******************************************************************************

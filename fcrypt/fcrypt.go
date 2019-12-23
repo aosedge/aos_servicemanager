@@ -34,7 +34,8 @@ import (
 	"os"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
+
+	"aos_servicemanager/config"
 )
 
 var fcryptCfg config.Crypt

@@ -22,7 +22,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
+	"aos_servicemanager/config"
 )
 
 type alertCallback func(time time.Time, value uint64)

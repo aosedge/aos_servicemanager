@@ -33,10 +33,10 @@ import (
 	"github.com/coreos/go-systemd/dbus"
 	log "github.com/sirupsen/logrus"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/logging"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
+	"aos_servicemanager/logging"
 )
 
 /*******************************************************************************

@@ -25,11 +25,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsclient"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsserver"
+
+	"aos_servicemanager/wsclient"
+	"aos_servicemanager/wsserver"
 )
 
 /*******************************************************************************

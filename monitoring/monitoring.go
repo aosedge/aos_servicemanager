@@ -31,8 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/platform"
-
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
@@ -41,9 +39,10 @@ import (
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
+	"aos_servicemanager/platform"
 )
 
 /*******************************************************************************

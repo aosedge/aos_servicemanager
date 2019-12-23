@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-
 	"github.com/coreos/go-systemd/sdjournal"
 	log "github.com/sirupsen/logrus"
+
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
 )
 
 /*******************************************************************************

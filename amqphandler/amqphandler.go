@@ -31,8 +31,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
+	"aos_servicemanager/config"
+	"aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************

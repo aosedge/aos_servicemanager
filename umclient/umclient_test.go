@@ -27,17 +27,16 @@ import (
 	"testing"
 	"time"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/fcrypt"
-
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_updatemanager/umserver"
 
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/image"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/umclient"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsserver"
+	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/database"
+	"aos_servicemanager/fcrypt"
+	"aos_servicemanager/image"
+	"aos_servicemanager/umclient"
+	"aos_servicemanager/wsserver"
 )
 
 /*******************************************************************************

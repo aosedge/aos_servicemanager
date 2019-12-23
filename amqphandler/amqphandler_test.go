@@ -27,7 +27,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+
+	"aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************

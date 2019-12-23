@@ -40,7 +40,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
+	"aos_servicemanager/config"
 )
 
 const (

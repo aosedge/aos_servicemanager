@@ -26,8 +26,8 @@ import (
 	"github.com/godbus/dbus"
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
-	dbusServer "gitpct.epam.com/epmd-aepr/aos_servicemanager/dbushandler"
+	"aos_servicemanager/database"
+	dbusServer "aos_servicemanager/dbushandler"
 )
 
 /*******************************************************************************

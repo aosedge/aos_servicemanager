@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/config"
+	"aos_servicemanager/config"
 )
 
 /*******************************************************************************

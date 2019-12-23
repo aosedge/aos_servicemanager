@@ -24,7 +24,7 @@ import (
 	"github.com/godbus/dbus/introspect"
 	log "github.com/sirupsen/logrus"
 
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/database"
+	"aos_servicemanager/database"
 )
 
 /*******************************************************************************

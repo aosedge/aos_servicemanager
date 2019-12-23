@@ -26,13 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
 
-	"github.com/gorilla/websocket"
-
-	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/visclient"
-	"gitpct.epam.com/epmd-aepr/aos_servicemanager/wsserver"
+	"aos_servicemanager/visclient"
+	"aos_servicemanager/wsserver"
 )
 
 /*******************************************************************************

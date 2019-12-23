@@ -23,7 +23,8 @@ import (
 	"errors"
 
 	log "github.com/sirupsen/logrus"
-	amqp "gitpct.epam.com/epmd-aepr/aos_servicemanager/amqphandler"
+
+	amqp "aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************
