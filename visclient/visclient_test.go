@@ -28,10 +28,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
+	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
+	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 
 	"aos_servicemanager/visclient"
-	"aos_servicemanager/wsserver"
 )
 
 /*******************************************************************************
@@ -83,7 +83,9 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Can't parse url: %s", err)
 	}
 
-	server, err = wsserver.New("TestServer", url.Host, "../wsserver/data/crt.pem", "../wsserver/data/key.pem", newMessageProcessor)
+	server, err = wsserver.New("TestServer", url.Host,
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}
@@ -138,7 +140,7 @@ func TestGetUsers(t *testing.T) {
 func TestUsersChanged(t *testing.T) {
 	newUsers := []string{generateRandomString(10), generateRandomString(10)}
 
-	message, err := json.Marshal(&visserver.SubscriptionNotification{
+	message, err := json.Marshal(&visprotocol.SubscriptionNotification{
 		Action:         "subscription",
 		SubscriptionID: subscriptionID,
 		Value:          map[string][]string{"Attribute.Vehicle.UserIdentification.Users": newUsers}})
@@ -183,7 +185,7 @@ func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.M
 }
 
 func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
-	var header visserver.MessageHeader
+	var header visprotocol.MessageHeader
 
 	if err = json.Unmarshal(messageIn, &header); err != nil {
 		return nil, err
@@ -192,15 +194,15 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 	var rsp interface{}
 
 	switch header.Action {
-	case visserver.ActionSubscribe:
-		rsp = &visserver.SubscribeResponse{
+	case visprotocol.ActionSubscribe:
+		rsp = &visprotocol.SubscribeResponse{
 			MessageHeader:  header,
 			SubscriptionID: subscriptionID}
 
-	case visserver.ActionGet:
-		var getReq visserver.GetRequest
+	case visprotocol.ActionGet:
+		var getReq visprotocol.GetRequest
 
-		getRsp := visserver.GetResponse{
+		getRsp := visprotocol.GetResponse{
 			MessageHeader: header}
 
 		if err = json.Unmarshal(messageIn, &getReq); err != nil {

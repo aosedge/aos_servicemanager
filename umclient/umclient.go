@@ -29,13 +29,13 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_updatemanager/umserver"
+	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
+	"gitpct.epam.com/nunc-ota/aos_common/umprotocol"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/image"
-	"aos_servicemanager/wsclient"
 )
 
 /*******************************************************************************
@@ -157,10 +157,10 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 	um.Lock()
 	defer um.Unlock()
 
-	var status umserver.StatusMessage
+	var status umprotocol.StatusMessage
 
-	if err = um.wsClient.SendRequest("Type", &umserver.GetStatusReq{
-		MessageHeader: umserver.MessageHeader{Type: umserver.StatusType}}, &status); err != nil {
+	if err = um.wsClient.SendRequest("Type", &umprotocol.GetStatusReq{
+		MessageHeader: umprotocol.MessageHeader{Type: umprotocol.StatusType}}, &status); err != nil {
 		return 0, err
 	}
 
@@ -182,13 +182,13 @@ func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetada
 
 	/* TODO: Shall image version be without gaps?
 	if um.imageVersion+1 != imageVersion {
-		um.sendUpgradeStatus(umserver.FailedStatus, "wrong image version")
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
 		return
 	}
 	*/
 
 	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
-		um.sendUpgradeStatus(umserver.FailedStatus, "another upgrade is in progress")
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "another upgrade is in progress")
 		return
 	}
 
@@ -198,22 +198,22 @@ func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetada
 		um.upgradeState = stateDownloading
 
 		if err := um.clearDirs(); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
 		if err := um.storage.SetUpgradeVersion(um.upgradeVersion); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
 		if err := um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
 		if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
@@ -230,13 +230,13 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 
 	/* TODO: Shall image version be without gaps?
 	if um.imageVersion-1 != imageVersion {
-		um.sendRevertStatus(umserver.FailedStatus, "wrong image version")
+		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
 		return
 	}
 	*/
 
 	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
-		um.sendRevertStatus(umserver.FailedStatus, "another upgrade is in progress")
+		um.sendRevertStatus(umprotocol.FailedStatus, "another upgrade is in progress")
 		return
 	}
 
@@ -245,19 +245,19 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 		um.upgradeState = stateReverting
 
 		if err := um.storage.SetUpgradeVersion(um.upgradeVersion); err != nil {
-			um.sendRevertStatus(umserver.FailedStatus, err.Error())
+			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
 		if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-			um.sendRevertStatus(umserver.FailedStatus, err.Error())
+			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
-		if err := um.wsClient.SendMessage(umserver.RevertReq{
-			MessageHeader: umserver.MessageHeader{Type: umserver.RevertType},
+		if err := um.wsClient.SendMessage(umprotocol.RevertReq{
+			MessageHeader: umprotocol.MessageHeader{Type: umprotocol.RevertType},
 			ImageVersion:  um.upgradeVersion}); err != nil {
-			um.sendRevertStatus(umserver.FailedStatus, err.Error())
+			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 	}
@@ -276,14 +276,14 @@ func (um *Client) messageHandler(message []byte) {
 	um.Lock()
 	defer um.Unlock()
 
-	var status umserver.StatusMessage
+	var status umprotocol.StatusMessage
 
 	if err := json.Unmarshal(message, &status); err != nil {
 		log.Errorf("Can't parse message: %s", err)
 		return
 	}
 
-	if status.Type != umserver.StatusType {
+	if status.Type != umprotocol.StatusType {
 		log.Errorf("Wrong message type received: %s", status.Type)
 		return
 	}
@@ -294,21 +294,21 @@ func (um *Client) messageHandler(message []byte) {
 	}
 }
 
-func (um *Client) handleSystemStatus(status umserver.StatusMessage) (err error) {
+func (um *Client) handleSystemStatus(status umprotocol.StatusMessage) (err error) {
 	switch {
 	// any update at this moment
-	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umserver.InProgressStatus:
+	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umprotocol.InProgressStatus:
 
 	// upgrade/revert is in progress
-	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status == umserver.InProgressStatus:
+	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status == umprotocol.InProgressStatus:
 
 	// upgrade/revert complete
-	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status != umserver.InProgressStatus:
-		if status.Operation == umserver.RevertType {
+	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status != umprotocol.InProgressStatus:
+		if status.Operation == umprotocol.RevertType {
 			um.sendRevertStatus(status.Status, status.Error)
 		}
 
-		if status.Operation == umserver.UpgradeType {
+		if status.Operation == umprotocol.UpgradeType {
 			um.sendUpgradeStatus(status.Status, status.Error)
 		}
 
@@ -324,10 +324,10 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	um.Unlock()
 	defer um.Lock()
 
-	upgradeReq := umserver.UpgradeReq{
-		MessageHeader: umserver.MessageHeader{Type: umserver.UpgradeType},
+	upgradeReq := umprotocol.UpgradeReq{
+		MessageHeader: umprotocol.MessageHeader{Type: umprotocol.UpgradeType},
 		ImageVersion:  um.upgradeVersion,
-		Files:         make([]umserver.UpgradeFileInfo, 0, len(um.upgradeMetadata.Data))}
+		Files:         make([]umprotocol.UpgradeFileInfo, 0, len(um.upgradeMetadata.Data))}
 
 	for _, data := range um.upgradeMetadata.Data {
 		if len(data.URLs) == 0 {
@@ -339,7 +339,7 @@ func (um *Client) sendUpgradeRequest() (err error) {
 			return err
 		}
 
-		upgradeReq.Files = append(upgradeReq.Files, umserver.UpgradeFileInfo{
+		upgradeReq.Files = append(upgradeReq.Files, umprotocol.UpgradeFileInfo{
 			Target: data.Target,
 			URL:    data.URLs[0],
 			Sha256: fileInfo.Sha256,
@@ -355,7 +355,7 @@ func (um *Client) sendUpgradeRequest() (err error) {
 }
 
 func (um *Client) sendUpgradeStatus(upgradeStatus, upgradeError string) {
-	if upgradeStatus == umserver.SuccessStatus {
+	if upgradeStatus == umprotocol.SuccessStatus {
 		log.WithFields(log.Fields{"version": um.upgradeVersion}).Info("Upgrade success")
 	} else {
 		log.WithFields(log.Fields{"version": um.upgradeVersion}).Errorf("Upgrade failed: %s", upgradeError)
@@ -373,7 +373,7 @@ func (um *Client) sendUpgradeStatus(upgradeStatus, upgradeError string) {
 }
 
 func (um *Client) sendRevertStatus(revertStatus, revertError string) {
-	if revertStatus == umserver.SuccessStatus {
+	if revertStatus == umprotocol.SuccessStatus {
 		log.WithFields(log.Fields{"version": um.upgradeVersion}).Info("Revert success")
 	} else {
 		log.WithFields(log.Fields{"version": um.upgradeVersion}).Errorf("Revert failed: %s", revertError)
@@ -411,12 +411,12 @@ func (um *Client) downloadImage() {
 
 	image, err := image.New()
 	if err != nil {
-		um.sendUpgradeStatus(umserver.FailedStatus, "can't create image instance")
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "can't create image instance")
 		return
 	}
 
 	if len(um.upgradeMetadata.Data) == 0 {
-		um.sendUpgradeStatus(umserver.FailedStatus, "upgrade file list is empty")
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "upgrade file list is empty")
 		return
 	}
 
@@ -428,7 +428,7 @@ func (um *Client) downloadImage() {
 		for _, rawURL := range data.URLs {
 			url, err := url.Parse(rawURL)
 			if err != nil {
-				um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 				return
 			}
 
@@ -442,7 +442,7 @@ func (um *Client) downloadImage() {
 			syscall.Statfs(um.downloadDir, &stat)
 
 			if data.Size > stat.Bavail*uint64(stat.Bsize) {
-				um.sendUpgradeStatus(umserver.FailedStatus, "not enough space")
+				um.sendUpgradeStatus(umprotocol.FailedStatus, "not enough space")
 				return
 			}
 
@@ -457,24 +457,24 @@ func (um *Client) downloadImage() {
 		}
 
 		if !fileDownloaded {
-			um.sendUpgradeStatus(umserver.FailedStatus, "can't download file from any source")
+			um.sendUpgradeStatus(umprotocol.FailedStatus, "can't download file from any source")
 			return
 		}
 
 		if err = um.checkFile(fileName, data); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 
 		if data.DecryptionInfo != nil {
 			if err = um.decryptImage(
 				fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), data.DecryptionInfo); err != nil {
-				um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 				return
 			}
 		} else {
 			if err = os.Rename(fileName, path.Join(um.upgradeDir, filepath.Base(fileName))); err != nil {
-				um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 				return
 			}
 		}
@@ -482,25 +482,25 @@ func (um *Client) downloadImage() {
 		um.upgradeMetadata.Data[i].URLs = []string{filepath.Base(fileName)}
 
 		if err = um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
-			um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
 	}
 
 	if err = um.checkSigns(); err != nil {
-		um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 
 	if err = um.sendUpgradeRequest(); err != nil {
-		um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 
 	um.upgradeState = stateUpgrading
 
 	if err = um.storage.SetUpgradeState(um.upgradeState); err != nil {
-		um.sendUpgradeStatus(umserver.FailedStatus, err.Error())
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 }

@@ -28,7 +28,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_updatemanager/umserver"
+	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
+	"gitpct.epam.com/nunc-ota/aos_common/umprotocol"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -36,7 +37,6 @@ import (
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/image"
 	"aos_servicemanager/umclient"
-	"aos_servicemanager/wsserver"
 )
 
 /*******************************************************************************
@@ -115,7 +115,9 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Can't parse url: %s", err)
 	}
 
-	server, err = wsserver.New("TestServer", url.Host, "../wsserver/data/crt.pem", "../wsserver/data/key.pem", newMessageProcessor)
+	server, err = wsserver.New("TestServer", url.Host,
+	"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
+	"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}
@@ -284,7 +286,7 @@ func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.M
 }
 
 func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
-	var header umserver.MessageHeader
+	var header umprotocol.MessageHeader
 	var rsp interface{}
 
 	if err = json.Unmarshal(messageIn, &header); err != nil {
@@ -292,16 +294,16 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 	}
 
 	switch header.Type {
-	case umserver.StatusType:
-		rsp = umserver.StatusMessage{
-			MessageHeader:    umserver.MessageHeader{Type: umserver.StatusType},
-			Operation:        umserver.UpgradeType,
-			Status:           umserver.SuccessStatus,
+	case umprotocol.StatusType:
+		rsp = umprotocol.StatusMessage{
+			MessageHeader:    umprotocol.MessageHeader{Type: umprotocol.StatusType},
+			Operation:        umprotocol.UpgradeType,
+			Status:           umprotocol.SuccessStatus,
 			OperationVersion: operationVersion,
 			ImageVersion:     imageVersion}
 
-	case umserver.UpgradeType:
-		var upgradeReq umserver.UpgradeReq
+	case umprotocol.UpgradeType:
+		var upgradeReq umprotocol.UpgradeReq
 
 		if err = json.Unmarshal(messageIn, &upgradeReq); err != nil {
 			return nil, err
@@ -310,11 +312,11 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		operationVersion = upgradeReq.ImageVersion
 		imageVersion = upgradeReq.ImageVersion
 
-		status := umserver.SuccessStatus
+		status := umprotocol.SuccessStatus
 		errStr := ""
 
 		if len(upgradeReq.Files) == 0 {
-			status = umserver.FailedStatus
+			status = umprotocol.FailedStatus
 			errStr = "upgrade file list is empty"
 		}
 
@@ -325,7 +327,7 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 				Sha256: file.Sha256,
 				Sha512: file.Sha512,
 				Size:   file.Size}); err != nil {
-				status = umserver.FailedStatus
+				status = umprotocol.FailedStatus
 				errStr = err.Error()
 				break
 			}
@@ -333,30 +335,30 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 			if errStr == "" {
 				data, err := ioutil.ReadFile(fileName)
 				if err != nil {
-					status = umserver.FailedStatus
+					status = umprotocol.FailedStatus
 					errStr = err.Error()
 					break
 				}
 
 				if imageFile != string(data) {
-					status = umserver.FailedStatus
+					status = umprotocol.FailedStatus
 					errStr = "image file content mismatch"
 					break
 				}
 			}
 		}
 
-		rsp = umserver.StatusMessage{
-			MessageHeader: umserver.MessageHeader{
-				Type:  umserver.StatusType,
+		rsp = umprotocol.StatusMessage{
+			MessageHeader: umprotocol.MessageHeader{
+				Type:  umprotocol.StatusType,
 				Error: errStr},
-			Operation:        umserver.UpgradeType,
+			Operation:        umprotocol.UpgradeType,
 			Status:           status,
 			OperationVersion: operationVersion,
 			ImageVersion:     imageVersion}
 
-	case umserver.RevertType:
-		var revertReq umserver.UpgradeReq
+	case umprotocol.RevertType:
+		var revertReq umprotocol.UpgradeReq
 
 		if err = json.Unmarshal(messageIn, &revertReq); err != nil {
 			return nil, err
@@ -365,10 +367,10 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		operationVersion = revertReq.ImageVersion
 		imageVersion = revertReq.ImageVersion
 
-		rsp = umserver.StatusMessage{
-			MessageHeader:    umserver.MessageHeader{Type: umserver.StatusType},
-			Operation:        umserver.RevertType,
-			Status:           umserver.SuccessStatus,
+		rsp = umprotocol.StatusMessage{
+			MessageHeader:    umprotocol.MessageHeader{Type: umprotocol.StatusType},
+			Operation:        umprotocol.RevertType,
+			Status:           umprotocol.SuccessStatus,
 			OperationVersion: operationVersion,
 			ImageVersion:     imageVersion}
 

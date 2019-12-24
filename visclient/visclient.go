@@ -23,9 +23,8 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_vis/visserver"
-
-	"aos_servicemanager/wsclient"
+	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
+	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
 )
 
 /*******************************************************************************
@@ -110,11 +109,11 @@ func (vis *Client) IsConnected() (result bool) {
 
 // GetVIN returns VIN
 func (vis *Client) GetVIN() (vin string, err error) {
-	var rsp visserver.GetResponse
+	var rsp visprotocol.GetResponse
 
-	req := visserver.GetRequest{
-		MessageHeader: visserver.MessageHeader{
-			Action:    visserver.ActionGet,
+	req := visprotocol.GetRequest{
+		MessageHeader: visprotocol.MessageHeader{
+			Action:    visprotocol.ActionGet,
 			RequestID: wsclient.GenerateRequestID()},
 		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}
 
@@ -140,11 +139,11 @@ func (vis *Client) GetVIN() (vin string, err error) {
 // GetUsers returns user list
 func (vis *Client) GetUsers() (users []string, err error) {
 	if vis.users == nil {
-		var rsp visserver.GetResponse
+		var rsp visprotocol.GetResponse
 
-		req := visserver.GetRequest{
-			MessageHeader: visserver.MessageHeader{
-				Action:    visserver.ActionGet,
+		req := visprotocol.GetRequest{
+			MessageHeader: visprotocol.MessageHeader{
+				Action:    visprotocol.ActionGet,
 				RequestID: wsclient.GenerateRequestID()},
 			Path: "Attribute.Vehicle.UserIdentification.Users"}
 
@@ -175,7 +174,7 @@ func (vis *Client) Close() (err error) {
  ******************************************************************************/
 
 func (vis *Client) messageHandler(message []byte) {
-	var header visserver.MessageHeader
+	var header visprotocol.MessageHeader
 
 	if err := json.Unmarshal(message, &header); err != nil {
 		log.Errorf("Error parsing VIS response: %s", err)
@@ -183,7 +182,7 @@ func (vis *Client) messageHandler(message []byte) {
 	}
 
 	switch header.Action {
-	case visserver.ActionSubscription:
+	case visprotocol.ActionSubscription:
 		vis.processSubscriptions(message)
 
 	default:
@@ -207,7 +206,7 @@ func getValueByPath(path string, value interface{}) (result interface{}, err err
 }
 
 func (vis *Client) processSubscriptions(message []byte) (err error) {
-	var notification visserver.SubscriptionNotification
+	var notification visprotocol.SubscriptionNotification
 
 	if err = json.Unmarshal(message, &notification); err != nil {
 		return err
@@ -270,11 +269,11 @@ func (vis *Client) handleUsersChanged(value interface{}) {
 }
 
 func (vis *Client) subscribe(path string, callback func(value interface{})) (err error) {
-	var rsp visserver.SubscribeResponse
+	var rsp visprotocol.SubscribeResponse
 
-	req := visserver.SubscribeRequest{
-		MessageHeader: visserver.MessageHeader{
-			Action:    visserver.ActionSubscribe,
+	req := visprotocol.SubscribeRequest{
+		MessageHeader: visprotocol.MessageHeader{
+			Action:    visprotocol.ActionSubscribe,
 			RequestID: wsclient.GenerateRequestID()},
 		Path: path}
 
