@@ -27,7 +27,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/database"
-	dbusServer "aos_servicemanager/dbushandler"
+	"aos_servicemanager/dbushandler"
 )
 
 /*******************************************************************************
@@ -35,7 +35,7 @@ import (
  ******************************************************************************/
 
 var db *database.Database
-var server *dbusServer.DBusHandler
+var server *dbushandler.DBusHandler
 
 /*******************************************************************************
  * Init
@@ -63,7 +63,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if server, err = dbusServer.New(db); err != nil {
+	if server, err = dbushandler.New(db); err != nil {
 		return err
 	}
 
@@ -86,7 +86,7 @@ func cleanup() (err error) {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Error creating service images: %s", err)
+		log.Fatalf("Setup err: %s", err)
 	}
 
 	ret := m.Run()
@@ -110,7 +110,7 @@ func TestIntrospect(t *testing.T) {
 
 	var intro string
 
-	obj := conn.Object(dbusServer.InterfaceName, dbusServer.ObjectPath)
+	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
 
 	if err = obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {
 		t.Errorf("Can't make D-Bus call: %s", err)
@@ -133,9 +133,9 @@ func TestGetPermission(t *testing.T) {
 		permissions    map[string]string
 	)
 
-	obj := conn.Object(dbusServer.InterfaceName, dbusServer.ObjectPath)
+	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
 
-	err = obj.Call(dbusServer.InterfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
+	err = obj.Call(dbushandler.InterfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
 	if err != nil {
 		t.Fatalf("Can't make D-Bus call: %s", err)
 	}

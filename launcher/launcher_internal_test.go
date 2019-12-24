@@ -1087,7 +1087,7 @@ func TestServiceMonitoring(t *testing.T) {
 			MinThreshold: 0,
 			MaxThreshold: 20}}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", ServiceMonitoring: &serviceAlerts})
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", AlertRules: &serviceAlerts})
 	if status := <-sender.statusChannel; status.Error != "" {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}

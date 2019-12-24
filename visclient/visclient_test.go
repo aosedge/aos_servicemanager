@@ -89,6 +89,8 @@ func TestMain(m *testing.M) {
 	}
 	defer server.Close()
 
+	time.Sleep(2 * time.Second)
+
 	vis, err = visclient.New()
 	if err != nil {
 		log.Fatalf("Error creating VIS client: %s", err)

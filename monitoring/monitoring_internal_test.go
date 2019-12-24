@@ -589,6 +589,7 @@ func TestServices(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service1",
+			User:       "test",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
@@ -617,6 +618,7 @@ func TestServices(t *testing.T) {
 	monitor.StartMonitorService("Service2",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service2",
+			User:       "test",
 			ServiceRules: &amqp.ServiceAlertRules{
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
@@ -700,13 +702,8 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 
-	if err := cmd1.Wait(); err != nil {
-		t.Errorf("Can't wait for service: %s", err)
-	}
-
-	if err := cmd2.Wait(); err != nil {
-		t.Errorf("Can't wait for service: %s", err)
-	}
+	cmd1.Wait()
+	cmd2.Wait()
 }
 
 func TestTrafficLimit(t *testing.T) {
@@ -742,6 +739,7 @@ func TestTrafficLimit(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			ServiceDir:    "tmp/service1",
+			User:          "test",
 			UploadLimit:   300,
 			DownloadLimit: 300})
 	if err != nil {
@@ -774,6 +772,7 @@ func TestTrafficLimit(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			ServiceDir:    "tmp/service1",
+			User:          "test",
 			UploadLimit:   2000,
 			DownloadLimit: 2000})
 	if err != nil {

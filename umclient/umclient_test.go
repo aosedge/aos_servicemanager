@@ -61,7 +61,6 @@ type operationStatus struct {
 
 // Test sender
 type testSender struct {
-	versionChannel       chan uint64
 	upgradeStatusChannel chan operationStatus
 	revertStatusChannel  chan operationStatus
 }
@@ -129,7 +128,38 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Can't create db: %s", err)
 	}
 
-	crypt, err := fcrypt.CreateContext(config.Crypt{})
+	rootCert := []byte(`
+-----BEGIN CERTIFICATE-----
+MIIEAjCCAuqgAwIBAgIJAPwk2NFfSDPjMA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
+VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
+YmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9y
+ZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE4MDQx
+MDExMzMwMFoXDTI2MDYyNzExMzMwMFowgY0xFzAVBgNVBAMMDkZ1c2lvbiBSb290
+IENBMSkwJwYJKoZIhvcNAQkBFhp2b2xvZHlteXJfYmFiY2h1a0BlcGFtLmNvbTEN
+MAsGA1UECgwERVBBTTEcMBoGA1UECwwTTm92dXMgT3JkbyBTZWNsb3J1bTENMAsG
+A1UEBwwES3lpdjELMAkGA1UEBhMCVUEwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw
+ggEKAoIBAQC+K2ow2HO7+SUVfOq5tTtmHj4LQijHJ803mLk9pkPef+Glmeyp9HXe
+jDlQC04MeovMBeNTaq0wibf7qas9niXbeXRVzheZIFziMXqRuwLqc0KXdDxIDPTb
+TW3K0HE6M/eAtTfn9+Z/LnkWt4zMXasc02hvufsmIVEuNbc1VhrsJJg5uk88ldPM
+LSF7nff9eYZTHYgCyBkt9aL+fwoXO6eSDSAhjopX3lhdidkM+ni7EOhlN7STmgDM
+WKh9nMjXD5f28PGhtW/dZvn4SzasRE5MeaExIlBmhkWEUgVCyP7LvuQGRUPK+NYz
+FE2CLRuirLCWy1HIt9lLziPjlZ4361mNAgMBAAGjYzBhMB0GA1UdDgQWBBR0Shhz
+OuM95BhD0mWxC1j+KrE6UjAMBgNVHRMEBTADAQH/MAsGA1UdDwQEAwIBBjAlBgNV
+HREEHjAcgRp2b2xvZHlteXJfYmFiY2h1a0BlcGFtLmNvbTANBgkqhkiG9w0BAQsF
+AAOCAQEAl8bv1HTYe3l4Y+g0TVZR7bYL5BNsnGgqy0qS5fu991khXWf+Zwa2MLVn
+YakMnLkjvdHqUpWMJ/S82o2zWGmmuxca56ehjxCiP/nkm4M74yXz2R8cu52WxYnF
+yMvgawzQ6c1yhvZiv/gEE7KdbYRVKLHPgBzfyup21i5ngSlTcMRRS7oOBmoye4qc
+6adq6HtY6X/OnZ9I5xoRN1GcvaLUgUE6igTiVa1pF8kedWhHY7wzTXBxzSvIZkCU
+VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
+0PdFI3jseyLVPVhEzUkuC7mwjb7CeQ==
+-----END CERTIFICATE-----
+`)
+
+	if err := ioutil.WriteFile("tmp/rootCert.pem", rootCert, 0644); err != nil {
+		log.Fatalf("Can't create root cert: %s", err)
+	}
+
+	crypt, err := fcrypt.CreateContext(config.Crypt{CACert: "tmp/rootCert.pem"})
 	if err != nil {
 		log.Fatalf("Can't create crypto context: %s", err)
 	}
@@ -160,7 +190,7 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestCheckSystemStatus(t *testing.T) {
+func TestGetSystemVersion(t *testing.T) {
 	imageVersion = 4
 
 	if err := client.Connect(serverURL); err != nil {
@@ -168,33 +198,16 @@ func TestCheckSystemStatus(t *testing.T) {
 	}
 	defer client.Disconnect()
 
-	// wait for system image version
-	select {
-	case version := <-sender.versionChannel:
-		if version != imageVersion {
-			t.Errorf("Wrong image version: %d", version)
-		}
+	version, err := client.GetSystemVersion()
+	if err != nil {
+		t.Fatalf("Can't get system version: %s", err)
+	}
 
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for system version timeout")
+	if version != imageVersion {
+		t.Errorf("Wrong image version: %d", version)
 	}
 
 	client.Disconnect()
-
-	if err := client.Connect(serverURL); err != nil {
-		log.Fatalf("Error connecting to UM server: %s", err)
-	}
-
-	// wait for system image version
-	select {
-	case version := <-sender.versionChannel:
-		if version != imageVersion {
-			t.Errorf("Wrong image version: %d", version)
-		}
-
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for system version timeout")
-	}
 }
 
 func TestSystemUpgrade(t *testing.T) {
@@ -204,14 +217,6 @@ func TestSystemUpgrade(t *testing.T) {
 		log.Fatalf("Error connecting to UM server: %s", err)
 	}
 	defer client.Disconnect()
-
-	// wait for system image version
-	select {
-	case <-sender.versionChannel:
-
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for system version timeout")
-	}
 
 	metadata := amqp.UpgradeMetadata{
 		Data: []amqp.UpgradeFileInfo{createUpgradeFile("target1", "imagefile", []byte(imageFile))}}
@@ -238,14 +243,6 @@ func TestRevertUpgrade(t *testing.T) {
 	}
 	defer client.Disconnect()
 
-	// wait for system image version
-	select {
-	case <-sender.versionChannel:
-
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for system version timeout")
-	}
-
 	client.SystemRevert(3)
 
 	// wait for revert status
@@ -264,7 +261,6 @@ func TestRevertUpgrade(t *testing.T) {
 func newTestSender() (sender *testSender) {
 	sender = &testSender{}
 
-	sender.versionChannel = make(chan uint64, 1)
 	sender.revertStatusChannel = make(chan operationStatus, 1)
 	sender.upgradeStatusChannel = make(chan operationStatus, 1)
 
@@ -279,12 +275,6 @@ func (sender *testSender) SendSystemRevertStatus(revertStatus, revertError strin
 
 func (sender *testSender) SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error) {
 	sender.upgradeStatusChannel <- operationStatus{upgradeStatus, upgradeError, imageVersion}
-
-	return nil
-}
-
-func (sender *testSender) SendSystemVersion(imageVersion uint64) (err error) {
-	sender.versionChannel <- imageVersion
 
 	return nil
 }

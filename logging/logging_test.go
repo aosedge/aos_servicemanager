@@ -296,24 +296,24 @@ func TestGetServiceLog(t *testing.T) {
 
 	from := time.Now()
 
-	if err = createService("service0"); err != nil {
+	if err = createService("logservice0"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
-	if err = startService("service0"); err != nil {
+	if err = startService("logservice0"); err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
 	time.Sleep(10 * time.Second)
 
-	if err = stopService("service0"); err != nil {
+	if err = stopService("logservice0"); err != nil {
 		t.Fatalf("Can't stop service: %s", err)
 	}
 
 	till := from.Add(5 * time.Second)
 
 	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "service0",
+		ServiceID: "logservice0",
 		LogID:     "log0",
 		From:      &from,
 		Till:      &till})
@@ -321,7 +321,7 @@ func TestGetServiceLog(t *testing.T) {
 	checkReceivedLog(t, logging.LogChannel, from, till)
 
 	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "service0",
+		ServiceID: "logservice0",
 		LogID:     "log0",
 		From:      &from})
 
@@ -362,7 +362,7 @@ func TestGetEmptyLog(t *testing.T) {
 	}
 	defer logging.Close()
 
-	if err = createService("service2"); err != nil {
+	if err = createService("logservice2"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
@@ -373,7 +373,7 @@ func TestGetEmptyLog(t *testing.T) {
 	till := time.Now()
 
 	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "service2",
+		ServiceID: "logservice2",
 		LogID:     "log0",
 		From:      &from,
 		Till:      &till})
@@ -388,26 +388,26 @@ func TestGetServiceCrashLog(t *testing.T) {
 	}
 	defer logging.Close()
 
-	if err = createService("service1"); err != nil {
+	if err = createService("logservice3"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
 	from := time.Now()
 
-	if err = startService("service1"); err != nil {
+	if err = startService("logservice3"); err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
 	time.Sleep(5 * time.Second)
 
-	crashService("service1")
+	crashService("logservice3")
 
 	till := time.Now()
 
 	time.Sleep(1 * time.Second)
 
 	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
-		ServiceID: "service1",
+		ServiceID: "logservice3",
 		LogID:     "log2"})
 
 	checkReceivedLog(t, logging.LogChannel, from, till)
@@ -422,24 +422,24 @@ func TestMaxPartCountLog(t *testing.T) {
 
 	from := time.Now()
 
-	if err = createService("service0"); err != nil {
+	if err = createService("logservice4"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
-	if err = startService("service0"); err != nil {
+	if err = startService("logservice4"); err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
 	time.Sleep(20 * time.Second)
 
-	if err = stopService("service0"); err != nil {
+	if err = stopService("logservice4"); err != nil {
 		t.Fatalf("Can't stop service: %s", err)
 	}
 
 	till := from.Add(20 * time.Second)
 
 	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "service0",
+		ServiceID: "logservice4",
 		LogID:     "log0",
 		From:      &from,
 		Till:      &till})

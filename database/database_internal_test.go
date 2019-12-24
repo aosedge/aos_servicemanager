@@ -637,8 +637,8 @@ func TestUpgradeMetadata(t *testing.T) {
 			amqp.UpgradeFileInfo{
 				Target: "target",
 				URLs:   []string{"url1", "url2", "url3"},
-				Sha256: "sha256",
-				Sha512: "sha512",
+				Sha256: []byte("sha256"),
+				Sha512: []byte("sha512"),
 				Size:   1234}}}
 
 	if err := db.SetUpgradeMetadata(setUpgradeMetadata); err != nil {

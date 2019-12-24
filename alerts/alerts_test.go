@@ -398,26 +398,26 @@ func TestGetServiceError(t *testing.T) {
 	}
 	defer alertsHandler.Close()
 
-	if err = createService("service0"); err != nil {
+	if err = createService("alertservice0"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
-	if err = startService("service0"); err != nil {
+	if err = startService("alertservice0"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
 	time.Sleep(1 * time.Second)
 
-	crashService("service0")
+	crashService("alertservice0")
 
 	messages := []string{
-		"aos_service0.service: Main process exited, code=dumped, status=11/SEGV",
-		"aos_service0.service: Failed with result 'core-dump'."}
+		"aos_alertservice0.service: Main process exited, code=dumped, status=11/SEGV",
+		"aos_alertservice0.service: Failed with result 'core-dump'."}
 
 	var version uint64 = 0
 
 	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
-		amqp.AlertTagSystemError, "service0", &version, messages); err != nil {
+		amqp.AlertTagSystemError, "alertservice0", &version, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -432,7 +432,7 @@ func TestGetResourceAlerts(t *testing.T) {
 	}
 	defer alertsHandler.Close()
 
-	if err = createService("service3"); err != nil {
+	if err = createService("alertservice1"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
 	}
 
@@ -444,10 +444,10 @@ func TestGetResourceAlerts(t *testing.T) {
 	}
 
 	resourceAlerts := []resourceAlert{
-		resourceAlert{"service3", "cpu", time.Now(), 89},
-		resourceAlert{"service3", "cpu", time.Now(), 90},
-		resourceAlert{"service3", "cpu", time.Now(), 91},
-		resourceAlert{"service3", "cpu", time.Now(), 92},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 89},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 90},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 91},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 92},
 		resourceAlert{"system", "ram", time.Now(), 93},
 		resourceAlert{"system", "ram", time.Now(), 1500},
 		resourceAlert{"system", "ram", time.Now(), 1600}}

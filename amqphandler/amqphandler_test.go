@@ -434,7 +434,7 @@ func TestReceiveMessages(t *testing.T) {
 			data: &amqphandler.SystemRevertStatus{
 				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: amqphandler.SystemRevertType},
+					MessageType: amqphandler.SystemRevertStatusType},
 				Status:       "success",
 				ImageVersion: 3},
 			getDataType: func() interface{} {
@@ -449,7 +449,7 @@ func TestReceiveMessages(t *testing.T) {
 			data: &amqphandler.SystemUpgradeStatus{
 				MessageHeader: amqphandler.MessageHeader{
 					Version:     1,
-					MessageType: amqphandler.SystemUpgradeType},
+					MessageType: amqphandler.SystemUpgradeStatusType},
 				Status:       "failed",
 				ImageVersion: 4},
 			getDataType: func() interface{} {
