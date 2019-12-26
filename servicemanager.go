@@ -33,7 +33,6 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
-	"aos_servicemanager/dbushandler"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
@@ -60,7 +59,6 @@ type serviceManager struct {
 	cfg      *config.Config
 	crypt    *fcrypt.CryptoContext
 	db       *database.Database
-	dbus     *dbushandler.DBusHandler
 	launcher *launcher.Launcher
 	logging  *logging.Logging
 	monitor  *monitoring.Monitor
@@ -166,13 +164,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		goto err
 	}
 
-	// Create D-Bus server
-	if sm.dbus, err = dbushandler.New(sm.db); err != nil {
-		goto err
-	}
-
 	// Create VIS client
-	if sm.vis, err = visclient.New(); err != nil {
+	if sm.vis, err = visclient.New(sm.db); err != nil {
 		goto err
 	}
 
@@ -215,11 +208,6 @@ func (sm *serviceManager) close() {
 	// Close VIS client
 	if sm.vis != nil {
 		sm.vis.Close()
-	}
-
-	// Close D-Bus server
-	if sm.dbus != nil {
-		sm.dbus.Close()
 	}
 
 	// Close launcher

@@ -23,8 +23,10 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
 	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
+	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
+
+	"aos_servicemanager/visclient/dbushandler"
 )
 
 /*******************************************************************************
@@ -49,6 +51,8 @@ type Client struct {
 	UsersChangedChannel chan []string
 	ErrorChannel        chan error
 
+	dbusHandler *dbushandler.DBusHandler
+
 	wsClient *wsclient.Client
 
 	vin   string
@@ -64,10 +68,16 @@ type Client struct {
  ******************************************************************************/
 
 // New creates new visclient
-func New() (vis *Client, err error) {
+func New(serviceProvider dbushandler.ServiceProvider) (vis *Client, err error) {
 	vis = &Client{}
 
-	vis.wsClient, err = wsclient.New("VIS", vis.messageHandler)
+	if vis.dbusHandler, err = dbushandler.New(serviceProvider); err != nil {
+		return nil, err
+	}
+
+	if vis.wsClient, err = wsclient.New("VIS", vis.messageHandler); err != nil {
+		return nil, err
+	}
 
 	vis.UsersChangedChannel = make(chan []string, usersChangedChannelSize)
 	vis.ErrorChannel = vis.wsClient.ErrorChannel
@@ -166,7 +176,15 @@ func (vis *Client) GetUsers() (users []string, err error) {
 
 // Close closes vis client
 func (vis *Client) Close() (err error) {
-	return vis.wsClient.Close()
+	if err = vis.dbusHandler.Close(); err != nil {
+		return err
+	}
+
+	if err = vis.wsClient.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 /*******************************************************************************

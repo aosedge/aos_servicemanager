@@ -23,15 +23,19 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/godbus/dbus"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
 	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 
+	"aos_servicemanager/database"
 	"aos_servicemanager/visclient"
+	"aos_servicemanager/visclient/dbushandler"
 )
 
 /*******************************************************************************
@@ -55,6 +59,7 @@ type messageProcessor struct {
 var vis *visclient.Client
 var server *wsserver.Server
 var clientProcessor *messageProcessor
+var db *database.Database
 
 var subscriptionID = "test_subscription"
 
@@ -72,40 +77,72 @@ func init() {
 }
 
 /*******************************************************************************
- * Main
+ * Private
  ******************************************************************************/
 
-func TestMain(m *testing.M) {
+func setup() (err error) {
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		return err
+	}
+
+	if db, err = database.New("tmp/servicemanager.db"); err != nil {
+		return err
+	}
+
 	rand.Seed(time.Now().UnixNano())
 
 	url, err := url.Parse(serverURL)
 	if err != nil {
-		log.Fatalf("Can't parse url: %s", err)
+		return err
 	}
 
-	server, err = wsserver.New("TestServer", url.Host,
+	if server, err = wsserver.New("TestServer", url.Host,
 		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
-	if err != nil {
-		log.Fatalf("Can't create ws server: %s", err)
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
+		return err
 	}
-	defer server.Close()
 
 	time.Sleep(2 * time.Second)
 
-	vis, err = visclient.New()
+	vis, err = visclient.New(db)
 	if err != nil {
-		log.Fatalf("Error creating VIS client: %s", err)
+		return err
 	}
 
 	if err = vis.Connect(serverURL); err != nil {
-		log.Fatalf("Error connecting to VIS server: %s", err)
+		return err
+	}
+
+	return nil
+}
+
+func cleanup() (err error) {
+	db.Close()
+
+	if err := os.RemoveAll("tmp"); err != nil {
+		return err
+	}
+
+	if err = vis.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Setup err: %s", err)
 	}
 
 	ret := m.Run()
 
-	if err = vis.Close(); err != nil {
-		log.Fatalf("Error closing VIS: %s", err)
+	if err := cleanup(); err != nil {
+		log.Fatalf("Error cleaning up: %s", err)
 	}
 
 	os.Exit(ret)
@@ -160,6 +197,63 @@ func TestUsersChanged(t *testing.T) {
 
 	case <-time.After(100 * time.Millisecond):
 		t.Error("Waiting for users changed timeout")
+	}
+}
+
+func TestGetPermission(t *testing.T) {
+	if err := db.AddService(database.ServiceEntry{ID: "Service1",
+		Permissions: `{"*": "rw", "123": "rw"}`}); err != nil {
+		t.Fatalf("Can't add service: %s", err)
+	}
+
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		t.Fatalf("Can't connect to session bus: %s", err)
+	}
+
+	var (
+		permissionJson string
+		status         string
+		permissions    map[string]string
+	)
+
+	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
+
+	err = obj.Call(dbushandler.InterfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
+	if err != nil {
+		t.Fatalf("Can't make D-Bus call: %s", err)
+	}
+
+	if strings.ToUpper(status) != "OK" {
+		t.Fatalf("Can't get permissions: %s", status)
+	}
+
+	err = json.Unmarshal([]byte(permissionJson), &permissions)
+	if err != nil {
+		t.Fatalf("Can't decode permissions: %s", err)
+	}
+
+	if len(permissions) != 2 {
+		t.Fatal("Permission list length !=2")
+	}
+
+	if permissions["*"] != "rw" {
+		t.Fatal("Incorrect permission")
+	}
+}
+
+func TestIntrospect(t *testing.T) {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		t.Fatalf("Can't connect to session bus: %s", err)
+	}
+
+	var intro string
+
+	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
+
+	if err = obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {
+		t.Errorf("Can't make D-Bus call: %s", err)
 	}
 }
 
