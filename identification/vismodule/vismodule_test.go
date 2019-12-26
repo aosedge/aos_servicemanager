@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package visclient_test
+package vismodule_test
 
 import (
 	"encoding/json"
@@ -34,8 +34,8 @@ import (
 	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 
 	"aos_servicemanager/database"
-	"aos_servicemanager/visclient"
-	"aos_servicemanager/visclient/dbushandler"
+	"aos_servicemanager/identification/vismodule"
+	"aos_servicemanager/identification/vismodule/dbushandler"
 )
 
 /*******************************************************************************
@@ -56,7 +56,7 @@ type messageProcessor struct {
  * Vars
  ******************************************************************************/
 
-var vis *visclient.Client
+var vis *vismodule.VisModule
 var server *wsserver.Server
 var clientProcessor *messageProcessor
 var db *database.Database
@@ -97,15 +97,14 @@ func setup() (err error) {
 	}
 
 	if server, err = wsserver.New("TestServer", url.Host,
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
+		"../../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
+		"../../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
 		return err
 	}
 
 	time.Sleep(2 * time.Second)
 
-	vis, err = visclient.New(db)
-	if err != nil {
+	if vis, err = vismodule.New([]byte(""), db); err != nil {
 		return err
 	}
 
@@ -136,13 +135,13 @@ func cleanup() (err error) {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Setup err: %s", err)
+		log.Fatalf("Setup error: %s", err)
 	}
 
 	ret := m.Run()
 
 	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
+		log.Fatalf("Cleanup error: %s", err)
 	}
 
 	os.Exit(ret)
@@ -152,14 +151,14 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestGetVIN(t *testing.T) {
-	vin, err := vis.GetVIN()
+func TestGetSystemID(t *testing.T) {
+	systemID, err := vis.GetSystemID()
 	if err != nil {
-		t.Fatalf("Error getting VIN: %s", err)
+		t.Fatalf("Error getting system ID: %s", err)
 	}
 
-	if vin == "" {
-		t.Fatalf("Wrong VIN value: %s", vin)
+	if systemID == "" {
+		t.Fatalf("Wrong system ID value: %s", systemID)
 	}
 }
 
@@ -190,7 +189,7 @@ func TestUsersChanged(t *testing.T) {
 	}
 
 	select {
-	case users := <-vis.UsersChangedChannel:
+	case users := <-vis.UsersChangedChannel():
 		if len(users) != len(newUsers) {
 			t.Errorf("Wrong users len: %d", len(users))
 		}
