@@ -34,11 +34,11 @@ import (
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/fcrypt"
+	"aos_servicemanager/identification"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/umclient"
-	"aos_servicemanager/visclient"
 )
 
 /*******************************************************************************
@@ -54,16 +54,16 @@ const dbFileName = "servicemanager.db"
  ******************************************************************************/
 
 type serviceManager struct {
-	alerts   *alerts.Alerts
-	amqp     *amqp.AmqpHandler
-	cfg      *config.Config
-	crypt    *fcrypt.CryptoContext
-	db       *database.Database
-	launcher *launcher.Launcher
-	logging  *logging.Logging
-	monitor  *monitoring.Monitor
-	um       *umclient.Client
-	vis      *visclient.Client
+	alerts         *alerts.Alerts
+	amqp           *amqp.AmqpHandler
+	cfg            *config.Config
+	crypt          *fcrypt.CryptoContext
+	db             *database.Database
+	identification identification.Module
+	launcher       *launcher.Launcher
+	logging        *logging.Logging
+	monitor        *monitoring.Monitor
+	um             *umclient.Client
 }
 
 /*******************************************************************************
@@ -164,8 +164,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		goto err
 	}
 
-	// Create VIS client
-	if sm.vis, err = visclient.New(sm.db); err != nil {
+	// Create identification module
+	if sm.identification, err = identification.New(cfg, sm.db); err != nil {
 		goto err
 	}
 
@@ -205,9 +205,9 @@ func (sm *serviceManager) close() {
 		sm.um.Close()
 	}
 
-	// Close VIS client
-	if sm.vis != nil {
-		sm.vis.Close()
+	// Close identification module
+	if sm.identification != nil {
+		sm.identification.Close()
 	}
 
 	// Close launcher
@@ -401,11 +401,11 @@ func (sm *serviceManager) handleChannels() (err error) {
 				log.Errorf("Error send alerts: %s", err)
 			}
 
-		case users := <-sm.vis.UsersChangedChannel:
+		case users := <-sm.identification.UsersChangedChannel():
 			log.WithField("users", users).Info("Users changed")
 			return nil
 
-		case err := <-sm.vis.ErrorChannel:
+		case err := <-sm.identification.ErrorChannel():
 			return err
 
 		case err := <-umErrChannel:
@@ -420,22 +420,15 @@ func (sm *serviceManager) run() {
 		var vin string
 		var err error
 
-		if err = sm.vis.Connect(sm.cfg.VISServerURL); err != nil {
-			log.Errorf("Can't connect to VIS: %s", err)
-			goto reconnect
-		}
-
-		// Get vin code
-		if vin, err = sm.vis.GetVIN(); err != nil {
-			log.Errorf("Can't get VIN: %s", err)
-			sm.vis.Disconnect()
+		// Get system id
+		if vin, err = sm.identification.GetSystemID(); err != nil {
+			log.Errorf("Can't get system id: %s", err)
 			goto reconnect
 		}
 
 		// Get users
-		if users, err = sm.vis.GetUsers(); err != nil {
+		if users, err = sm.identification.GetUsers(); err != nil {
 			log.Errorf("Can't get users: %s", err)
-			sm.vis.Disconnect()
 			goto reconnect
 		}
 
@@ -480,7 +473,6 @@ func (sm *serviceManager) run() {
 
 	reconnect:
 		sm.amqp.Disconnect()
-		sm.vis.Disconnect()
 		if sm.um != nil {
 			sm.um.Disconnect()
 		}
