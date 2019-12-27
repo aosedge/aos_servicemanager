@@ -18,6 +18,7 @@
 package identification
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"aos_servicemanager/config"
@@ -63,12 +64,15 @@ func Register(name string, newFunc NewFunc) {
 }
 
 func New(config *config.Config, db *database.Database) (module Module, err error) {
-	name := "vis"
-
-	newFunc, ok := moduleMap[name]
+	newFunc, ok := moduleMap[config.Identification.Module]
 	if !ok {
-		return nil, fmt.Errorf("module '%s' not found", name)
+		return nil, fmt.Errorf("identification module '%s' not found", config.Identification.Module)
 	}
 
-	return newFunc([]byte(""), db)
+	paramsJSON, err := json.Marshal(config.Identification.Params)
+	if err != nil {
+		return nil, err
+	}
+
+	return newFunc(paramsJSON, db)
 }

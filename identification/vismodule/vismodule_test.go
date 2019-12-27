@@ -102,7 +102,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if vis, err = vismodule.New([]byte(""), db); err != nil {
+	if vis, err = vismodule.New([]byte(`{"VisServer": "wss://localhost:8088"}`), db); err != nil {
 		return err
 	}
 

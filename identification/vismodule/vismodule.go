@@ -27,6 +27,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
 
+	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/identification/vismodule/dbushandler"
 )
@@ -42,12 +43,16 @@ const (
 	errorChannelSize        = 1
 )
 
+const defaultReconnectTime = 10 * time.Second
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
 // VisModule vis module instance
 type VisModule struct {
+	config moduleConfig
+
 	usersChangedChannel chan []string
 	errorChannel        chan error
 
@@ -71,6 +76,11 @@ type ServiceProvider interface {
 	GetService(id string) (entry database.ServiceEntry, err error)
 }
 
+type moduleConfig struct {
+	VISServer     string
+	ReconnectTime config.Duration
+}
+
 /*******************************************************************************
  * init
  ******************************************************************************/
@@ -84,6 +94,13 @@ func New(configJSON []byte, serviceProvider ServiceProvider) (module *VisModule,
 
 	module = &VisModule{}
 
+	// default reconnect time
+	module.config.ReconnectTime.Duration = defaultReconnectTime
+
+	if err = json.Unmarshal(configJSON, &module.config); err != nil {
+		return nil, err
+	}
+
 	if module.dbusHandler, err = dbushandler.New(serviceProvider); err != nil {
 		return nil, err
 	}
@@ -96,7 +113,7 @@ func New(configJSON []byte, serviceProvider ServiceProvider) (module *VisModule,
 	module.errorChannel = make(chan error, errorChannelSize)
 	module.connectionCond = sync.NewCond(module)
 
-	go module.handleConnection("wss://localhost:8088", 10*time.Second)
+	go module.handleConnection(module.config.VISServer, module.config.ReconnectTime.Duration)
 
 	return module, nil
 }
