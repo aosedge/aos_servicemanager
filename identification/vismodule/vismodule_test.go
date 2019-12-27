@@ -102,13 +102,7 @@ func setup() (err error) {
 		return err
 	}
 
-	time.Sleep(2 * time.Second)
-
 	if vis, err = vismodule.New([]byte(""), db); err != nil {
-		return err
-	}
-
-	if err = vis.Connect(serverURL); err != nil {
 		return err
 	}
 

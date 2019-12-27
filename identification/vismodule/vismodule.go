@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
@@ -59,6 +60,9 @@ type VisModule struct {
 
 	subscribeMap sync.Map
 
+	isConnected    bool
+	connectionCond *sync.Cond
+
 	sync.Mutex
 }
 
@@ -90,6 +94,9 @@ func New(configJSON []byte, serviceProvider ServiceProvider) (module *VisModule,
 
 	module.usersChangedChannel = make(chan []string, usersChangedChannelSize)
 	module.errorChannel = make(chan error, errorChannelSize)
+	module.connectionCond = sync.NewCond(module)
+
+	go module.handleConnection("wss://localhost:8088", 10*time.Second)
 
 	return module, nil
 }
@@ -110,39 +117,9 @@ func (module *VisModule) Close() (err error) {
 	return retErr
 }
 
-// Connect connects to the VIS
-func (module *VisModule) Connect(url string) (err error) {
-	if err = module.wsClient.Connect(url); err != nil {
-		return err
-	}
-
-	module.subscribeMap = sync.Map{}
-
-	if err = module.subscribe("Attribute.Vehicle.UserIdentification.Users", module.handleUsersChanged); err != nil {
-		if err := module.wsClient.Disconnect(); err != nil {
-			log.Errorf("Can't disconnect from VIS: %s", err)
-		}
-
-		return err
-	}
-
-	module.users = nil
-	module.vin = ""
-
-	return nil
-}
-
-// Disconnect disconnects from the VIS
-func (module *VisModule) Disconnect() (err error) {
-	return module.wsClient.Disconnect()
-}
-
-// IsConnected returns true if connected to VIS
-func (module *VisModule) IsConnected() (result bool) {
-	return module.wsClient.IsConnected()
-}
-
 func (module *VisModule) GetSystemID() (vin string, err error) {
+	module.waitConnection()
+
 	var rsp visprotocol.GetResponse
 
 	req := visprotocol.GetRequest{
@@ -171,6 +148,8 @@ func (module *VisModule) GetSystemID() (vin string, err error) {
 }
 
 func (module *VisModule) GetUsers() (users []string, err error) {
+	module.waitConnection()
+
 	if module.users == nil {
 		var rsp visprotocol.GetResponse
 
@@ -208,6 +187,56 @@ func (module *VisModule) ErrorChannel() (channel <-chan error) {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (module *VisModule) waitConnection() {
+	module.Lock()
+	defer module.Unlock()
+
+	if module.isConnected {
+		return
+	}
+
+	for !module.isConnected {
+		module.connectionCond.Wait()
+	}
+}
+
+func (module *VisModule) handleConnection(url string, reconnectTime time.Duration) {
+	for {
+		if err := module.wsClient.Connect(url); err != nil {
+			log.Errorf("Can't connect to VIS: %s", err)
+			goto reconnect
+		}
+
+		module.subscribeMap = sync.Map{}
+
+		if err := module.subscribe("Attribute.Vehicle.UserIdentification.Users", module.handleUsersChanged); err != nil {
+			log.Errorf("Can't subscribe to VIS: %s", err)
+			goto reconnect
+		}
+
+		module.users = nil
+		module.vin = ""
+
+		module.Lock()
+		module.isConnected = true
+		module.Unlock()
+
+		module.connectionCond.Broadcast()
+
+		select {
+		case err := <-module.wsClient.ErrorChannel:
+			module.Lock()
+			module.isConnected = false
+			module.Unlock()
+
+			module.errorChannel <- err
+		}
+
+	reconnect:
+		time.Sleep(reconnectTime)
+	}
+}
 
 func (module *VisModule) messageHandler(message []byte) {
 	var header visprotocol.MessageHeader
