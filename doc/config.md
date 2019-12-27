@@ -37,7 +37,7 @@ The configuration file has JSON format. Following is JSON schema:
         "fcrypt",
         "serviceDiscovery",
         "workingDir",
-        "visServer"
+        "identification"
     ],
     "properties": {
         "fcrypt": {
@@ -79,10 +79,6 @@ The configuration file has JSON format. Following is JSON schema:
         },
         "workingDir": {
             "description": "Directory where AOS data will be stored",
-            "type": "string"
-        },
-        "visServer": {
-            "description": "Address of VIS server",
             "type": "string"
         },
         "defaultServiceTTLDays": {
@@ -186,6 +182,23 @@ The configuration file has JSON format. Following is JSON schema:
                     "type": "integer",
                     "minimum": 0,
                     "default": 25
+                }
+            }
+        },
+        "identification": {
+            "description": "Identification parameters",
+            "type": "object",
+            "required": [
+                "module"
+            ],
+            "properties": {
+                "module": {
+                    "description": "Identification module name",
+                    "type": "string"
+                },
+                "params": {
+                    "description": "Identification module parameters",
+                    "type": "object"
                 }
             }
         }

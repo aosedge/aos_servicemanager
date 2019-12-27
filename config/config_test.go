@@ -72,6 +72,13 @@ func createConfigFile() (err error) {
 		"sendPeriod": "00:00:20",
 		"maxMessageSize": 1024,
 		"maxOfflineMessages": 32
+	},
+	"identification": {
+		"module": "test",
+		"params": {
+			"param1": "testParam",
+			"param2": 123
+		}
 	}
 }`
 
@@ -288,5 +295,40 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	if config.Alerts.MaxOfflineMessages != 32 {
 		t.Errorf("Wrong max offline message value: %d", config.Alerts.MaxOfflineMessages)
+	}
+}
+
+func TestGetIdentification(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Identification.Module != "test" {
+		t.Errorf("Wrong identification module: %s", config.Identification.Module)
+	}
+
+	type Params struct {
+		Param1 string
+		Param2 int
+	}
+
+	var params Params
+
+	paramsJSON, err := json.Marshal(config.Identification.Params)
+	if err != nil {
+		t.Errorf("Can't parse identification params: %s", err)
+	}
+
+	if err = json.Unmarshal(paramsJSON, &params); err != nil {
+		t.Errorf("Can't parse identification params: %s", err)
+	}
+
+	if params.Param1 != "testParam" {
+		t.Errorf("Wrong param1: %v", params.Param1)
+	}
+
+	if params.Param2 != 123 {
+		t.Errorf("Wrong param2: %v", params.Param2)
 	}
 }

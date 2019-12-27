@@ -78,18 +78,25 @@ type Alerts struct {
 	MaxOfflineMessages int      `json:"maxOfflineMessages"`
 }
 
+// Identification configuration for identification modules
+type Identification struct {
+	Module string      `json:"module"`
+	Params interface{} `json:"params"`
+}
+
 // Config instance
 type Config struct {
-	Crypt               Crypt      `json:"fcrypt"`
-	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
-	VISServerURL        string     `json:"visServer"`
-	UMServerURL         string     `json:"umServer"`
-	WorkingDir          string     `json:"workingDir"`
-	UpgradeDir          string     `json:"upgradeDir"`
-	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
-	Monitoring          Monitoring `json:"monitoring"`
-	Logging             Logging    `json:"logging"`
-	Alerts              Alerts     `json:"alerts"`
+	Crypt               Crypt          `json:"fcrypt"`
+	ServiceDiscoveryURL string         `json:"serviceDiscovery"`
+	VISServerURL        string         `json:"visServer"`
+	UMServerURL         string         `json:"umServer"`
+	WorkingDir          string         `json:"workingDir"`
+	UpgradeDir          string         `json:"upgradeDir"`
+	DefaultServiceTTL   uint64         `json:"defaultServiceTTLDays"`
+	Monitoring          Monitoring     `json:"monitoring"`
+	Logging             Logging        `json:"logging"`
+	Alerts              Alerts         `json:"alerts"`
+	Identification      Identification `json:"identification"`
 }
 
 /*******************************************************************************
