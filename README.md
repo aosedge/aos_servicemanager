@@ -14,29 +14,34 @@ See architecture [document](doc/architecture.md) for more details.
 
 ## Required GO packages
 
-To build SM, following additional packages should be installed:
-* github.com/anexia-it/fsquota
-* github.com/cavaliercoder/grab
-* github.com/coreos/go-iptables
-* github.com/coreos/go-systemd
-* github.com/coreos/pkg
-* github.com/fsnotify/fsnotify
-* github.com/godbus/dbus
-* github.com/google/uuid
-* github.com/gorilla/websocket
-* github.com/mattn/go-sqlite3
-* github.com/opencontainers/runtime-spec/specs-go
-* github.com/shirou/gopsutil
-* github.com/sirupsen/logrus
-* github.com/streadway/amqp
+Dependency tool `dep` (https://github.com/golang/dep) is used to handle external package dependencies. `dep` tool should be installed on the host machine before performing the build. `Gopkg.toml` contains list of required external go packages. Perform following command before build to fetch the required packages:
+
+```
+dep ensure
+```
 
 ## Required native packages
+
 * libsystemd-dev
+
+## Identification module selection
+
+For authentication with the cloud SM requires to get the `system id` and `user claims` parameters. These parameters are platform specific. All supported modules are located under `identification` folder. Registration of modules are done in `register<name>module.go` files, where `name` is the module name (for example: `registervismodule.go`). Each register module file contains the build tag which should be used during build to include the module into the final binary:
+```
+// +build with_vis_module
+```
+Build tags are specified by `--tags` parameters in the build command:
+
+```
+go build --tags "with_<name1>_module with_<name2>_module"
+```
+
+Any number of the supported modules can be built with final binary. But only one is used in runtime. The selection is done with [config](doc/config.md) file.
 
 ## Native build
 
 ```
-go build
+go build --tags "with_vis_module"
 ```
 
 ## ARM 64 build
@@ -48,7 +53,7 @@ sudo apt install gcc-aarch64-linux-gnu
 Build:
 
 ```
-CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build
+CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build --tags "with_vis_module"
 ```
 
 # Configuration
