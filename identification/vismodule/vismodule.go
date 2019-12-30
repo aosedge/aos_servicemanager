@@ -18,13 +18,13 @@
 package vismodule
 
 import (
-	"aos_common/visprotocol"
 	"encoding/json"
 	"errors"
 	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
 	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
 
 	"aos_servicemanager/config"
