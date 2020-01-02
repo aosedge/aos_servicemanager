@@ -185,27 +185,27 @@ func TestSendMessages(t *testing.T) {
 
 	testData := []interface{}{
 		&amqphandler.StateAcceptance{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: amqphandler.ProtocolVersion},
 			ServiceID:     "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"},
 
 		&amqphandler.UpdateState{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: amqphandler.ProtocolVersion},
 			ServiceID:     "service1", Checksum: "0993478847", State: "This is new state"},
 
 		&amqphandler.RequestServiceLog{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: amqphandler.ProtocolVersion},
 			ServiceID:     "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
 
 		&amqphandler.RequestServiceCrashLog{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
 			ServiceID:     "service3", LogID: uuid.New().String()},
 
 		&amqphandler.SystemRevert{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: amqphandler.ProtocolVersion},
 			ImageVersion:  3},
 
 		&amqphandler.SystemUpgrade{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: 1},
+			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: amqphandler.ProtocolVersion},
 			ImageVersion:  4},
 	}
 
@@ -326,7 +326,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.VehicleStatus{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.VehicleStatusType},
 				Services: initialSetupData},
 			getDataType: func() interface{} {
@@ -340,7 +340,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.VehicleStatus{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.ServiceStatusType},
 				Services: []amqphandler.ServiceInfo{initialSetupData[0]}},
 			getDataType: func() interface{} {
@@ -354,7 +354,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.MonitoringData{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.MonitoringDataType},
 				Timestamp: monitoringData.Timestamp,
 				Data:      monitoringData.Data},
@@ -370,7 +370,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.NewState{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.NewStateType},
 				ServiceID: "service0",
 				Checksum:  "12345679",
@@ -386,7 +386,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.StateRequest{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.StateRequestType},
 				ServiceID: "service1",
 				Default:   true},
@@ -401,7 +401,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.PushServiceLog{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.PushServiceLogType},
 				LogID:     pushServiceLogData.LogID,
 				PartCount: pushServiceLogData.PartCount,
@@ -419,7 +419,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.Alerts{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.AlertsType},
 				Data: alertsData.Data},
 			getDataType: func() interface{} {
@@ -433,7 +433,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.SystemRevertStatus{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.SystemRevertStatusType},
 				Status:       "success",
 				ImageVersion: 3},
@@ -448,7 +448,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.SystemUpgradeStatus{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.SystemUpgradeStatusType},
 				Status:       "failed",
 				ImageVersion: 4},
@@ -463,7 +463,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: &amqphandler.SystemVersion{
 				MessageHeader: amqphandler.MessageHeader{
-					Version:     1,
+					Version:     amqphandler.ProtocolVersion,
 					MessageType: amqphandler.SystemVersionType},
 				ImageVersion: 5},
 			getDataType: func() interface{} {

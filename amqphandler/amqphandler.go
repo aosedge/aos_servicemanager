@@ -39,6 +39,9 @@ import (
  * Consts
  ******************************************************************************/
 
+// ProtocolVersion specifies supported protocol version
+const ProtocolVersion = 2
+
 const (
 	sendChannelSize    = 32
 	receiveChannelSize = 16
@@ -326,9 +329,9 @@ type Message struct {
 }
 
 type serviceDiscoveryRequest struct {
-	Version uint64   `json:"version"`
-	VIN     string   `json:"VIN"`
-	Users   []string `json:"users"`
+	Version  uint64   `json:"version"`
+	SystemID string   `json:"systemID"`
+	Users    []string `json:"users"`
 }
 
 // ServiceAlertRules define service monitoring alerts rules
@@ -437,8 +440,8 @@ func New() (handler *AmqpHandler, err error) {
 }
 
 // Connect connects to cloud
-func (handler *AmqpHandler) Connect(sdURL string, vin string, users []string) (err error) {
-	log.WithFields(log.Fields{"url": sdURL, "vin": vin, "users": users}).Debug("AMQP connect")
+func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []string) (err error) {
+	log.WithFields(log.Fields{"url": sdURL, "vin": systemID, "users": users}).Debug("AMQP connect")
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
@@ -449,9 +452,9 @@ func (handler *AmqpHandler) Connect(sdURL string, vin string, users []string) (e
 
 	if err := retryHelper(func() (err error) {
 		connectionInfo, err = getConnectionInfo(sdURL, serviceDiscoveryRequest{
-			Version: 1,
-			VIN:     vin,
-			Users:   users}, tlsConfig)
+			Version:  ProtocolVersion,
+			SystemID: systemID,
+			Users:    users}, tlsConfig)
 
 		return err
 	}); err != nil {
@@ -510,7 +513,7 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
 	handler.sendChannel <- Message{"", VehicleStatus{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: VehicleStatusType},
 		Services: serviceList}}
 
@@ -521,7 +524,7 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
 	handler.sendChannel <- Message{"", VehicleStatus{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: ServiceStatusType},
 		Services: []ServiceInfo{serviceStatus}}}
 
@@ -531,7 +534,7 @@ func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err er
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
 	monitoringData.MessageHeader = MessageHeader{
-		Version:     1,
+		Version:     ProtocolVersion,
 		MessageType: MonitoringDataType}
 
 	handler.sendChannel <- Message{"", monitoringData}
@@ -543,7 +546,7 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
 	handler.sendChannel <- Message{correlationID, NewState{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: NewStateType},
 		ServiceID: serviceID,
 		State:     state,
@@ -556,7 +559,7 @@ func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlation
 func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
 	handler.sendChannel <- Message{"", StateRequest{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: StateRequestType},
 		ServiceID: serviceID,
 		Default:   defaultState}}
@@ -567,7 +570,7 @@ func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
 	serviceLog.MessageHeader = MessageHeader{
-		Version:     1,
+		Version:     ProtocolVersion,
 		MessageType: PushServiceLogType}
 
 	handler.sendChannel <- Message{"", serviceLog}
@@ -578,7 +581,7 @@ func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error
 // SendAlerts sends alerts message
 func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
 	alerts.MessageHeader = MessageHeader{
-		Version:     1,
+		Version:     ProtocolVersion,
 		MessageType: AlertsType}
 
 	handler.sendChannel <- Message{"", alerts}
@@ -596,7 +599,7 @@ func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError str
 
 	handler.sendChannel <- Message{"", SystemRevertStatus{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: SystemRevertStatusType},
 		Status:       revertStatus,
 		Error:        errorValue,
@@ -615,7 +618,7 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 
 	handler.sendChannel <- Message{"", SystemUpgradeStatus{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: SystemUpgradeStatusType},
 		Status:       upgradeStatus,
 		Error:        errorValue,
@@ -628,7 +631,7 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
 	handler.sendChannel <- Message{"", SystemVersion{
 		MessageHeader: MessageHeader{
-			Version:     1,
+			Version:     ProtocolVersion,
 			MessageType: SystemVersionType},
 		ImageVersion: imageVersion}}
 
@@ -891,6 +894,11 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
 
 			header := MessageHeader{}
+
+			if header.Version != ProtocolVersion {
+				log.Errorf("Unsupported protocol version: %d", header.Version)
+				continue
+			}
 
 			if err := json.Unmarshal(delivery.Body, &header); err != nil {
 				log.Errorf("Can't parse message body: %s", err)
