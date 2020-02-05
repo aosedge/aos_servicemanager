@@ -186,6 +186,11 @@ func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetada
 	}
 	*/
 
+	if um.imageVersion >= imageVersion {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
+		return
+	}
+
 	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "another upgrade is in progress")
 		return
@@ -233,6 +238,11 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 		return
 	}
 	*/
+
+	if um.imageVersion <= imageVersion {
+		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
+		return
+	}
 
 	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
 		um.sendRevertStatus(umprotocol.FailedStatus, "another upgrade is in progress")

@@ -221,6 +221,10 @@ func TestSystemUpgrade(t *testing.T) {
 	}
 	defer client.Disconnect()
 
+	if _, err := client.GetSystemVersion(); err != nil {
+		t.Errorf("Can't get system version: %s", err)
+	}
+
 	metadata := amqp.UpgradeMetadata{
 		Data: []amqp.UpgradeFileInfo{createUpgradeFile("target1", "imagefile", []byte(imageFile))}}
 
@@ -246,11 +250,18 @@ func TestRevertUpgrade(t *testing.T) {
 	}
 	defer client.Disconnect()
 
+	if _, err := client.GetSystemVersion(); err != nil {
+		t.Errorf("Can't get system version: %s", err)
+	}
+
 	client.SystemRevert(3)
 
 	// wait for revert status
 	select {
-	case <-sender.revertStatusChannel:
+	case status := <-sender.revertStatusChannel:
+		if status.err != "" {
+			t.Errorf("Revert failed: %s", status.err)
+		}
 
 	case <-time.After(1 * time.Second):
 		t.Error("Waiting for revert status timeout")
