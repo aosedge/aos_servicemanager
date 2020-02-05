@@ -145,7 +145,7 @@ func (module *VisModule) GetSystemID() (vin string, err error) {
 			RequestID: wsclient.GenerateRequestID()},
 		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}
 
-	if err = module.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
+	if err = module.wsClient.SendRequest("RequestID", req.RequestID, &req, &rsp); err != nil {
 		return "", err
 	}
 
@@ -176,7 +176,7 @@ func (module *VisModule) GetUsers() (users []string, err error) {
 				RequestID: wsclient.GenerateRequestID()},
 			Path: "Attribute.Vehicle.UserIdentification.Users"}
 
-		if err = module.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
+		if err = module.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 			return nil, err
 		}
 
@@ -359,7 +359,7 @@ func (module *VisModule) subscribe(path string, callback func(value interface{})
 			RequestID: wsclient.GenerateRequestID()},
 		Path: path}
 
-	if err = module.wsClient.SendRequest("RequestID", &req, &rsp); err != nil {
+	if err = module.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 		return err
 	}
 
