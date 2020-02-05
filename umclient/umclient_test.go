@@ -19,6 +19,7 @@ package umclient_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -28,8 +29,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 	"gitpct.epam.com/nunc-ota/aos_common/umprotocol"
+	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -116,8 +117,8 @@ func TestMain(m *testing.M) {
 	}
 
 	server, err = wsserver.New("TestServer", url.Host,
-	"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-	"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}
@@ -286,26 +287,27 @@ func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.M
 }
 
 func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
-	var header umprotocol.MessageHeader
-	var rsp interface{}
+	var message umprotocol.Message
+	var response interface{}
 
-	if err = json.Unmarshal(messageIn, &header); err != nil {
+	log.Debug(string(messageIn))
+
+	if err = json.Unmarshal(messageIn, &message); err != nil {
 		return nil, err
 	}
 
-	switch header.Type {
-	case umprotocol.StatusType:
-		rsp = umprotocol.StatusMessage{
-			MessageHeader:    umprotocol.MessageHeader{Type: umprotocol.StatusType},
-			Operation:        umprotocol.UpgradeType,
+	switch message.Header.MessageType {
+	case umprotocol.StatusRequestType:
+		response = umprotocol.StatusRsp{
+			Operation:        umprotocol.UpgradeOperation,
 			Status:           umprotocol.SuccessStatus,
-			OperationVersion: operationVersion,
-			ImageVersion:     imageVersion}
+			RequestedVersion: operationVersion,
+			CurrentVersion:   imageVersion}
 
-	case umprotocol.UpgradeType:
+	case umprotocol.UpgradeRequestType:
 		var upgradeReq umprotocol.UpgradeReq
 
-		if err = json.Unmarshal(messageIn, &upgradeReq); err != nil {
+		if err = json.Unmarshal(message.Data, &upgradeReq); err != nil {
 			return nil, err
 		}
 
@@ -315,74 +317,65 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		status := umprotocol.SuccessStatus
 		errStr := ""
 
-		if len(upgradeReq.Files) == 0 {
+		fileName := path.Join("tmp/upgrade/", upgradeReq.ImageInfo.Path)
+
+		if err = image.CheckFileInfo(fileName, image.FileInfo{
+			Sha256: upgradeReq.ImageInfo.Sha256,
+			Sha512: upgradeReq.ImageInfo.Sha512,
+			Size:   upgradeReq.ImageInfo.Size}); err != nil {
 			status = umprotocol.FailedStatus
-			errStr = "upgrade file list is empty"
+			errStr = err.Error()
+			break
 		}
 
-		for _, file := range upgradeReq.Files {
-			fileName := path.Join("tmp/upgrade/", file.URL)
-
-			if err = image.CheckFileInfo(fileName, image.FileInfo{
-				Sha256: file.Sha256,
-				Sha512: file.Sha512,
-				Size:   file.Size}); err != nil {
-				status = umprotocol.FailedStatus
-				errStr = err.Error()
-				break
-			}
-
-			if errStr == "" {
-				data, err := ioutil.ReadFile(fileName)
-				if err != nil {
-					status = umprotocol.FailedStatus
-					errStr = err.Error()
-					break
-				}
-
-				if imageFile != string(data) {
-					status = umprotocol.FailedStatus
-					errStr = "image file content mismatch"
-					break
-				}
-			}
+		data, err := ioutil.ReadFile(fileName)
+		if err != nil {
+			status = umprotocol.FailedStatus
+			errStr = err.Error()
+			break
 		}
 
-		rsp = umprotocol.StatusMessage{
-			MessageHeader: umprotocol.MessageHeader{
-				Type:  umprotocol.StatusType,
-				Error: errStr},
-			Operation:        umprotocol.UpgradeType,
+		if imageFile != string(data) {
+			status = umprotocol.FailedStatus
+			errStr = "image file content mismatch"
+			break
+		}
+
+		response = umprotocol.StatusRsp{
+			Operation:        umprotocol.UpgradeOperation,
 			Status:           status,
-			OperationVersion: operationVersion,
-			ImageVersion:     imageVersion}
+			Error:            errStr,
+			RequestedVersion: operationVersion,
+			CurrentVersion:   imageVersion}
 
-	case umprotocol.RevertType:
+	case umprotocol.RevertRequestType:
 		var revertReq umprotocol.UpgradeReq
 
-		if err = json.Unmarshal(messageIn, &revertReq); err != nil {
+		if err = json.Unmarshal(message.Data, &revertReq); err != nil {
 			return nil, err
 		}
 
 		operationVersion = revertReq.ImageVersion
 		imageVersion = revertReq.ImageVersion
 
-		rsp = umprotocol.StatusMessage{
-			MessageHeader:    umprotocol.MessageHeader{Type: umprotocol.StatusType},
-			Operation:        umprotocol.RevertType,
+		response = umprotocol.StatusRsp{
+			Operation:        umprotocol.RevertOperation,
 			Status:           umprotocol.SuccessStatus,
-			OperationVersion: operationVersion,
-			ImageVersion:     imageVersion}
+			RequestedVersion: operationVersion,
+			CurrentVersion:   imageVersion}
 
 	default:
-		header.Error = "Unsupported message type"
-		rsp = header
+		return nil, fmt.Errorf("unsupported message type: %s", message.Header.MessageType)
 	}
 
-	if rsp != nil {
-		if messageOut, err = json.Marshal(rsp); err != nil {
-			return nil, err
-		}
+	message.Header.MessageType = umprotocol.StatusResponseType
+
+	if message.Data, err = json.Marshal(response); err != nil {
+		return nil, err
+	}
+
+	if messageOut, err = json.Marshal(message); err != nil {
+		return nil, err
 	}
 
 	return messageOut, nil

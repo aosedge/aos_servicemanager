@@ -29,8 +29,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
 	"gitpct.epam.com/nunc-ota/aos_common/umprotocol"
+	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -157,10 +157,9 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 	um.Lock()
 	defer um.Unlock()
 
-	var status umprotocol.StatusMessage
+	var status umprotocol.StatusRsp
 
-	if err = um.wsClient.SendRequest("Type", &umprotocol.GetStatusReq{
-		MessageHeader: umprotocol.MessageHeader{Type: umprotocol.StatusType}}, &status); err != nil {
+	if err = um.sendRequest(umprotocol.StatusRequestType, umprotocol.StatusResponseType, nil, &status); err != nil {
 		return 0, err
 	}
 
@@ -168,7 +167,7 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 		return 0, err
 	}
 
-	um.imageVersion = status.ImageVersion
+	um.imageVersion = status.CurrentVersion
 
 	return um.imageVersion, nil
 }
@@ -254,9 +253,8 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 			return
 		}
 
-		if err := um.wsClient.SendMessage(umprotocol.RevertReq{
-			MessageHeader: umprotocol.MessageHeader{Type: umprotocol.RevertType},
-			ImageVersion:  um.upgradeVersion}); err != nil {
+		if err := um.sendMessage(umprotocol.RevertRequestType, umprotocol.RevertReq{
+			ImageVersion: um.upgradeVersion}); err != nil {
 			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
@@ -272,19 +270,26 @@ func (um *Client) Close() (err error) {
  * Private
  ******************************************************************************/
 
-func (um *Client) messageHandler(message []byte) {
+func (um *Client) messageHandler(dataJSON []byte) {
 	um.Lock()
 	defer um.Unlock()
 
-	var status umprotocol.StatusMessage
+	var message umprotocol.Message
 
-	if err := json.Unmarshal(message, &status); err != nil {
+	if err := json.Unmarshal(dataJSON, &message); err != nil {
 		log.Errorf("Can't parse message: %s", err)
 		return
 	}
 
-	if status.Type != umprotocol.StatusType {
-		log.Errorf("Wrong message type received: %s", status.Type)
+	if message.Header.MessageType != umprotocol.StatusResponseType {
+		log.Errorf("Wrong message type received: %s", message.Header.MessageType)
+		return
+	}
+
+	var status umprotocol.StatusRsp
+
+	if err := json.Unmarshal(message.Data, &status); err != nil {
+		log.Errorf("Can't parse status: %s", err)
 		return
 	}
 
@@ -294,7 +299,7 @@ func (um *Client) messageHandler(message []byte) {
 	}
 }
 
-func (um *Client) handleSystemStatus(status umprotocol.StatusMessage) (err error) {
+func (um *Client) handleSystemStatus(status umprotocol.StatusRsp) (err error) {
 	switch {
 	// any update at this moment
 	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umprotocol.InProgressStatus:
@@ -304,11 +309,11 @@ func (um *Client) handleSystemStatus(status umprotocol.StatusMessage) (err error
 
 	// upgrade/revert complete
 	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status != umprotocol.InProgressStatus:
-		if status.Operation == umprotocol.RevertType {
+		if status.Operation == umprotocol.RevertOperation {
 			um.sendRevertStatus(status.Status, status.Error)
 		}
 
-		if status.Operation == umprotocol.UpgradeType {
+		if status.Operation == umprotocol.UpgradeOperation {
 			um.sendUpgradeStatus(status.Status, status.Error)
 		}
 
@@ -324,30 +329,26 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	um.Unlock()
 	defer um.Lock()
 
-	upgradeReq := umprotocol.UpgradeReq{
-		MessageHeader: umprotocol.MessageHeader{Type: umprotocol.UpgradeType},
-		ImageVersion:  um.upgradeVersion,
-		Files:         make([]umprotocol.UpgradeFileInfo, 0, len(um.upgradeMetadata.Data))}
-
-	for _, data := range um.upgradeMetadata.Data {
-		if len(data.URLs) == 0 {
-			return errors.New("no file URLs")
-		}
-
-		fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, data.URLs[0]))
-		if err != nil {
-			return err
-		}
-
-		upgradeReq.Files = append(upgradeReq.Files, umprotocol.UpgradeFileInfo{
-			Target: data.Target,
-			URL:    data.URLs[0],
-			Sha256: fileInfo.Sha256,
-			Sha512: fileInfo.Sha512,
-			Size:   fileInfo.Size})
+	if len(um.upgradeMetadata.Data) == 0 {
+		return errors.New("metadata doesn't contain file info")
 	}
 
-	if err = um.wsClient.SendMessage(upgradeReq); err != nil {
+	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeMetadata.Data[0].URLs[0]))
+	if err != nil {
+		return err
+	}
+
+	upgradeReq := umprotocol.UpgradeReq{
+		ImageVersion: um.upgradeVersion,
+		ImageInfo: umprotocol.ImageInfo{
+			Path:   um.upgradeMetadata.Data[0].URLs[0],
+			Sha256: fileInfo.Sha256,
+			Sha512: fileInfo.Sha512,
+			Size:   fileInfo.Size,
+		},
+	}
+
+	if err = um.sendMessage(umprotocol.UpgradeRequestType, upgradeReq); err != nil {
 		return err
 	}
 
@@ -582,6 +583,48 @@ func (um *Client) checkSigns() (err error) {
 		if err = context.VerifySign(file, data.Signs.ChainName, data.Signs.Alg, data.Signs.Value); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (um *Client) sendMessage(messageType string, data interface{}) (err error) {
+	message := umprotocol.Message{
+		Header: umprotocol.Header{
+			Version:     umprotocol.Version,
+			MessageType: messageType,
+		},
+	}
+
+	if message.Data, err = json.Marshal(data); err != nil {
+		return err
+	}
+
+	if err = um.wsClient.SendMessage(&message); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (um *Client) sendRequest(messageType, expectedMessageType string, request, response interface{}) (err error) {
+	message := umprotocol.Message{
+		Header: umprotocol.Header{
+			Version:     umprotocol.Version,
+			MessageType: messageType,
+		},
+	}
+
+	if message.Data, err = json.Marshal(request); err != nil {
+		return err
+	}
+
+	if err = um.wsClient.SendRequest("Header.MessageType", expectedMessageType, &message, &message); err != nil {
+		return err
+	}
+
+	if err = json.Unmarshal(message.Data, response); err != nil {
+		return err
 	}
 
 	return nil
