@@ -95,6 +95,7 @@ SM requires following applications to be available in the system or placed in SM
 * [runc](https://github.com/opencontainers/runc) - launch service containers
 * [netns](https://github.com/genuinetools/netns) - set containers network bridge
 * [wondershaper](https://github.com/magnific0/wondershaper) - set network UL/DL speed limit
+* [iperf](https://sourceforge.net/projects/iperf2/) - a network traffic tool for measuring TCP and UDP performance. 
 
 ## Required Python3 packages
 
