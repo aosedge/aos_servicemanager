@@ -1,0 +1,39 @@
+stages:
+  - test  
+  - build
+
+before_script:  
+  - echo $CI_PROJECT_DIR
+  - ln -svf $CI_PROJECT_DIR $HOME/go/src/aos_servicemanager
+  - cd $HOME/go/src/aos_servicemanager
+
+after_script:  
+   - cd $CI_PROJECT_DIR
+   - rm $HOME/go/src/aos_servicemanager
+
+test:
+  tags:
+    - SM
+  stage: test  
+  script:
+    - sudo iptables -t nat -A POSTROUTING -o ens3 -s 172.19.0.0/24 -j MASQUERADE
+    - sudo cp vendor/gitpct.epam.com/nunc-ota/aos_common/ci/rootCA.crt.pem  /etc/ssl/certs/
+    - echo "-------   Run Unit tests   -------"
+    - sudo -E /usr/local/go/bin/go test $(go list ./... | grep -v "/vendor\|identification/visidentifier") -v -coverprofile .testCoverage.txt
+    - go tool cover -func=.testCoverage.txt
+    - rm .testCoverage.txt
+  
+build:
+  tags:
+    - SM
+  stage: build
+  script:
+    - echo "-------   Start Build   -------"
+    - go build
+    - tar czf artifacts.tar.gz aos_servicemanager
+    - curl -H "X-JFrog-Art-Api:$CI_ARTIFACTS_TOKEN" -T ./artifacts.tar.gz "https://artifactory.epam.com/artifactory/NUNC-OTA/service_manager/builds/$CI_PIPELINE_ID/"
+
+
+  
+ 
+
