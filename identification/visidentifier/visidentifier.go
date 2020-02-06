@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package vismodule
+package visidentifier
 
 import (
 	"encoding/json"
@@ -29,14 +29,12 @@ import (
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
-	"aos_servicemanager/identification/vismodule/dbushandler"
+	"aos_servicemanager/identification/visidentifier/dbushandler"
 )
 
 /*******************************************************************************
  * Consts
  ******************************************************************************/
-
-const Name = "vis"
 
 const (
 	usersChangedChannelSize = 1
@@ -49,9 +47,9 @@ const defaultReconnectTime = 10 * time.Second
  * Types
  ******************************************************************************/
 
-// VisModule vis module instance
-type VisModule struct {
-	config moduleConfig
+// Instance vis identifier instance
+type Instance struct {
+	config instanceConfig
 
 	usersChangedChannel chan []string
 	errorChannel        chan error
@@ -76,7 +74,7 @@ type ServiceProvider interface {
 	GetService(id string) (entry database.ServiceEntry, err error)
 }
 
-type moduleConfig struct {
+type instanceConfig struct {
 	VISServer     string
 	ReconnectTime config.Duration
 }
@@ -89,53 +87,56 @@ type moduleConfig struct {
  * Public
  ******************************************************************************/
 
-func New(configJSON []byte, serviceProvider ServiceProvider) (module *VisModule, err error) {
-	log.Info("Create VIS identification module")
+// New creates new vis identifier instance
+func New(configJSON []byte, serviceProvider ServiceProvider) (instance *Instance, err error) {
+	log.Info("Create VIS identification instance")
 
-	module = &VisModule{}
+	instance = &Instance{}
 
 	// default reconnect time
-	module.config.ReconnectTime.Duration = defaultReconnectTime
+	instance.config.ReconnectTime.Duration = defaultReconnectTime
 
-	if err = json.Unmarshal(configJSON, &module.config); err != nil {
+	if err = json.Unmarshal(configJSON, &instance.config); err != nil {
 		return nil, err
 	}
 
-	if module.dbusHandler, err = dbushandler.New(serviceProvider); err != nil {
+	if instance.dbusHandler, err = dbushandler.New(serviceProvider); err != nil {
 		return nil, err
 	}
 
-	if module.wsClient, err = wsclient.New("VIS", module.messageHandler); err != nil {
+	if instance.wsClient, err = wsclient.New("VIS", instance.messageHandler); err != nil {
 		return nil, err
 	}
 
-	module.usersChangedChannel = make(chan []string, usersChangedChannelSize)
-	module.errorChannel = make(chan error, errorChannelSize)
-	module.connectionCond = sync.NewCond(module)
+	instance.usersChangedChannel = make(chan []string, usersChangedChannelSize)
+	instance.errorChannel = make(chan error, errorChannelSize)
+	instance.connectionCond = sync.NewCond(instance)
 
-	go module.handleConnection(module.config.VISServer, module.config.ReconnectTime.Duration)
+	go instance.handleConnection(instance.config.VISServer, instance.config.ReconnectTime.Duration)
 
-	return module, nil
+	return instance, nil
 }
 
-func (module *VisModule) Close() (err error) {
-	log.Info("Close VIS identification module")
+// Close closes vis identifier instance
+func (instance *Instance) Close() (err error) {
+	log.Info("Close VIS identification instance")
 
 	var retErr error
 
-	if err = module.dbusHandler.Close(); err != nil {
+	if err = instance.dbusHandler.Close(); err != nil {
 		retErr = err
 	}
 
-	if err = module.wsClient.Close(); err != nil && retErr == nil {
+	if err = instance.wsClient.Close(); err != nil && retErr == nil {
 		retErr = err
 	}
 
 	return retErr
 }
 
-func (module *VisModule) GetSystemID() (vin string, err error) {
-	module.waitConnection()
+// GetSystemID returns the system ID
+func (instance *Instance) GetSystemID() (systemID string, err error) {
+	instance.waitConnection()
 
 	var rsp visprotocol.GetResponse
 
@@ -145,7 +146,7 @@ func (module *VisModule) GetSystemID() (vin string, err error) {
 			RequestID: wsclient.GenerateRequestID()},
 		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}
 
-	if err = module.wsClient.SendRequest("RequestID", req.RequestID, &req, &rsp); err != nil {
+	if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 		return "", err
 	}
 
@@ -155,19 +156,20 @@ func (module *VisModule) GetSystemID() (vin string, err error) {
 	}
 
 	ok := false
-	if module.vin, ok = value.(string); !ok {
+	if instance.vin, ok = value.(string); !ok {
 		return "", errors.New("wrong VIN type")
 	}
 
-	log.WithField("VIN", module.vin).Debug("Get VIN")
+	log.WithField("VIN", instance.vin).Debug("Get VIN")
 
-	return module.vin, err
+	return instance.vin, err
 }
 
-func (module *VisModule) GetUsers() (users []string, err error) {
-	module.waitConnection()
+// GetUsers returns the user claims
+func (instance *Instance) GetUsers() (users []string, err error) {
+	instance.waitConnection()
 
-	if module.users == nil {
+	if instance.users == nil {
 		var rsp visprotocol.GetResponse
 
 		req := visprotocol.GetRequest{
@@ -176,78 +178,80 @@ func (module *VisModule) GetUsers() (users []string, err error) {
 				RequestID: wsclient.GenerateRequestID()},
 			Path: "Attribute.Vehicle.UserIdentification.Users"}
 
-		if err = module.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
+		if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 			return nil, err
 		}
 
-		module.Lock()
-		defer module.Unlock()
+		instance.Lock()
+		defer instance.Unlock()
 
-		if err = module.setUsers(rsp.Value); err != nil {
+		if err = instance.setUsers(rsp.Value); err != nil {
 			return nil, err
 		}
 	}
 
-	log.WithField("users", module.users).Debug("Get users")
+	log.WithField("users", instance.users).Debug("Get users")
 
-	return module.users, err
+	return instance.users, err
 }
 
-func (module *VisModule) UsersChangedChannel() (channel <-chan []string) {
-	return module.usersChangedChannel
+// UsersChangedChannel returns users changed channel
+func (instance *Instance) UsersChangedChannel() (channel <-chan []string) {
+	return instance.usersChangedChannel
 }
 
-func (module *VisModule) ErrorChannel() (channel <-chan error) {
-	return module.errorChannel
+// ErrorChannel returns error channel
+func (instance *Instance) ErrorChannel() (channel <-chan error) {
+	return instance.errorChannel
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
 
-func (module *VisModule) waitConnection() {
-	module.Lock()
-	defer module.Unlock()
+func (instance *Instance) waitConnection() {
+	instance.Lock()
+	defer instance.Unlock()
 
-	if module.isConnected {
+	if instance.isConnected {
 		return
 	}
 
-	for !module.isConnected {
-		module.connectionCond.Wait()
+	for !instance.isConnected {
+		instance.connectionCond.Wait()
 	}
 }
 
-func (module *VisModule) handleConnection(url string, reconnectTime time.Duration) {
+func (instance *Instance) handleConnection(url string, reconnectTime time.Duration) {
 	for {
-		if err := module.wsClient.Connect(url); err != nil {
+		if err := instance.wsClient.Connect(url); err != nil {
 			log.Errorf("Can't connect to VIS: %s", err)
 			goto reconnect
 		}
 
-		module.subscribeMap = sync.Map{}
+		instance.subscribeMap = sync.Map{}
 
-		if err := module.subscribe("Attribute.Vehicle.UserIdentification.Users", module.handleUsersChanged); err != nil {
+		if err := instance.subscribe("Attribute.Vehicle.UserIdentification.Users", instance.handleUsersChanged); err != nil {
 			log.Errorf("Can't subscribe to VIS: %s", err)
 			goto reconnect
 		}
 
-		module.users = nil
-		module.vin = ""
+		instance.users = nil
+		instance.vin = ""
 
-		module.Lock()
-		module.isConnected = true
-		module.Unlock()
+		instance.Lock()
+		instance.isConnected = true
+		instance.Unlock()
 
-		module.connectionCond.Broadcast()
+		instance.connectionCond.Broadcast()
 
 		select {
-		case err := <-module.wsClient.ErrorChannel:
-			module.Lock()
-			module.isConnected = false
-			module.Unlock()
+		case err := <-instance.wsClient.ErrorChannel:
+			instance.Lock()
+			instance.isConnected = false
+			instance.Unlock()
 
-			module.errorChannel <- err
+			instance.errorChannel <- err
 		}
 
 	reconnect:
@@ -255,7 +259,7 @@ func (module *VisModule) handleConnection(url string, reconnectTime time.Duratio
 	}
 }
 
-func (module *VisModule) messageHandler(message []byte) {
+func (instance *Instance) messageHandler(message []byte) {
 	var header visprotocol.MessageHeader
 
 	if err := json.Unmarshal(message, &header); err != nil {
@@ -265,7 +269,7 @@ func (module *VisModule) messageHandler(message []byte) {
 
 	switch header.Action {
 	case visprotocol.ActionSubscription:
-		module.processSubscriptions(message)
+		instance.processSubscriptions(message)
 
 	default:
 		log.WithField("action", header.Action).Warning("Unexpected message received")
@@ -287,7 +291,7 @@ func getValueByPath(path string, value interface{}) (result interface{}, err err
 	return value, nil
 }
 
-func (module *VisModule) processSubscriptions(message []byte) (err error) {
+func (instance *Instance) processSubscriptions(message []byte) (err error) {
 	var notification visprotocol.SubscriptionNotification
 
 	if err = json.Unmarshal(message, &notification); err != nil {
@@ -296,7 +300,7 @@ func (module *VisModule) processSubscriptions(message []byte) (err error) {
 
 	// serve subscriptions
 	subscriptionFound := false
-	module.subscribeMap.Range(func(key, value interface{}) bool {
+	instance.subscribeMap.Range(func(key, value interface{}) bool {
 		if key.(string) == notification.SubscriptionID {
 			subscriptionFound = true
 			value.(func(interface{}))(notification.Value)
@@ -312,7 +316,7 @@ func (module *VisModule) processSubscriptions(message []byte) (err error) {
 	return nil
 }
 
-func (module *VisModule) setUsers(value interface{}) (err error) {
+func (instance *Instance) setUsers(value interface{}) (err error) {
 	value, err = getValueByPath("Attribute.Vehicle.UserIdentification.Users", value)
 	if err != nil {
 		return err
@@ -323,34 +327,34 @@ func (module *VisModule) setUsers(value interface{}) (err error) {
 		return errors.New("wrong users type")
 	}
 
-	module.users = make([]string, len(itfs))
+	instance.users = make([]string, len(itfs))
 
 	for i, itf := range itfs {
 		item, ok := itf.(string)
 		if !ok {
 			return errors.New("wrong users type")
 		}
-		module.users[i] = item
+		instance.users[i] = item
 	}
 
 	return nil
 }
 
-func (module *VisModule) handleUsersChanged(value interface{}) {
-	module.Lock()
-	defer module.Unlock()
+func (instance *Instance) handleUsersChanged(value interface{}) {
+	instance.Lock()
+	defer instance.Unlock()
 
-	if err := module.setUsers(value); err != nil {
+	if err := instance.setUsers(value); err != nil {
 		log.Errorf("Can't set users: %s", err)
 		return
 	}
 
-	module.usersChangedChannel <- module.users
+	instance.usersChangedChannel <- instance.users
 
-	log.WithField("users", module.users).Debug("Users changed")
+	log.WithField("users", instance.users).Debug("Users changed")
 }
 
-func (module *VisModule) subscribe(path string, callback func(value interface{})) (err error) {
+func (instance *Instance) subscribe(path string, callback func(value interface{})) (err error) {
 	var rsp visprotocol.SubscribeResponse
 
 	req := visprotocol.SubscribeRequest{
@@ -359,7 +363,7 @@ func (module *VisModule) subscribe(path string, callback func(value interface{})
 			RequestID: wsclient.GenerateRequestID()},
 		Path: path}
 
-	if err = module.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
+	if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 		return err
 	}
 
@@ -367,7 +371,7 @@ func (module *VisModule) subscribe(path string, callback func(value interface{})
 		return errors.New("no subscriptionID in response")
 	}
 
-	module.subscribeMap.Store(rsp.SubscriptionID, callback)
+	instance.subscribeMap.Store(rsp.SubscriptionID, callback)
 
 	return nil
 }

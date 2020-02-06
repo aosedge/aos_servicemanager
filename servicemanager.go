@@ -34,7 +34,7 @@ import (
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/fcrypt"
-	"aos_servicemanager/identification"
+	"aos_servicemanager/identification/nuanceidentifier"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
@@ -54,16 +54,29 @@ const dbFileName = "servicemanager.db"
  ******************************************************************************/
 
 type serviceManager struct {
-	alerts         *alerts.Alerts
-	amqp           *amqp.AmqpHandler
-	cfg            *config.Config
-	crypt          *fcrypt.CryptoContext
-	db             *database.Database
-	identification identification.Module
-	launcher       *launcher.Launcher
-	logging        *logging.Logging
-	monitor        *monitoring.Monitor
-	um             *umclient.Client
+	alerts     *alerts.Alerts
+	amqp       *amqp.AmqpHandler
+	cfg        *config.Config
+	crypt      *fcrypt.CryptoContext
+	db         *database.Database
+	identifier identifier
+	launcher   *launcher.Launcher
+	logging    *logging.Logging
+	monitor    *monitoring.Monitor
+	um         *umclient.Client
+}
+
+type identifier interface {
+	// Close closes identifier
+	Close() (err error)
+	// GetSystemID returns the system ID
+	GetSystemID() (systemID string, err error)
+	// GetUsers returns the user claims
+	GetUsers() (users []string, err error)
+	// UsersChangedChannel returns users changed channel
+	UsersChangedChannel() (channel <-chan []string)
+	// ErrorChannel returns error channel
+	ErrorChannel() (channel <-chan error)
 }
 
 /*******************************************************************************
@@ -164,8 +177,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		goto err
 	}
 
-	// Create identification module
-	if sm.identification, err = identification.New(cfg, sm.db); err != nil {
+	// Create identifier
+	// Use appropriate identifier from identification folder
+	if sm.identifier, err = nuanceidentifier.New(cfg.Identifier); err != nil {
 		goto err
 	}
 
@@ -205,9 +219,9 @@ func (sm *serviceManager) close() {
 		sm.um.Close()
 	}
 
-	// Close identification module
-	if sm.identification != nil {
-		sm.identification.Close()
+	// Close identifier
+	if sm.identifier != nil {
+		sm.identifier.Close()
 	}
 
 	// Close launcher
@@ -401,11 +415,11 @@ func (sm *serviceManager) handleChannels() (err error) {
 				log.Errorf("Error send alerts: %s", err)
 			}
 
-		case users := <-sm.identification.UsersChangedChannel():
+		case users := <-sm.identifier.UsersChangedChannel():
 			log.WithField("users", users).Info("Users changed")
 			return nil
 
-		case err := <-sm.identification.ErrorChannel():
+		case err := <-sm.identifier.ErrorChannel():
 			return err
 
 		case err := <-umErrChannel:
@@ -421,13 +435,13 @@ func (sm *serviceManager) run() {
 		var err error
 
 		// Get system id
-		if vin, err = sm.identification.GetSystemID(); err != nil {
+		if vin, err = sm.identifier.GetSystemID(); err != nil {
 			log.Errorf("Can't get system id: %s", err)
 			goto reconnect
 		}
 
 		// Get users
-		if users, err = sm.identification.GetUsers(); err != nil {
+		if users, err = sm.identifier.GetUsers(); err != nil {
 			log.Errorf("Can't get users: %s", err)
 			goto reconnect
 		}

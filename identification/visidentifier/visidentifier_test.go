@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package vismodule_test
+package visidentifier_test
 
 import (
 	"encoding/json"
@@ -34,8 +34,8 @@ import (
 	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
 
 	"aos_servicemanager/database"
-	"aos_servicemanager/identification/vismodule"
-	"aos_servicemanager/identification/vismodule/dbushandler"
+	"aos_servicemanager/identification/visidentifier"
+	"aos_servicemanager/identification/visidentifier/dbushandler"
 )
 
 /*******************************************************************************
@@ -56,7 +56,7 @@ type messageProcessor struct {
  * Vars
  ******************************************************************************/
 
-var vis *vismodule.VisModule
+var vis *visidentifier.Instance
 var server *wsserver.Server
 var clientProcessor *messageProcessor
 var db *database.Database
@@ -102,7 +102,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if vis, err = vismodule.New([]byte(`{"VisServer": "wss://localhost:8088"}`), db); err != nil {
+	if vis, err = visidentifier.New([]byte(`{"VisServer": "wss://localhost:8088"}`), db); err != nil {
 		return err
 	}
 

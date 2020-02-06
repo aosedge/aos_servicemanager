@@ -73,12 +73,9 @@ func createConfigFile() (err error) {
 		"maxMessageSize": 1024,
 		"maxOfflineMessages": 32
 	},
-	"identification": {
-		"module": "test",
-		"params": {
-			"param1": "testParam",
-			"param2": 123
-		}
+	"identifier": {
+		"param1": "testParam",
+		"param2": 123
 	}
 }`
 
@@ -304,10 +301,6 @@ func TestGetIdentification(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Identification.Module != "test" {
-		t.Errorf("Wrong identification module: %s", config.Identification.Module)
-	}
-
 	type Params struct {
 		Param1 string
 		Param2 int
@@ -315,13 +308,8 @@ func TestGetIdentification(t *testing.T) {
 
 	var params Params
 
-	paramsJSON, err := json.Marshal(config.Identification.Params)
-	if err != nil {
-		t.Errorf("Can't parse identification params: %s", err)
-	}
-
-	if err = json.Unmarshal(paramsJSON, &params); err != nil {
-		t.Errorf("Can't parse identification params: %s", err)
+	if err = json.Unmarshal(config.Identifier, &params); err != nil {
+		t.Errorf("Can't parse identifier params: %s", err)
 	}
 
 	if params.Param1 != "testParam" {
