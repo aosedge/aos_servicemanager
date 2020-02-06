@@ -5,5 +5,5 @@ data/services.db
 servicemanager.conf
 data/services/
 data/template.service
-vendor/**
+vendor/github.com/sirupsen/logrus/go.mod
 Gopkg.lock
