@@ -895,13 +895,13 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 			header := MessageHeader{}
 
-			if header.Version != ProtocolVersion {
-				log.Errorf("Unsupported protocol version: %d", header.Version)
+			if err := json.Unmarshal(delivery.Body, &header); err != nil {
+				log.Errorf("Can't parse message body: %s", err)
 				continue
 			}
 
-			if err := json.Unmarshal(delivery.Body, &header); err != nil {
-				log.Errorf("Can't parse message body: %s", err)
+			if header.Version != ProtocolVersion {
+				log.Errorf("Unsupported protocol version: %d", header.Version)
 				continue
 			}
 
