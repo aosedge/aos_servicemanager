@@ -1,7 +1,7 @@
 
 # AOS Service Manager
 
-AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for following tasks:
+AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for the following tasks:
 * communicate with the backend;
 * install, remove, start, stop AOS services;
 * configure AOS services network;
@@ -14,7 +14,7 @@ See architecture [document](doc/architecture.md) for more details.
 
 ## Required GO packages
 
-Dependency tool `dep` (https://github.com/golang/dep) is used to handle external package dependencies. `dep` tool should be installed on the host machine before performing the build. `Gopkg.toml` contains list of required external go packages. Perform following command before build to fetch the required packages:
+Dependency tool `dep` (https://github.com/golang/dep) is used to handle external package dependencies. `dep` tool should be installed on the host machine before performing the build. `Gopkg.toml` contains a list of required external go packages. Perform the following command before build to fetch the required packages:
 
 ```
 dep ensure
@@ -26,22 +26,20 @@ dep ensure
 
 ## Identification module selection
 
-For authentication with the cloud SM requires to get the `system id` and `user claims` parameters. These parameters are platform specific. All supported modules are located under `identification` folder. Registration of modules are done in `register<name>module.go` files, where `name` is the module name (for example: `registervismodule.go`). Each register module file contains the build tag which should be used during build to include the module into the final binary:
-```
-// +build with_vis_module
-```
-Build tags are specified by `--tags` parameters in the build command:
+For authentication with the cloud, SM requires to get the `system id` and `user claims` parameters. These parameters are platform-specific. There are identification packages under `identification` folder. One of identification instance should be explicitly created in the  main function:
 
+```golang
+	// Create identifier
+	// Use appropriate identifier from identification folder
+	if sm.identifier, err = nuanceidentifier.New(cfg.Identifier); err != nil {
+		goto err
+	}
 ```
-go build --tags "with_<name1>_module with_<name2>_module"
-```
-
-Any number of the supported modules can be built with final binary. But only one is used in runtime. The selection is done with [config](doc/config.md) file.
 
 ## Native build
 
 ```
-go build --tags "with_vis_module"
+go build
 ```
 
 ## ARM 64 build
@@ -53,7 +51,7 @@ sudo apt install gcc-aarch64-linux-gnu
 Build:
 
 ```
-CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build --tags "with_vis_module"
+CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build
 ```
 
 # Configuration
@@ -85,7 +83,7 @@ To configure service network, SM mounts following system files:
 * `/etc/resolv.conf`
 * `/etc/nsswitch.conf`
 
-In order to override system network configuration, custom version of above files can be put to SM working directory under `etc` folder.
+To override system network configuration, a custom version of the above files can be put to SM working directory under `etc` folder.
 
 # Run
 
@@ -126,9 +124,6 @@ Following python3 packages are required to launch telemetry-emulator:
 * `python3-threading`
 
 # Test
-
-To launch test, additional go packages should be installed:
-* github.com/jlaffaye/ftp
 
 Test all packages:
 

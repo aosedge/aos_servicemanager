@@ -36,8 +36,7 @@ The configuration file has JSON format. Following is JSON schema:
     "required": [
         "fcrypt",
         "serviceDiscovery",
-        "workingDir",
-        "identification"
+        "workingDir"
     ],
     "properties": {
         "fcrypt": {
@@ -185,22 +184,12 @@ The configuration file has JSON format. Following is JSON schema:
                 }
             }
         },
-        "identification": {
-            "description": "Identification parameters",
+        "identifier": {
+            "description": "Identifier parameters",
             "type": "object",
             "required": [
                 "module"
-            ],
-            "properties": {
-                "module": {
-                    "description": "Identification module name",
-                    "type": "string"
-                },
-                "params": {
-                    "description": "Identification module parameters",
-                    "type": "object"
-                }
-            }
+            ]
         }
     }
 }
