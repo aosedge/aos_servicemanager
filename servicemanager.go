@@ -35,7 +35,7 @@ import (
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/fcrypt"
-	"aos_servicemanager/identification/nuanceidentifier"
+	"aos_servicemanager/identification/visidentifier"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
@@ -199,7 +199,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create identifier
 	// Use appropriate identifier from identification folder
-	if sm.identifier, err = nuanceidentifier.New(cfg.Identifier); err != nil {
+	if sm.identifier, err = visidentifier.New(cfg.Identifier, sm.db); err != nil {
 		goto err
 	}
 
