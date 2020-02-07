@@ -1,5 +1,7 @@
 
-# AOS Service Manager
+# AOS Service Manager  
+[![pipeline status](https://gitpct.epam.com/nunc-ota/aos_servicemanager/badges/master/pipeline.svg)](https://gitpct.epam.com/nunc-ota/aos_servicemanager/commits/master)
+[![coverage report](https://gitpct.epam.com/nunc-ota/aos_servicemanager/badges/master/coverage.svg)](https://gitpct.epam.com/nunc-ota/aos_servicemanager/commits/master)  
 
 AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for the following tasks:
 * communicate with the backend;
