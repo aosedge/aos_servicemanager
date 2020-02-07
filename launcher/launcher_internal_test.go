@@ -1127,6 +1127,11 @@ func TestServiceMonitoring(t *testing.T) {
 }
 
 func TestServiceStorage(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip TestServiceStorage")
+		return
+	}
+
 	sender := newTestSender()
 
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
@@ -1199,6 +1204,11 @@ func TestServiceStorage(t *testing.T) {
 }
 
 func TestServiceState(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip TestServiceState")
+		return
+	}
+
 	sender := newTestSender()
 
 	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 256}, sender, nil)
