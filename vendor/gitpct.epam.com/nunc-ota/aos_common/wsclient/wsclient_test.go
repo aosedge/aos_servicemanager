@@ -19,14 +19,12 @@ package wsclient_test
 
 import (
 	"encoding/json"
-	"net/url"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
-
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 
 	"aos_common/wsclient"
@@ -37,23 +35,18 @@ import (
  * Consts
  ******************************************************************************/
 
+const hostURL = ":8088"
 const serverURL = "wss://localhost:8088"
+const crtFile = "../wsserver/data/crt.pem"
+const keyFile = "../wsserver/data/key.pem"
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-type messageProcessor struct {
-	sendMessage    wsserver.SendMessage
-	messageHandler func(message []byte) (response []byte)
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
-
-var server *wsserver.Server
-var clientProcessor *messageProcessor
 
 /*******************************************************************************
  * Init
@@ -72,31 +65,19 @@ func init() {
  * Main
  ******************************************************************************/
 
-func TestMain(m *testing.M) {
-	url, err := url.Parse(serverURL)
-	if err != nil {
-		log.Fatalf("Can't parse url: %s", err)
-	}
-
-	server, err = wsserver.New("TestServer", url.Host, "../wsserver/data/crt.pem", "../wsserver/data/key.pem", newMessageProcessor)
-	if err != nil {
-		log.Fatalf("Can't create ws server: %s", err)
-	}
-	defer server.Close()
-
-	// Wait for server become ready
-	time.Sleep(1 * time.Second)
-
-	ret := m.Run()
-
-	os.Exit(ret)
-}
-
 /*******************************************************************************
  * Tests
  ******************************************************************************/
 
 func TestConnectDisconnect(t *testing.T) {
+	server, err := wsserver.New("TestServer", hostURL, crtFile, keyFile, nil)
+	if err != nil {
+		t.Fatalf("Can't create ws server: %s", err)
+	}
+	defer server.Close()
+
+	time.Sleep(1 * time.Second)
+
 	client, err := wsclient.New("Test", nil)
 	if err != nil {
 		t.Fatalf("Can't create ws client: %s", err)
@@ -115,6 +96,7 @@ func TestConnectDisconnect(t *testing.T) {
 		t.Errorf("Can't connect to ws server: %s", err)
 	}
 }
+
 func TestSendRequest(t *testing.T) {
 	type Header struct {
 		Type      string
@@ -132,6 +114,32 @@ func TestSendRequest(t *testing.T) {
 		Error  *string `json:"Error,omitempty"`
 	}
 
+	server, err := wsserver.New("TestServer", hostURL, crtFile, keyFile,
+		func(messageType int, data []byte) (response []byte, err error) {
+			var req Request
+			var rsp Response
+
+			if err = json.Unmarshal(data, &req); err != nil {
+				return nil, err
+			}
+
+			rsp.Header.Type = req.Header.Type
+			rsp.Header.RequestID = req.Header.RequestID
+			rsp.Value = float32(req.Value) / 10.0
+
+			if response, err = json.Marshal(rsp); err != nil {
+				return
+			}
+
+			return response, nil
+		})
+	if err != nil {
+		t.Fatalf("Can't create ws server: %s", err)
+	}
+	defer server.Close()
+
+	time.Sleep(1 * time.Second)
+
 	client, err := wsclient.New("Test", nil)
 	if err != nil {
 		t.Fatalf("Can't create ws client: %s", err)
@@ -140,25 +148,6 @@ func TestSendRequest(t *testing.T) {
 
 	if err = client.Connect(serverURL); err != nil {
 		t.Fatalf("Can't connect to ws server: %s", err)
-	}
-
-	clientProcessor.messageHandler = func(messageIn []byte) (messageOut []byte) {
-		var req Request
-		var rsp Response
-
-		if err := json.Unmarshal(messageIn, &req); err != nil {
-			return
-		}
-
-		rsp.Header.Type = req.Header.Type
-		rsp.Header.RequestID = req.Header.RequestID
-		rsp.Value = float32(req.Value) / 10.0
-
-		if messageOut, err = json.Marshal(rsp); err != nil {
-			return
-		}
-
-		return messageOut
 	}
 
 	req := Request{Header: Header{Type: "GET", RequestID: uuid.New().String()}}
@@ -187,6 +176,32 @@ func TestWrongIDRequest(t *testing.T) {
 		Error     *string `json:"Error,omitempty"`
 	}
 
+	server, err := wsserver.New("TestServer", hostURL, crtFile, keyFile,
+		func(messageType int, data []byte) (response []byte, err error) {
+			var req Request
+			var rsp Response
+
+			if err = json.Unmarshal(data, &req); err != nil {
+				return nil, err
+			}
+
+			rsp.Type = req.Type
+			rsp.RequestID = uuid.New().String()
+			rsp.Value = float32(req.Value) / 10.0
+
+			if response, err = json.Marshal(rsp); err != nil {
+				return
+			}
+
+			return response, err
+		})
+	if err != nil {
+		t.Fatalf("Can't create ws server: %s", err)
+	}
+	defer server.Close()
+
+	time.Sleep(1 * time.Second)
+
 	client, err := wsclient.New("Test", nil)
 	if err != nil {
 		t.Fatalf("Can't create ws client: %s", err)
@@ -195,25 +210,6 @@ func TestWrongIDRequest(t *testing.T) {
 
 	if err = client.Connect(serverURL); err != nil {
 		t.Fatalf("Can't connect to ws server: %s", err)
-	}
-
-	clientProcessor.messageHandler = func(messageIn []byte) (messageOut []byte) {
-		var req Request
-		var rsp Response
-
-		if err := json.Unmarshal(messageIn, &req); err != nil {
-			return
-		}
-
-		rsp.Type = req.Type
-		rsp.RequestID = uuid.New().String()
-		rsp.Value = float32(req.Value) / 10.0
-
-		if messageOut, err = json.Marshal(rsp); err != nil {
-			return
-		}
-
-		return messageOut
 	}
 
 	req := Request{Type: "GET", RequestID: uuid.New().String()}
@@ -225,6 +221,14 @@ func TestWrongIDRequest(t *testing.T) {
 }
 
 func TestErrorChannel(t *testing.T) {
+	server, err := wsserver.New("TestServer", hostURL, crtFile, keyFile, nil)
+	if err != nil {
+		t.Fatalf("Can't create ws server: %s", err)
+	}
+	defer server.Close()
+
+	time.Sleep(1 * time.Second)
+
 	client, err := wsclient.New("Test", nil)
 	if err != nil {
 		t.Fatalf("Can't create ws client: %s", err)
@@ -243,28 +247,23 @@ func TestErrorChannel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Error("Waiting error channel timeout")
 	}
-
-	url, err := url.Parse(serverURL)
-	if err != nil {
-		t.Fatalf("Can't parse url: %s", err)
-	}
-
-	server, err = wsserver.New("TestServer", url.Host, "../wsserver/data/crt.pem", "../wsserver/data/key.pem", newMessageProcessor)
-	if err != nil {
-		t.Fatalf("Can't create ws server: %s", err)
-	}
-
-	// Wait for server become ready
-	time.Sleep(1 * time.Second)
 }
 
 func TestMessageHandler(t *testing.T) {
+	server, err := wsserver.New("TestServer", hostURL, crtFile, keyFile, nil)
+	if err != nil {
+		t.Fatalf("Can't create ws server: %s", err)
+	}
+	defer server.Close()
+
 	type Message struct {
 		Type  string
 		Value int
 	}
 
 	messageChannel := make(chan Message)
+
+	time.Sleep(1 * time.Second)
 
 	client, err := wsclient.New("Test", func(data []byte) {
 		var message Message
@@ -276,18 +275,24 @@ func TestMessageHandler(t *testing.T) {
 
 		messageChannel <- message
 	})
-
 	if err != nil {
 		t.Fatalf("Can't create ws client: %s", err)
 	}
-	defer client.Close()
 
 	if err = client.Connect(serverURL); err != nil {
 		t.Fatalf("Can't connect to ws server: %s", err)
 	}
+	defer client.Close()
 
-	if err = clientProcessor.sendMessage(websocket.TextMessage, []byte(`{"Type":"NOTIFY", "Value": 123}`)); err != nil {
-		t.Fatalf("Can't send message: %s", err)
+	clientHandlers := server.GetClients()
+	if len(clientHandlers) == 0 {
+		t.Fatalf("No connected clients")
+	}
+
+	for _, clientHandler := range clientHandlers {
+		if err = clientHandler.SendMessage(websocket.TextMessage, []byte(`{"Type":"NOTIFY", "Value": 123}`)); err != nil {
+			t.Fatalf("Can't send message: %s", err)
+		}
 	}
 
 	select {
@@ -299,22 +304,4 @@ func TestMessageHandler(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Error("Waiting message timeout")
 	}
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.MessageProcessor, err error) {
-	clientProcessor = &messageProcessor{sendMessage: sendMessage}
-
-	return clientProcessor, nil
-}
-
-func (processor *messageProcessor) ProcessMessage(messageType int, message []byte) (response []byte, err error) {
-	if processor.messageHandler != nil {
-		response = processor.messageHandler(message)
-	}
-
-	return response, nil
 }

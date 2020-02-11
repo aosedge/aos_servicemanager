@@ -18,8 +18,8 @@
 package wsserver
 
 import (
-	"container/list"
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -41,47 +41,41 @@ const (
  * Types
  ******************************************************************************/
 
-// MessageProcessor specifies ws client interface
-type MessageProcessor interface {
-	ProcessMessage(messageType int, message []byte) (response []byte, err error)
-}
-
-// SendMessage send message function
-type SendMessage func(messageType int, message []byte) (err error)
-
-// NewMessageProcessor function called to create new message processor
-type NewMessageProcessor func(sendMessage SendMessage) (processor MessageProcessor, err error)
-
 // Server websocket server structure
 type Server struct {
-	name                string
-	newMessageProcessor NewMessageProcessor
-	httpServer          *http.Server
-	upgrader            websocket.Upgrader
+	name       string
+	httpServer *http.Server
+	upgrader   websocket.Upgrader
 	sync.Mutex
-	clients *list.List
+	clients        map[string]*ClientHandler
+	processMessage ProcessMessage
 }
 
-type clientHandler struct {
-	MessageProcessor
-	name       string
-	connection *websocket.Conn
+// ClientHandler websocket client handler
+type ClientHandler struct {
+	RemoteAddr     string
+	processMessage ProcessMessage
+	connection     *websocket.Conn
 	sync.Mutex
 }
+
+// ProcessMessage callback function used to process incoming messagess
+type ProcessMessage func(messageType int, message []byte) (response []byte, err error)
 
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new Web socket server
-func New(name, url, cert, key string, newMessageProcessor NewMessageProcessor) (server *Server, err error) {
+func New(name, url, cert, key string, processMessage ProcessMessage) (server *Server, err error) {
 	server = &Server{
-		name:                name,
-		newMessageProcessor: newMessageProcessor,
+		name: name,
 		upgrader: websocket.Upgrader{
 			// TODO: Implement proper check origin validation
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		processMessage: processMessage,
+		clients:        make(map[string]*ClientHandler),
 	}
 
 	log.WithField("server", server.name).Debug("Create ws server")
@@ -90,7 +84,6 @@ func New(name, url, cert, key string, newMessageProcessor NewMessageProcessor) (
 	serveMux.HandleFunc("/", server.handleConnection)
 
 	server.httpServer = &http.Server{Addr: url, Handler: serveMux}
-	server.clients = list.New()
 
 	go func(crt, key string) {
 		log.WithFields(log.Fields{"address": url, "crt": crt, "key": key}).Debug("Listen for clients")
@@ -104,40 +97,118 @@ func New(name, url, cert, key string, newMessageProcessor NewMessageProcessor) (
 	return server, nil
 }
 
-// Close closes web socket server and all connections
-func (server *Server) Close() {
-	log.WithField("server", server.name).Debug("Close ws server")
-
+// GetClients return client list
+func (server *Server) GetClients() (clients []*ClientHandler) {
 	server.Lock()
 	defer server.Unlock()
 
-	var next *list.Element
-	for element := server.clients.Front(); element != nil; element = next {
-		element.Value.(*clientHandler).close(true)
-		next = element.Next()
-		server.clients.Remove(element)
+	clients = make([]*ClientHandler, 0, len(server.clients))
+
+	for _, client := range server.clients {
+		clients = append(clients, client)
+	}
+
+	return clients
+}
+
+// Close closes web socket server and all connections
+func (server *Server) Close() {
+	server.Lock()
+	defer server.Unlock()
+
+	log.WithField("server", server.name).Debug("Close ws server")
+
+	for _, client := range server.clients {
+		client.close(true)
 	}
 
 	server.httpServer.Shutdown(context.Background())
+}
+
+// SendMessage sends message to ws client
+func (handler *ClientHandler) SendMessage(messageType int, data []byte) (err error) {
+	handler.Lock()
+	defer handler.Unlock()
+
+	if messageType == websocket.TextMessage {
+		log.WithFields(log.Fields{
+			"message":    string(data),
+			"remoteAddr": handler.RemoteAddr}).Debug("Send message")
+	} else {
+		log.WithFields(log.Fields{
+			"message":    data,
+			"remoteAddr": handler.RemoteAddr}).Debug("Send message")
+	}
+
+	if writeSocketTimeout != 0 {
+		handler.connection.SetWriteDeadline(time.Now().Add(writeSocketTimeout))
+	}
+
+	if err = handler.connection.WriteMessage(messageType, data); err != nil {
+		if err != websocket.ErrCloseSent {
+			log.Errorf("Can't write message: %s", err)
+			handler.connection.Close()
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
 
-func (handler *clientHandler) close(sendCloseMessage bool) (err error) {
+func (server *Server) newHandler(w http.ResponseWriter, r *http.Request) (handler *ClientHandler, err error) {
+	server.Lock()
+	defer server.Unlock()
+
+	defer func() {
+		if err != nil {
+			if handler.connection != nil {
+				handler.connection.Close()
+			}
+		}
+	}()
+
+	handler = &ClientHandler{RemoteAddr: r.RemoteAddr, processMessage: server.processMessage}
+
+	if websocket.IsWebSocketUpgrade(r) != true {
+		return nil, errors.New("new connection is not websocket")
+	}
+
+	if handler.connection, err = server.upgrader.Upgrade(w, r, nil); err != nil {
+		return nil, err
+	}
+
+	server.clients[handler.RemoteAddr] = handler
+
+	return handler, nil
+}
+
+func (server *Server) deleteHandler(handler *ClientHandler) (err error) {
+	server.Lock()
+	defer server.Unlock()
+
+	delete(server.clients, handler.RemoteAddr)
+	handler.close(false)
+
+	return nil
+}
+
+func (handler *ClientHandler) close(sendCloseMessage bool) (err error) {
 	log.WithFields(log.Fields{
-		"RemoteAddr": handler.connection.RemoteAddr(),
-		"server":     handler.name}).Info("Close client")
+		"remoteAddr": handler.connection.RemoteAddr()}).Info("Close client")
 
 	if sendCloseMessage {
-		handler.sendMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		handler.SendMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	}
 
 	return handler.connection.Close()
 }
 
-func (handler *clientHandler) run() {
+func (handler *ClientHandler) run() {
 	for {
 		messageType, message, err := handler.connection.ReadMessage()
 		if err != nil {
@@ -151,55 +222,28 @@ func (handler *clientHandler) run() {
 
 		if messageType == websocket.TextMessage {
 			log.WithFields(log.Fields{
-				"message": string(message),
-				"server":  handler.name}).Debug("Receive message")
+				"message":    string(message),
+				"removeAddr": handler.RemoteAddr}).Debug("Receive message")
 		} else {
 			log.WithFields(log.Fields{
-				"message": message,
-				"server":  handler.name}).Debug("Receive message")
+				"message":    message,
+				"remoteAddr": handler.RemoteAddr}).Debug("Receive message")
 		}
 
-		response, err := handler.ProcessMessage(messageType, message)
-		if err != nil {
-			log.Errorf("Can't process message: %s", err)
-			continue
-		}
+		if handler.processMessage != nil {
+			response, err := handler.processMessage(messageType, message)
+			if err != nil {
+				log.Errorf("Can't process message: %s", err)
+				continue
+			}
 
-		if response != nil {
-			if err := handler.sendMessage(messageType, response); err != nil {
-				log.Errorf("Can't send message: %s", err)
+			if response != nil {
+				if err := handler.SendMessage(messageType, response); err != nil {
+					log.Errorf("Can't send message: %s", err)
+				}
 			}
 		}
 	}
-}
-
-func (handler *clientHandler) sendMessage(messageType int, data []byte) (err error) {
-	handler.Lock()
-	defer handler.Unlock()
-
-	if messageType == websocket.TextMessage {
-		log.WithFields(log.Fields{
-			"message": string(data),
-			"server":  handler.name}).Debug("Send message")
-	} else {
-		log.WithFields(log.Fields{
-			"message": data,
-			"server":  handler.name}).Debug("Send message")
-	}
-
-	if writeSocketTimeout != 0 {
-		handler.connection.SetWriteDeadline(time.Now().Add(writeSocketTimeout))
-	}
-
-	if err = handler.connection.WriteMessage(messageType, data); err != nil {
-		log.Errorf("Can't write message: %s", err)
-
-		handler.connection.Close()
-
-		return err
-	}
-
-	return nil
 }
 
 func (server *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
@@ -207,42 +251,15 @@ func (server *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
 		"remoteAddr": r.RemoteAddr,
 		"server":     server.name}).Debug("New connection request")
 
-	if websocket.IsWebSocketUpgrade(r) != true {
-		log.Error("New connection is not websocket")
-		return
-	}
-
-	connection, err := server.upgrader.Upgrade(w, r, nil)
+	handler, err := server.newHandler(w, r)
 	if err != nil {
-		log.Error("Can't make websocket connection: ", err)
+		log.Errorf("Can't create client handler: %s", err)
 		return
 	}
-
-	handler := &clientHandler{name: server.name, connection: connection}
-
-	processor, err := server.newMessageProcessor(handler.sendMessage)
-	if err != nil {
-		log.Error("Can't create websocket client connection: ", err)
-		connection.Close()
-		return
-	}
-
-	handler.MessageProcessor = processor
-
-	server.Lock()
-	clientElement := server.clients.PushBack(handler)
-	server.Unlock()
 
 	handler.run()
 
-	server.Lock()
-	defer server.Unlock()
-
-	for element := server.clients.Front(); element != nil; element = element.Next() {
-		if element == clientElement {
-			handler.close(false)
-			server.clients.Remove(clientElement)
-			break
-		}
+	if err = server.deleteHandler(handler); err != nil {
+		log.Errorf("Can't delete client handler: %s", err)
 	}
 }

@@ -118,7 +118,7 @@ func TestMain(m *testing.M) {
 
 	server, err = wsserver.New("TestServer", url.Host,
 		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor)
+		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", processMessage)
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}
@@ -293,11 +293,7 @@ func (sender *testSender) SendSystemUpgradeStatus(upgradeStatus, upgradeError st
 	return nil
 }
 
-func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.MessageProcessor, err error) {
-	return &messageProcessor{}, nil
-}
-
-func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
+func processMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
 	var message umprotocol.Message
 	var response interface{}
 
