@@ -339,11 +339,11 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	um.Unlock()
 	defer um.Lock()
 
-	if len(um.upgradeMetadata.Data) == 0 {
-		return errors.New("metadata doesn't contain file info")
+	if len(um.upgradeMetadata.Data.URLs) == 0 {
+		return errors.New("metadata doesn't contain URL for download")
 	}
 
-	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeMetadata.Data[0].URLs[0]))
+	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeMetadata.Data.URLs[0]))
 	if err != nil {
 		return err
 	}
@@ -351,7 +351,7 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	upgradeReq := umprotocol.UpgradeReq{
 		ImageVersion: um.upgradeVersion,
 		ImageInfo: umprotocol.ImageInfo{
-			Path:   um.upgradeMetadata.Data[0].URLs[0],
+			Path:   um.upgradeMetadata.Data.URLs[0],
 			Sha256: fileInfo.Sha256,
 			Sha512: fileInfo.Sha512,
 			Size:   fileInfo.Size,
@@ -426,76 +426,73 @@ func (um *Client) downloadImage() {
 		return
 	}
 
-	if len(um.upgradeMetadata.Data) == 0 {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "upgrade file list is empty")
+	if len(um.upgradeMetadata.Data.URLs) == 0 {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "upgrade file list URLs is empty")
 		return
 	}
 
-	for i, data := range um.upgradeMetadata.Data {
+	fileDownloaded := false
+	fileName := ""
 
-		fileDownloaded := false
-		fileName := ""
+	for _, rawURL := range um.upgradeMetadata.Data.URLs {
+		url, err := url.Parse(rawURL)
+		if err != nil {
+			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
+			return
+		}
 
-		for _, rawURL := range data.URLs {
-			url, err := url.Parse(rawURL)
-			if err != nil {
-				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-				return
-			}
-
-			// skip already downloaded and decrypted files
-			if !url.IsAbs() {
-				break
-			}
-
-			var stat syscall.Statfs_t
-
-			syscall.Statfs(um.downloadDir, &stat)
-
-			if data.Size > stat.Bavail*uint64(stat.Bsize) {
-				um.sendUpgradeStatus(umprotocol.FailedStatus, "not enough space")
-				return
-			}
-
-			if fileName, err = image.Download(um.downloadDir, rawURL); err != nil {
-				log.WithField("url", rawURL).Warningf("Can't download file: %s", err)
-				continue
-			}
-
-			fileDownloaded = true
-
+		// skip already downloaded and decrypted files
+		if !url.IsAbs() {
 			break
 		}
 
-		if !fileDownloaded {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, "can't download file from any source")
+		var stat syscall.Statfs_t
+
+		syscall.Statfs(um.downloadDir, &stat)
+
+		if um.upgradeMetadata.Data.Size > stat.Bavail*uint64(stat.Bsize) {
+			um.sendUpgradeStatus(umprotocol.FailedStatus, "not enough space")
 			return
 		}
 
-		if err = um.checkFile(fileName, data); err != nil {
+		if fileName, err = image.Download(um.downloadDir, rawURL); err != nil {
+			log.WithField("url", rawURL).Warningf("Can't download file: %s", err)
+			continue
+		}
+
+		fileDownloaded = true
+
+		break
+	}
+
+	if !fileDownloaded {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "can't download file from any source")
+		return
+	}
+
+	if err = um.checkFile(fileName, um.upgradeMetadata.Data); err != nil {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
+		return
+	}
+
+	if um.upgradeMetadata.Data.DecryptionInfo != nil {
+		if err = um.decryptImage(
+			fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeMetadata.Data.DecryptionInfo); err != nil {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
-
-		if data.DecryptionInfo != nil {
-			if err = um.decryptImage(
-				fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), data.DecryptionInfo); err != nil {
-				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-				return
-			}
-		} else {
-			if err = os.Rename(fileName, path.Join(um.upgradeDir, filepath.Base(fileName))); err != nil {
-				um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-				return
-			}
-		}
-
-		um.upgradeMetadata.Data[i].URLs = []string{filepath.Base(fileName)}
-
-		if err = um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
+	} else {
+		if err = os.Rename(fileName, path.Join(um.upgradeDir, filepath.Base(fileName))); err != nil {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
+	}
+
+	um.upgradeMetadata.Data.URLs = []string{filepath.Base(fileName)}
+
+	if err = um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
+		return
 	}
 
 	if err = um.checkSigns(); err != nil {
@@ -577,22 +574,21 @@ func (um *Client) checkSigns() (err error) {
 		}
 	}
 
-	for _, data := range um.upgradeMetadata.Data {
-		if data.Signs == nil {
-			continue
-		}
+	if um.upgradeMetadata.Data.Signs == nil {
+		return errors.New("upgradeMetadata does not have signature")
+	}
 
-		file, err := os.Open(path.Join(um.upgradeDir, data.URLs[0]))
-		if err != nil {
-			return err
-		}
-		defer file.Close()
+	file, err := os.Open(path.Join(um.upgradeDir, um.upgradeMetadata.Data.URLs[0]))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
-		log.WithField("file", file.Name()).Debug("Check signature")
+	log.WithField("file", file.Name()).Debug("Check signature")
 
-		if err = context.VerifySign(file, data.Signs.ChainName, data.Signs.Alg, data.Signs.Value); err != nil {
-			return err
-		}
+	if err = context.VerifySign(file, um.upgradeMetadata.Data.Signs.ChainName, um.upgradeMetadata.Data.Signs.Alg,
+		um.upgradeMetadata.Data.Signs.Value); err != nil {
+		return err
 	}
 
 	return nil

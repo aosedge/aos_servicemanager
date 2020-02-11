@@ -633,13 +633,12 @@ func TestUpgradeState(t *testing.T) {
 
 func TestUpgradeMetadata(t *testing.T) {
 	setUpgradeMetadata := amqp.UpgradeMetadata{
-		Data: []amqp.UpgradeFileInfo{
-			amqp.UpgradeFileInfo{
-				Target: "target",
-				URLs:   []string{"url1", "url2", "url3"},
-				Sha256: []byte("sha256"),
-				Sha512: []byte("sha512"),
-				Size:   1234}}}
+		Data: amqp.UpgradeFileInfo{
+			Target: "target",
+			URLs:   []string{"url1", "url2", "url3"},
+			Sha256: []byte("sha256"),
+			Sha512: []byte("sha512"),
+			Size:   1234}}
 
 	if err := db.SetUpgradeMetadata(setUpgradeMetadata); err != nil {
 		t.Fatalf("Can't set upgrade metadata: %s", err)

@@ -189,7 +189,7 @@ type UpgradeCertificate struct {
 // UpgradeMetadata upgrade metadata
 type UpgradeMetadata struct {
 	UpgradeType       string                    `json:"upgradeType"`
-	Data              []UpgradeFileInfo         `json:"data"`
+	Data              UpgradeFileInfo           `json:"data"`
 	CertificateChains []UpgradeCertificateChain `json:"certificateChains,omitempty"`
 	Certificates      []UpgradeCertificate      `json:"certificates,omitempty"`
 }
