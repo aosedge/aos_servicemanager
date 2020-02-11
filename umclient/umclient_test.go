@@ -214,11 +214,6 @@ func TestGetSystemVersion(t *testing.T) {
 }
 
 func TestSystemUpgrade(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestSystemUpgrade")
-		return
-	}
-
 	imageVersion = 3
 
 	if err := client.Connect(serverURL); err != nil {
