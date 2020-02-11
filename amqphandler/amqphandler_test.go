@@ -183,30 +183,30 @@ func TestSendMessages(t *testing.T) {
 		t.Fatalf("Can't connect to server: %s", err)
 	}
 
-	testData := []interface{}{
-		&amqphandler.StateAcceptance{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: amqphandler.ProtocolVersion},
-			ServiceID:     "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"},
+	testData := []*amqphandler.AOSMessage{
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.StateAcceptance{ServiceID: "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"}},
 
-		&amqphandler.UpdateState{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: amqphandler.ProtocolVersion},
-			ServiceID:     "service1", Checksum: "0993478847", State: "This is new state"},
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.UpdateState{ServiceID: "service1", Checksum: "0993478847", State: "This is new state"}},
 
-		&amqphandler.RequestServiceLog{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: amqphandler.ProtocolVersion},
-			ServiceID:     "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.RequestServiceLog{ServiceID: "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}}},
 
-		&amqphandler.RequestServiceCrashLog{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
-			ServiceID:     "service3", LogID: uuid.New().String()},
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.RequestServiceCrashLog{ServiceID: "service3", LogID: uuid.New().String()}},
 
-		&amqphandler.SystemRevert{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: amqphandler.ProtocolVersion},
-			ImageVersion:  3},
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.SystemRevert{ImageVersion: 3}},
 
-		&amqphandler.SystemUpgrade{
-			MessageHeader: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: amqphandler.ProtocolVersion},
-			ImageVersion:  4},
+		&amqphandler.AOSMessage{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.SystemUpgrade{ImageVersion: 4}},
 	}
 
 	for _, message := range testData {
@@ -219,8 +219,8 @@ func TestSendMessages(t *testing.T) {
 
 		select {
 		case receiveMessage := <-amqpHandler.MessageChannel:
-			if !reflect.DeepEqual(message, receiveMessage.Data) {
-				t.Errorf("Wrong data received: %v %v", message, receiveMessage.Data)
+			if !reflect.DeepEqual(message.Data, receiveMessage.Data) {
+				t.Errorf("Wrong data received: %v %v", message.Data, receiveMessage.Data)
 				continue
 			}
 
@@ -255,7 +255,7 @@ func TestReceiveMessages(t *testing.T) {
 	type messageDesc struct {
 		correlationID string
 		call          func() error
-		data          interface{}
+		data          amqphandler.AOSMessage
 		getDataType   func() interface{}
 	}
 
@@ -324,11 +324,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendInitialSetup(initialSetupData)
 			},
-			data: &amqphandler.VehicleStatus{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.VehicleStatusType},
-				Services: initialSetupData},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.VehicleStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.VehicleStatus{Services: initialSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.VehicleStatus{}
 			},
@@ -338,11 +336,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendServiceStatus(initialSetupData[0])
 			},
-			data: &amqphandler.VehicleStatus{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.ServiceStatusType},
-				Services: []amqphandler.ServiceInfo{initialSetupData[0]}},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.VehicleStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.VehicleStatus{Services: []amqphandler.ServiceInfo{initialSetupData[0]}}},
 			getDataType: func() interface{} {
 				return &amqphandler.VehicleStatus{}
 			},
@@ -352,12 +348,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendMonitoringData(monitoringData)
 			},
-			data: &amqphandler.MonitoringData{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.MonitoringDataType},
-				Timestamp: monitoringData.Timestamp,
-				Data:      monitoringData.Data},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.MonitoringDataType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.MonitoringData{Timestamp: monitoringData.Timestamp, Data: monitoringData.Data}},
 			getDataType: func() interface{} {
 				return &amqphandler.MonitoringData{}
 			},
@@ -368,13 +361,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendNewState("service0", "This is state", "12345679", sendNewStateCorrelationID)
 			},
-			data: &amqphandler.NewState{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.NewStateType},
-				ServiceID: "service0",
-				Checksum:  "12345679",
-				State:     "This is state"},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.NewStateType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.NewState{ServiceID: "service0", Checksum: "12345679", State: "This is state"}},
 			getDataType: func() interface{} {
 				return &amqphandler.NewState{}
 			},
@@ -384,12 +373,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendStateRequest("service1", true)
 			},
-			data: &amqphandler.StateRequest{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.StateRequestType},
-				ServiceID: "service1",
-				Default:   true},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.StateRequestType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.StateRequest{ServiceID: "service1", Default: true}},
 			getDataType: func() interface{} {
 				return &amqphandler.StateRequest{}
 			},
@@ -399,15 +385,14 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendServiceLog(pushServiceLogData)
 			},
-			data: &amqphandler.PushServiceLog{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.PushServiceLogType},
-				LogID:     pushServiceLogData.LogID,
-				PartCount: pushServiceLogData.PartCount,
-				Part:      pushServiceLogData.Part,
-				Data:      pushServiceLogData.Data,
-				Error:     pushServiceLogData.Error},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.PushServiceLogType, Version: amqphandler.ProtocolVersion},
+				Data: &amqphandler.PushServiceLog{
+					LogID:     pushServiceLogData.LogID,
+					PartCount: pushServiceLogData.PartCount,
+					Part:      pushServiceLogData.Part,
+					Data:      pushServiceLogData.Data,
+					Error:     pushServiceLogData.Error}},
 			getDataType: func() interface{} {
 				return &amqphandler.PushServiceLog{}
 			},
@@ -417,11 +402,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendAlerts(alertsData)
 			},
-			data: &amqphandler.Alerts{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.AlertsType},
-				Data: alertsData.Data},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.AlertsType, Version: amqphandler.ProtocolVersion},
+				Data:   &alertsData},
 			getDataType: func() interface{} {
 				return &amqphandler.Alerts{}
 			},
@@ -431,12 +414,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendSystemRevertStatus("success", "", 3)
 			},
-			data: &amqphandler.SystemRevertStatus{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.SystemRevertStatusType},
-				Status:       "success",
-				ImageVersion: 3},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.SystemRevertStatus{Status: "success", ImageVersion: 3}},
 			getDataType: func() interface{} {
 				return &amqphandler.SystemRevertStatus{}
 			},
@@ -446,12 +426,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendSystemUpgradeStatus("failed", "", 4)
 			},
-			data: &amqphandler.SystemUpgradeStatus{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.SystemUpgradeStatusType},
-				Status:       "failed",
-				ImageVersion: 4},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.SystemUpgradeStatus{Status: "failed", ImageVersion: 4}},
 			getDataType: func() interface{} {
 				return &amqphandler.SystemUpgradeStatus{}
 			},
@@ -461,11 +438,9 @@ func TestReceiveMessages(t *testing.T) {
 			call: func() error {
 				return amqpHandler.SendSystemVersion(5)
 			},
-			data: &amqphandler.SystemVersion{
-				MessageHeader: amqphandler.MessageHeader{
-					Version:     amqphandler.ProtocolVersion,
-					MessageType: amqphandler.SystemVersionType},
-				ImageVersion: 5},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemVersionType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.SystemVersion{ImageVersion: 5}},
 			getDataType: func() interface{} {
 				return &amqphandler.SystemVersion{}
 			},
@@ -480,9 +455,10 @@ func TestReceiveMessages(t *testing.T) {
 
 		select {
 		case delivery := <-testClient.delivery:
-			receiveData := message.getDataType()
+			var rawData json.RawMessage
+			receiveData := amqphandler.AOSMessage{Data: &rawData}
 
-			if err = json.Unmarshal(delivery.Body, receiveData); err != nil {
+			if err = json.Unmarshal(delivery.Body, &receiveData); err != nil {
 				t.Errorf("Error parsing message: %s", err)
 				continue
 			}
@@ -491,8 +467,20 @@ func TestReceiveMessages(t *testing.T) {
 				t.Errorf("Wrong correlation ID received: %s %s", message.correlationID, delivery.CorrelationId)
 			}
 
-			if !reflect.DeepEqual(receiveData, message.data) {
-				t.Errorf("Wrong data received: %v %v", message.data, receiveData)
+			if !reflect.DeepEqual(receiveData.Header, message.data.Header) {
+				t.Errorf("Wrong Header received: %v != %v", receiveData.Header, message.data.Header)
+				continue
+			}
+
+			decodedMsg := message.getDataType()
+
+			if err = json.Unmarshal(rawData, &decodedMsg); err != nil {
+				t.Errorf("Error parsing message: %s", err)
+				continue
+			}
+
+			if !reflect.DeepEqual(message.data.Data, decodedMsg) {
+				t.Errorf("Wrong data received: %v != %v", decodedMsg, message.data.Data)
 			}
 
 		case err = <-testClient.errChannel:

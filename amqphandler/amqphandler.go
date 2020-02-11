@@ -104,22 +104,25 @@ type MessageHeader struct {
 	MessageType string `json:"messageType"`
 }
 
+// AOSMessage structure for AOS messages
+type AOSMessage struct {
+	Header MessageHeader `json:"header"`
+	Data   interface{}   `json:"data"`
+}
+
 // DesiredStatus desired status message
 type DesiredStatus struct {
-	MessageHeader
 	Services []byte `json:"services"`
 }
 
 // RequestServiceCrashLog request service crash log message
 type RequestServiceCrashLog struct {
-	MessageHeader
 	ServiceID string `json:"serviceId"`
 	LogID     string `json:"logID"`
 }
 
 // RequestServiceLog request service log message
 type RequestServiceLog struct {
-	MessageHeader
 	ServiceID string     `json:"serviceId"`
 	LogID     string     `json:"logID"`
 	From      *time.Time `json:"from"`
@@ -128,7 +131,6 @@ type RequestServiceLog struct {
 
 // StateAcceptance state acceptance message
 type StateAcceptance struct {
-	MessageHeader
 	ServiceID string `json:"serviceId"`
 	Checksum  string `json:"checksum"`
 	Result    string `json:"result"`
@@ -137,7 +139,6 @@ type StateAcceptance struct {
 
 // SystemRevert system revert structure
 type SystemRevert struct {
-	MessageHeader
 	ImageVersion uint64 `json:"imageVersion"`
 }
 
@@ -195,14 +196,12 @@ type UpgradeMetadata struct {
 
 // SystemUpgrade system upgrade structure
 type SystemUpgrade struct {
-	MessageHeader
 	ImageVersion uint64          `json:"imageVersion"`
 	Metadata     UpgradeMetadata `json:"metadata"`
 }
 
 // UpdateState state update message
 type UpdateState struct {
-	MessageHeader
 	ServiceID string `json:"serviceId"`
 	Checksum  string `json:"stateChecksum"`
 	State     string `json:"state"`
@@ -230,13 +229,11 @@ type AlertItem struct {
 
 // Alerts alerts message structure
 type Alerts struct {
-	MessageHeader
 	Data []AlertItem `json:"data"`
 }
 
 // NewState new state structure
 type NewState struct {
-	MessageHeader
 	ServiceID string `json:"serviceId"`
 	Checksum  string `json:"stateChecksum"`
 	State     string `json:"state"`
@@ -254,7 +251,6 @@ type ServiceMonitoringData struct {
 
 // MonitoringData monitoring data structure
 type MonitoringData struct {
-	MessageHeader
 	Timestamp time.Time `json:"timestamp"`
 	Data      struct {
 		Global struct {
@@ -270,7 +266,6 @@ type MonitoringData struct {
 
 // PushServiceLog push service log structure
 type PushServiceLog struct {
-	MessageHeader
 	LogID     string  `json:"logID"`
 	PartCount *uint64 `json:"partCount,omitempty"`
 	Part      *uint64 `json:"part,omitempty"`
@@ -280,14 +275,12 @@ type PushServiceLog struct {
 
 // StateRequest state request structure
 type StateRequest struct {
-	MessageHeader
 	ServiceID string `json:"serviceId"`
 	Default   bool   `json:"default"`
 }
 
 // SystemRevertStatus system revert status structure
 type SystemRevertStatus struct {
-	MessageHeader
 	Status       string  `json:"revertStatus"`
 	Error        *string `json:"error,omitempty"`
 	ImageVersion uint64  `json:"imageVersion"`
@@ -295,7 +288,6 @@ type SystemRevertStatus struct {
 
 // SystemUpgradeStatus system upgrade status structure
 type SystemUpgradeStatus struct {
-	MessageHeader
 	Status       string  `json:"upgradeStatus"`
 	Error        *string `json:"error,omitempty"`
 	ImageVersion uint64  `json:"imageVersion"`
@@ -303,13 +295,11 @@ type SystemUpgradeStatus struct {
 
 // SystemVersion system version structure
 type SystemVersion struct {
-	MessageHeader
 	ImageVersion uint64 `json:"imageVersion"`
 }
 
 // VehicleStatus vehicle status structure
 type VehicleStatus struct {
-	MessageHeader
 	Services []ServiceInfo `json:"services"`
 }
 
@@ -511,80 +501,66 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list of available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", VehicleStatus{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: VehicleStatusType},
-		Services: serviceList}}
+	statusMsg := createAosMessage(VehicleStatusType, VehicleStatus{Services: serviceList})
+
+	handler.sendChannel <- Message{"", statusMsg}
 
 	return nil
 }
 
 // SendServiceStatus sends message with service status
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	handler.sendChannel <- Message{"", VehicleStatus{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: ServiceStatusType},
-		Services: []ServiceInfo{serviceStatus}}}
+	statusMsg := createAosMessage(VehicleStatusType,
+		VehicleStatus{Services: []ServiceInfo{serviceStatus}})
+
+	handler.sendChannel <- Message{"", statusMsg}
 
 	return nil
 }
 
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
-	monitoringData.MessageHeader = MessageHeader{
-		Version:     ProtocolVersion,
-		MessageType: MonitoringDataType}
+	monitoringMsg := createAosMessage(MonitoringDataType, monitoringData)
 
-	handler.sendChannel <- Message{"", monitoringData}
+	handler.sendChannel <- Message{"", monitoringMsg}
 
 	return nil
 }
 
 // SendNewState sends new state message
 func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
-	handler.sendChannel <- Message{correlationID, NewState{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: NewStateType},
-		ServiceID: serviceID,
-		State:     state,
-		Checksum:  checksum}}
+	newStateMsg := createAosMessage(NewStateType,
+		NewState{ServiceID: serviceID, State: state, Checksum: checksum})
+
+	handler.sendChannel <- Message{correlationID, newStateMsg}
 
 	return nil
 }
 
 // SendStateRequest sends state request message
 func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
-	handler.sendChannel <- Message{"", StateRequest{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: StateRequestType},
-		ServiceID: serviceID,
-		Default:   defaultState}}
+	stateRequestMsg := createAosMessage(StateRequestType,
+		StateRequest{ServiceID: serviceID, Default: defaultState})
+
+	handler.sendChannel <- Message{"", stateRequestMsg}
 
 	return nil
 }
 
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
-	serviceLog.MessageHeader = MessageHeader{
-		Version:     ProtocolVersion,
-		MessageType: PushServiceLogType}
+	serviceLogMsg := createAosMessage(PushServiceLogType, serviceLog)
 
-	handler.sendChannel <- Message{"", serviceLog}
+	handler.sendChannel <- Message{"", serviceLogMsg}
 
 	return nil
 }
 
 // SendAlerts sends alerts message
 func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
-	alerts.MessageHeader = MessageHeader{
-		Version:     ProtocolVersion,
-		MessageType: AlertsType}
+	alertMsg := createAosMessage(AlertsType, alerts)
 
-	handler.sendChannel <- Message{"", alerts}
+	handler.sendChannel <- Message{"", alertMsg}
 
 	return nil
 }
@@ -597,13 +573,10 @@ func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError str
 		errorValue = nil
 	}
 
-	handler.sendChannel <- Message{"", SystemRevertStatus{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: SystemRevertStatusType},
-		Status:       revertStatus,
-		Error:        errorValue,
-		ImageVersion: imageVersion}}
+	revertStatusMsg := createAosMessage(SystemRevertStatusType,
+		SystemRevertStatus{Status: revertStatus, Error: errorValue, ImageVersion: imageVersion})
+
+	handler.sendChannel <- Message{"", revertStatusMsg}
 
 	return nil
 }
@@ -616,24 +589,19 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 		errorValue = nil
 	}
 
-	handler.sendChannel <- Message{"", SystemUpgradeStatus{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: SystemUpgradeStatusType},
-		Status:       upgradeStatus,
-		Error:        errorValue,
-		ImageVersion: imageVersion}}
+	upgradeStatusMsg := createAosMessage(SystemUpgradeStatusType,
+		SystemUpgradeStatus{Status: upgradeStatus, Error: errorValue, ImageVersion: imageVersion})
+
+	handler.sendChannel <- Message{"", upgradeStatusMsg}
 
 	return nil
 }
 
 // SendSystemVersion sends system version
 func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
-	handler.sendChannel <- Message{"", SystemVersion{
-		MessageHeader: MessageHeader{
-			Version:     ProtocolVersion,
-			MessageType: SystemVersionType},
-		ImageVersion: imageVersion}}
+	systemVersionMsg := createAosMessage(SystemVersionType, SystemVersion{ImageVersion: imageVersion})
+
+	handler.sendChannel <- Message{"", systemVersionMsg}
 
 	return nil
 }
@@ -893,32 +861,33 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				"message":      string(delivery.Body),
 				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
 
-			header := MessageHeader{}
+			var rawData json.RawMessage
+			incomingMsg := AOSMessage{Data: &rawData}
 
-			if err := json.Unmarshal(delivery.Body, &header); err != nil {
-				log.Errorf("Can't parse message body: %s", err)
+			if err := json.Unmarshal(delivery.Body, &incomingMsg); err != nil {
+				log.Errorf("Can't parse message header: %s", err)
 				continue
 			}
 
-			if header.Version != ProtocolVersion {
-				log.Errorf("Unsupported protocol version: %d", header.Version)
+			if incomingMsg.Header.Version != ProtocolVersion {
+				log.Errorf("Unsupported protocol version: %d", incomingMsg.Header.Version)
 				continue
 			}
 
-			messageType, ok := messageMap[header.MessageType]
+			messageType, ok := messageMap[incomingMsg.Header.MessageType]
 			if !ok {
-				log.Warnf("AMQP unsupported message type: %s", header.MessageType)
+				log.Warnf("AMQP unsupported message type: %s", incomingMsg.Header.MessageType)
 				continue
 			}
 
 			data := messageType()
 
-			if err := json.Unmarshal(delivery.Body, data); err != nil {
+			if err := json.Unmarshal(rawData, data); err != nil {
 				log.Errorf("Can't parse message body: %s", err)
 				continue
 			}
 
-			if header.MessageType == DesiredStatusType {
+			if incomingMsg.Header.MessageType == DesiredStatusType {
 				var err error
 
 				encodedData, ok := data.(*DesiredStatus)
@@ -951,4 +920,12 @@ func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
 	}
 
 	return services, nil
+}
+
+func createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
+	msg = AOSMessage{
+		Header: MessageHeader{Version: ProtocolVersion, MessageType: msgType},
+		Data:   data}
+
+	return msg
 }
