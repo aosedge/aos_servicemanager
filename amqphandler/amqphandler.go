@@ -250,16 +250,14 @@ type ServiceMonitoringData struct {
 // MonitoringData monitoring data structure
 type MonitoringData struct {
 	Timestamp time.Time `json:"timestamp"`
-	Data      struct {
-		Global struct {
-			RAM        uint64 `json:"ram"`
-			CPU        uint64 `json:"cpu"`
-			UsedDisk   uint64 `json:"usedDisk"`
-			InTraffic  uint64 `json:"inTraffic"`
-			OutTraffic uint64 `json:"outTraffic"`
-		} `json:"global"`
-		ServicesData []ServiceMonitoringData `json:"servicesData"`
-	} `json:"data"`
+	Global    struct {
+		RAM        uint64 `json:"ram"`
+		CPU        uint64 `json:"cpu"`
+		UsedDisk   uint64 `json:"usedDisk"`
+		InTraffic  uint64 `json:"inTraffic"`
+		OutTraffic uint64 `json:"outTraffic"`
+	} `json:"global"`
+	ServicesData []ServiceMonitoringData `json:"servicesData"`
 }
 
 // PushServiceLog push service log structure

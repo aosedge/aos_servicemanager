@@ -271,12 +271,12 @@ func TestReceiveMessages(t *testing.T) {
 	}
 
 	monitoringData := amqphandler.MonitoringData{Timestamp: time.Now().UTC()}
-	monitoringData.Data.Global.RAM = 1024
-	monitoringData.Data.Global.CPU = 50
-	monitoringData.Data.Global.UsedDisk = 2048
-	monitoringData.Data.Global.InTraffic = 8192
-	monitoringData.Data.Global.OutTraffic = 4096
-	monitoringData.Data.ServicesData = []amqphandler.ServiceMonitoringData{
+	monitoringData.Global.RAM = 1024
+	monitoringData.Global.CPU = 50
+	monitoringData.Global.UsedDisk = 2048
+	monitoringData.Global.InTraffic = 8192
+	monitoringData.Global.OutTraffic = 4096
+	monitoringData.ServicesData = []amqphandler.ServiceMonitoringData{
 		amqphandler.ServiceMonitoringData{ServiceID: "service0", RAM: 1024, CPU: 50, UsedDisk: 100000},
 		amqphandler.ServiceMonitoringData{ServiceID: "service1", RAM: 128, CPU: 60, UsedDisk: 200000},
 		amqphandler.ServiceMonitoringData{ServiceID: "service2", RAM: 256, CPU: 70, UsedDisk: 300000},
@@ -349,7 +349,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.MonitoringDataType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.MonitoringData{Timestamp: monitoringData.Timestamp, Data: monitoringData.Data}},
+				Data:   &monitoringData},
 			getDataType: func() interface{} {
 				return &amqphandler.MonitoringData{}
 			},
