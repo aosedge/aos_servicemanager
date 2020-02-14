@@ -228,9 +228,7 @@ type AlertItem struct {
 }
 
 // Alerts alerts message structure
-type Alerts struct {
-	Data []AlertItem `json:"data"`
-}
+type Alerts []AlertItem
 
 // NewState new state structure
 type NewState struct {

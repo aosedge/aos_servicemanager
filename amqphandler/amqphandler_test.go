@@ -297,27 +297,26 @@ func TestReceiveMessages(t *testing.T) {
 	var alertVersion uint64 = 2
 
 	alertsData := amqphandler.Alerts{
-		Data: []amqphandler.AlertItem{
-			amqphandler.AlertItem{
-				Timestamp: time.Now().UTC(),
-				Tag:       amqphandler.AlertTagSystemError,
-				Source:    "system",
-				Payload:   map[string]interface{}{"Message": "System error"},
-			},
-			amqphandler.AlertItem{
-				Timestamp: time.Now().UTC(),
-				Tag:       amqphandler.AlertTagSystemError,
-				Source:    "service 1",
-				Version:   &alertVersion,
-				Payload:   map[string]interface{}{"Message": "Service crashed"},
-			},
-			amqphandler.AlertItem{
-				Timestamp: time.Now().UTC(),
-				Tag:       amqphandler.AlertTagResource,
-				Source:    "system",
-				Payload:   map[string]interface{}{"Parameter": "cpu", "Value": float64(100)},
-			},
-		}}
+		amqphandler.AlertItem{
+			Timestamp: time.Now().UTC(),
+			Tag:       amqphandler.AlertTagSystemError,
+			Source:    "system",
+			Payload:   map[string]interface{}{"Message": "System error"},
+		},
+		amqphandler.AlertItem{
+			Timestamp: time.Now().UTC(),
+			Tag:       amqphandler.AlertTagSystemError,
+			Source:    "service 1",
+			Version:   &alertVersion,
+			Payload:   map[string]interface{}{"Message": "Service crashed"},
+		},
+		amqphandler.AlertItem{
+			Timestamp: time.Now().UTC(),
+			Tag:       amqphandler.AlertTagResource,
+			Source:    "system",
+			Payload:   map[string]interface{}{"Parameter": "cpu", "Value": float64(100)},
+		},
+	}
 
 	testData := []messageDesc{
 		messageDesc{

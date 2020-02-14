@@ -109,7 +109,7 @@ func New(config *config.Config,
 
 	instance.ticker = time.NewTicker(instance.config.SendPeriod.Duration)
 
-	instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+	instance.alerts = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 
 	if err = instance.setupJournal(); err != nil {
 		return nil, err
@@ -322,8 +322,8 @@ func (instance *Alerts) addAlert(item amqp.AlertItem) {
 	instance.Lock()
 	defer instance.Unlock()
 
-	if len(instance.alerts.Data) != 0 &&
-		reflect.DeepEqual(instance.alerts.Data[len(instance.alerts.Data)-1].Payload, item.Payload) {
+	if len(instance.alerts) != 0 &&
+		reflect.DeepEqual(instance.alerts[len(instance.alerts)-1].Payload, item.Payload) {
 		instance.duplicatedAlerts++
 		return
 	}
@@ -332,7 +332,7 @@ func (instance *Alerts) addAlert(item amqp.AlertItem) {
 	instance.alertsSize += len(data)
 
 	if int(instance.alertsSize) <= instance.config.MaxMessageSize {
-		instance.alerts.Data = append(instance.alerts.Data, item)
+		instance.alerts = append(instance.alerts, item)
 	} else {
 		instance.skippedAlerts++
 	}
@@ -356,7 +356,7 @@ func (instance *Alerts) sendAlerts() {
 			log.Warn("Skip sending alerts due to channel is full")
 		}
 
-		instance.alerts.Data = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+		instance.alerts = make([]amqp.AlertItem, 0, alertsDataAllocSize)
 		instance.skippedAlerts = 0
 		instance.duplicatedAlerts = 0
 		instance.alertsSize = 0

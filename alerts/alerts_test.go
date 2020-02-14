@@ -111,7 +111,7 @@ func waitResult(alertsChannel <-chan amqp.Alerts, timeout time.Duration, checkAl
 	for {
 		select {
 		case alerts := <-alertsChannel:
-			for _, alert := range alerts.Data {
+			for _, alert := range alerts {
 				success, err := checkAlert(alert)
 				if err != nil {
 					return err
@@ -538,8 +538,8 @@ func TestAlertsMaxMessageSize(t *testing.T) {
 
 	select {
 	case alerts := <-alertsHandler.AlertsChannel:
-		if len(alerts.Data) != numExpectedMessages {
-			t.Errorf("Wrong message count received: %d", len(alerts.Data))
+		if len(alerts) != numExpectedMessages {
+			t.Errorf("Wrong message count received: %d", len(alerts))
 		}
 
 	case <-time.After(5 * time.Second):
@@ -604,8 +604,8 @@ func TestDuplicateAlerts(t *testing.T) {
 
 	select {
 	case alerts := <-alertsHandler.AlertsChannel:
-		if len(alerts.Data) != 1 {
-			t.Errorf("Wrong message count received: %d", len(alerts.Data))
+		if len(alerts) != 1 {
+			t.Errorf("Wrong message count received: %d", len(alerts))
 		}
 
 	case <-time.After(5 * time.Second):
