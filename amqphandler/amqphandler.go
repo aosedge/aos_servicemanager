@@ -431,7 +431,7 @@ func New() (handler *AmqpHandler, err error) {
 
 // Connect connects to cloud
 func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []string) (err error) {
-	log.WithFields(log.Fields{"url": sdURL, "vin": systemID, "users": users}).Debug("AMQP connect")
+	log.WithFields(log.Fields{"url": sdURL, "systemID": systemID, "users": users}).Debug("AMQP connect")
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {

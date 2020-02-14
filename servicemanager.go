@@ -431,11 +431,11 @@ func (sm *serviceManager) handleChannels() (err error) {
 func (sm *serviceManager) run() {
 	for {
 		var users []string
-		var vin string
+		var systemID string
 		var err error
 
 		// Get system id
-		if vin, err = sm.identifier.GetSystemID(); err != nil {
+		if systemID, err = sm.identifier.GetSystemID(); err != nil {
 			log.Errorf("Can't get system id: %s", err)
 			goto reconnect
 		}
@@ -458,7 +458,7 @@ func (sm *serviceManager) run() {
 		}
 
 		// Connect
-		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, vin, users); err != nil {
+		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, systemID, users); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
 			goto reconnect
 		}

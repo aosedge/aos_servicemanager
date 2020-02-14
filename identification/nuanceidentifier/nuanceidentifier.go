@@ -53,7 +53,7 @@ func (instance *Instance) Close() (err error) {
 }
 
 // GetSystemID returns the system ID
-func (instance *Instance) GetSystemID() (vin string, err error) {
+func (instance *Instance) GetSystemID() (systemID string, err error) {
 	return "1234567890", nil
 }
 
