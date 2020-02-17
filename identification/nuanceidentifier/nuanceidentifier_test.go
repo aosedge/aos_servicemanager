@@ -41,7 +41,7 @@ func init() {
  ******************************************************************************/
 
 func setup() (err error) {
-	if nuance, err = nuanceidentifier.New(nil); err != nil {
+	if nuance, err = nuanceidentifier.New([]byte(`{"systemID":"123456", "users":["user1"]}`)); err != nil {
 		return err
 	}
 	defer nuance.Close()
@@ -81,7 +81,7 @@ func TestGetSystemID(t *testing.T) {
 		t.Fatalf("Error getting system ID: %s", err)
 	}
 
-	if systemID == "" {
+	if systemID != "123456" {
 		t.Fatalf("Wrong system ID value: %s", systemID)
 	}
 }
@@ -92,7 +92,7 @@ func TestGetUsers(t *testing.T) {
 		t.Fatalf("Error getting users: %s", err)
 	}
 
-	if users == nil {
+	if users[0] != "user1" {
 		t.Fatalf("Wrong users value: %s", users)
 	}
 }

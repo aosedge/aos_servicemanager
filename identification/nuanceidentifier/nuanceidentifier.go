@@ -2,6 +2,7 @@ package nuanceidentifier
 
 import (
 	"encoding/json"
+	"errors"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -20,6 +21,8 @@ type Instance struct {
 }
 
 type instanceConfig struct {
+	SystemID string
+	Users    []string
 }
 
 /*******************************************************************************
@@ -42,6 +45,14 @@ func New(configJSON []byte) (instance *Instance, err error) {
 		}
 	}
 
+	if instance.config.SystemID == "" {
+		return nil, errors.New("System ID is not defined")
+	}
+
+	if len(instance.config.Users) == 0 {
+		return nil, errors.New("Users are not defined")
+	}
+
 	return instance, nil
 }
 
@@ -54,12 +65,12 @@ func (instance *Instance) Close() (err error) {
 
 // GetSystemID returns the system ID
 func (instance *Instance) GetSystemID() (systemID string, err error) {
-	return "1234567890", nil
+	return instance.config.SystemID, nil
 }
 
 // GetUsers returns the user claims
 func (instance *Instance) GetUsers() (users []string, err error) {
-	return []string{"this-is-super-user"}, nil
+	return instance.config.Users, nil
 }
 
 // UsersChangedChannel returns users changed channel
