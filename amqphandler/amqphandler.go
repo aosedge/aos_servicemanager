@@ -163,17 +163,6 @@ type UpgradeSigns struct {
 	OcspValues       []string `json:"ocspValues"`
 }
 
-// UpgradeFileInfo upgrade file info
-type UpgradeFileInfo struct {
-	Target         string                 `json:"target"`
-	URLs           []string               `json:"urls"`
-	Sha256         []byte                 `json:"sha256"`
-	Sha512         []byte                 `json:"sha512"`
-	Size           uint64                 `json:"size"`
-	DecryptionInfo *UpgradeDecryptionInfo `json:"decryptionInfo,omitempty"`
-	Signs          *UpgradeSigns          `json:"signs,omitempty"`
-}
-
 // UpgradeCertificateChain upgrade certificate chain
 type UpgradeCertificateChain struct {
 	Name         string   `json:"name"`
@@ -186,18 +175,17 @@ type UpgradeCertificate struct {
 	Certificate []byte `json:"certificate"`
 }
 
-// UpgradeMetadata upgrade metadata
-type UpgradeMetadata struct {
-	UpgradeType       string                    `json:"upgradeType"`
-	Data              UpgradeFileInfo           `json:"data"`
-	CertificateChains []UpgradeCertificateChain `json:"certificateChains,omitempty"`
-	Certificates      []UpgradeCertificate      `json:"certificates,omitempty"`
-}
-
 // SystemUpgrade system upgrade structure
 type SystemUpgrade struct {
-	ImageVersion uint64          `json:"imageVersion"`
-	Metadata     UpgradeMetadata `json:"metadata"`
+	ImageVersion      uint64                    `json:"imageVersion"`
+	URLs              []string                  `json:"urls"`
+	Sha256            []byte                    `json:"sha256"`
+	Sha512            []byte                    `json:"sha512"`
+	Size              uint64                    `json:"size"`
+	DecryptionInfo    *UpgradeDecryptionInfo    `json:"decryptionInfo,omitempty"`
+	Signs             *UpgradeSigns             `json:"signs,omitempty"`
+	CertificateChains []UpgradeCertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []UpgradeCertificate      `json:"certificates,omitempty"`
 }
 
 // UpdateState state update message

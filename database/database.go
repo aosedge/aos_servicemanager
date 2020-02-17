@@ -36,7 +36,7 @@ import (
  ******************************************************************************/
 
 const (
-	dbVersion = 3
+	dbVersion = 4
 )
 
 /*******************************************************************************
@@ -704,14 +704,14 @@ func (db *Database) GetUpgradeState() (state int, err error) {
 	return state, nil
 }
 
-// SetUpgradeMetadata stores upgrade metadata
-func (db *Database) SetUpgradeMetadata(metadata amqp.UpgradeMetadata) (err error) {
-	metadataJSON, err := json.Marshal(&metadata)
+// SetUpgradeData stores upgrade data
+func (db *Database) SetUpgradeData(data amqp.SystemUpgrade) (err error) {
+	dataJSON, err := json.Marshal(&data)
 	if err != nil {
 		return err
 	}
 
-	result, err := db.sql.Exec("UPDATE config SET upgradeMetadata = ?", metadataJSON)
+	result, err := db.sql.Exec("UPDATE config SET upgradeData = ?", dataJSON)
 	if err != nil {
 		return err
 	}
@@ -728,33 +728,33 @@ func (db *Database) SetUpgradeMetadata(metadata amqp.UpgradeMetadata) (err error
 	return nil
 }
 
-// GetUpgradeMetadata returns upgrade metadata
-func (db *Database) GetUpgradeMetadata() (metadata amqp.UpgradeMetadata, err error) {
-	stmt, err := db.sql.Prepare("SELECT upgradeMetadata FROM config")
+// GetUpgradeData returns upgrade data
+func (db *Database) GetUpgradeData() (data amqp.SystemUpgrade, err error) {
+	stmt, err := db.sql.Prepare("SELECT upgradeData FROM config")
 	if err != nil {
-		return metadata, err
+		return data, err
 	}
 	defer stmt.Close()
 
-	var metadataJSON []byte
+	var dataJSON []byte
 
-	if err = stmt.QueryRow().Scan(&metadataJSON); err != nil {
+	if err = stmt.QueryRow().Scan(&dataJSON); err != nil {
 		if err == sql.ErrNoRows {
-			return metadata, ErrNotExist
+			return data, ErrNotExist
 		}
 
-		return metadata, err
+		return data, err
 	}
 
-	if metadataJSON == nil {
-		return metadata, nil
+	if dataJSON == nil {
+		return data, nil
 	}
 
-	if err = json.Unmarshal(metadataJSON, &metadata); err != nil {
-		return metadata, err
+	if err = json.Unmarshal(dataJSON, &data); err != nil {
+		return data, err
 	}
 
-	return metadata, nil
+	return data, nil
 }
 
 // SetUpgradeVersion stores upgrade version
@@ -870,7 +870,7 @@ func (db *Database) createConfigTable() (err error) {
 			version INTEGER,
 			cursor TEXT,
 			upgradeState INTEGER,
-			upgradeMetadata BLOB,
+			upgradeData BLOB,
 			upgradeVersion INTEGER)`); err != nil {
 		return err
 	}
@@ -880,7 +880,7 @@ func (db *Database) createConfigTable() (err error) {
 			version,
 			cursor,
 			upgradeState,
-			upgradeMetadata,
+			upgradeData,
 			upgradeVersion) values(?, ?, ?, ?, ?)`, dbVersion, "", 0, []byte{}, 3); err != nil {
 		return err
 	}

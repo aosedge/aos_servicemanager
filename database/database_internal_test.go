@@ -631,26 +631,24 @@ func TestUpgradeState(t *testing.T) {
 	}
 }
 
-func TestUpgradeMetadata(t *testing.T) {
-	setUpgradeMetadata := amqp.UpgradeMetadata{
-		Data: amqp.UpgradeFileInfo{
-			Target: "target",
-			URLs:   []string{"url1", "url2", "url3"},
-			Sha256: []byte("sha256"),
-			Sha512: []byte("sha512"),
-			Size:   1234}}
+func TestUpgradeData(t *testing.T) {
+	setUpgradeData := amqp.SystemUpgrade{
+		URLs:   []string{"url1", "url2", "url3"},
+		Sha256: []byte("sha256"),
+		Sha512: []byte("sha512"),
+		Size:   1234}
 
-	if err := db.SetUpgradeMetadata(setUpgradeMetadata); err != nil {
-		t.Fatalf("Can't set upgrade metadata: %s", err)
+	if err := db.SetUpgradeData(setUpgradeData); err != nil {
+		t.Fatalf("Can't set upgrade data: %s", err)
 	}
 
-	getUpgradeMetadata, err := db.GetUpgradeMetadata()
+	getUpgradeData, err := db.GetUpgradeData()
 	if err != nil {
-		t.Fatalf("Can't get upgrade metadata: %s", err)
+		t.Fatalf("Can't get upgrade data: %s", err)
 	}
 
-	if !reflect.DeepEqual(setUpgradeMetadata, getUpgradeMetadata) {
-		t.Fatalf("Wrong upgrade metadata value: %v", getUpgradeMetadata)
+	if !reflect.DeepEqual(setUpgradeData, getUpgradeData) {
+		t.Fatalf("Wrong upgrade data value: %v", getUpgradeData)
 	}
 }
 

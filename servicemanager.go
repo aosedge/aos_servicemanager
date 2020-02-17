@@ -351,7 +351,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 		log.WithFields(log.Fields{
 			"imageVersion": data.ImageVersion}).Info("Receive system upgrade request")
 
-		sm.um.SystemUpgrade(data.ImageVersion, data.Metadata)
+		sm.um.SystemUpgrade(*data)
 
 	case *amqp.SystemRevert:
 		log.WithFields(log.Fields{

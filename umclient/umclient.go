@@ -71,10 +71,10 @@ type Client struct {
 	downloadDir string
 	upgradeDir  string
 
-	imageVersion    uint64
-	upgradeState    int
-	upgradeVersion  uint64
-	upgradeMetadata amqp.UpgradeMetadata
+	imageVersion   uint64
+	upgradeState   int
+	upgradeVersion uint64
+	upgradeData    amqp.SystemUpgrade
 }
 
 // Sender provides API to send messages to the cloud
@@ -87,8 +87,8 @@ type Sender interface {
 type Storage interface {
 	SetUpgradeState(state int) (err error)
 	GetUpgradeState() (state int, err error)
-	SetUpgradeMetadata(metadata amqp.UpgradeMetadata) (err error)
-	GetUpgradeMetadata() (metadata amqp.UpgradeMetadata, err error)
+	SetUpgradeData(data amqp.SystemUpgrade) (err error)
+	GetUpgradeData() (data amqp.SystemUpgrade, err error)
 	SetUpgradeVersion(version uint64) (err error)
 	GetUpgradeVersion() (version uint64, err error)
 }
@@ -127,7 +127,7 @@ func New(config *config.Config, crypt *fcrypt.CryptoContext, sender Sender, stor
 	}
 
 	if um.upgradeState == stateDownloading {
-		if um.upgradeMetadata, err = um.storage.GetUpgradeMetadata(); err != nil {
+		if um.upgradeData, err = um.storage.GetUpgradeData(); err != nil {
 			return nil, err
 		}
 
@@ -173,11 +173,11 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 }
 
 // SystemUpgrade send system upgrade request to UM
-func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetadata) {
+func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
 	um.Lock()
 	defer um.Unlock()
 
-	log.WithField("version", imageVersion).Info("System upgrade")
+	log.WithField("version", upgradeData.ImageVersion).Info("System upgrade")
 
 	/* TODO: Shall image version be without gaps?
 	if um.imageVersion+1 != imageVersion {
@@ -186,19 +186,19 @@ func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetada
 	}
 	*/
 
-	if um.imageVersion >= imageVersion {
+	if um.imageVersion >= upgradeData.ImageVersion {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
 		return
 	}
 
-	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
+	if um.upgradeState != stateInit && um.upgradeVersion != upgradeData.ImageVersion {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "another upgrade is in progress")
 		return
 	}
 
 	if um.upgradeState == stateInit {
-		um.upgradeVersion = imageVersion
-		um.upgradeMetadata = metadata
+		um.upgradeVersion = upgradeData.ImageVersion
+		um.upgradeData = upgradeData
 		um.upgradeState = stateDownloading
 
 		if err := um.clearDirs(); err != nil {
@@ -211,7 +211,7 @@ func (um *Client) SystemUpgrade(imageVersion uint64, metadata amqp.UpgradeMetada
 			return
 		}
 
-		if err := um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
+		if err := um.storage.SetUpgradeData(um.upgradeData); err != nil {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
@@ -339,11 +339,11 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	um.Unlock()
 	defer um.Lock()
 
-	if len(um.upgradeMetadata.Data.URLs) == 0 {
+	if len(um.upgradeData.URLs) == 0 {
 		return errors.New("metadata doesn't contain URL for download")
 	}
 
-	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeMetadata.Data.URLs[0]))
+	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeData.URLs[0]))
 	if err != nil {
 		return err
 	}
@@ -351,7 +351,7 @@ func (um *Client) sendUpgradeRequest() (err error) {
 	upgradeReq := umprotocol.UpgradeReq{
 		ImageVersion: um.upgradeVersion,
 		ImageInfo: umprotocol.ImageInfo{
-			Path:   um.upgradeMetadata.Data.URLs[0],
+			Path:   um.upgradeData.URLs[0],
 			Sha256: fileInfo.Sha256,
 			Sha512: fileInfo.Sha512,
 			Size:   fileInfo.Size,
@@ -401,15 +401,15 @@ func (um *Client) sendRevertStatus(revertStatus, revertError string) {
 	}
 }
 
-func (um *Client) checkFile(fileName string, fileInfo amqp.UpgradeFileInfo) (err error) {
+func (um *Client) checkFile(fileName string, data amqp.SystemUpgrade) (err error) {
 	// This function is called under locked context but we need to unlock for downloads
 	um.Unlock()
 	defer um.Lock()
 
 	if err = image.CheckFileInfo(fileName, image.FileInfo{
-		Sha256: fileInfo.Sha256,
-		Sha512: fileInfo.Sha512,
-		Size:   fileInfo.Size}); err != nil {
+		Sha256: data.Sha256,
+		Sha512: data.Sha512,
+		Size:   data.Size}); err != nil {
 		return err
 	}
 
@@ -426,7 +426,7 @@ func (um *Client) downloadImage() {
 		return
 	}
 
-	if len(um.upgradeMetadata.Data.URLs) == 0 {
+	if len(um.upgradeData.URLs) == 0 {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "upgrade file list URLs is empty")
 		return
 	}
@@ -434,7 +434,7 @@ func (um *Client) downloadImage() {
 	fileDownloaded := false
 	fileName := ""
 
-	for _, rawURL := range um.upgradeMetadata.Data.URLs {
+	for _, rawURL := range um.upgradeData.URLs {
 		url, err := url.Parse(rawURL)
 		if err != nil {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
@@ -450,7 +450,7 @@ func (um *Client) downloadImage() {
 
 		syscall.Statfs(um.downloadDir, &stat)
 
-		if um.upgradeMetadata.Data.Size > stat.Bavail*uint64(stat.Bsize) {
+		if um.upgradeData.Size > stat.Bavail*uint64(stat.Bsize) {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, "not enough space")
 			return
 		}
@@ -470,14 +470,14 @@ func (um *Client) downloadImage() {
 		return
 	}
 
-	if err = um.checkFile(fileName, um.upgradeMetadata.Data); err != nil {
+	if err = um.checkFile(fileName, um.upgradeData); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 
-	if um.upgradeMetadata.Data.DecryptionInfo != nil {
+	if um.upgradeData.DecryptionInfo != nil {
 		if err = um.decryptImage(
-			fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeMetadata.Data.DecryptionInfo); err != nil {
+			fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeData.DecryptionInfo); err != nil {
 			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
@@ -488,9 +488,9 @@ func (um *Client) downloadImage() {
 		}
 	}
 
-	um.upgradeMetadata.Data.URLs = []string{filepath.Base(fileName)}
+	um.upgradeData.URLs = []string{filepath.Base(fileName)}
 
-	if err = um.storage.SetUpgradeMetadata(um.upgradeMetadata); err != nil {
+	if err = um.storage.SetUpgradeData(um.upgradeData); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
@@ -562,23 +562,23 @@ func (um *Client) checkSigns() (err error) {
 		return err
 	}
 
-	for _, cert := range um.upgradeMetadata.Certificates {
+	for _, cert := range um.upgradeData.Certificates {
 		if err = context.AddCertificate(cert.Fingerprint, cert.Certificate); err != nil {
 			return err
 		}
 	}
 
-	for _, chain := range um.upgradeMetadata.CertificateChains {
+	for _, chain := range um.upgradeData.CertificateChains {
 		if err = context.AddCertificateChain(chain.Name, chain.Fingerprints); err != nil {
 			return err
 		}
 	}
 
-	if um.upgradeMetadata.Data.Signs == nil {
-		return errors.New("upgradeMetadata does not have signature")
+	if um.upgradeData.Signs == nil {
+		return errors.New("upgradeData does not have signature")
 	}
 
-	file, err := os.Open(path.Join(um.upgradeDir, um.upgradeMetadata.Data.URLs[0]))
+	file, err := os.Open(path.Join(um.upgradeDir, um.upgradeData.URLs[0]))
 	if err != nil {
 		return err
 	}
@@ -586,8 +586,8 @@ func (um *Client) checkSigns() (err error) {
 
 	log.WithField("file", file.Name()).Debug("Check signature")
 
-	if err = context.VerifySign(file, um.upgradeMetadata.Data.Signs.ChainName, um.upgradeMetadata.Data.Signs.Alg,
-		um.upgradeMetadata.Data.Signs.Value); err != nil {
+	if err = context.VerifySign(file, um.upgradeData.Signs.ChainName, um.upgradeData.Signs.Alg,
+		um.upgradeData.Signs.Value); err != nil {
 		return err
 	}
 
