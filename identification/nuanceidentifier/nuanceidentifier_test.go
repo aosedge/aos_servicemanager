@@ -1,7 +1,12 @@
 package nuanceidentifier_test
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"os"
+	"path"
+	"reflect"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
@@ -12,6 +17,14 @@ import (
 /*******************************************************************************
  * Consts
  ******************************************************************************/
+
+const (
+	tmpDir       = "/tmp/aos"
+	systemIDFile = "systemid.data"
+	usersFile    = "user_claims.json"
+	systemID     = "11111111-222222-3333333"
+	usersJson    = `{"claim": ["user1","user2"]}`
+)
 
 /*******************************************************************************
  * Types
@@ -41,7 +54,21 @@ func init() {
  ******************************************************************************/
 
 func setup() (err error) {
-	if nuance, err = nuanceidentifier.New([]byte(`{"systemID":"123456", "users":["user1"]}`)); err != nil {
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		log.Fatalf("Can't crate tmp dir: %s", err)
+	}
+
+	if err := ioutil.WriteFile(path.Join(tmpDir, systemIDFile), []byte(systemID), 0644); err != nil {
+		log.Fatalf("Error create a new file: %s", err)
+	}
+
+	if err := ioutil.WriteFile(path.Join(tmpDir, usersFile), []byte(usersJson), 0644); err != nil {
+		log.Fatalf("Error create a new file: %s", err)
+	}
+
+	jsonString := fmt.Sprintf(`{"SystemIDFile": "%s", "UsersFile": "%s"}`,
+		path.Join(tmpDir, systemIDFile), path.Join(tmpDir, usersFile))
+	if nuance, err = nuanceidentifier.New([]byte(jsonString)); err != nil {
 		return err
 	}
 	defer nuance.Close()
@@ -58,14 +85,20 @@ func cleanup() (err error) {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
+	var err error
+
+	if err = setup(); err != nil {
 		log.Fatalf("Setup error: %s", err)
 	}
 
 	ret := m.Run()
 
-	if err := cleanup(); err != nil {
+	if err = cleanup(); err != nil {
 		log.Fatalf("Cleanup error: %s", err)
+	}
+
+	if err = os.RemoveAll(tmpDir); err != nil {
+		log.Fatalf("Error removing tmp dir: %s", err)
 	}
 
 	os.Exit(ret)
@@ -76,13 +109,13 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetSystemID(t *testing.T) {
-	systemID, err := nuance.GetSystemID()
+	sysID, err := nuance.GetSystemID()
 	if err != nil {
 		t.Fatalf("Error getting system ID: %s", err)
 	}
 
-	if systemID != "123456" {
-		t.Fatalf("Wrong system ID value: %s", systemID)
+	if sysID != systemID {
+		t.Fatalf("Wrong system ID value: %s, expect: %s", sysID, systemID)
 	}
 }
 
@@ -92,7 +125,16 @@ func TestGetUsers(t *testing.T) {
 		t.Fatalf("Error getting users: %s", err)
 	}
 
-	if users[0] != "user1" {
-		t.Fatalf("Wrong users value: %s", users)
+	var usersList struct {
+		Claim []string
+	}
+
+	err = json.Unmarshal([]byte(usersJson), &usersList)
+	if err != nil {
+		t.Fatalf("Unmarshal JSON: %v", err)
+	}
+
+	if !reflect.DeepEqual(usersList.Claim, users) {
+		t.Fatalf("User claims mismatch")
 	}
 }

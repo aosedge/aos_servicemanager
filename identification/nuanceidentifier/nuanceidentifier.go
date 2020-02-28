@@ -3,6 +3,7 @@ package nuanceidentifier
 import (
 	"encoding/json"
 	"errors"
+	"io/ioutil"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -17,12 +18,14 @@ import (
 
 // Instance nuance instance
 type Instance struct {
-	config instanceConfig
+	config   instanceConfig
+	systemID string
+	users    []string
 }
 
 type instanceConfig struct {
-	SystemID string
-	Users    []string
+	SystemIDFile string
+	UsersFile    string
 }
 
 /*******************************************************************************
@@ -45,13 +48,35 @@ func New(configJSON []byte) (instance *Instance, err error) {
 		}
 	}
 
-	if instance.config.SystemID == "" {
-		return nil, errors.New("System ID is not defined")
+	if instance.config.SystemIDFile == "" {
+		return nil, errors.New("system ID file is not defined")
 	}
 
-	if len(instance.config.Users) == 0 {
-		return nil, errors.New("Users are not defined")
+	if instance.config.UsersFile == "" {
+		return nil, errors.New("users file is not defined")
 	}
+
+	data, err := ioutil.ReadFile(instance.config.SystemIDFile)
+	if err != nil {
+		return nil, err
+	}
+
+	instance.systemID = string(data)
+
+	data, err = ioutil.ReadFile(instance.config.UsersFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var users struct {
+		Claim []string
+	}
+
+	if err = json.Unmarshal(data, &users); err != nil {
+		return nil, err
+	}
+
+	instance.users = users.Claim
 
 	return instance, nil
 }
@@ -65,12 +90,12 @@ func (instance *Instance) Close() (err error) {
 
 // GetSystemID returns the system ID
 func (instance *Instance) GetSystemID() (systemID string, err error) {
-	return instance.config.SystemID, nil
+	return instance.systemID, nil
 }
 
 // GetUsers returns the user claims
 func (instance *Instance) GetUsers() (users []string, err error) {
-	return instance.config.Users, nil
+	return instance.users, nil
 }
 
 // UsersChangedChannel returns users changed channel
