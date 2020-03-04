@@ -72,7 +72,7 @@ const (
 	SystemRevertStatusType  = "systemRevertStatus"
 	SystemUpgradeStatusType = "systemUpgradeStatus"
 	SystemVersionType       = "systemVersion"
-	VehicleStatusType       = "vehicleStatus"
+	UnitStatusType          = "unitStatus"
 )
 
 // Alert tags
@@ -282,8 +282,8 @@ type SystemVersion struct {
 	ImageVersion uint64 `json:"imageVersion"`
 }
 
-// VehicleStatus vehicle status structure
-type VehicleStatus struct {
+// UnitStatus untit status structure
+type UnitStatus struct {
 	Services []ServiceInfo `json:"services"`
 }
 
@@ -485,7 +485,7 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list of available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	statusMsg := createAosMessage(VehicleStatusType, VehicleStatus{Services: serviceList})
+	statusMsg := createAosMessage(UnitStatusType, UnitStatus{Services: serviceList})
 
 	handler.sendChannel <- Message{"", statusMsg}
 
@@ -494,8 +494,8 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 
 // SendServiceStatus sends message with service status
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	statusMsg := createAosMessage(VehicleStatusType,
-		VehicleStatus{Services: []ServiceInfo{serviceStatus}})
+	statusMsg := createAosMessage(UnitStatusType,
+		UnitStatus{Services: []ServiceInfo{serviceStatus}})
 
 	handler.sendChannel <- Message{"", statusMsg}
 

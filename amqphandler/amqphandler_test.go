@@ -324,10 +324,10 @@ func TestReceiveMessages(t *testing.T) {
 				return amqpHandler.SendInitialSetup(initialSetupData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.VehicleStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.VehicleStatus{Services: initialSetupData}},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.UnitStatus{Services: initialSetupData}},
 			getDataType: func() interface{} {
-				return &amqphandler.VehicleStatus{}
+				return &amqphandler.UnitStatus{}
 			},
 		},
 
@@ -336,10 +336,10 @@ func TestReceiveMessages(t *testing.T) {
 				return amqpHandler.SendServiceStatus(initialSetupData[0])
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.VehicleStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.VehicleStatus{Services: []amqphandler.ServiceInfo{initialSetupData[0]}}},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.UnitStatus{Services: []amqphandler.ServiceInfo{initialSetupData[0]}}},
 			getDataType: func() interface{} {
-				return &amqphandler.VehicleStatus{}
+				return &amqphandler.UnitStatus{}
 			},
 		},
 
