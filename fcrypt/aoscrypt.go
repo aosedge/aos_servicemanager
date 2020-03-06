@@ -724,3 +724,23 @@ func (ctx *SymmetricCipherContext) removePkcs7Padding(dataIn []byte, dataLen int
 	}
 	return removedSize, nil
 }
+
+// GetCertificateOrganizations gives a list of certificate organizations
+func GetCertificateOrganizations(clientCertFile string) (names []string, err error) {
+	certRaw, err := ioutil.ReadFile(clientCertFile)
+	if err != nil {
+		return nil, err
+	}
+
+	certPemData, _ := pem.Decode(certRaw)
+	cert, err := x509.ParseCertificate(certPemData.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	if cert.Subject.Organization == nil {
+		return nil, errors.New("certificate does not have organizations")
+	}
+
+	return cert.Subject.Organization, nil
+}

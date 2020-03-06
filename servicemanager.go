@@ -116,6 +116,7 @@ func cleanup(workingDir, dbFile string) {
 }
 
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
+	var names []string
 	sm = &serviceManager{cfg: cfg}
 
 	// Create DB
@@ -135,6 +136,20 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Initialize fcrypt
 	fcrypt.Init(cfg.Crypt)
+
+	// Get organization names from certificate and use it as discovery URL
+	names, err = fcrypt.GetCertificateOrganizations(cfg.Crypt.ClientCert)
+	if err != nil {
+		log.Warningf("Organization name will be taken from config file: %s", err)
+	} else {
+		// We use the first member of organization list
+		// The certificate should contain only one organization
+		if len(names) == 1 && names[0] != "" {
+			cfg.ServiceDiscoveryURL = names[0]
+		} else {
+			log.Error("Certificate organization name is empty or organization is not a single")
+		}
+	}
 
 	// Create crypto context
 	if sm.crypt, err = fcrypt.CreateContext(cfg.Crypt); err != nil {
