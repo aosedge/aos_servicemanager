@@ -25,9 +25,16 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
+
 	"aos_servicemanager/config"
+)
+
+const (
+	tmpDir = `/tmp/aos`
 )
 
 var (
@@ -862,4 +869,150 @@ func TestVerifySignOfComponent(t *testing.T) {
 			t.Fatal("Verify fail", err)
 		}
 	}
+}
+
+type certData struct {
+	Name string
+	Data []byte
+}
+
+var certificates = []certData{
+	// This certificate does not include organization name
+	{
+		Data: []byte(`-----BEGIN CERTIFICATE-----
+MIIDJTCCAg2gAwIBAgIUBiw13Q4f7BUUA0HnHGgIzm2IJp0wDQYJKoZIhvcNAQEL
+BQAwIjELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUwHhcNMjAwMzEw
+MTEwODAyWhcNMjIxMjI5MTEwODAyWjAiMQswCQYDVQQGEwJBVTETMBEGA1UECAwK
+U29tZS1TdGF0ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJh4v4V6
+UIpeM157kefN3wwzVTn1VJGXwN+UQlNUB/CYnRarQEM4CfrVNJnneQK4VldIQJ51
+DbNAvIjVqrQMUkZZgfACwkZlRxSnJUAca5greDFeQCu5hUNrS8oKo3eqJJs9/kML
+vP5LkqB7XA1ac246fMwYIEhTnn2ZeQTWA6iUUjpPT5IAU3av0+Ky8/vmj5/RoExL
+TezNEILHZ4xFGC25OZcQ2e1G5AtcUEnJNilnQ/xDNLNXeKK7SoPn7FDZirGPi09O
+Z9gbZFm84UgaShLt/nquvDDb5n5GNmEMTGpZP4ijVHIH4iQph1R0/QAtLHs0plci
+fW7J41GZ78UUDMUCAwEAAaNTMFEwHQYDVR0OBBYEFEqklIcL5Mj4r4QrEylJokIR
+ERrDMB8GA1UdIwQYMBaAFEqklIcL5Mj4r4QrEylJokIRERrDMA8GA1UdEwEB/wQF
+MAMBAf8wDQYJKoZIhvcNAQELBQADggEBAIHDzZxnPVN8Rxzslkndyikb245F37ad
+K1dAcsx0LmRjMDJn+TWfqBd2jmQYXZXhLEN6yCpaJmts/BBooLYI89JWnUBzB4DM
+DlOBEFoEUkjOLv0gwwgSukEG+NTu3nsHfpBopCkSrPuA0II2qOpdc/HVxhDiIfp2
+Fx3nae59Yjfsh0BTaU/Ap90IIP2uebZZxV+t3a3CH9o5oCKdYvbLqG+TRGfhJ8oV
+fBUDOWm1hT9Ej+djyE8lnOSL713t9KM+m8zMZHDuTTPwlpXnkeq2qtHP/fkfGUTZ
+1TpDv5rAdzNoOiK+cscLYRht2wkMcVmde8GuEJnflZDLeg/k2yI8CkA=
+-----END CERTIFICATE-----`),
+		Name: `certificate1.pem`,
+	},
+	// This certificate includes organization name
+	{
+		Data: []byte(`-----BEGIN CERTIFICATE-----
+MIIEDTCCAvWgAwIBAgIIXmI8ZAAO3zcwDQYJKoZIhvcNAQELBQAwcDElMCMGA1UE
+AwwcQU9TIHZlaGljbGVzIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEc
+MBoGA1UECwwTTm92dXMgT3JkbyBTZWNsb3J1bTENMAsGA1UEBwwES3lpdjELMAkG
+A1UEBhMCVUEwHhcNMjAwMzA2MTIwNDUyWhcNMzAwMzA0MTIwNDUyWjCBnjE0MDIG
+A1UEAwwrYzE4M2RlNjMtZTJiNy00Nzc2LTkwZTAtYjdjOWI4Zjc0MGU4LW9ubGlu
+ZTE1MDMGA1UECgwsc3RhZ2luZy1mdXNpb24ud2VzdGV1cm9wZS5jbG91ZGFwcC5h
+enVyZS5jb20xLzAtBgNVBAsMJk9FTSBrb3N0eWFudHluX2lnbmF0b3YgVGVzdCB1
+bml0IG1vZGVsMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA22up8faZ
+cb7KMjCqf/HWRLZHN6wsyhTQPL0+/HVlnAz1URtRp+EhtuUXlzIrO+XACHKW0qDG
+aus77Vsmf65asuBojlbLRfl5bofqvT7hnY94NFPhHAl0r9iONT5HlsGJfy+2KJy8
+9dU7cIJrwBxvO2T1UEQ8jBNPu0kJMLvz3o+kQv//8OhG1Z8ykxDyRyXMMjYl/WRO
+nTIyZ8qTNrElitTUA7WrQVDoX1TXXYYkSR9mBG6uK5jsEzazSgcZYfzgmANwLMCX
+mQAlorvlxu3iBUHwPYaPVoTutQ7yqeC4irbTrULvjR7KjmlaFxK162p1crZXauy+
+cSiSb3wi5uMN7wIDAQABo3wwejAMBgNVHRMBAf8EAjAAMAsGA1UdDwQEAwIFoDAd
+BgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUHAwEwHQYDVR0OBBYEFMJRHgqJpOpq
+5wjM+dhPdwS/QIhOMB8GA1UdIwQYMBaAFMyIR9SjshF4Z5rxI9KyZhD6CjjCMA0G
+CSqGSIb3DQEBCwUAA4IBAQAYBWnHljDu19TUDKeU6cRv2k5sowrVpn/HaneJ9PAu
+pmHZtjDWOYMKCYGpWfscCyhkLaek3AgH22fzj0P2bWuGQE5ORdQ912u3HiVaF9bE
+A7HobN2J0/CC3soKuM8pQDk9DfWDGy500v4dQiPFVG4h+WJp82VWSAdu7chFydKP
+LKsOnzTfW1+DUyoYBztZp06sudkh8M/aIaGfU1f/79AYumAVBhOTwoEVQ4P8K7QE
+0c1Vc5G/2X4Mweu8LBrf2kpdy5aqFYwTldcqE+el9KfvnssiDC3B1LCLW2JqV2RX
+iWCeajoiW4IqzTHL0DvrqnFdoHYN2XqYYdpQldfPkTpn
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIDwzCCAqugAwIBAgIJAO2BVuwqJLb8MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNV
+BAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0Fv
+UzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjQwWhcN
+MjUwMzE5MTMyMjQwWjBwMSUwIwYDVQQDDBxBT1MgdmVoaWNsZXMgSW50ZXJtZWRp
+YXRlIENBMQ0wCwYDVQQKDARFUEFNMRwwGgYDVQQLDBNOb3Z1cyBPcmRvIFNlY2xv
+cnVtMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEB
+BQADggEPADCCAQoCggEBAKs2DANC2BAGU/rzUpOy3HpcShNdC7+vjcZ2fX6kFF9k
+RZumS58dHQjj+UW6VQXFd5QS1Bb6lL/psc7svYEE4c212fWkkw84Un+ZibbIQvsF
+LfAz9lqYLtzJPY3bjHRwe9bZUjO1YNxjxupB6o0R7yRGiFVA7ajrSkpNG8xrCVg6
+OkN/B6hGXfv1Vn+t7lo3+JAGhEJ+/3sQ6lmyLBTtnr+qMUDwWDqKarqY9gBZbGyY
+K+Jj1M0axtUtO2wNFa0UCK36aFaA/0DdoltpnenCyIngKmDBYJPwKQiqOoKEtKan
+tTIa5uM6PJgrhDPjfquODfbxqxZBYnY4+WUTWNpwa7sCAwEAAaN8MHowDAYDVR0T
+BAUwAwEB/zAdBgNVHQ4EFgQUzIhH1KOyEXhnmvEj0rJmEPoKOMIwHwYDVR0jBBgw
+FoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQG
+CCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAF3YtoIs6HrcC
+XXJH//FGm4SlWGfhQ7l4k2PbC4RqrZvkMMIci7oT2xfdIAzbPUBiaVXMEw7HR7eI
+iOqRzjR2ZUqIz3VD6fGVyw5Y3JLqMuT7DuirQ9BWeBTf+BXm40cvLsnWbQD7r6RD
+x1a8E9uOLdt7/9C2utoQVdAZLu7UgUqRyFVeF8zHT98INDtYi8bp8nZ/de64fZbN
+5pmBi2OdQGcvXUj/SRt/4OCmRqBqrYjgSl7TaAlyvf4/xk2uBG4AaKFZWWlth244
+KgfaSRGKUZuvyQwTKerc8AwUFu5r3tZwAlwT9dyRM1fg+EGbmKaadyegb3AtItyN
+d2r/FFIYWg==
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIID4TCCAsmgAwIBAgIJAO2BVuwqJLb4MA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
+VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
+YmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9y
+ZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE5MDMy
+MTEzMTQyNVoXDTI1MDMxOTEzMTQyNVowVDEZMBcGA1UEAwwQQW9TIFNlY29uZGFy
+eSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQW9TMQ0wCwYDVQQHDARLeWl2
+MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALyD
+uKMpBZN/kQFHzKo8N8y1EoPgG5sazSRe0O5xL7lm78hBmp4Vpsm/BYSI8NElkxdO
+TjqQG6KK0HAyCCfQJ7MnI3G/KnJ9wxD/SWjye0/Wr5ggo1H3kFhSd9HKtuRsZJY6
+E4BSz4yzburCIILC4ZvS/755OAAFX7g1IEsPeKh8sww1oGLL0xeg8W0CWmWO9PRn
+o5Dl7P5QHR02BKrEwZ/DrpSpsE+ftTczxaPp/tzqp2CDGWYT5NoBfxP3W7zjKmTC
+ECVgM/c29P2/AL4J8xXydDlSujvE9QG5g5UUz/dlBbVXFv0cK0oneADe0D4aRK5s
+MH2ZsVFaaZAd2laa7+MCAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQU
+NrDxTEYV6uDVs6xHNU77q9zVmMowHwYDVR0jBBgwFoAUdEoYczrjPeQYQ9JlsQtY
+/iqxOlIwCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcD
+AjANBgkqhkiG9w0BAQsFAAOCAQEAe1IT/RhZ690PIBlkzLDutf0zfs2Ei6jxTyCY
+xiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq
+/5nZBl7P+56h5DcuLJsUb3tCC5pIkV9FYeVCg+Ub5c59b3hlFpqCmxSvDzNnRZZc
+r+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+
+G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
+rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
+-----END CERTIFICATE-----`),
+		Name: `certificate2.pem`,
+	},
+}
+
+func TestGetCertificateOrganizations(t *testing.T) {
+	var names []string
+	var err error
+
+	if _, err = GetCertificateOrganizations(path.Join(tmpDir, certificates[0].Name)); err == nil {
+		log.Error("Expected error because the certificate doesn't have organizations")
+	}
+
+	if names, err = GetCertificateOrganizations(path.Join(tmpDir, certificates[1].Name)); err != nil {
+		log.Fatalf("Get organization name error: %s", err)
+	}
+	if len(names) != 1 {
+		log.Error("Number of organizations doesn't equal one")
+	}
+	if names[0] == "" {
+		log.Error("Organization name is empty")
+	}
+}
+
+func TestMain(m *testing.M) {
+	var err error
+
+	if err = os.MkdirAll(tmpDir, 0755); err != nil {
+		log.Fatalf("Error creating tmp dir: %s", err)
+	}
+
+	for i := range certificates {
+		if err := ioutil.WriteFile(path.Join(tmpDir, certificates[i].Name), certificates[i].Data, 0644); err != nil {
+			log.Fatalf("Can't write test file: %s", err)
+		}
+	}
+
+	ret := m.Run()
+
+	if err = os.RemoveAll(tmpDir); err != nil {
+		log.Fatalf("Error removing tmp dir: %s", err)
+	}
+
+	os.Exit(ret)
 }
