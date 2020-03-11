@@ -475,17 +475,15 @@ func (um *Client) downloadImage() {
 		return
 	}
 
-	if um.upgradeData.DecryptionInfo != nil {
-		if err = um.decryptImage(
-			fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeData.DecryptionInfo); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-	} else {
-		if err = os.Rename(fileName, path.Join(um.upgradeDir, filepath.Base(fileName))); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
+	if um.upgradeData.DecryptionInfo == nil {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, "no decryption info provided")
+		return
+	}
+
+	if err = um.decryptImage(
+		fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeData.DecryptionInfo); err != nil {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
+		return
 	}
 
 	um.upgradeData.URLs = []string{filepath.Base(fileName)}
