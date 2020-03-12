@@ -282,6 +282,12 @@ func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Ce
 	return nil
 }
 
+// LoadOfflineKeyFile sets a new offline key file and load it
+func (ctx *CryptoContext) LoadOfflineKeyFile(filepath string) error {
+	ctx.cryptConfig.OfflinePrivKey = filepath
+	return ctx.LoadOfflineKey()
+}
+
 func (ctx *CryptoContext) LoadOfflineKey() error {
 	if ctx.cryptConfig.OfflinePrivKey == "" {
 		return errors.New("OfflinePrivKey not set")

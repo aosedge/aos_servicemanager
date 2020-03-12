@@ -18,8 +18,12 @@
 package umclient_test
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -45,10 +49,16 @@ import (
  * Consts
  ******************************************************************************/
 
-const serverURL = "wss://localhost:8089"
-
 const (
-	imageFile = "This is image file"
+	serverURL      = "wss://localhost:8089"
+	tmpDir         = "/tmp/aos"
+	imageAes256Key = "7786B273FF34FCE19D6B804EFF5A3F55"
+	imageAes256IV  = "66B86B273FF34FCE"
+	imagePlainText = "This is a wonderful crypto update"
+	// Chipher was decoded as base64 string
+	// openssl enc -aes-256-cbc -nosalt -e -in file.data -out file.data.crypted -iv '66B86B273FF34FCE' -K '7786B273FF34FCE19D6B804EFF5A3F55'
+	// cat file.data.crypted | base64
+	imageChipherText = "GJlYICHYJ1dgXLDHZ+WGzjePWZ1lMBd+tMlBJ3n9Nx3epyWzqegBNamUfemIl45L"
 )
 
 /*******************************************************************************
@@ -86,6 +96,36 @@ var (
 	operationVersion uint64
 )
 
+var OfflinePrivKeyPem = []byte(`
+-----BEGIN PRIVATE KEY-----
+MIIEpQIBAAKCAQEA2/gmKbqsk3azfArIxz2GgGnuJj5xWGSyyvAX5cB5oWMlRD8i
+bNNQJm2BIBMlPxLfYUygpEInJaeUI0H1iz5RO5sYEABP6sY7pXvX8AzUqVSQ6TY0
+0J39kgPsetRvnZUT9hXYLJ43YCis9psiRTBS4fuSuZK+ZhYojsE4E0iPj08yFVqj
+KHZFOuEdLQLTPWJ0e3ORHQX7v9aADt4t+ESOxf3gJs+Vxbk57Bzq1MBlYh83tB/b
+pf/vy/gzgVzLXBsEalw3o0Lo9aypCnhwNXwGgfqhHq9Cn4sn7cpozpMaWuvoJYdV
+6/i2VzVQrHkWP0N3luxSvEMNG7FgXyK4CEupSQIDAQABAoIBAGhADzYvtqKc2yuq
+oMVsr1Yk3i1Z4rYV43aym2DT+9E0//B8S4BwFchglZXx/PELrLqcanXutEbwSRD8
+rba0biNlud27iCSolpQzQYAPVKp73cHpYtaMSiTtnyIHlG6GvNMgPzfGNFBqdq7Z
+j0BjSqS3ai5xEbOoRMiDYmQhO4ibCqQUqsvZJJNmNG9VFKVW0gdacBzfq/RYV1Yj
+6P0MVMIiZHulxrg2SBSDNMNpJXFWHUVOJ2HdZeyEM1/eL9PGK+Ys58THLnV6GlAD
+icq6okOSBHoS3257BKqtWZTWlemp7na52IYc2Ll4VUVpAZzPRpNyF9IUmL4rCNzc
+vE+BEJECgYEA/U2Ml5CQvYWFk3PP8rRQUhqP4yUvtzxFlAPkrZSdYm/KnBSCjXBe
+3K6JHzUpZFLO1yXGuMS1z7pITZ6p/8KX5VZvLmgUTANFf+A2omrpGcZFqAfbPGtI
+8B8voupOn8/iLRZXziZueGbugSWo/iiC8NiNl4hpgxrLVQqR8EZKHh8CgYEA3k+9
+TntpkLRQCIpWjJPr/ri/FsfNwUQyxEuhx5fdOf+Q8M8xBdgp3X9r0766s7IEVJfh
+fPMeeg6i8TnjGLrLOeDZ5flaTXRcJqzL/iMoGUnU4tWwG/PAj2Pm7ZFRR95ZvnuM
+5zc0NDGcgYq3o7pu3lnxUKWnRZqqUDw4vrCFe5cCgYEA2UTpcSAJZubemoneNpo/
+ww0Rmo5NDWjfbYShY9pz3Ply2sok6VkXpUb4SxJ4fJsi3ByFBfuEz7dDSYDs5Hpv
+e8HWAAI6VrD/rh4N/uahJwCQwv5qKLsFhyHY5G8CHcZchLwDeMoyO4hez9wTxl3N
+YvT9DpttlY0oF7vHTkecT5UCgYEAzsBuGM1h8jgfrrGpqHfxpSYAYZlU3AcnB7Qn
+M08jacsq6ypmNz9AQEU+7OCXFoPazympheE9WNq/44SoldkzJBLf06fBugMbqMRP
+u3zK0CoAGS4O6RAa58BLhmn9o89Au4yAEJEgteHl4fw2qci7T4NqkExfcrZS6uf3
+BjF5EuUCgYEAigRZNLDfltWlVm9ErwWYWaSCGZpXkWCtoPqynvVYHRO2aWxUZg7x
+7bkO7pE+LAjRyi3CF+qhVKJKfiKSAQcFWDHGR+xDHh3B82QUjL7qkzqkGf42vx2S
+GCeMmVJw+HzT3w19CoTvoDlnW2GHPpNXhOzjl3DD4Y0PUBhNX5sOROM=
+-----END PRIVATE KEY-----
+`)
+
 /*******************************************************************************
  * Init
  ******************************************************************************/
@@ -104,12 +144,12 @@ func init() {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	if err := os.MkdirAll("tmp/fileServer", 0755); err != nil {
+	if err := os.MkdirAll(path.Join(tmpDir, "fileServer"), 0755); err != nil {
 		log.Fatalf("Can't crate file server dir: %s", err)
 	}
 
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", http.FileServer(http.Dir("tmp/fileServer"))))
+		log.Fatal(http.ListenAndServe(":8080", http.FileServer(http.Dir(path.Join(tmpDir, "fileServer")))))
 	}()
 
 	url, err := url.Parse(serverURL)
@@ -159,16 +199,24 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 -----END CERTIFICATE-----
 `)
 
-	if err := ioutil.WriteFile("tmp/rootCert.pem", rootCert, 0644); err != nil {
-		log.Fatalf("Can't create root cert: %s", err)
+	if err := ioutil.WriteFile(path.Join(tmpDir, "rootCert.pem"), rootCert, 0644); err != nil {
+		log.Fatalf("Cannot create root cert: %s", err)
 	}
 
-	crypt, err := fcrypt.CreateContext(config.Crypt{CACert: "tmp/rootCert.pem"})
+	crypt, err := fcrypt.CreateContext(config.Crypt{CACert: path.Join(tmpDir, "rootCert.pem")})
 	if err != nil {
-		log.Fatalf("Can't create crypto context: %s", err)
+		log.Fatalf("Cannot create crypto context: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: "tmp/upgrade"}, crypt, sender, db)
+	if err := ioutil.WriteFile(path.Join(tmpDir, "offline.key.pem"), OfflinePrivKeyPem, 0644); err != nil {
+		log.Fatalf("Cannot create root cert: %s", err)
+	}
+
+	if err = crypt.LoadOfflineKeyFile(path.Join(tmpDir, "offline.key.pem")); err != nil {
+		log.Fatalf("Cannot load offline key file: %s", err)
+	}
+
+	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, crypt, sender, db)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}
@@ -229,7 +277,7 @@ func TestSystemUpgrade(t *testing.T) {
 		t.Errorf("Can't get system version: %s", err)
 	}
 
-	data, err := createUpgradeData(5, "imagefile", []byte(imageFile))
+	data, err := createUpgradeData(5, "imagefile", []byte(imagePlainText))
 	if err != nil {
 		t.Fatalf("Can't create upgrade data: %s", err)
 	}
@@ -330,7 +378,7 @@ func processMessage(messageType int, messageIn []byte) (messageOut []byte, err e
 		status := umprotocol.SuccessStatus
 		errStr := ""
 
-		fileName := path.Join("tmp/upgrade/", upgradeReq.ImageInfo.Path)
+		fileName := path.Join(tmpDir, "upgrade/", upgradeReq.ImageInfo.Path)
 
 		if err = image.CheckFileInfo(fileName, image.FileInfo{
 			Sha256: upgradeReq.ImageInfo.Sha256,
@@ -348,7 +396,7 @@ func processMessage(messageType int, messageIn []byte) (messageOut []byte, err e
 			break
 		}
 
-		if imageFile != string(data) {
+		if imagePlainText != string(data) {
 			status = umprotocol.FailedStatus
 			errStr = "image file content mismatch"
 			break
@@ -395,9 +443,14 @@ func processMessage(messageType int, messageIn []byte) (messageOut []byte, err e
 }
 
 func createUpgradeData(version uint64, fileName string, content []byte) (data amqp.SystemUpgrade, err error) {
-	filePath := path.Join("tmp/fileServer", fileName)
+	cryptedRaw, err := base64.StdEncoding.DecodeString(imageChipherText)
+	if err != nil {
+		return data, err
+	}
 
-	if err = ioutil.WriteFile(filePath, content, 0644); err != nil {
+	filePath := path.Join(tmpDir, "fileServer", fileName)
+
+	if err = ioutil.WriteFile(filePath, cryptedRaw, 0644); err != nil {
 		return data, err
 	}
 
@@ -413,7 +466,7 @@ func createUpgradeData(version uint64, fileName string, content []byte) (data am
 	data.Sha512 = imageFileInfo.Sha512
 	data.Size = imageFileInfo.Size
 
-	signValue, err := base64.StdEncoding.DecodeString("gqrnwcPhxFT7NoTow93HmYUWZKvZCrllSU5CXG+HnaICRTOucIbw36iYZBv63j87dxBmSr7kvk7nep6SioIjnEYOKJJ8yNypyFf9UaIWSNI53Xrb5i6gySJ53IwTaQV8Bd+HsP+Qqd/U42FLFIUD3rW6BYDIAVWdkjDew5PV5VpA32as2l2eDykqwPt08Gidaw6frBN4CkVC/QnTpTFeZv2IJvC927BkP9VdiF2VO5lUK2ZC+kjYCjegsVVHXwNfZWHu1Qi+XVn+72v3LFSw9RzJc0CI7MtDlZi57g48OnFEGeHNHkqxib8LJ9T5DNQlLD92Pj/vu8m2BLWimc11Qw==")
+	signValue, err := base64.StdEncoding.DecodeString("KHwPwgdcu9BbICvhVkOAW79SEB/2GsFwME8xd/r0z+aC7Ne6bpQtXzXLGrjYLsqvWKg5CNn0kN8PbHCM3K18Zvy+vESTuUzvqucQxEt7IvQdF6x0k9lylstwuBgz8hL4xNF3/SJcm7n1GYomyaxr2DKiV7qW9d6ChXemUniaf5pD2BYJXzZ+g7lyv/jrm/MH/pIuW2X5KwT1G4k+q9VvMAHV6mSdf0JncEUe9kkRdgfjzUxhixOCrpA8/sGlUBDYvy0edYgz34pjOi0B8oc3/W3L4ItBKKLK8MZNGr4Oz0UL8cTNLDW885MUKbeWV0RQzilb13hh/lERdXKKBmRjwA==")
 	if err != nil {
 		return data, err
 	}
@@ -454,6 +507,24 @@ func createUpgradeData(version uint64, fileName string, content []byte) (data am
 			Fingerprint: "EE9E93D52D84CF3CBEB2E327635770458457B7C2",
 			Certificate: cert3,
 		},
+	}
+
+	publicKeyRaw, _ := pem.Decode(OfflinePrivKeyPem)
+	privKeyImported, err := x509.ParsePKCS1PrivateKey(publicKeyRaw.Bytes)
+	if err != nil {
+		return data, err
+	}
+
+	encryptedAesKey, err := rsa.EncryptPKCS1v15(rand.Reader, &privKeyImported.PublicKey, []byte(imageAes256Key))
+	if err != nil {
+		return data, err
+	}
+
+	data.DecryptionInfo = &amqp.UpgradeDecryptionInfo{
+		BlockAlg: "AES256/CBC/pkcs7",
+		BlockIv:  []byte(imageAes256IV),
+		BlockKey: encryptedAesKey,
+		AsymAlg:  "RSA/PKCS1v1_5",
 	}
 
 	return data, nil
