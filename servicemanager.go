@@ -150,7 +150,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 				Scheme: "https",
 				Host:   names[0],
 			}
-			cfg.ServiceDiscoveryURL = url.String()
+			cfg.ServiceDiscoveryURL = url.String() + ":9000"
 		} else {
 			log.Error("Certificate organization name is empty or organization is not a single")
 		}
