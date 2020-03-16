@@ -20,6 +20,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -145,7 +146,11 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		// We use the first member of organization list
 		// The certificate should contain only one organization
 		if len(names) == 1 && names[0] != "" {
-			cfg.ServiceDiscoveryURL = names[0]
+			url := url.URL{
+				Scheme: "https",
+				Host:   names[0],
+			}
+			cfg.ServiceDiscoveryURL = url.String()
 		} else {
 			log.Error("Certificate organization name is empty or organization is not a single")
 		}
