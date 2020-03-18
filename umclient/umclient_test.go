@@ -167,7 +167,7 @@ func TestMain(m *testing.M) {
 
 	sender = newTestSender()
 
-	db, err = database.New("tmp/servicemanager.db")
+	db, err = database.New(path.Join(tmpDir, " servicemanager.db"))
 	if err != nil {
 		log.Fatalf("Can't create db: %s", err)
 	}
@@ -231,7 +231,7 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Error closing UM: %s", err)
 	}
 
-	if err := os.RemoveAll("tmp"); err != nil {
+	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Fatalf("Error removing tmp dir: %s", err)
 	}
 
