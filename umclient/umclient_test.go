@@ -158,8 +158,8 @@ func TestMain(m *testing.M) {
 	}
 
 	server, err = wsserver.New("TestServer", url.Host,
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-		"../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", processMessage)
+		"../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/crt.pem",
+		"../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/key.pem", processMessage)
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}

@@ -56,8 +56,8 @@
 
 [[constraint]]
   branch = "master"
-  name = "gitpct.epam.com/nunc-ota/aos_common"
-  source = "git@gitpct.epam.com:nunc-ota/aos_common.git"
+  name = "gitpct.epam.com/epmd-aepr/aos_common"
+  source = "git@gitpct.epam.com:epmd-aepr/aos_common.git"
   
 [[constraint]]
   branch = "master"

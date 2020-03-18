@@ -30,8 +30,8 @@ import (
 	"github.com/godbus/dbus"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
-	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
+	"gitpct.epam.com/epmd-aepr/aos_common/visprotocol"
+	"gitpct.epam.com/epmd-aepr/aos_common/wsserver"
 
 	"aos_servicemanager/database"
 	"aos_servicemanager/identification/visidentifier"
@@ -97,8 +97,8 @@ func setup() (err error) {
 	}
 
 	if server, err = wsserver.New("TestServer", url.Host,
-		"../../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/crt.pem",
-		"../../vendor/gitpct.epam.com/nunc-ota/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
+		"../../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/crt.pem",
+		"../../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
 		return err
 	}
 

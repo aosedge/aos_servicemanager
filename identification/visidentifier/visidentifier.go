@@ -24,8 +24,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/visprotocol"
-	"gitpct.epam.com/nunc-ota/aos_common/wsclient"
+	"gitpct.epam.com/epmd-aepr/aos_common/visprotocol"
+	"gitpct.epam.com/epmd-aepr/aos_common/wsclient"
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"

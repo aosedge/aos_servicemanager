@@ -1,7 +1,7 @@
 
 # AOS Service Manager  
-[![pipeline status](https://gitpct.epam.com/nunc-ota/aos_servicemanager/badges/master/pipeline.svg)](https://gitpct.epam.com/nunc-ota/aos_servicemanager/commits/master)
-[![coverage report](https://gitpct.epam.com/nunc-ota/aos_servicemanager/badges/master/coverage.svg)](https://gitpct.epam.com/nunc-ota/aos_servicemanager/commits/master)  
+[![pipeline status](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/badges/master/pipeline.svg)](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/commits/master)
+[![coverage report](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/badges/master/coverage.svg)](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/commits/master)  
 
 AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for the following tasks:
 * communicate with the backend;
@@ -33,7 +33,7 @@ For authentication with the cloud, SM requires to get the `system id` and `user 
 ```golang
 	// Create identifier
 	// Use appropriate identifier from identification folder
-	if sm.identifier, err = nuanceidentifier.New(cfg.Identifier); err != nil {
+	if sm.identifier, err = visidentifier.New(cfg.Identifier); err != nil {
 		goto err
 	}
 ```
