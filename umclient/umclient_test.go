@@ -34,9 +34,9 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/nunc-ota/aos_common/image"
-	"gitpct.epam.com/nunc-ota/aos_common/umprotocol"
-	"gitpct.epam.com/nunc-ota/aos_common/wsserver"
+	"gitpct.epam.com/epmd-aepr/aos_common/image"
+	"gitpct.epam.com/epmd-aepr/aos_common/umprotocol"
+	"gitpct.epam.com/epmd-aepr/aos_common/wsserver"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
