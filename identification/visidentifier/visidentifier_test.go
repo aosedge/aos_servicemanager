@@ -48,17 +48,12 @@ const serverURL = "wss://localhost:8088"
  * Types
  ******************************************************************************/
 
-type messageProcessor struct {
-	sendMessage wsserver.SendMessage
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var vis *visidentifier.Instance
 var server *wsserver.Server
-var clientProcessor *messageProcessor
 var db *database.Database
 
 var subscriptionID = "test_subscription"
@@ -97,8 +92,8 @@ func setup() (err error) {
 	}
 
 	if server, err = wsserver.New("TestServer", url.Host,
-		"../../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/crt.pem",
-		"../../vendor/gitpct.epam.com/epmd-aepr/aos_common/wsserver/data/key.pem", newMessageProcessor); err != nil {
+		"../../ci/crt.pem",
+		"../../ci/key.pem", processMessages); err != nil {
 		return err
 	}
 
@@ -178,8 +173,12 @@ func TestUsersChanged(t *testing.T) {
 		t.Fatalf("Error marshal request: %s", err)
 	}
 
-	if err := clientProcessor.sendMessage(websocket.TextMessage, message); err != nil {
-		t.Fatalf("Error send message: %s", err)
+	clients := server.GetClients()
+
+	for _, client := range clients {
+		if err := client.SendMessage(websocket.TextMessage, message); err != nil {
+			t.Fatalf("Error send message: %s", err)
+		}
 	}
 
 	select {
@@ -265,16 +264,10 @@ func generateRandomString(size uint) (result string) {
 	return string(tmp)
 }
 
-func newMessageProcessor(sendMessage wsserver.SendMessage) (processor wsserver.MessageProcessor, err error) {
-	clientProcessor = &messageProcessor{sendMessage: sendMessage}
-
-	return clientProcessor, nil
-}
-
-func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
+func processMessages(messageType int, message []byte) (response []byte, err error) {
 	var header visprotocol.MessageHeader
 
-	if err = json.Unmarshal(messageIn, &header); err != nil {
+	if err = json.Unmarshal(message, &header); err != nil {
 		return nil, err
 	}
 
@@ -292,7 +285,7 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		getRsp := visprotocol.GetResponse{
 			MessageHeader: header}
 
-		if err = json.Unmarshal(messageIn, &getReq); err != nil {
+		if err = json.Unmarshal(message, &getReq); err != nil {
 			return nil, err
 		}
 
@@ -310,9 +303,9 @@ func (processor *messageProcessor) ProcessMessage(messageType int, messageIn []b
 		return nil, errors.New("unknown action")
 	}
 
-	if messageOut, err = json.Marshal(rsp); err != nil {
+	if response, err = json.Marshal(rsp); err != nil {
 		return
 	}
 
-	return messageOut, nil
+	return response, nil
 }
