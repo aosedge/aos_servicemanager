@@ -1,9 +1,2 @@
-servicemanager
 aos_servicemanager
-data/servicemanager.db
-data/services.db
-servicemanager.conf
-data/services/
-data/template.service
-vendor/github.com/sirupsen/logrus/go.mod
-Gopkg.lock
+go.sum

@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-systemd/dbus"
+	"github.com/coreos/go-systemd/v22/dbus"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"

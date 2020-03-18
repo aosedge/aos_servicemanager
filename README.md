@@ -4,6 +4,7 @@
 [![coverage report](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/badges/master/coverage.svg)](https://gitpct.epam.com/epmd-aepr/aos_servicemanager/commits/master)  
 
 AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for the following tasks:
+
 * communicate with the backend;
 * install, remove, start, stop AOS services;
 * configure AOS services network;
@@ -16,10 +17,16 @@ See architecture [document](doc/architecture.md) for more details.
 
 ## Required GO packages
 
-Dependency tool `dep` (https://github.com/golang/dep) is used to handle external package dependencies. `dep` tool should be installed on the host machine before performing the build. `Gopkg.toml` contains a list of required external go packages. Perform the following command before build to fetch the required packages:
+All requires GO packages exist under `vendor` folder. Content of this folder is created with GO modules:
 
+```bash
+export GO111MODULE=on
+export GOPRIVATE=gitpct.epam.com/*
 ```
-dep ensure
+
+```golang
+go mod init
+go mod vendors
 ```
 
 ## Required native packages
