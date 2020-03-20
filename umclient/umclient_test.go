@@ -294,6 +294,19 @@ func TestSystemUpgrade(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Error("Waiting for upgrade status timeout")
 	}
+
+	// Try to upgrade the same version
+	client.SystemUpgrade(data)
+
+	select {
+	case status := <-sender.upgradeStatusChannel:
+		if status.err != "" {
+			t.Errorf("Upgrade failed: %s", status.err)
+		}
+
+	case <-time.After(1 * time.Second):
+		t.Error("Waiting for upgrade status timeout")
+	}
 }
 
 func TestRevertUpgrade(t *testing.T) {
@@ -319,6 +332,19 @@ func TestRevertUpgrade(t *testing.T) {
 
 	case <-time.After(1 * time.Second):
 		t.Error("Waiting for revert status timeout")
+	}
+
+	// Try to revert the same version
+	client.SystemRevert(3)
+
+	select {
+	case status := <-sender.revertStatusChannel:
+		if status.err != "" {
+			t.Errorf("Revert failed: %s", status.err)
+		}
+
+	case <-time.After(1 * time.Second):
+		t.Error("Waiting for upgrade status timeout")
 	}
 }
 

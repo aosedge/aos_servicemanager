@@ -167,8 +167,6 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 		return 0, err
 	}
 
-	um.imageVersion = status.CurrentVersion
-
 	return um.imageVersion, nil
 }
 
@@ -179,6 +177,11 @@ func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
 
 	log.WithField("version", upgradeData.ImageVersion).Info("System upgrade")
 
+	if um.imageVersion == upgradeData.ImageVersion {
+		um.sendUpgradeStatus(umprotocol.SuccessStatus, "")
+		return
+	}
+
 	/* TODO: Shall image version be without gaps?
 	if um.imageVersion+1 != imageVersion {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
@@ -186,7 +189,7 @@ func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
 	}
 	*/
 
-	if um.imageVersion >= upgradeData.ImageVersion {
+	if um.imageVersion > upgradeData.ImageVersion {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
 		return
 	}
@@ -232,6 +235,11 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 
 	log.WithField("version", imageVersion).Info("System revert")
 
+	if um.imageVersion == imageVersion {
+		um.sendRevertStatus(umprotocol.SuccessStatus, "")
+		return
+	}
+
 	/* TODO: Shall image version be without gaps?
 	if um.imageVersion-1 != imageVersion {
 		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
@@ -239,7 +247,7 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 	}
 	*/
 
-	if um.imageVersion <= imageVersion {
+	if um.imageVersion < imageVersion {
 		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
 		return
 	}
@@ -310,6 +318,8 @@ func (um *Client) messageHandler(dataJSON []byte) {
 }
 
 func (um *Client) handleSystemStatus(status umprotocol.StatusRsp) (err error) {
+	um.imageVersion = status.CurrentVersion
+
 	switch {
 	// any update at this moment
 	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umprotocol.InProgressStatus:
