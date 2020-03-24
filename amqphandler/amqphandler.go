@@ -96,11 +96,14 @@ type AmqpHandler struct {
 
 	sendConnection    *amqp.Connection
 	receiveConnection *amqp.Connection
+
+	systemID string
 }
 
 // MessageHeader message header
 type MessageHeader struct {
 	Version     uint64 `json:"version"`
+	SystemID    string `json:"systemId"`
 	MessageType string `json:"messageType"`
 }
 
@@ -416,6 +419,7 @@ func New() (handler *AmqpHandler, err error) {
 // Connect connects to cloud
 func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []string) (err error) {
 	log.WithFields(log.Fields{"url": sdURL, "systemID": systemID, "users": users}).Debug("AMQP connect")
+	handler.systemID = systemID
 
 	tlsConfig, err := fcrypt.GetTLSConfig()
 	if err != nil {
@@ -485,7 +489,7 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 
 // SendInitialSetup sends initial list of available services
 func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	statusMsg := createAosMessage(UnitStatusType, UnitStatus{Services: serviceList})
+	statusMsg := handler.createAosMessage(UnitStatusType, UnitStatus{Services: serviceList})
 
 	handler.sendChannel <- Message{"", statusMsg}
 
@@ -494,7 +498,7 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 
 // SendServiceStatus sends message with service status
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	statusMsg := createAosMessage(UnitStatusType,
+	statusMsg := handler.createAosMessage(UnitStatusType,
 		UnitStatus{Services: []ServiceInfo{serviceStatus}})
 
 	handler.sendChannel <- Message{"", statusMsg}
@@ -504,7 +508,7 @@ func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err er
 
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
-	monitoringMsg := createAosMessage(MonitoringDataType, monitoringData)
+	monitoringMsg := handler.createAosMessage(MonitoringDataType, monitoringData)
 
 	handler.sendChannel <- Message{"", monitoringMsg}
 
@@ -513,7 +517,7 @@ func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (e
 
 // SendNewState sends new state message
 func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlationID string) (err error) {
-	newStateMsg := createAosMessage(NewStateType,
+	newStateMsg := handler.createAosMessage(NewStateType,
 		NewState{ServiceID: serviceID, State: state, Checksum: checksum})
 
 	handler.sendChannel <- Message{correlationID, newStateMsg}
@@ -523,7 +527,7 @@ func (handler *AmqpHandler) SendNewState(serviceID, state, checksum, correlation
 
 // SendStateRequest sends state request message
 func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool) (err error) {
-	stateRequestMsg := createAosMessage(StateRequestType,
+	stateRequestMsg := handler.createAosMessage(StateRequestType,
 		StateRequest{ServiceID: serviceID, Default: defaultState})
 
 	handler.sendChannel <- Message{"", stateRequestMsg}
@@ -533,7 +537,7 @@ func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool
 
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
-	serviceLogMsg := createAosMessage(PushServiceLogType, serviceLog)
+	serviceLogMsg := handler.createAosMessage(PushServiceLogType, serviceLog)
 
 	handler.sendChannel <- Message{"", serviceLogMsg}
 
@@ -542,7 +546,7 @@ func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error
 
 // SendAlerts sends alerts message
 func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
-	alertMsg := createAosMessage(AlertsType, alerts)
+	alertMsg := handler.createAosMessage(AlertsType, alerts)
 
 	handler.sendChannel <- Message{"", alertMsg}
 
@@ -557,7 +561,7 @@ func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError str
 		errorValue = nil
 	}
 
-	revertStatusMsg := createAosMessage(SystemRevertStatusType,
+	revertStatusMsg := handler.createAosMessage(SystemRevertStatusType,
 		SystemRevertStatus{Status: revertStatus, Error: errorValue, ImageVersion: imageVersion})
 
 	handler.sendChannel <- Message{"", revertStatusMsg}
@@ -573,7 +577,7 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 		errorValue = nil
 	}
 
-	upgradeStatusMsg := createAosMessage(SystemUpgradeStatusType,
+	upgradeStatusMsg := handler.createAosMessage(SystemUpgradeStatusType,
 		SystemUpgradeStatus{Status: upgradeStatus, Error: errorValue, ImageVersion: imageVersion})
 
 	handler.sendChannel <- Message{"", upgradeStatusMsg}
@@ -583,7 +587,7 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 
 // SendSystemVersion sends system version
 func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
-	systemVersionMsg := createAosMessage(SystemVersionType, SystemVersion{ImageVersion: imageVersion})
+	systemVersionMsg := handler.createAosMessage(SystemVersionType, SystemVersion{ImageVersion: imageVersion})
 
 	handler.sendChannel <- Message{"", systemVersionMsg}
 
@@ -906,9 +910,9 @@ func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
 	return services, nil
 }
 
-func createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
+func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
 	msg = AOSMessage{
-		Header: MessageHeader{Version: ProtocolVersion, MessageType: msgType},
+		Header: MessageHeader{Version: ProtocolVersion, SystemID: handler.systemID, MessageType: msgType},
 		Data:   data}
 
 	return msg
