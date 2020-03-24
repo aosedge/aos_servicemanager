@@ -55,6 +55,7 @@ const (
 	DesiredStatusType          = "desiredStatus"
 	RequestServiceCrashLogType = "requestServiceCrashLog"
 	RequestServiceLogType      = "requestServiceLog"
+	ServiceDiscoveryType       = "serviceDiscovery"
 	StateAcceptanceType        = "stateAcceptance"
 	SystemRevertType           = "systemRevert"
 	SystemUpgradeType          = "systemUpgrade"
@@ -305,10 +306,8 @@ type Message struct {
 	Data          interface{}
 }
 
-type serviceDiscoveryRequest struct {
-	Version  uint64   `json:"version"`
-	SystemID string   `json:"systemID"`
-	Users    []string `json:"users"`
+type serviceDiscoveryRequestData struct {
+	Users []string `json:"users"`
 }
 
 // ServiceAlertRules define service monitoring alerts rules
@@ -429,11 +428,9 @@ func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []strin
 	var connectionInfo rabbitConnectioninfo
 
 	if err := retryHelper(func() (err error) {
-		connectionInfo, err = getConnectionInfo(sdURL, serviceDiscoveryRequest{
-			Version:  ProtocolVersion,
-			SystemID: systemID,
-			Users:    users}, tlsConfig)
-
+		connectionInfo, err = getConnectionInfo(sdURL,
+			handler.createAosMessage(ServiceDiscoveryType, serviceDiscoveryRequestData{Users: users}),
+			tlsConfig)
 		return err
 	}); err != nil {
 		return err
@@ -622,7 +619,7 @@ func retryHelper(f func() error) (err error) {
 }
 
 // service discovery implementation
-func getConnectionInfo(url string, request serviceDiscoveryRequest, tlsConfig *tls.Config) (info rabbitConnectioninfo, err error) {
+func getConnectionInfo(url string, request AOSMessage, tlsConfig *tls.Config) (info rabbitConnectioninfo, err error) {
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
 		return info, err
