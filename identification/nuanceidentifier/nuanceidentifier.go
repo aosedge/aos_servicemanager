@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -61,7 +62,7 @@ func New(configJSON []byte) (instance *Instance, err error) {
 		return nil, err
 	}
 
-	instance.systemID = string(data)
+	instance.systemID = strings.TrimSpace(string(data))
 
 	data, err = ioutil.ReadFile(instance.config.UsersFile)
 	if err != nil {
