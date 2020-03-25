@@ -495,7 +495,7 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err err
 
 // SendServiceStatus sends message with service status
 func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	statusMsg := handler.createAosMessage(UnitStatusType,
+	statusMsg := handler.createAosMessage(ServiceStatusType,
 		UnitStatus{Services: []ServiceInfo{serviceStatus}})
 
 	handler.sendChannel <- Message{"", statusMsg}

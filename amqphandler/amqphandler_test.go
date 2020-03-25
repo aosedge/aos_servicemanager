@@ -336,7 +336,7 @@ func TestReceiveMessages(t *testing.T) {
 				return amqpHandler.SendServiceStatus(initialSetupData[0])
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.ServiceStatusType, Version: amqphandler.ProtocolVersion},
 				Data:   &amqphandler.UnitStatus{Services: []amqphandler.ServiceInfo{initialSetupData[0]}}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
