@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -667,4 +668,53 @@ func TestUpgradeVersion(t *testing.T) {
 	if setUpgradeVersion != getUpgradeVersion {
 		t.Fatalf("Wrong upgrade version value: %v", getUpgradeVersion)
 	}
+}
+
+func TestMultiThread(t *testing.T) {
+	const numIterations = 1000
+
+	var wg sync.WaitGroup
+
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+
+		for i := 0; i < numIterations; i++ {
+			if err := db.SetUpgradeState(i); err != nil {
+				t.Fatalf("Can't set upgrade state: %s", err)
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		_, err := db.GetUpgradeState()
+		if err != nil {
+			t.Fatalf("Can't get upgrade state: %s", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		for i := 0; i < numIterations; i++ {
+			if err := db.SetUpgradeVersion(uint64(i)); err != nil {
+				t.Fatalf("Can't set upgrade version: %s", err)
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		for i := 0; i < numIterations; i++ {
+			if _, err := db.GetUpgradeVersion(); err != nil {
+				t.Fatalf("Can't get upgrade version: %s", err)
+			}
+		}
+	}()
+
+	wg.Wait()
 }
