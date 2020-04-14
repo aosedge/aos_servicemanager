@@ -255,6 +255,8 @@ func (instance *Alerts) setupJournal() (err error) {
 }
 
 func (instance *Alerts) processJournal() (err error) {
+	currentCursor := instance.cursor
+
 	for {
 		count, err := instance.journal.Next()
 		if err != nil {
@@ -262,17 +264,10 @@ func (instance *Alerts) processJournal() (err error) {
 		}
 
 		if count == 0 {
-			cursor, err := instance.journal.GetCursor()
-			if err != nil {
-				return err
-			}
-
-			if cursor != instance.cursor {
-				if err = instance.cursorStorage.SetJournalCursor(cursor); err != nil {
+			if currentCursor != instance.cursor {
+				if err = instance.cursorStorage.SetJournalCursor(currentCursor); err != nil {
 					return err
 				}
-
-				instance.cursor = cursor
 			}
 
 			return nil
@@ -282,6 +277,8 @@ func (instance *Alerts) processJournal() (err error) {
 		if err != nil {
 			return err
 		}
+
+		currentCursor = entry.Cursor
 
 		var version *uint64
 		source := "system"
