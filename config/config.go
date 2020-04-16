@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path"
+	"strconv"
 	"time"
 )
 
@@ -30,8 +31,20 @@ import (
  * Types
  ******************************************************************************/
 
-// Crypt configuration structure with certificates info
+// TPMHandle represents a handle number from hex JSON string
+type TPMHandle uint32
+
+// TPMEngine configuration structure represents TPM device
+type TPMEngine struct {
+	Enabled       bool      `json:"enabled"`
+	Interface     string    `json:"interface"`
+	OnlineHandle  TPMHandle `json:"onlineHandle"`
+	OfflineHandle TPMHandle `json:"offlineHandle"`
+}
+
+// Crypt configuration structure with crypto attributes
 type Crypt struct {
+	TPMEngine      TPMEngine
 	CACert         string
 	ClientCert     string
 	ClientKey      string
@@ -193,5 +206,28 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 
 	default:
 		return fmt.Errorf("invalid duration value: %v", value)
+	}
+}
+
+// UnmarshalJSON implements custom parse for tpmHandle
+func (handle *TPMHandle) UnmarshalJSON(b []byte) (err error) {
+	var v interface{}
+
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+
+	switch value := v.(type) {
+	case string:
+		result, err := strconv.ParseUint(value[2:], 16, 32)
+		if err != nil {
+			return err
+		}
+		*handle = TPMHandle(result)
+
+		return nil
+
+	default:
+		return fmt.Errorf("invalid tpmHandle value: %v", value)
 	}
 }

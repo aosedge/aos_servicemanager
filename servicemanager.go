@@ -167,7 +167,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Initialize fcrypt
-	fcrypt.Init(cfg.Crypt)
+	if err = fcrypt.Init(cfg.Crypt); err != nil {
+		return sm, err
+	}
 
 	// Get organization names from certificate and use it as discovery URL
 	names, err = fcrypt.GetCertificateOrganizations(cfg.Crypt.ClientCert)

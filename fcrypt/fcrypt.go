@@ -39,9 +39,13 @@ import (
 )
 
 var fcryptCfg config.Crypt
+var onlinePrivate *tpmPrivateKeyRSA
+var offlinePrivate *tpmPrivateKeyRSA
 
 // Init initializes of fcrypt package
-func Init(conf config.Crypt) {
+func Init(conf config.Crypt) error {
+	var err error
+
 	fcryptCfg = conf
 
 	log.Debug("CAcert:         ", fcryptCfg.CACert)
@@ -49,6 +53,37 @@ func Init(conf config.Crypt) {
 	log.Debug("ClientKey:      ", fcryptCfg.ClientKey)
 	log.Debug("OfflinePrivKey: ", fcryptCfg.OfflinePrivKey)
 	log.Debug("OfflineCert:    ", fcryptCfg.OfflineCert)
+
+	if fcryptCfg.TPMEngine.Enabled {
+		log.Debugf("Open hardware crypto interface %s", fcryptCfg.TPMEngine.Interface)
+
+		tpmCrypto := &TPMCrypto{}
+
+		err = tpmCrypto.Open(fcryptCfg.TPMEngine.Interface)
+		if err != nil {
+			return err
+		}
+
+		onlinePrivate = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: fcryptCfg.TPMEngine.OnlineHandle, hashAlg: crypto.SHA256}
+
+		err = onlinePrivate.Create()
+		if err != nil {
+			return err
+		}
+
+		log.Debugf("TPM creates private online key object from 0x%X", uint32(fcryptCfg.TPMEngine.OnlineHandle))
+
+		offlinePrivate = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: fcryptCfg.TPMEngine.OfflineHandle, hashAlg: crypto.SHA256}
+
+		err = offlinePrivate.Create()
+		if err != nil {
+			return err
+		}
+
+		log.Debugf("TPM creates private offline key object from 0x%X", uint32(fcryptCfg.TPMEngine.OfflineHandle))
+	}
+
+	return nil
 }
 
 func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
@@ -68,12 +103,41 @@ func getCaCertPool() (*x509.CertPool, error) {
 	return caCertPool, nil
 }
 
-// GetTLSConfig Provides TLS configuration which can be used with HTTPS client
-func GetTLSConfig() (*tls.Config, error) {
-	// Load client cert
-	cert, err := tls.LoadX509KeyPair(fcryptCfg.ClientCert, fcryptCfg.ClientKey)
+func loadClientCertificate(file string) (certificates [][]byte, err error) {
+	certPEMBlock, err := ioutil.ReadFile(file)
 	if err != nil {
-		log.Fatalf("Can't load key pair: %s", err)
+		return nil, err
+	}
+
+	for {
+		var certDERBlock *pem.Block
+
+		certDERBlock, certPEMBlock = pem.Decode(certPEMBlock)
+		if certDERBlock == nil {
+			break
+		}
+
+		if certDERBlock.Type == "CERTIFICATE" {
+			certificates = append(certificates, certDERBlock.Bytes)
+		}
+	}
+
+	if len(certificates) == 0 {
+		return nil, errors.New("client certificate does not exist")
+	}
+
+	return certificates, nil
+}
+
+// GetTLSConfig Provides TLS configuration for HTTPS client
+func GetTLSConfig() (*tls.Config, error) {
+	cfg := &tls.Config{}
+	var cert tls.Certificate
+	var err error
+
+	ClientCert, err := loadClientCertificate(fcryptCfg.ClientCert)
+	if err != nil {
+		return cfg, err
 	}
 
 	caCertPool, err := getCaCertPool()
@@ -81,35 +145,46 @@ func GetTLSConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates:          []tls.Certificate{cert},
-		RootCAs:               caCertPool,
-		VerifyPeerCertificate: verifyCert,
+	if fcryptCfg.TPMEngine.Enabled {
+		log.Debug("TLS config uses TPM engine")
+		cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: ClientCert}
+
+		// Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
+		cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
+			tls.PKCS1WithSHA256,
+			tls.PKCS1WithSHA1,
+		}
+	} else {
+		log.Debug("TLS config uses native crypto")
+		cert, err = tls.LoadX509KeyPair(fcryptCfg.ClientCert, fcryptCfg.ClientKey)
+		if err != nil {
+			return cfg, err
+		}
 	}
 
-	tlsConfig.BuildNameToCertificate()
-	return tlsConfig, nil
+	cfg.RootCAs = caCertPool
+	cfg.Certificates = []tls.Certificate{cert}
+	cfg.VerifyPeerCertificate = verifyCert
+
+	cfg.BuildNameToCertificate()
+	return cfg, nil
 }
 
-func getPrivKey() (*rsa.PrivateKey, error) {
-	var err error
-	var key crypto.PrivateKey
+func getPrivKey() (key crypto.PrivateKey, err error) {
+	if fcryptCfg.TPMEngine.Enabled {
+		key = offlinePrivate
+	} else {
+		keyBytes, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
+		if err != nil {
+			return nil, fmt.Errorf("error reading private key: %s", err)
+		}
 
-	keyBytes, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
-	if err != nil {
-		return nil, fmt.Errorf("error reading private key: %s", err)
+		if key, err = decodePrivateKey(keyBytes); err != nil {
+			return nil, err
+		}
 	}
 
-	if key, err = decodePrivateKey(keyBytes); err != nil {
-		return nil, err
-	}
-
-	switch key := key.(type) {
-	case *rsa.PrivateKey:
-		return key, nil
-	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
-		return nil, errors.New("ECDSA private key not yet supported")
-	}
+	return key, err
 }
 
 func getOfflineCert() (*x509.Certificate, error) {
@@ -324,7 +399,13 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	return DecryptMessage(der, key, cert)
+	switch key := key.(type) {
+	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
+		return DecryptMessage(der, key, cert)
+
+	default:
+		return nil, fmt.Errorf("%T private key not yet supported", key)
+	}
 }
 
 //DecryptImage Decrypts given image into temporary file

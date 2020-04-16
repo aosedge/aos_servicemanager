@@ -303,36 +303,47 @@ func (ctx *CryptoContext) LoadOfflineKeyFile(filepath string) error {
 	return ctx.LoadOfflineKey()
 }
 
+// LoadOfflineKey function loads offline key into context
 func (ctx *CryptoContext) LoadOfflineKey() error {
-	if ctx.cryptConfig.OfflinePrivKey == "" {
-		return errors.New("OfflinePrivKey not set")
+	if !ctx.cryptConfig.TPMEngine.Enabled {
+		if ctx.cryptConfig.OfflinePrivKey == "" {
+			return errors.New("OfflinePrivKey not set")
+		}
+
+		keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
+		if err != nil {
+			return fmt.Errorf("error reading offline private key from file: %s", err)
+		}
+
+		return ctx.LoadKeyFromBytes(keyBytes)
 	}
 
-	keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
-	if err != nil {
-		return fmt.Errorf("error reading offline private key from file: %s", err)
-	}
-
-	return ctx.LoadKeyFromBytes(keyBytes)
+	return nil
 }
 
+// LoadKeyFromBytes function loads online key which represents in a byte data into context
 func (ctx *CryptoContext) LoadKeyFromBytes(data []byte) (err error) {
 	ctx.privateKey, err = loadKey(data)
 	return err
 }
 
+// LoadOnlineKey function loads online key into context
 func (ctx *CryptoContext) LoadOnlineKey() error {
-	if ctx.cryptConfig.ClientKey == "" {
-		return errors.New("OfflinePrivKey not set")
+	if !ctx.cryptConfig.TPMEngine.Enabled {
+		if ctx.cryptConfig.ClientKey == "" {
+			return errors.New("OfflinePrivKey is not set")
+		}
+
+		keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
+		if err != nil {
+			return fmt.Errorf("error reading online private key from file: %s", err)
+		}
+
+		ctx.privateKey, err = loadKey(keyBytes)
+		return err
 	}
 
-	keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
-	if err != nil {
-		return fmt.Errorf("error reading online private key from file: %s", err)
-	}
-
-	ctx.privateKey, err = loadKey(keyBytes)
-	return err
+	return nil
 }
 
 func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (SymmetricContextInterface, error) {

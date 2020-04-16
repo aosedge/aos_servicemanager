@@ -18,9 +18,9 @@
 package fcrypt
 
 import (
+	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -148,22 +148,21 @@ func getContentInfo(ci asnContentInfo) (*contentInfo, error) {
 	return &ret, nil
 }
 
-func decryptCMSKey(ktri *keyTransRecipientInfo,
-	privKey *rsa.PrivateKey) ([]byte, error) {
+func decryptCMSKey(ktri *keyTransRecipientInfo, decryptor crypto.Decrypter) (symmetrickey []byte, err error) {
 	switch {
 	case ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid):
 		if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
 			return nil, errors.New("extra paramaters for RSA algorithm found")
 		}
 
-		key, err := privKey.Decrypt(nil, ktri.EncryptedKey, nil)
+		symmetrickey, err = decryptor.Decrypt(nil, ktri.EncryptedKey, nil)
 		if err != nil {
 			return nil, err
 		}
 
-		log.Debugf("AES KEY: %#v", key)
+		log.Debugf("AES KEY: %#v", symmetrickey)
 
-		return key, nil
+		return symmetrickey, nil
 	default:
 		return nil, errors.New("unknown public encryption OID")
 	}
@@ -215,7 +214,7 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 }
 
 //DecryptMessage decrypt message
-func DecryptMessage(der []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]byte, error) {
+func DecryptMessage(der []byte, key crypto.PrivateKey, cert *x509.Certificate) (plainKey []byte, err error) {
 	ci, err := unmarshallCMS(der)
 	if err != nil {
 		return nil, err
@@ -224,10 +223,16 @@ func DecryptMessage(der []byte, key *rsa.PrivateKey, cert *x509.Certificate) ([]
 	for _, recipient := range ci.EnvelopedData.RecipientInfos {
 		r := recipient.(keyTransRecipientInfo)
 		if cert.SerialNumber.Cmp(r.Rid.SerialNumber) == 0 {
-			dkey, err := decryptCMSKey(&r, key)
+			decryptor, ok := key.(crypto.Decrypter)
+			if !ok {
+				return nil, errors.New("private key doesn't have a decryption suite")
+			}
+
+			dkey, err := decryptCMSKey(&r, decryptor)
 			if err != nil {
 				return nil, err
 			}
+
 			return decryptMessage(&ci.EnvelopedData.EncryptedContentInfo, dkey)
 		}
 	}
