@@ -86,6 +86,7 @@ type Config struct {
 	UMServerURL         string          `json:"umServer"`
 	WorkingDir          string          `json:"workingDir"`
 	UpgradeDir          string          `json:"upgradeDir"`
+	StorageDir          string          `json:"storageDir"`
 	DefaultServiceTTL   uint64          `json:"defaultServiceTTLDays"`
 	Monitoring          Monitoring      `json:"monitoring"`
 	Logging             Logging         `json:"logging"`
@@ -105,6 +106,7 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
+		StorageDir:        "/var/aos/storage",
 		DefaultServiceTTL: 30,
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},

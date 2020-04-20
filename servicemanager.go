@@ -103,10 +103,10 @@ func init() {
  * ServiceManager
  ******************************************************************************/
 
-func cleanup(workingDir, dbFile string) {
+func cleanup(cfg *config.Config, dbFile string) {
 	log.Debug("System cleanup")
 
-	if err := launcher.Cleanup(workingDir); err != nil {
+	if err := launcher.Cleanup(cfg); err != nil {
 		log.Fatalf("Can't cleanup launcher: %s", err)
 	}
 
@@ -126,7 +126,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	if sm.db, err = database.New(dbFile); err != nil {
 		if err == database.ErrVersionMismatch {
 			log.Warning("Unsupported database version")
-			cleanup(cfg.WorkingDir, dbFile)
+			cleanup(cfg, dbFile)
 			sm.db, err = database.New(dbFile)
 		}
 
@@ -551,7 +551,7 @@ func main() {
 	}
 
 	if *doCleanup {
-		cleanup(cfg.WorkingDir, path.Join(cfg.WorkingDir, dbFileName))
+		cleanup(cfg, path.Join(cfg.WorkingDir, dbFileName))
 		return
 	}
 

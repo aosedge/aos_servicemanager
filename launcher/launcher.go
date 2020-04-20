@@ -182,7 +182,7 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 		return nil, err
 	}
 
-	if launcher.storageHandler, err = newStorageHandler(config.WorkingDir, serviceProvider,
+	if launcher.storageHandler, err = newStorageHandler(config.StorageDir, serviceProvider,
 		launcher.NewStateChannel, sender); err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (launcher *Launcher) UpdateState(state amqp.UpdateState) {
 }
 
 // Cleanup deletes all AOS services, their storages and states
-func Cleanup(workingDir string) (err error) {
+func Cleanup(cfg *config.Config) (err error) {
 	systemd, err := dbus.NewSystemConnection()
 	if err != nil {
 		log.Errorf("Can't connect to systemd: %s", err)
@@ -395,7 +395,7 @@ func Cleanup(workingDir string) (err error) {
 		}
 	}
 
-	serviceDir := path.Join(workingDir, serviceDir)
+	serviceDir := path.Join(cfg.WorkingDir, serviceDir)
 
 	log.WithField("dir", serviceDir).Debug("Remove service dir")
 
@@ -403,7 +403,7 @@ func Cleanup(workingDir string) (err error) {
 		log.Fatalf("Can't remove service folder: %s", err)
 	}
 
-	storageDir := path.Join(workingDir, storageDir)
+	storageDir := path.Join(cfg.StorageDir, storageDir)
 
 	log.WithField("dir", storageDir).Debug("Remove storage dir")
 
@@ -865,7 +865,7 @@ func (launcher *Launcher) restoreService(service database.ServiceEntry) (retErr 
 		}
 	}
 
-	if err := platform.SetUserFSQuota(launcher.config.WorkingDir, service.StorageLimit, service.UserName); err != nil {
+	if err := platform.SetUserFSQuota(launcher.config.StorageDir, service.StorageLimit, service.UserName); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
 			retErr = err
@@ -927,7 +927,7 @@ func (launcher *Launcher) addService(service database.ServiceEntry) (err error) 
 	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
-	if err = platform.SetUserFSQuota(launcher.config.WorkingDir,
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir,
 		service.StorageLimit+service.StateLimit, service.UserName); err != nil {
 		return err
 	}
@@ -977,7 +977,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Update service state failed")
 	}
 
-	if err = platform.SetUserFSQuota(launcher.config.WorkingDir, newService.StorageLimit, newService.UserName); err != nil {
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit, newService.UserName); err != nil {
 		panic("Set service quota failed")
 	}
 

@@ -177,6 +177,17 @@ func TestGetWorkingDir(t *testing.T) {
 	}
 }
 
+func TestGetStorageDirAsWorkingDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.StorageDir != "/var/aos/storage" {
+		t.Errorf("Wrong storageDir value: %s", config.StorageDir)
+	}
+}
+
 func TestGetVisServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {

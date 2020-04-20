@@ -82,11 +82,11 @@ type stateParams struct {
  * Storage related API
  ******************************************************************************/
 
-func newStorageHandler(workingDir string, serviceProvider ServiceProvider,
+func newStorageHandler(storageBaseDir string, serviceProvider ServiceProvider,
 	newStateChannel chan<- NewState, sender Sender) (handler *storageHandler, err error) {
 	handler = &storageHandler{
 		serviceProvider: serviceProvider,
-		storagePath:     path.Join(workingDir, storageDir),
+		storagePath:     path.Join(storageBaseDir, storageDir),
 		newStateChannel: newStateChannel,
 		sender:          sender}
 
