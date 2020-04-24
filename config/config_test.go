@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"reflect"
 	"testing"
 	"time"
 
@@ -76,7 +77,8 @@ func createConfigFile() (err error) {
 	"identifier": {
 		"param1": "testParam",
 		"param2": 123
-	}
+	},
+	"devices": ["device0", "device1", "device2"]
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -329,5 +331,18 @@ func TestGetIdentification(t *testing.T) {
 
 	if params.Param2 != 123 {
 		t.Errorf("Wrong param2: %v", params.Param2)
+	}
+}
+
+func TestDevices(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	devices := []string{"device0", "device1", "device2"}
+
+	if !reflect.DeepEqual(config.Devices, devices) {
+		t.Errorf("Wrong device value: %v", config.Devices)
 	}
 }
