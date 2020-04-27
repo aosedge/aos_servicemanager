@@ -921,6 +921,12 @@ func (launcher *Launcher) prepareService(installDir string,
 		return service, err
 	}
 
+	for _, device := range launcher.config.Devices {
+		if err = spec.addHostDevice(device); err != nil {
+			return service, err
+		}
+	}
+
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
 	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, &spec.ocSpec); err != nil {

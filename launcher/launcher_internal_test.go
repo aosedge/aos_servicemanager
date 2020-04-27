@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/jlaffaye/ftp"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
@@ -1340,5 +1341,63 @@ func TestServiceState(t *testing.T) {
 
 	if err := launcher.removeAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestSpec(t *testing.T) {
+	if err := generateConfig("tmp"); err != nil {
+		t.Fatalf("Can't generate service spec: %s", err)
+	}
+
+	spec, err := loadServiceSpec(path.Join("tmp", ocConfigFile))
+	if err != nil {
+		t.Fatalf("Can't load service spec: %s", err)
+	}
+	defer func() {
+		if err := spec.save(); err != nil {
+			t.Fatalf("Can't save service spec: %s", err)
+		}
+	}()
+
+	deviceName := "/dev/random"
+
+	if err = spec.addHostDevice(deviceName); err != nil {
+		t.Fatalf("Can't add host device: %s", err)
+	}
+
+	found := false
+
+	var device specs.LinuxDevice
+
+	for _, device = range spec.ocSpec.Linux.Devices {
+		if device.Path == deviceName {
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("Device not found")
+	}
+
+	found = false
+
+	for _, resource := range spec.ocSpec.Linux.Resources.Devices {
+		if resource.Major == nil || resource.Minor == nil {
+			continue
+		}
+
+		if *resource.Major == device.Major && *resource.Minor == device.Minor {
+			found = true
+
+			if !resource.Allow {
+				t.Error("Resource is not allowed")
+			}
+		}
+	}
+
+	if !found {
+		t.Fatal("Resource not found")
 	}
 }

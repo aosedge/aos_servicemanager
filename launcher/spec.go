@@ -20,6 +20,7 @@ package launcher
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	"aos_servicemanager/platform"
 )
@@ -45,6 +47,12 @@ type serviceSpec struct {
 	ocSpec   specs.Spec
 	fileName string
 }
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var errNotDevice = errors.New("not a device")
 
 /*******************************************************************************
  * Private
@@ -202,6 +210,121 @@ func (spec *serviceSpec) addPrestartHook(path string) (err error) {
 	}
 
 	spec.ocSpec.Hooks.Prestart = append(spec.ocSpec.Hooks.Prestart, specs.Hook{Path: path})
+
+	return nil
+}
+
+func addDevice(deviceName string) (device *specs.LinuxDevice, err error) {
+	log.WithFields(log.Fields{"device": deviceName}).Debug("Add device")
+
+	var stat unix.Stat_t
+
+	if err := unix.Lstat(deviceName, &stat); err != nil {
+		return nil, err
+	}
+
+	if unix.Major(stat.Rdev) == 0 {
+		return nil, errNotDevice
+	}
+
+	devType := ""
+
+	switch {
+	case stat.Mode&unix.S_IFBLK == unix.S_IFBLK:
+		devType = "b"
+	case stat.Mode&unix.S_IFCHR == unix.S_IFCHR:
+		devType = "c"
+	}
+
+	mode := os.FileMode(stat.Mode)
+
+	return &specs.LinuxDevice{
+		Type:     devType,
+		Path:     deviceName,
+		Major:    int64(unix.Major(stat.Rdev)),
+		Minor:    int64(unix.Minor(stat.Rdev)),
+		FileMode: &mode,
+		UID:      &stat.Uid,
+		GID:      &stat.Gid,
+	}, nil
+}
+
+func addDevices(deviceName string) (devices []specs.LinuxDevice, err error) {
+	stat, err := os.Stat(deviceName)
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	case stat.IsDir():
+		files, err := ioutil.ReadDir(deviceName)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, file := range files {
+			switch file.Name() {
+			case "pts", "shm", "fd", "mqueue", ".lxc", ".lxd-mounts", ".udev":
+				log.WithField("device", file.Name()).Warnf("Device skipped")
+
+				continue
+
+			default:
+				dirDevices, err := addDevices(path.Join(deviceName, file.Name()))
+				if err != nil {
+					return nil, err
+				}
+
+				devices = append(devices, dirDevices...)
+			}
+		}
+
+		return devices, nil
+
+	case stat.Name() == "console":
+		log.WithField("device", deviceName).Warnf("Device skipped")
+
+		return devices, nil
+
+	default:
+		device, err := addDevice(deviceName)
+		if err != nil {
+			if err == errNotDevice {
+				log.WithField("device", deviceName).Warnf("Device skipped as not a device node")
+
+				return nil, nil
+			}
+
+			return nil, err
+		}
+
+		devices = append(devices, *device)
+
+		return devices, nil
+	}
+}
+
+func (spec *serviceSpec) addHostDevice(deviceName string) (err error) {
+	log.WithFields(log.Fields{"device": deviceName}).Debug("Add host device")
+
+	specDevices, err := addDevices(deviceName)
+	if err != nil {
+		return err
+	}
+
+	spec.ocSpec.Linux.Devices = append(spec.ocSpec.Linux.Devices, specDevices...)
+
+	for _, specDevice := range specDevices {
+		major, minor := specDevice.Major, specDevice.Minor
+
+		spec.ocSpec.Linux.Resources.Devices = append(spec.ocSpec.Linux.Resources.Devices, specs.LinuxDeviceCgroup{
+			Allow:  true,
+			Type:   specDevice.Type,
+			Major:  &major,
+			Minor:  &minor,
+			Access: "rwm",
+		})
+	}
 
 	return nil
 }
