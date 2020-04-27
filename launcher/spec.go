@@ -156,12 +156,6 @@ func (spec *serviceSpec) mountHostFS(workingDir string) (err error) {
 		specs.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
 		specs.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
 		specs.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
-		// TODO: mount individual tmp
-		// "destination": "/tmp",
-		// "type": "tmpfs",
-		// "source": "tmpfs",
-		// "options": ["nosuid","strictatime","mode=755","size=65536k"]
-		specs.Mount{Destination: "/tmp", Type: "bind", Source: "/tmp", Options: []string{"bind", "rw"}},
 	}
 
 	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, mounts...)
