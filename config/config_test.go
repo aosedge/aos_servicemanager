@@ -78,7 +78,8 @@ func createConfigFile() (err error) {
 		"param1": "testParam",
 		"param2": 123
 	},
-	"devices": ["device0", "device1", "device2"]
+	"devices": ["device0", "device1", "device2"],
+	"groups": ["group0", "group1", "group2"]
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -344,5 +345,18 @@ func TestDevices(t *testing.T) {
 
 	if !reflect.DeepEqual(config.Devices, devices) {
 		t.Errorf("Wrong device value: %v", config.Devices)
+	}
+}
+
+func TestGroups(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	devices := []string{"group0", "group1", "group2"}
+
+	if !reflect.DeepEqual(config.Groups, devices) {
+		t.Errorf("Wrong groups value: %v", config.Groups)
 	}
 }

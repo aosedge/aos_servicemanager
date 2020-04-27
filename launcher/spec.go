@@ -23,8 +23,10 @@ import (
 	"errors"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
+	"strconv"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
@@ -325,6 +327,24 @@ func (spec *serviceSpec) addHostDevice(deviceName string) (err error) {
 			Access: "rwm",
 		})
 	}
+
+	return nil
+}
+
+func (spec *serviceSpec) addGroup(groupName string) (err error) {
+	log.WithFields(log.Fields{"group": groupName}).Debug("Add group")
+
+	group, err := user.LookupGroup(groupName)
+	if err != nil {
+		return err
+	}
+
+	gid, err := strconv.ParseUint(group.Gid, 10, 32)
+	if err != nil {
+		return err
+	}
+
+	spec.ocSpec.Process.User.AdditionalGids = append(spec.ocSpec.Process.User.AdditionalGids, uint32(gid))
 
 	return nil
 }

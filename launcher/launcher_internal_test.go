@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"reflect"
 	"strconv"
@@ -1359,6 +1360,8 @@ func TestSpec(t *testing.T) {
 		}
 	}()
 
+	// add device
+
 	deviceName := "/dev/random"
 
 	if err = spec.addHostDevice(deviceName); err != nil {
@@ -1399,5 +1402,37 @@ func TestSpec(t *testing.T) {
 
 	if !found {
 		t.Fatal("Resource not found")
+	}
+
+	// add group
+
+	groupName := "audio"
+
+	group, err := user.LookupGroup(groupName)
+	if err != nil {
+		t.Fatalf("Can't lookup group: %s", err)
+	}
+
+	gid, err := strconv.ParseUint(group.Gid, 10, 32)
+	if err != nil {
+		t.Fatalf("Can't parse GID: %s", err)
+	}
+
+	if err = spec.addGroup(groupName); err != nil {
+		t.Fatalf("Can't add group: %s", err)
+	}
+
+	found = false
+
+	for _, serviceGID := range spec.ocSpec.Process.User.AdditionalGids {
+		if uint32(gid) == serviceGID {
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		t.Error("Group not found")
 	}
 }

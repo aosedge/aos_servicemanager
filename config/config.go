@@ -93,6 +93,7 @@ type Config struct {
 	Alerts              Alerts          `json:"alerts"`
 	Identifier          json.RawMessage `json:"identifier"`
 	Devices             []string        `json:"devices"`
+	Groups              []string        `json:"groups"`
 }
 
 /*******************************************************************************

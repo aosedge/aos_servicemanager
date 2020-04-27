@@ -205,6 +205,13 @@ The configuration file has JSON format. Following is JSON schema:
             "items": {
                 "type": "string"
             }
+        },
+        "groups": {
+            "description": "The list of host groups which should be added to service",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
         }
     }
 }

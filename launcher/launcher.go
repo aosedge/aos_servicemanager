@@ -927,6 +927,12 @@ func (launcher *Launcher) prepareService(installDir string,
 		}
 	}
 
+	for _, group := range launcher.config.Groups {
+		if err = spec.addGroup(group); err != nil {
+			return service, err
+		}
+	}
+
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
 	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, &spec.ocSpec); err != nil {
