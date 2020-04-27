@@ -171,31 +171,20 @@ func (spec *serviceSpec) mountHostFS(workingDir string) (err error) {
 		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
 	}
 
-	// add hosts
-	hosts, _ := filepath.Abs(path.Join(workingDir, "etc", "hosts"))
-	if _, err := os.Stat(hosts); err != nil {
-		hosts = "/etc/hosts"
-	}
-	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "hosts"), Type: "bind", Source: hosts, Options: []string{"bind", "ro"}})
-
-	// add resolv.conf
-	resolvConf, _ := filepath.Abs(path.Join(workingDir, "etc", "resolv.conf"))
-	if _, err := os.Stat(resolvConf); err != nil {
-		resolvConf = "/etc/resolv.conf"
-	}
-	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "resolv.conf"), Type: "bind", Source: resolvConf, Options: []string{"bind", "ro"}})
-
-	// add nsswitch.conf
-	nsswitchConf, _ := filepath.Abs(path.Join(workingDir, "etc", "nsswitch.conf"))
-	if _, err := os.Stat(nsswitchConf); err != nil {
-		nsswitchConf = "/etc/nsswitch.conf"
-	}
-	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "nsswitch.conf"), Type: "bind", Source: nsswitchConf, Options: []string{"bind", "ro"}})
-
 	// TODO: all services should have their own certificates
 	// this mound for demo only and should be removed
 	// mount /etc/ssl
-	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "ssl"), Type: "bind", Source: path.Join("/etc", "ssl"), Options: []string{"bind", "ro"}})
+	etcItems := []string{"hosts", "resolv.conf", "nsswitch.conf", "group", "ssl"}
+
+	for _, item := range etcItems {
+		// Check if in working dir
+		absPath, _ := filepath.Abs(path.Join(workingDir, "etc", item))
+		if _, err := os.Stat(absPath); err != nil {
+			absPath = path.Join("/etc", item)
+		}
+
+		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"}})
+	}
 
 	return nil
 }
