@@ -23,7 +23,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
@@ -129,7 +127,17 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		return err
 	}
 
-	configFile := path.Join(service.Path, "config.json")
+	spec, err := loadServiceSpec(path.Join(service.Path, ocConfigFile))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if specErr := spec.save(); specErr != nil {
+			if err == nil {
+				err = specErr
+			}
+		}
+	}()
 
 	if service.StorageLimit == 0 {
 		if entry.StorageFolder != "" {
@@ -140,7 +148,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 			return err
 		}
 
-		return updateMountSpec(configFile, "")
+		return spec.removeStorageFolder()
 	}
 
 	if entry.StorageFolder != "" {
@@ -181,7 +189,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		}
 	}
 
-	if err = updateMountSpec(configFile, entry.StorageFolder); err != nil {
+	if err = spec.addStorageFolder(entry.StorageFolder); err != nil {
 		return err
 	}
 
@@ -506,56 +514,6 @@ func createStateFile(path, userName string) (err error) {
 
 	if err = os.Chown(path, int(uid), int(gid)); err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func updateMountSpec(specFile, storageFolder string) (err error) {
-	spec, err := getServiceSpec(specFile)
-	if err != nil {
-		return err
-	}
-
-	absStorageFolder, err := filepath.Abs(storageFolder)
-	if err != nil {
-		return err
-	}
-
-	newMount := specs.Mount{
-		Destination: "/home/service/storage",
-		Type:        "bind",
-		Source:      absStorageFolder,
-		Options:     []string{"bind", "rw"}}
-
-	storageIndex := len(spec.Mounts)
-
-	for i, mount := range spec.Mounts {
-		if mount.Destination == "/home/service/storage" {
-			storageIndex = i
-			break
-		}
-	}
-
-	specChanged := false
-
-	if storageIndex == len(spec.Mounts) && storageFolder != "" {
-		spec.Mounts = append(spec.Mounts, newMount)
-		specChanged = true
-	}
-
-	if storageIndex < len(spec.Mounts) {
-		if storageFolder == "" {
-			spec.Mounts = append(spec.Mounts[:storageIndex], spec.Mounts[storageIndex+1:]...)
-			specChanged = true
-		} else if !reflect.DeepEqual(spec.Mounts[storageIndex], newMount) {
-			spec.Mounts[storageIndex] = newMount
-			specChanged = true
-		}
-	}
-
-	if specChanged {
-		return writeServiceSpec(&spec, specFile)
 	}
 
 	return nil

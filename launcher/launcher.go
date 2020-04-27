@@ -57,11 +57,17 @@ const (
 	wonderShaperName = "wondershaper" // wondershaper name
 
 	aosProductPrefix = "com.epam.aos." //prefix used in annotations to get aos related entries
+
+	ocConfigFile = "config.json"
 )
 
 const (
 	stateChannelSize = 32
 )
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
 
 var (
 	statusStr = []string{"OK", "Error"}
@@ -890,14 +896,34 @@ func (launcher *Launcher) prepareService(installDir string,
 	}
 
 	// update config.json
-	spec, err := launcher.updateServiceSpec(installDir, userName)
-	if err != nil {
+	spec, err := loadServiceSpec(path.Join(installDir, ocConfigFile))
+	defer func() {
+		if specErr := spec.save(); specErr != nil {
+			if err == nil {
+				err = specErr
+			}
+		}
+	}()
+
+	if err = spec.disableTerminal(); err != nil {
+		return service, err
+	}
+
+	if err = spec.mountHostFS(launcher.config.WorkingDir); err != nil {
+		return service, err
+	}
+
+	if err = spec.setUser(userName); err != nil {
+		return service, err
+	}
+
+	if err = spec.addPrestartHook(launcher.netnsPath); err != nil {
 		return service, err
 	}
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec); err != nil {
+	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, &spec.ocSpec); err != nil {
 		return service, err
 	}
 
@@ -916,7 +942,7 @@ func (launcher *Launcher) prepareService(installDir string,
 		Status:      statusOk,
 		AlertRules:  string(alertRules)}
 
-	if err = launcher.updateServiceFromSpec(&service, spec); err != nil {
+	if err = launcher.updateServiceFromSpec(&service, &spec.ocSpec); err != nil {
 		return service, err
 	}
 
@@ -1218,82 +1244,6 @@ func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, 
 	}
 
 	return nil
-}
-
-func (launcher *Launcher) updateServiceSpec(dir string, userName string) (spec *specs.Spec, err error) {
-	configFile := path.Join(dir, "config.json")
-
-	// get service spec
-	localSpec, err := getServiceSpec(configFile)
-	if err != nil {
-		return spec, err
-	}
-
-	// disable terminal
-	localSpec.Process.Terminal = false
-
-	// assign UID, GID
-	if localSpec.Process.User.UID, localSpec.Process.User.GID, err = platform.GetUserUIDGID(userName); err != nil {
-		return spec, err
-	}
-
-	mounts := []specs.Mount{
-		specs.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
-		// TODO: mount individual tmp
-		// "destination": "/tmp",
-		// "type": "tmpfs",
-		// "source": "tmpfs",
-		// "options": ["nosuid","strictatime","mode=755","size=65536k"]
-		specs.Mount{Destination: "/tmp", Type: "bind", Source: "/tmp", Options: []string{"bind", "rw"}}}
-	localSpec.Mounts = append(localSpec.Mounts, mounts...)
-	// add lib64 if exists
-	if _, err := os.Stat("/lib64"); err == nil {
-		localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
-	}
-	// add hosts
-	hosts, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "hosts"))
-	if _, err := os.Stat(hosts); err != nil {
-		hosts = "/etc/hosts"
-	}
-	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "hosts"), Type: "bind", Source: hosts, Options: []string{"bind", "ro"}})
-	// add resolv.conf
-	resolvConf, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "resolv.conf"))
-	if _, err := os.Stat(resolvConf); err != nil {
-		resolvConf = "/etc/resolv.conf"
-	}
-	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "resolv.conf"), Type: "bind", Source: resolvConf, Options: []string{"bind", "ro"}})
-	// add nsswitch.conf
-	nsswitchConf, _ := filepath.Abs(path.Join(launcher.config.WorkingDir, "etc", "nsswitch.conf"))
-	if _, err := os.Stat(nsswitchConf); err != nil {
-		nsswitchConf = "/etc/nsswitch.conf"
-	}
-	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "nsswitch.conf"), Type: "bind", Source: nsswitchConf, Options: []string{"bind", "ro"}})
-
-	// TODO: all services should have their own certificates
-	// this mound for demo only and should be removed
-	// mount /etc/ssl
-	localSpec.Mounts = append(localSpec.Mounts, specs.Mount{Destination: path.Join("/etc", "ssl"), Type: "bind", Source: path.Join("/etc", "ssl"), Options: []string{"bind", "ro"}})
-
-	// add netns hook
-	if localSpec.Hooks == nil {
-		localSpec.Hooks = &specs.Hooks{}
-	}
-	localSpec.Hooks.Prestart = append(localSpec.Hooks.Prestart, specs.Hook{Path: launcher.netnsPath})
-
-	// create annotations
-	if localSpec.Annotations == nil {
-		localSpec.Annotations = make(map[string]string)
-	}
-
-	// write config.json
-	if err = writeServiceSpec(&localSpec, configFile); err != nil {
-		return spec, err
-	}
-
-	return &localSpec, nil
 }
 
 func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {

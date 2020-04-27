@@ -109,7 +109,7 @@ func init() {
  ******************************************************************************/
 
 func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", DefaultServiceTTL: 30}, sender, db, monitor)
+	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, sender, db, monitor)
 	if err != nil {
 		return launcher, err
 	}
@@ -140,21 +140,19 @@ func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	specFile := path.Join(imageDir, "config.json")
-
-	spec, err := getServiceSpec(specFile)
+	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
 
-	if spec.Annotations == nil {
-		spec.Annotations = make(map[string]string)
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
 	}
-	spec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
+	spec.ocSpec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
 
-	if err := writeServiceSpec(&spec, specFile); err != nil {
+	if err = spec.save(); err != nil {
 		return outputFile, err
 	}
 
@@ -189,22 +187,20 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 		return outputFile, err
 	}
 
-	specFile := path.Join(imageDir, "config.json")
-
-	spec, err := getServiceSpec(specFile)
+	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"iperf", "-s"}
+	spec.ocSpec.Process.Args = []string{"iperf", "-s"}
 
-	if spec.Annotations == nil {
-		spec.Annotations = make(map[string]string)
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
 	}
-	spec.Annotations[aosProductPrefix+"network.uploadSpeed"] = "4096"
-	spec.Annotations[aosProductPrefix+"network.downloadSpeed"] = "8192"
+	spec.ocSpec.Annotations[aosProductPrefix+"network.uploadSpeed"] = "4096"
+	spec.ocSpec.Annotations[aosProductPrefix+"network.downloadSpeed"] = "8192"
 
-	if err := writeServiceSpec(&spec, specFile); err != nil {
+	if err = spec.save(); err != nil {
 		return outputFile, err
 	}
 
@@ -243,22 +239,20 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 		return outputFile, err
 	}
 
-	specFile := path.Join(imageDir, "config.json")
-
-	spec, err := getServiceSpec(specFile)
+	spec, err := loadServiceSpec(path.Join(imageDir, ocConfigFile))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
 
-	if spec.Annotations == nil {
-		spec.Annotations = make(map[string]string)
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
 	}
-	spec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
-	spec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
+	spec.ocSpec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
+	spec.ocSpec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
 
-	if err := writeServiceSpec(&spec, specFile); err != nil {
+	if err = spec.save(); err != nil {
 		return outputFile, err
 	}
 

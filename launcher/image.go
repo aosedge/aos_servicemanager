@@ -21,7 +21,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"io/ioutil"
 	"os"
@@ -29,7 +28,6 @@ import (
 	"strings"
 
 	"github.com/cavaliercoder/grab"
-	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -247,31 +245,4 @@ func unpackImage(name, destination string) (err error) {
 			}
 		}
 	}
-}
-
-func getServiceSpec(configFile string) (spec specs.Spec, err error) {
-	raw, err := ioutil.ReadFile(configFile)
-	if err != nil {
-		return spec, err
-	}
-
-	if err = json.Unmarshal(raw, &spec); err != nil {
-		return spec, err
-	}
-
-	return spec, nil
-}
-
-func writeServiceSpec(spec *specs.Spec, configFile string) (err error) {
-	f, err := os.Create(configFile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "\t")
-
-	err = encoder.Encode(spec)
-	return err
 }
