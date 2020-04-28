@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ type Alerts struct {
 	config          config.Alerts
 	cursorStorage   CursorStorage
 	serviceProvider ServiceProvider
+	filterRegexp    []*regexp.Regexp
 
 	alertsSize       int
 	skippedAlerts    uint32
@@ -110,6 +112,21 @@ func New(config *config.Config,
 	instance.ticker = time.NewTicker(instance.config.SendPeriod.Duration)
 
 	instance.alerts = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+
+	for _, substr := range instance.config.Filter {
+		if len(substr) == 0 {
+			log.Warning("Filter value has an empty string")
+			continue
+		}
+
+		tmpRegexp, err := regexp.Compile(substr)
+		if err != nil {
+			log.Errorf("Regexp compile error. Incorrect regexp: %s, error is: %s", substr, err)
+			continue
+		}
+
+		instance.filterRegexp = append(instance.filterRegexp, tmpRegexp)
+	}
 
 	if err = instance.setupJournal(); err != nil {
 		return nil, err
@@ -306,12 +323,24 @@ func (instance *Alerts) processJournal() (err error) {
 
 		log.WithFields(log.Fields{"time": t, "message": entry.Fields["MESSAGE"]}).Debug("System alert")
 
-		instance.addAlert(amqp.AlertItem{
-			Timestamp: t,
-			Tag:       amqp.AlertTagSystemError,
-			Source:    source,
-			Version:   version,
-			Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
+		skipsend := false
+
+		for _, substr := range instance.filterRegexp {
+			skipsend = substr.MatchString(entry.Fields["MESSAGE"])
+
+			if skipsend {
+				break
+			}
+		}
+
+		if !skipsend {
+			instance.addAlert(amqp.AlertItem{
+				Timestamp: t,
+				Tag:       amqp.AlertTagSystemError,
+				Source:    source,
+				Version:   version,
+				Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
+		}
 	}
 }
 

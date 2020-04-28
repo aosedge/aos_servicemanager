@@ -76,6 +76,7 @@ type Alerts struct {
 	SendPeriod         Duration `json:"sendPeriod"`
 	MaxMessageSize     int      `json:"maxMessagesize"`
 	MaxOfflineMessages int      `json:"maxOfflineMessages"`
+	Filter             []string `json:"filter"`
 }
 
 // Config instance
