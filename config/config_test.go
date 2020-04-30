@@ -37,6 +37,12 @@ import (
 func createConfigFile() (err error) {
 	configContent := `{
 	"fcrypt" : {
+		"TPMEngine": {
+            "enabled": true,
+            "interface": "/dev/tpmrm0",
+            "onlineHandle": "0x81000000",
+            "offlineHandle": "0x81000001"
+        },
 		"CACert" : "CACert",
 		"ClientCert" : "ClientCert",
 		"ClientKey" : "ClientKey",
@@ -142,6 +148,22 @@ func TestGetCrypt(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Crypt.TPMEngine.Enabled != true {
+		t.Errorf("Wrong TPMEngine Enabled value: %v", config.Crypt.TPMEngine.Enabled)
+	}
+
+	if config.Crypt.TPMEngine.Interface != "/dev/tpmrm0" {
+		t.Errorf("Wrong TPMEngine Interface value: %s", config.Crypt.TPMEngine.Interface)
+	}
+
+	if config.Crypt.TPMEngine.OnlineHandle != 0x81000000 {
+		t.Errorf("Wrong TPMEngine OnlineHandle value: 0x%x", config.Crypt.TPMEngine.OnlineHandle)
+	}
+
+	if config.Crypt.TPMEngine.OfflineHandle != 0x81000001 {
+		t.Errorf("Wrong TPMEngine OfflineHandle value: 0x%x", config.Crypt.TPMEngine.OfflineHandle)
 	}
 
 	if config.Crypt.CACert != "CACert" {
