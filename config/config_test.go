@@ -72,7 +72,8 @@ func createConfigFile() (err error) {
 	"alerts": {
 		"sendPeriod": "00:00:20",
 		"maxMessageSize": 1024,
-		"maxOfflineMessages": 32
+		"maxOfflineMessages": 32,
+		"filter": ["(test)", "(regexp)"]
 	},
 	"identifier": {
 		"param1": "testParam",
@@ -306,6 +307,12 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	if config.Alerts.MaxOfflineMessages != 32 {
 		t.Errorf("Wrong max offline message value: %d", config.Alerts.MaxOfflineMessages)
+	}
+
+	filter := []string{"(test)", "(regexp)"}
+
+	if !reflect.DeepEqual(config.Alerts.Filter, filter) {
+		t.Errorf("Wrong filter value: %v", config.Alerts.Filter)
 	}
 }
 
