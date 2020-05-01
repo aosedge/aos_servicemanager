@@ -189,6 +189,14 @@ The configuration file has JSON format. Following is JSON schema:
                     "type": "integer",
                     "minimum": 0,
                     "default": 25
+                },
+                "filter": {
+                    "description": "List of regular expressions which allow to filter out alerts",
+                    "type": "array",
+                    "default": empty ,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
