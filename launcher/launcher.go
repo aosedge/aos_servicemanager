@@ -1015,6 +1015,10 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		panic("Update service state failed")
 	}
 
+	if err = launcher.addServiceToCurrentUsers(newService.ID); err != nil {
+		panic("Add service to user failed")
+	}
+
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit, newService.UserName); err != nil {
 		panic("Set service quota failed")
 	}
