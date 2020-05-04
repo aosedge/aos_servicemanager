@@ -90,6 +90,7 @@ type Monitor struct {
 
 	config     config.Monitoring
 	workingDir string
+	storageDir string
 
 	sendTimer *time.Ticker
 	pollTimer *time.Ticker
@@ -157,6 +158,7 @@ func New(config *config.Config, trafficStorage TrafficStorage,
 
 	monitor.config = config.Monitoring
 	monitor.workingDir = config.WorkingDir
+	monitor.storageDir = config.StorageDir
 
 	monitor.alertProcessors = list.New()
 
@@ -515,7 +517,7 @@ func (monitor *Monitor) getCurrentServicesData() {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.workingDir, value.user)
+		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.storageDir, value.user)
 		if err != nil {
 			log.Errorf("Can't get service Disc usage: %s", err)
 		}
