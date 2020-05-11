@@ -21,13 +21,17 @@ package launcher
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/opencontainers/runc/libcontainer/specconv"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -75,6 +79,84 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 	}
 
 	return spec, nil
+}
+
+func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string) (spec *serviceSpec, err error) {
+	imageConfigJSONFile, err := os.Open(fileImagConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	defer imageConfigJSONFile.Close()
+
+	byteValue, _ := ioutil.ReadAll(imageConfigJSONFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var imageConfig imagespec.Image
+	if err = json.Unmarshal(byteValue, &imageConfig); err != nil {
+		return nil, err
+	}
+
+	strOS := strings.ToLower(imageConfig.OS)
+	if strOS != "linux" {
+		return nil, fmt.Errorf("unsupported OS in image config %s", imageConfig.OS)
+	}
+
+	spec = &serviceSpec{fileName: fileNameRuntimeSpec}
+
+	spec.ocSpec = *specconv.Example()
+
+	spec.mergeEnv(imageConfig.Config.Env)
+
+	spec.createArgs(&imageConfig.Config)
+
+	spec.ocSpec.Process.Cwd = imageConfig.Config.WorkingDir
+	if spec.ocSpec.Process.Cwd == "" {
+		spec.ocSpec.Process.Cwd = "/"
+	}
+
+	return spec, nil
+}
+
+func (spec *serviceSpec) mergeEnv(configEnv []string) {
+	var resultEnvArray []string
+
+	for _, result := range spec.ocSpec.Process.Env {
+		data := strings.SplitN(result, "=", 2)
+		key := data[0]
+		var keyWasFound bool
+
+		for i, data := range configEnv {
+			if !strings.Contains(data, "=") {
+				if data == key {
+					keyWasFound = true
+				}
+			} else {
+				keyValue := strings.SplitN(data, "=", 2)
+				if keyValue[0] == key {
+					keyWasFound = true
+				}
+			}
+
+			if keyWasFound {
+				resultEnvArray = append(resultEnvArray, data)
+				configEnv = append(configEnv[:i], configEnv[i+1:]...)
+				break
+			}
+		}
+
+		if !keyWasFound {
+			resultEnvArray = append(resultEnvArray, result)
+		}
+	}
+
+	spec.ocSpec.Process.Env = append(resultEnvArray, configEnv...)
+}
+
+func (spec *serviceSpec) createArgs(config *imagespec.ImageConfig) {
+	spec.ocSpec.Process.Args = append(config.Entrypoint, config.Cmd...)
 }
 
 func (spec *serviceSpec) save() (err error) {

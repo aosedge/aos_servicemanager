@@ -20,6 +20,7 @@ package launcher
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -35,6 +36,7 @@ import (
 	"time"
 
 	"github.com/jlaffaye/ftp"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -486,6 +488,95 @@ func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.Ser
 	}
 
 	return ftpConnection, nil
+}
+
+func generateImageConfig() (config *imagespec.Image, err error) {
+	configStr := `{
+		"created": "2015-10-31T22:22:56.015925234Z",
+		"author": "Alyssa P. Hacker <alyspdev@example.com>",
+		"architecture": "amd64",
+		"os": "Linux",
+		"config": {
+			"ExposedPorts": {
+				"8080/tcp": {}
+			},
+			"Env": [
+				"PATH=/usr/local/sbin",
+				"FOO=oci_is_a",
+				"BAR=well_written_spec",
+				"MY_VAR",
+				"TERM"
+			],
+			"Entrypoint": [
+				"/bin/my-app-binary"
+			],
+			"Cmd": [
+				"--foreground",
+				"--config",
+				"/etc/my-app.d/default.cfg"
+			],
+			"Volumes": {
+				"/var/job-result-data": {},
+				"/var/log/my-app-logs": {}
+			},
+			"WorkingDir": "/home/alice",
+			"Labels": {
+				"com.example.project.git.url": "https://example.com/project.git",
+				"com.example.project.git.commit": "45a939b2999782a3f005621a8d0f29aa387e1d6b"
+			}
+		},
+		"rootfs": {
+		  "diff_ids": [
+			"sha256:c6f988f4874bb0add23a778f753c65efe992244e148a1d2ec2a8b664fb66bbd1",
+			"sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+		  ],
+		  "type": "layers"
+		},
+		"history": [
+		  {
+			"created": "2015-10-31T22:22:54.690851953Z",
+			"created_by": "/bin/sh -c #(nop) ADD file:a3bc1e842b69636f9df5256c49c5374fb4eef1e281fe3f282c65fb853ee171c5 in /"
+		  },
+		  {
+			"created": "2015-10-31T22:22:55.613815829Z",
+			"created_by": "/bin/sh -c #(nop) CMD [\"sh\"]",
+			"empty_layer": true
+		  }
+		]
+	}
+	`
+	var imageConfig imagespec.Image
+	if err = json.Unmarshal([]byte(configStr), &imageConfig); err != nil {
+		return nil, err
+	}
+
+	return &imageConfig, nil
+}
+
+func saveImageConfig(folderPath string, config *imagespec.Image) (filePath string, err error) {
+	filePath = path.Join(folderPath, "imageConfig.json")
+
+	if err := os.Remove(filePath); err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+
+	jsonFile, err := os.Create(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := jsonFile.Write(data); err != nil {
+		return "", err
+	}
+
+	return filePath, err
 }
 
 /*******************************************************************************
@@ -1434,5 +1525,49 @@ func TestSpec(t *testing.T) {
 
 	if !found {
 		t.Error("Group not found")
+	}
+}
+
+func TestSpecFromImageConfig(t *testing.T) {
+	_, err := generateSpecFromImageConfig("no_file", "tmp/config.json")
+	if err == nil {
+		t.Errorf("Should be error no such file or director")
+	}
+
+	imgConfig, err := generateImageConfig()
+	if err != nil {
+		log.Fatalf("Error creating OCI Image config %s", err)
+	}
+
+	imgConfig.OS = "Windows"
+	configFile, err := saveImageConfig("tmp", imgConfig)
+	if err != nil {
+		log.Fatalf("Error save OCI Image config %s", err)
+	}
+
+	_, err = generateSpecFromImageConfig(configFile, "tmp/config.json")
+	if err == nil {
+		t.Errorf("Should be error unsupported OS in image config")
+	}
+
+	imgConfig.OS = "linux"
+	configFile, err = saveImageConfig("tmp", imgConfig)
+	if err != nil {
+		log.Fatalf("Error save OCI Image config %s", err)
+	}
+
+	runtimeSpec, err := generateSpecFromImageConfig(configFile, "tmp/config.json")
+	if err != nil {
+		t.Errorf("Error generating OCI runtime spec %s", err)
+	}
+
+	originalCmd := []string{"/bin/my-app-binary", "--foreground", "--config", "/etc/my-app.d/default.cfg"}
+	if false == reflect.DeepEqual(runtimeSpec.ocSpec.Process.Args, originalCmd) {
+		t.Errorf("Error crating args from config")
+	}
+
+	origEnv := []string{"PATH=/usr/local/sbin", "TERM", "FOO=oci_is_a", "BAR=well_written_spec", "MY_VAR"}
+	if false == reflect.DeepEqual(runtimeSpec.ocSpec.Process.Env, origEnv) {
+		t.Errorf("Error crating env from config")
 	}
 }
