@@ -32,7 +32,7 @@ import (
 
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/specconv"
-	"github.com/opencontainers/runtime-spec/specs-go"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
@@ -50,7 +50,7 @@ const serviceStorageFolder = "/home/service/storage"
  ******************************************************************************/
 
 type serviceSpec struct {
-	ocSpec   specs.Spec
+	ocSpec   runtimespec.Spec
 	fileName string
 }
 
@@ -180,7 +180,7 @@ func (spec *serviceSpec) addStorageFolder(storageFolder string) (err error) {
 		return err
 	}
 
-	newMount := specs.Mount{
+	newMount := runtimespec.Mount{
 		Destination: serviceStorageFolder,
 		Type:        "bind",
 		Source:      absStorageFolder,
@@ -207,7 +207,7 @@ func (spec *serviceSpec) addStorageFolder(storageFolder string) (err error) {
 }
 
 func (spec *serviceSpec) removeStorageFolder() (err error) {
-	var mounts []specs.Mount
+	var mounts []runtimespec.Mount
 
 	for _, mount := range spec.ocSpec.Mounts {
 		if mount.Destination == serviceStorageFolder {
@@ -233,18 +233,18 @@ func (spec *serviceSpec) setUser(user string) (err error) {
 }
 
 func (spec *serviceSpec) mountHostFS(workingDir string) (err error) {
-	mounts := []specs.Mount{
-		specs.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
-		specs.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
+	mounts := []runtimespec.Mount{
+		runtimespec.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
+		runtimespec.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
+		runtimespec.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
+		runtimespec.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
 	}
 
 	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, mounts...)
 
 	// add lib64 if exists
 	if _, err := os.Stat("/lib64"); err == nil {
-		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
+		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
 	}
 
 	// TODO: all services should have their own certificates
@@ -259,7 +259,7 @@ func (spec *serviceSpec) mountHostFS(workingDir string) (err error) {
 			absPath = path.Join("/etc", item)
 		}
 
-		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, specs.Mount{Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"}})
+		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"}})
 	}
 
 	return nil
@@ -273,15 +273,15 @@ func (spec *serviceSpec) disableTerminal() (err error) {
 
 func (spec *serviceSpec) addPrestartHook(path string) (err error) {
 	if spec.ocSpec.Hooks == nil {
-		spec.ocSpec.Hooks = &specs.Hooks{}
+		spec.ocSpec.Hooks = &runtimespec.Hooks{}
 	}
 
-	spec.ocSpec.Hooks.Prestart = append(spec.ocSpec.Hooks.Prestart, specs.Hook{Path: path})
+	spec.ocSpec.Hooks.Prestart = append(spec.ocSpec.Hooks.Prestart, runtimespec.Hook{Path: path})
 
 	return nil
 }
 
-func addDevice(deviceName string) (device *specs.LinuxDevice, err error) {
+func addDevice(deviceName string) (device *runtimespec.LinuxDevice, err error) {
 	log.WithFields(log.Fields{"device": deviceName}).Debug("Add device")
 
 	var stat unix.Stat_t
@@ -305,7 +305,7 @@ func addDevice(deviceName string) (device *specs.LinuxDevice, err error) {
 
 	mode := os.FileMode(stat.Mode)
 
-	return &specs.LinuxDevice{
+	return &runtimespec.LinuxDevice{
 		Type:     devType,
 		Path:     deviceName,
 		Major:    int64(unix.Major(stat.Rdev)),
@@ -316,7 +316,7 @@ func addDevice(deviceName string) (device *specs.LinuxDevice, err error) {
 	}, nil
 }
 
-func addDevices(deviceName string) (devices []specs.LinuxDevice, err error) {
+func addDevices(deviceName string) (devices []runtimespec.LinuxDevice, err error) {
 	stat, err := os.Stat(deviceName)
 	if err != nil {
 		return nil, err
@@ -384,7 +384,7 @@ func (spec *serviceSpec) addHostDevice(deviceName string) (err error) {
 	for _, specDevice := range specDevices {
 		major, minor := specDevice.Major, specDevice.Minor
 
-		spec.ocSpec.Linux.Resources.Devices = append(spec.ocSpec.Linux.Resources.Devices, specs.LinuxDeviceCgroup{
+		spec.ocSpec.Linux.Resources.Devices = append(spec.ocSpec.Linux.Resources.Devices, runtimespec.LinuxDeviceCgroup{
 			Allow:  true,
 			Type:   specDevice.Type,
 			Major:  &major,

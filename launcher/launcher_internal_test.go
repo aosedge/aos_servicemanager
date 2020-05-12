@@ -37,7 +37,7 @@ import (
 
 	"github.com/jlaffaye/ftp"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
@@ -1461,7 +1461,7 @@ func TestSpec(t *testing.T) {
 
 	found := false
 
-	var device specs.LinuxDevice
+	var device runtimespec.LinuxDevice
 
 	for _, device = range spec.ocSpec.Linux.Devices {
 		if device.Path == deviceName {

@@ -35,7 +35,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -1163,7 +1163,7 @@ WantedBy=multi-user.target
 	return template, nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *specs.Spec) (err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *runtimespec.Spec) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
@@ -1224,7 +1224,7 @@ func (launcher *Launcher) updateMonitoring(service database.ServiceEntry, state 
 	return nil
 }
 
-func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, spec *specs.Spec) (err error) {
+func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, spec *runtimespec.Spec) (err error) {
 	service.TTL = launcher.config.DefaultServiceTTL
 
 	if ttlString, ok := spec.Annotations[aosProductPrefix+"service.TTL"]; ok {
@@ -1262,7 +1262,7 @@ func (launcher *Launcher) updateServiceFromSpec(service *database.ServiceEntry, 
 	return nil
 }
 
-func (launcher *Launcher) generateNetLimitsCmds(spec *specs.Spec) (setCmd, clearCmd string) {
+func (launcher *Launcher) generateNetLimitsCmds(spec *runtimespec.Spec) (setCmd, clearCmd string) {
 	value, exist := spec.Annotations[aosProductPrefix+"network.downloadSpeed"]
 	if exist {
 		setCmd = setCmd + " -d " + value
