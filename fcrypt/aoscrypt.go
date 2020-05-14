@@ -318,6 +318,8 @@ func (ctx *CryptoContext) LoadOfflineKey() error {
 		return ctx.LoadKeyFromBytes(keyBytes)
 	}
 
+	ctx.privateKey = offlinePrivate
+
 	return nil
 }
 
@@ -346,13 +348,11 @@ func (ctx *CryptoContext) LoadOnlineKey() error {
 	return nil
 }
 
-func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (SymmetricContextInterface, error) {
-
+// ImportSessionKey function retrieves a symmetric key from crypto context
+func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symContext SymmetricContextInterface, err error) {
 	if ctx == nil || ctx.privateKey == nil {
 		return nil, errors.New("asymmetric context not initialized")
 	}
-
-	var err error
 
 	algName, _, _ := decodeAlgNames(keyInfo.SymmetricAlgName)
 	keySize, ivSize, err := getSymmetricAlgInfo(algName)
@@ -368,31 +368,74 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (Symmet
 
 	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 	case "RSA/PKCS1V1_5":
-		clearKey := make([]byte, keySize)
-		err = rsa.DecryptPKCS1v15SessionKey(nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
-		if err != nil {
-			return nil, err
-		}
-		if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
-			return nil, err
+		if !ctx.cryptConfig.TPMEngine.Enabled {
+			clearKey := make([]byte, keySize)
+
+			err = rsa.DecryptPKCS1v15SessionKey(nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
+			if err != nil {
+				return nil, err
+			}
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
+		} else {
+			decryptor, ok := ctx.privateKey.(crypto.Decrypter)
+			if !ok {
+				return nil, errors.New("private key doesn't contain a Decryptor")
+			}
+
+			plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
 		}
 
 	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
-		var hashFunc hash.Hash
-		switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
-		case "RSA/OAEP":
-			hashFunc = sha1.New()
-		case "RSA/OAEP-256":
-			hashFunc = sha256.New()
-		case "RSA/OAEP-512":
-			hashFunc = sha512.New()
-		}
-		clearKey, err := rsa.DecryptOAEP(hashFunc, nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
-			return nil, err
+		if !ctx.cryptConfig.TPMEngine.Enabled {
+			var hashFunc hash.Hash
+			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
+			case "RSA/OAEP":
+				hashFunc = sha1.New()
+
+			case "RSA/OAEP-256":
+				hashFunc = sha256.New()
+
+			case "RSA/OAEP-512":
+				hashFunc = sha512.New()
+			}
+
+			clearKey, err := rsa.DecryptOAEP(hashFunc, nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
+		} else {
+			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
+			case "RSA/OAEP", "RSA/OAEP-256":
+				decryptor, ok := ctx.privateKey.(crypto.Decrypter)
+				if !ok {
+					return nil, errors.New("private key doesn't contain a Decryptor")
+				}
+
+				plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, &rsa.OAEPOptions{})
+				if err != nil {
+					return nil, err
+				}
+
+				if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
+					return nil, err
+				}
+
+			default:
+				return nil, errors.New("unsupported OAEP scheme")
+			}
 		}
 
 	default:
