@@ -329,25 +329,6 @@ func (ctx *CryptoContext) LoadKeyFromBytes(data []byte) (err error) {
 	return err
 }
 
-// LoadOnlineKey function loads online key into context
-func (ctx *CryptoContext) LoadOnlineKey() error {
-	if !ctx.cryptConfig.TPMEngine.Enabled {
-		if ctx.cryptConfig.ClientKey == "" {
-			return errors.New("OfflinePrivKey is not set")
-		}
-
-		keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
-		if err != nil {
-			return fmt.Errorf("error reading online private key from file: %s", err)
-		}
-
-		ctx.privateKey, err = loadKey(keyBytes)
-		return err
-	}
-
-	return nil
-}
-
 // ImportSessionKey function retrieves a symmetric key from crypto context
 func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symContext SymmetricContextInterface, err error) {
 	if ctx == nil || ctx.privateKey == nil {

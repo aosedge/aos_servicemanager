@@ -198,10 +198,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if err = sm.crypt.LoadOnlineKey(); err != nil {
-		return sm, err
-	}
-
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
