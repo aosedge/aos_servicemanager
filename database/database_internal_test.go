@@ -18,6 +18,7 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -28,6 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -69,7 +71,7 @@ func TestMain(m *testing.M) {
 
 func TestAddService(t *testing.T) {
 	// AddService
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -94,14 +96,14 @@ func TestAddService(t *testing.T) {
 
 func TestUpdateService(t *testing.T) {
 	// AddService
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = ServiceEntry{"service1", 2, "to/new_service1", "new_service1.service", "new_user1",
+	service1 = launcher.Service{"service1", 2, "to/new_service1", "new_service1.service", "new_user1",
 		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}", 123, 456, 789, 1024}
 
 	// UpdateService
@@ -137,7 +139,7 @@ func TestNotExistService(t *testing.T) {
 
 func TestSetServiceStatus(t *testing.T) {
 	// AddService
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -164,7 +166,7 @@ func TestSetServiceStatus(t *testing.T) {
 }
 
 func TestSetServiceState(t *testing.T) {
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -191,7 +193,7 @@ func TestSetServiceState(t *testing.T) {
 }
 
 func TestSetServiceStartTime(t *testing.T) {
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -220,7 +222,7 @@ func TestSetServiceStartTime(t *testing.T) {
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -240,7 +242,7 @@ func TestRemoveService(t *testing.T) {
 
 func TestGetServices(t *testing.T) {
 	// Add service 1
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -248,7 +250,7 @@ func TestGetServices(t *testing.T) {
 	}
 
 	// Add service 2
-	service2 := ServiceEntry{"service2", 1, "to/service2", "service2.service", "user2", `{"*":"rw"}`, 0, 0,
+	service2 := launcher.Service{"service2", 1, "to/service2", "service2.service", "user2", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
@@ -277,14 +279,14 @@ func TestGetServices(t *testing.T) {
 
 func TestAddUsersService(t *testing.T) {
 	// Add services
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service2 := ServiceEntry{"service2", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service2 := launcher.Service{"service2", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
@@ -361,12 +363,12 @@ func TestAddSameUsersService(t *testing.T) {
 
 func TestNotExistUsersServices(t *testing.T) {
 	// GetService
-	result, err := db.IsUsersService([]string{"user2", "user3"}, "service18")
-	if err != nil {
+	_, err := db.GetUsersService([]string{"user2", "user3"}, "service18")
+	if err != nil && err != ErrNotExist {
 		t.Fatalf("Can't check if service in users: %s", err)
 	}
 
-	if result {
+	if err == nil {
 		t.Errorf("Error users service: %s", err)
 	}
 }
@@ -384,12 +386,12 @@ func TestRemoveUsersService(t *testing.T) {
 		t.Errorf("Can't remove users service: %s", err)
 	}
 
-	result, err := db.IsUsersService([]string{"user0", "user1"}, "service1")
-	if err != nil {
+	_, err = db.GetUsersService([]string{"user0", "user1"}, "service1")
+	if err != nil && err != ErrNotExist {
 		t.Fatalf("Can't check if service in users: %s", err)
 	}
 
-	if result {
+	if err == nil {
 		t.Errorf("Error users service: %s", err)
 	}
 }
@@ -409,7 +411,7 @@ func TestAddUsersList(t *testing.T) {
 	}
 
 	// Check users list
-	usersList, err := db.GetUsersList()
+	usersList, err := db.getUsersList()
 	if err != nil {
 		t.Fatalf("Can't get users list: %s", err)
 	}
@@ -466,7 +468,7 @@ func TestAddUsersList(t *testing.T) {
 		}
 	}
 
-	usersList, err = db.GetUsersList()
+	usersList, err = db.getUsersList()
 	if err != nil {
 		t.Fatalf("Can't get users list: %s", err)
 	}
@@ -592,7 +594,7 @@ func TestCursor(t *testing.T) {
 
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
-	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
@@ -717,4 +719,36 @@ func TestMultiThread(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (db *Database) getUsersList() (usersList [][]string, err error) {
+	rows, err := db.sql.Query("SELECT DISTINCT users FROM users")
+	if err != nil {
+		return usersList, err
+	}
+	defer rows.Close()
+
+	usersList = make([][]string, 0)
+
+	for rows.Next() {
+		var usersJSON []byte
+		err = rows.Scan(&usersJSON)
+		if err != nil {
+			return usersList, err
+		}
+
+		var users []string
+
+		if err = json.Unmarshal(usersJSON, &users); err != nil {
+			return usersList, err
+		}
+
+		usersList = append(usersList, users)
+	}
+
+	return usersList, rows.Err()
 }

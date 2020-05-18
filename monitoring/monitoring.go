@@ -41,7 +41,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
 	"aos_servicemanager/platform"
 )
 
@@ -861,7 +860,7 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 	traffic := trafficMonitoring{addresses: addresses}
 
 	if traffic.lastUpdate, traffic.initialValue, err =
-		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && err != database.ErrNotExist {
+		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && !strings.Contains(err.Error(), "not exist") {
 		return err
 	}
 

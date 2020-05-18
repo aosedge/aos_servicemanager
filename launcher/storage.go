@@ -34,7 +34,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	amqp "aos_servicemanager/amqphandler"
-	"aos_servicemanager/database"
 	"aos_servicemanager/platform"
 )
 
@@ -113,7 +112,7 @@ func (handler *storageHandler) Close() {
 	handler.watcher.Close()
 }
 
-func (handler *storageHandler) MountStorageFolder(users []string, service database.ServiceEntry) (err error) {
+func (handler *storageHandler) MountStorageFolder(users []string, service Service) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
@@ -202,7 +201,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 	return nil
 }
 
-func (handler *storageHandler) StopStateWatching(users []string, service database.ServiceEntry) (err error) {
+func (handler *storageHandler) StopStateWatching(users []string, service Service) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
@@ -212,7 +211,7 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
-		if err == database.ErrNotExist {
+		if strings.Contains(err.Error(), "not exist") {
 			return nil
 		}
 
@@ -247,7 +246,7 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 	return errors.New("correlation ID not found")
 }
 
-func (handler *storageHandler) UpdateState(users []string, service database.ServiceEntry,
+func (handler *storageHandler) UpdateState(users []string, service Service,
 	state, checksum string) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
@@ -287,7 +286,7 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 	return nil
 }
 
-func (handler *storageHandler) startStateWatching(users []string, service database.ServiceEntry) (err error) {
+func (handler *storageHandler) startStateWatching(users []string, service Service) (err error) {
 	// no mutex as it is called from locked context
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)

@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -35,7 +36,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
+	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
 )
 
@@ -53,11 +54,249 @@ func init() {
 }
 
 /*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type testServiceProvider struct {
+	services map[string]*launcher.Service
+}
+
+/*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var db *database.Database
 var systemd *dbus.Conn
+
+var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Error setting up: %s", err)
+	}
+
+	ret := m.Run()
+
+	cleanup()
+
+	os.Exit(ret)
+}
+
+/*******************************************************************************
+ * Tests
+ ******************************************************************************/
+
+func TestGetServiceLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	from := time.Now()
+
+	if err = createService("logservice0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	if err = startService("logservice0"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(10 * time.Second)
+
+	if err = stopService("logservice0"); err != nil {
+		t.Fatalf("Can't stop service: %s", err)
+	}
+
+	till := from.Add(5 * time.Second)
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "logservice0",
+		LogID:     "log0",
+		From:      &from,
+		Till:      &till})
+
+	checkReceivedLog(t, logging.LogChannel, from, till)
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "logservice0",
+		LogID:     "log0",
+		From:      &from})
+
+	checkReceivedLog(t, logging.LogChannel, from, time.Now())
+}
+
+func TestGetWrongServiceLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	till := time.Now()
+	from := till.Add(-1 * time.Hour)
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "nonExisting",
+		LogID:     "log1",
+		From:      &from,
+		Till:      &till})
+
+	select {
+	case result := <-logging.LogChannel:
+		if result.Error == nil {
+			log.Error("Expect log error")
+		}
+
+	case <-time.After(5 * time.Second):
+		log.Errorf("Receive log timeout")
+	}
+}
+
+func TestGetEmptyLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	if err = createService("logservice2"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	from := time.Now()
+
+	time.Sleep(5 * time.Second)
+
+	till := time.Now()
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "logservice2",
+		LogID:     "log0",
+		From:      &from,
+		Till:      &till})
+
+	checkEmptyLog(t, logging.LogChannel)
+}
+
+func TestGetServiceCrashLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	if err = createService("logservice3"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	from := time.Now()
+
+	if err = startService("logservice3"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	crashService("logservice3")
+
+	till := time.Now()
+
+	time.Sleep(1 * time.Second)
+
+	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
+		ServiceID: "logservice3",
+		LogID:     "log2"})
+
+	checkReceivedLog(t, logging.LogChannel, from, till)
+}
+
+func TestMaxPartCountLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 512, MaxPartCount: 2}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	from := time.Now()
+
+	if err = createService("logservice4"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	if err = startService("logservice4"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(20 * time.Second)
+
+	if err = stopService("logservice4"); err != nil {
+		t.Fatalf("Can't stop service: %s", err)
+	}
+
+	till := from.Add(20 * time.Second)
+
+	logging.GetServiceLog(amqp.RequestServiceLog{
+		ServiceID: "logservice4",
+		LogID:     "log0",
+		From:      &from,
+		Till:      &till})
+
+	for {
+		select {
+		case result := <-logging.LogChannel:
+			if result.Error != nil {
+				t.Errorf("Error log received: %s", *result.Error)
+				return
+			}
+
+			if result.Data == nil {
+				t.Error("No data")
+				return
+			}
+
+			if result.PartCount == nil {
+				t.Error("Missing part count")
+				return
+			}
+
+			if *result.PartCount != 2 {
+				t.Errorf("Wrong part count received: %d", *result.PartCount)
+				return
+			}
+
+			if result.Part == nil {
+				t.Error("Missing part")
+				return
+			}
+
+			if *result.Part > *result.PartCount {
+				t.Errorf("Wrong part received: %d", *result.Part)
+				return
+			}
+
+		case <-time.After(1 * time.Second):
+			return
+		}
+	}
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
+	s, ok := serviceProvider.services[serviceID]
+	if !ok {
+		return service, fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	return *s, nil
+}
 
 /*******************************************************************************
  * Private
@@ -65,10 +304,6 @@ var systemd *dbus.Conn
 
 func setup() (err error) {
 	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
-	}
-
-	if db, err = database.New("tmp/servicemanager.db"); err != nil {
 		return err
 	}
 
@@ -80,12 +315,7 @@ func setup() (err error) {
 }
 
 func cleanup() {
-	services, err := db.GetServices()
-	if err != nil {
-		log.Errorf("Can't get services: %s", err)
-	}
-
-	for _, service := range services {
+	for _, service := range serviceProvider.services {
 		if err := stopService(service.ID); err != nil {
 			log.Errorf("Can't stop service: %s", err)
 		}
@@ -95,7 +325,6 @@ func cleanup() {
 		}
 	}
 
-	db.Close()
 	systemd.Close()
 
 	if err := os.RemoveAll("tmp"); err != nil {
@@ -120,9 +349,11 @@ func createService(serviceID string) (err error) {
 
 	serviceName := "aos_" + serviceID + ".service"
 
-	if err = db.AddService(database.ServiceEntry{ID: serviceID, UnitName: serviceName}); err != nil {
-		return err
+	if _, ok := serviceProvider.services[serviceID]; ok {
+		return errors.New("service already exists")
 	}
+
+	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
 
 	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
 	if err != nil {
@@ -262,222 +493,6 @@ func checkEmptyLog(t *testing.T, logChannel chan amqp.PushServiceLog) {
 
 		case <-time.After(5 * time.Second):
 			t.Error("Receive log timeout")
-			return
-		}
-	}
-}
-
-/*******************************************************************************
- * Main
- ******************************************************************************/
-
-func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
-	}
-
-	ret := m.Run()
-
-	cleanup()
-
-	os.Exit(ret)
-}
-
-/*******************************************************************************
- * Tests
- ******************************************************************************/
-
-func TestGetServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	from := time.Now()
-
-	if err = createService("logservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	if err = startService("logservice0"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	time.Sleep(10 * time.Second)
-
-	if err = stopService("logservice0"); err != nil {
-		t.Fatalf("Can't stop service: %s", err)
-	}
-
-	till := from.Add(5 * time.Second)
-
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice0",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
-
-	checkReceivedLog(t, logging.LogChannel, from, till)
-
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice0",
-		LogID:     "log0",
-		From:      &from})
-
-	checkReceivedLog(t, logging.LogChannel, from, time.Now())
-}
-
-func TestGetWrongServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	till := time.Now()
-	from := till.Add(-1 * time.Hour)
-
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "nonExisting",
-		LogID:     "log1",
-		From:      &from,
-		Till:      &till})
-
-	select {
-	case result := <-logging.LogChannel:
-		if result.Error == nil {
-			log.Error("Expect log error")
-		}
-
-	case <-time.After(5 * time.Second):
-		log.Errorf("Receive log timeout")
-	}
-}
-
-func TestGetEmptyLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	if err = createService("logservice2"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	from := time.Now()
-
-	time.Sleep(5 * time.Second)
-
-	till := time.Now()
-
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice2",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
-
-	checkEmptyLog(t, logging.LogChannel)
-}
-
-func TestGetServiceCrashLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, db)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	if err = createService("logservice3"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	from := time.Now()
-
-	if err = startService("logservice3"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	time.Sleep(5 * time.Second)
-
-	crashService("logservice3")
-
-	till := time.Now()
-
-	time.Sleep(1 * time.Second)
-
-	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
-		ServiceID: "logservice3",
-		LogID:     "log2"})
-
-	checkReceivedLog(t, logging.LogChannel, from, till)
-}
-
-func TestMaxPartCountLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 512, MaxPartCount: 2}}, db)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	from := time.Now()
-
-	if err = createService("logservice4"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	if err = startService("logservice4"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	time.Sleep(20 * time.Second)
-
-	if err = stopService("logservice4"); err != nil {
-		t.Fatalf("Can't stop service: %s", err)
-	}
-
-	till := from.Add(20 * time.Second)
-
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice4",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
-
-	for {
-		select {
-		case result := <-logging.LogChannel:
-			if result.Error != nil {
-				t.Errorf("Error log received: %s", *result.Error)
-				return
-			}
-
-			if result.Data == nil {
-				t.Error("No data")
-				return
-			}
-
-			if result.PartCount == nil {
-				t.Error("Missing part count")
-				return
-			}
-
-			if *result.PartCount != 2 {
-				t.Errorf("Wrong part count received: %d", *result.PartCount)
-				return
-			}
-
-			if result.Part == nil {
-				t.Error("Missing part")
-				return
-			}
-
-			if *result.Part > *result.PartCount {
-				t.Errorf("Wrong part received: %d", *result.Part)
-				return
-			}
-
-		case <-time.After(1 * time.Second):
 			return
 		}
 	}

@@ -20,6 +20,7 @@ package visidentifier_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"net/url"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"aos_servicemanager/database"
 	"aos_servicemanager/identification/visidentifier"
 	"aos_servicemanager/identification/visidentifier/dbushandler"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -48,15 +50,25 @@ const serverURL = "wss://localhost:8088"
  * Types
  ******************************************************************************/
 
+type testServiceProvider struct {
+	services map[string]*launcher.Service
+}
+
+type messageProcessor struct {
+	sendMessage wsserver.SendMessage
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var vis *visidentifier.Instance
 var server *wsserver.Server
-var db *database.Database
+var clientProcessor *messageProcessor
 
 var subscriptionID = "test_subscription"
+
+var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
 
 /*******************************************************************************
  * Init
@@ -80,10 +92,6 @@ func setup() (err error) {
 		return err
 	}
 
-	if db, err = database.New("tmp/servicemanager.db"); err != nil {
-		return err
-	}
-
 	rand.Seed(time.Now().UnixNano())
 
 	url, err := url.Parse(serverURL)
@@ -97,7 +105,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if vis, err = visidentifier.New([]byte(`{"VisServer": "wss://localhost:8088"}`), db); err != nil {
+	if vis, err = visidentifier.New([]byte(`{"VisServer": "wss://localhost:8088"}`), &serviceProvider); err != nil {
 		return err
 	}
 
@@ -105,8 +113,6 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	db.Close()
-
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err
 	}
@@ -193,10 +199,8 @@ func TestUsersChanged(t *testing.T) {
 }
 
 func TestGetPermission(t *testing.T) {
-	if err := db.AddService(database.ServiceEntry{ID: "Service1",
-		Permissions: `{"*": "rw", "123": "rw"}`}); err != nil {
-		t.Fatalf("Can't add service: %s", err)
-	}
+	serviceProvider.services["Service1"] = &launcher.Service{ID: "Service1",
+		Permissions: `{"*": "rw", "123": "rw"}`}
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -247,6 +251,19 @@ func TestIntrospect(t *testing.T) {
 	if err = obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {
 		t.Errorf("Can't make D-Bus call: %s", err)
 	}
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
+	s, ok := serviceProvider.services[serviceID]
+	if !ok {
+		return service, fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	return *s, nil
 }
 
 /*******************************************************************************

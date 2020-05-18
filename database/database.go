@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -48,7 +49,7 @@ const (
  ******************************************************************************/
 
 // ErrNotExist is returned when requested entry not exist in DB
-var ErrNotExist = errors.New("entry doesn't not exist")
+var ErrNotExist = errors.New("entry does not exist")
 
 // ErrVersionMismatch is returned when DB has unsupported DB version
 var ErrVersionMismatch = errors.New("version mismatch")
@@ -60,33 +61,6 @@ var ErrVersionMismatch = errors.New("version mismatch")
 // Database structure with database information
 type Database struct {
 	sql *sql.DB
-}
-
-// ServiceEntry describes entry structure
-type ServiceEntry struct {
-	ID            string    // service id
-	Version       uint64    // service version
-	Path          string    // path to service bundle
-	UnitName      string    // systemd unit name
-	UserName      string    // user used to run this service
-	Permissions   string    // VIS permissions
-	State         int       // service state
-	Status        int       // service status
-	StartAt       time.Time // time at which service was started
-	TTL           uint64    // expiration service duration in days
-	AlertRules    string    // alert rules in json format
-	UploadLimit   uint64    // upload traffic limit
-	DownloadLimit uint64    // download traffic limit
-	StorageLimit  uint64    // storage limit
-	StateLimit    uint64    // state limit
-}
-
-// UsersEntry describes users entry structure
-type UsersEntry struct {
-	Users         []string
-	ServiceID     string
-	StorageFolder string
-	StateChecksum []byte
 }
 
 /*******************************************************************************
@@ -141,7 +115,7 @@ func New(name string) (db *Database, err error) {
 }
 
 // AddService adds new service
-func (db *Database) AddService(service ServiceEntry) (err error) {
+func (db *Database) AddService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
@@ -156,7 +130,7 @@ func (db *Database) AddService(service ServiceEntry) (err error) {
 }
 
 // UpdateService updates service
-func (db *Database) UpdateService(service ServiceEntry) (err error) {
+func (db *Database) UpdateService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
 								 SET version = ?, path = ?, unit = ?, user = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
@@ -200,7 +174,7 @@ func (db *Database) RemoveService(serviceID string) (err error) {
 }
 
 // GetService returns service by service ID
-func (db *Database) GetService(serviceID string) (service ServiceEntry, err error) {
+func (db *Database) GetService(serviceID string) (service launcher.Service, err error) {
 	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE id = ?")
 	if err != nil {
 		return service, err
@@ -222,7 +196,7 @@ func (db *Database) GetService(serviceID string) (service ServiceEntry, err erro
 }
 
 // GetServices returns all services
-func (db *Database) GetServices() (services []ServiceEntry, err error) {
+func (db *Database) GetServices() (services []launcher.Service, err error) {
 	rows, err := db.sql.Query("SELECT * FROM services")
 	if err != nil {
 		return nil, err
@@ -230,7 +204,7 @@ func (db *Database) GetServices() (services []ServiceEntry, err error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var service ServiceEntry
+		var service launcher.Service
 
 		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 			&service.UserName, &service.Permissions, &service.State, &service.Status,
@@ -247,7 +221,7 @@ func (db *Database) GetServices() (services []ServiceEntry, err error) {
 }
 
 // GetServiceByUnitName returns service by systemd unit name
-func (db *Database) GetServiceByUnitName(unitName string) (service ServiceEntry, err error) {
+func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
 	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")
 	if err != nil {
 		return service, err
@@ -430,7 +404,7 @@ func (db *Database) SetUsersStateChecksum(users []string, serviceID string, chec
 }
 
 // GetUsersService returns users service
-func (db *Database) GetUsersService(users []string, serviceID string) (usersService UsersEntry, err error) {
+func (db *Database) GetUsersService(users []string, serviceID string) (usersService launcher.UsersService, err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
 		return usersService, err
@@ -458,7 +432,7 @@ func (db *Database) GetUsersService(users []string, serviceID string) (usersServ
 }
 
 // GetUsersServicesByServiceID returns users services by service ID
-func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices []UsersEntry, err error) {
+func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices []launcher.UsersService, err error) {
 	rows, err := db.sql.Query("SELECT users, storageFolder, stateCheckSum FROM users WHERE serviceid = ?", serviceID)
 	if err != nil {
 		return usersServices, err
@@ -466,7 +440,7 @@ func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices
 	defer rows.Close()
 
 	for rows.Next() {
-		usersService := UsersEntry{ServiceID: serviceID}
+		usersService := launcher.UsersService{ServiceID: serviceID}
 		usersJSON := []byte{}
 
 		if err = rows.Scan(&usersJSON, &usersService.StorageFolder, &usersService.StateChecksum); err != nil {
@@ -484,7 +458,7 @@ func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices
 }
 
 // GetUsersServices returns list of users services
-func (db *Database) GetUsersServices(users []string) (usersServices []ServiceEntry, err error) {
+func (db *Database) GetUsersServices(users []string) (usersServices []launcher.Service, err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
 		return nil, err
@@ -497,7 +471,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []ServiceEnt
 	defer rows.Close()
 
 	for rows.Next() {
-		var service ServiceEntry
+		var service launcher.Service
 
 		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 			&service.UserName, &service.Permissions, &service.State, &service.Status,
@@ -511,55 +485,6 @@ func (db *Database) GetUsersServices(users []string) (usersServices []ServiceEnt
 	}
 
 	return usersServices, rows.Err()
-}
-
-// IsUsersService returns true if service id belongs to current users
-func (db *Database) IsUsersService(users []string, serviceID string) (result bool, err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return result, err
-	}
-
-	rows, err := db.sql.Query("SELECT * FROM users WHERE users = ? AND serviceid = ?", usersJSON, serviceID)
-	if err != nil {
-		return result, err
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		return true, rows.Err()
-	}
-
-	return false, rows.Err()
-}
-
-// GetUsersList returns list of all users
-func (db *Database) GetUsersList() (usersList [][]string, err error) {
-	rows, err := db.sql.Query("SELECT DISTINCT users FROM users")
-	if err != nil {
-		return usersList, err
-	}
-	defer rows.Close()
-
-	usersList = make([][]string, 0)
-
-	for rows.Next() {
-		var usersJSON []byte
-		err = rows.Scan(&usersJSON)
-		if err != nil {
-			return usersList, err
-		}
-
-		var users []string
-
-		if err = json.Unmarshal(usersJSON, &users); err != nil {
-			return usersList, err
-		}
-
-		usersList = append(usersList, users)
-	}
-
-	return usersList, rows.Err()
 }
 
 // RemoveServiceFromAllUsers removes service from all users

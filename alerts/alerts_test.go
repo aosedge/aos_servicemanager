@@ -37,7 +37,7 @@ import (
 	"aos_servicemanager/alerts"
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -54,13 +54,437 @@ func init() {
 }
 
 /*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type testServiceProvider struct {
+	services map[string]*launcher.Service
+}
+
+type testCursorStorage struct {
+	cursor string
+}
+
+/*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var db *database.Database
 var systemd *dbus.Conn
 
 var errTimeout = errors.New("timeout")
+
+var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
+var cursorStorage testCursorStorage
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	if err := setup(); err != nil {
+		log.Fatalf("Error setting up: %s", err)
+	}
+
+	ret := m.Run()
+
+	cleanup()
+
+	os.Exit(ret)
+}
+
+/*******************************************************************************
+ * Tests
+ ******************************************************************************/
+
+func TestGetSystemError(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
+	if err != nil {
+		t.Fatalf("Can't create syslog: %s", err)
+	}
+	defer sysLog.Close()
+
+	// Check crit message received
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+
+		if err = sysLog.Crit(messages[len(messages)-1]); err != nil {
+			t.Errorf("Can't write to syslog: %s", err)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
+		amqp.AlertTagSystemError, "system", nil, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// Check non crit message not received
+
+	messages = make([]string, 0, numMessages)
+
+	messages = append(messages, uuid.New().String())
+	if err = sysLog.Warning(messages[len(messages)-1]); err != nil {
+		t.Errorf("Can't write to syslog: %s", err)
+	}
+
+	messages = append(messages, uuid.New().String())
+	if err = sysLog.Notice(messages[len(messages)-1]); err != nil {
+		t.Errorf("Can't write to syslog: %s", err)
+	}
+
+	messages = append(messages, uuid.New().String())
+	if err = sysLog.Info(messages[len(messages)-1]); err != nil {
+		t.Errorf("Can't write to syslog: %s", err)
+	}
+
+	messages = append(messages, uuid.New().String())
+	if err = sysLog.Debug(messages[len(messages)-1]); err != nil {
+		t.Errorf("Can't write to syslog: %s", err)
+	}
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		func(alert amqp.AlertItem) (success bool, err error) {
+			if alert.Tag == amqp.AlertTagSystemError {
+				for _, originMessage := range messages {
+					systemAlert, ok := (alert.Payload.(amqp.SystemAlert))
+					if !ok {
+						return false, errors.New("wrong alert type")
+					}
+
+					if originMessage == systemAlert.Message {
+						return false, fmt.Errorf("unexpected message: %s", systemAlert.Message)
+					}
+				}
+			}
+
+			return false, nil
+		}); err != nil && err != errTimeout {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetOfflineSystemError(t *testing.T) {
+	const numMessages = 5
+
+	// Open and close to store cursor
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	alertsHandler.Close()
+
+	// Wait at least 1 poll period cursor to be stored
+	time.Sleep(2 * time.Second)
+
+	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
+	if err != nil {
+		t.Fatalf("Can't create syslog: %s", err)
+	}
+	defer sysLog.Close()
+
+	// Send offline messages
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+
+		if err = sysLog.Emerg(messages[len(messages)-1]); err != nil {
+			t.Errorf("Can't write to syslog: %s", err)
+		}
+	}
+
+	// Open again
+	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	// Check all offline messages are handled
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagSystemError, "system", nil, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetServiceError(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("alertservice0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	if err = startService("alertservice0"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	crashService("alertservice0")
+
+	messages := []string{
+		"aos_alertservice0.service: Main process exited, code=dumped, status=11/SEGV",
+		"aos_alertservice0.service: Failed with result 'core-dump'."}
+
+	var version uint64 = 0
+
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
+		amqp.AlertTagSystemError, "alertservice0", &version, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetResourceAlerts(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("alertservice1"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	type resourceAlert struct {
+		source   string
+		resource string
+		time     time.Time
+		value    uint64
+	}
+
+	resourceAlerts := []resourceAlert{
+		resourceAlert{"alertservice1", "cpu", time.Now(), 89},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 90},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 91},
+		resourceAlert{"alertservice1", "cpu", time.Now(), 92},
+		resourceAlert{"system", "ram", time.Now(), 93},
+		resourceAlert{"system", "ram", time.Now(), 1500},
+		resourceAlert{"system", "ram", time.Now(), 1600}}
+
+	for _, alert := range resourceAlerts {
+		alertsHandler.SendResourceAlert(alert.source, alert.resource, alert.time, alert.value)
+	}
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		func(alert amqp.AlertItem) (success bool, err error) {
+			if alert.Tag != amqp.AlertTagResource {
+				return false, nil
+			}
+
+			for i, originItem := range resourceAlerts {
+				receivedAlert, ok := (alert.Payload.(amqp.ResourceAlert))
+				if !ok {
+					return false, errors.New("wrong alert type")
+				}
+
+				receivedItem := resourceAlert{
+					source:   alert.Source,
+					resource: receivedAlert.Parameter,
+					time:     alert.Timestamp,
+					value:    receivedAlert.Value}
+
+				if receivedItem == originItem {
+					resourceAlerts = append(resourceAlerts[:i], resourceAlerts[i+1:]...)
+
+					if len(resourceAlerts) == 0 {
+						return true, nil
+					}
+
+					return false, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetServiceManagerAlerts(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+		log.Error(messages[len(messages)-1])
+	}
+
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "servicemanager", nil, messages); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestAlertsMaxMessageSize(t *testing.T) {
+	const numMessages = 5
+	// the size of one message ~154 bytes:
+	// {"timestamp":"2019-03-28T16:54:58.500221705+02:00","tag":"aosCore","source":"servicemanager","payload":{"message":"884a0472-5ce3-4da6-acff-088ce3959cd3"}}
+	// Set MaxMessageSize to 500 to allow only 3 messages to come
+	const numExpectedMessages = 3
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     500,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	for i := 0; i < numMessages; i++ {
+		// One message size is: timestamp 24 + tag "aosCore" 7 + source "servicemanager" 14 + uuid 36 = 81
+		log.Error(uuid.New().String())
+	}
+
+	select {
+	case alerts := <-alertsHandler.AlertsChannel:
+		if len(alerts) != numExpectedMessages {
+			t.Errorf("Wrong message count received: %d", len(alerts))
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Errorf("Result failed: %s", errTimeout)
+	}
+}
+
+func TestAlertsMaxOfflineMessages(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 3}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+		log.Error(messages[len(messages)-1])
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	messageCount := 0
+
+	for {
+		select {
+		case <-alertsHandler.AlertsChannel:
+			messageCount++
+
+		case <-time.After(1 * time.Second):
+			if messageCount != 3 {
+				t.Errorf("Wrong message count received: %d", messageCount)
+			}
+			return
+		}
+	}
+}
+
+func TestDuplicateAlerts(t *testing.T) {
+	const numMessages = 5
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 25}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, "This is error message")
+		log.Error(messages[len(messages)-1])
+	}
+
+	select {
+	case alerts := <-alertsHandler.AlertsChannel:
+		if len(alerts) != 1 {
+			t.Errorf("Wrong message count received: %d", len(alerts))
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Errorf("Result failed: %s", errTimeout)
+	}
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
+	s, ok := serviceProvider.services[serviceID]
+	if !ok {
+		return service, fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	return *s, nil
+}
+
+func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
+	for _, s := range serviceProvider.services {
+		if s.UnitName == unitName {
+			return *s, nil
+		}
+	}
+
+	return service, fmt.Errorf("service with unit %s does not exist", unitName)
+}
+
+func (cursorStorage *testCursorStorage) SetJournalCursor(cursor string) (err error) {
+	cursorStorage.cursor = cursor
+
+	return nil
+}
+
+func (cursorStorage *testCursorStorage) GetJournalCursor() (cursor string, err error) {
+	return cursorStorage.cursor, nil
+}
 
 /*******************************************************************************
  * Private
@@ -70,12 +494,6 @@ func setup() (err error) {
 	if err := os.MkdirAll("tmp", 0755); err != nil {
 		return err
 	}
-
-	db, err = database.New("tmp/servicemanager.db")
-	if err != nil {
-		return err
-	}
-
 	if systemd, err = dbus.NewSystemConnection(); err != nil {
 		return err
 	}
@@ -84,12 +502,7 @@ func setup() (err error) {
 }
 
 func cleanup() {
-	services, err := db.GetServices()
-	if err != nil {
-		log.Errorf("Can't get services: %s", err)
-	}
-
-	for _, service := range services {
+	for _, service := range serviceProvider.services {
 		if err := stopService(service.ID); err != nil {
 			log.Errorf("Can't stop service: %s", err)
 		}
@@ -99,7 +512,6 @@ func cleanup() {
 		}
 	}
 
-	db.Close()
 	systemd.Close()
 
 	if err := os.RemoveAll("tmp"); err != nil {
@@ -184,9 +596,11 @@ func createService(serviceID string) (err error) {
 
 	serviceName := "aos_" + serviceID + ".service"
 
-	if err = db.AddService(database.ServiceEntry{ID: serviceID, UnitName: serviceName}); err != nil {
-		return err
+	if _, ok := serviceProvider.services[serviceID]; ok {
+		return errors.New("service already exists")
 	}
+
+	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
 
 	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
 	if err != nil {
@@ -236,383 +650,6 @@ func crashService(serviceID string) {
 	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }
 
-/*******************************************************************************
- * Main
- ******************************************************************************/
-
-func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
-	}
-
-	ret := m.Run()
-
-	cleanup()
-
-	os.Exit(ret)
-}
-
-/*******************************************************************************
- * Tests
- ******************************************************************************/
-
-func TestGetSystemError(t *testing.T) {
-	const numMessages = 5
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
-	if err != nil {
-		t.Fatalf("Can't create syslog: %s", err)
-	}
-	defer sysLog.Close()
-
-	// Check crit message received
-
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-
-		if err = sysLog.Crit(messages[len(messages)-1]); err != nil {
-			t.Errorf("Can't write to syslog: %s", err)
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
-		amqp.AlertTagSystemError, "system", nil, messages); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-
-	// Check non crit message not received
-
-	messages = make([]string, 0, numMessages)
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Warning(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Notice(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Info(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Debug(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
-		func(alert amqp.AlertItem) (success bool, err error) {
-			if alert.Tag == amqp.AlertTagSystemError {
-				for _, originMessage := range messages {
-					systemAlert, ok := (alert.Payload.(amqp.SystemAlert))
-					if !ok {
-						return false, errors.New("wrong alert type")
-					}
-
-					if originMessage == systemAlert.Message {
-						return false, fmt.Errorf("unexpected message: %s", systemAlert.Message)
-					}
-				}
-			}
-
-			return false, nil
-		}); err != nil && err != errTimeout {
-		t.Errorf("Result failed: %s", err)
-	}
-}
-
-func TestGetOfflineSystemError(t *testing.T) {
-	const numMessages = 5
-
-	// Open and close to store cursor
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	alertsHandler.Close()
-
-	// Wait at least 1 poll period cursor to be stored
-	time.Sleep(2 * time.Second)
-
-	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
-	if err != nil {
-		t.Fatalf("Can't create syslog: %s", err)
-	}
-	defer sysLog.Close()
-
-	// Send offline messages
-
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-
-		if err = sysLog.Emerg(messages[len(messages)-1]); err != nil {
-			t.Errorf("Can't write to syslog: %s", err)
-		}
-	}
-
-	// Open again
-	alertsHandler, err = alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	// Check all offline messages are handled
-	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagSystemError, "system", nil, messages); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-}
-
-func TestGetServiceError(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	if err = createService("alertservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	if err = startService("alertservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	time.Sleep(1 * time.Second)
-
-	crashService("alertservice0")
-
-	messages := []string{
-		"aos_alertservice0.service: Main process exited, code=dumped, status=11/SEGV",
-		"aos_alertservice0.service: Failed with result 'core-dump'."}
-
-	var version uint64 = 0
-
-	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second,
-		amqp.AlertTagSystemError, "alertservice0", &version, messages); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-}
-
-func TestGetResourceAlerts(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	if err = createService("alertservice1"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
-
-	type resourceAlert struct {
-		source   string
-		resource string
-		time     time.Time
-		value    uint64
-	}
-
-	resourceAlerts := []resourceAlert{
-		resourceAlert{"alertservice1", "cpu", time.Now(), 89},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 90},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 91},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 92},
-		resourceAlert{"system", "ram", time.Now(), 93},
-		resourceAlert{"system", "ram", time.Now(), 1500},
-		resourceAlert{"system", "ram", time.Now(), 1600}}
-
-	for _, alert := range resourceAlerts {
-		alertsHandler.SendResourceAlert(alert.source, alert.resource, alert.time, alert.value)
-	}
-
-	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
-		func(alert amqp.AlertItem) (success bool, err error) {
-			if alert.Tag != amqp.AlertTagResource {
-				return false, nil
-			}
-
-			for i, originItem := range resourceAlerts {
-				receivedAlert, ok := (alert.Payload.(amqp.ResourceAlert))
-				if !ok {
-					return false, errors.New("wrong alert type")
-				}
-
-				receivedItem := resourceAlert{
-					source:   alert.Source,
-					resource: receivedAlert.Parameter,
-					time:     alert.Timestamp,
-					value:    receivedAlert.Value}
-
-				if receivedItem == originItem {
-					resourceAlerts = append(resourceAlerts[:i], resourceAlerts[i+1:]...)
-
-					if len(resourceAlerts) == 0 {
-						return true, nil
-					}
-
-					return false, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-}
-
-func TestGetServiceManagerAlerts(t *testing.T) {
-	const numMessages = 5
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-		log.Error(messages[len(messages)-1])
-	}
-
-	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "servicemanager", nil, messages); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-}
-
-func TestAlertsMaxMessageSize(t *testing.T) {
-	const numMessages = 5
-	// the size of one message ~154 bytes:
-	// {"timestamp":"2019-03-28T16:54:58.500221705+02:00","tag":"aosCore","source":"servicemanager","payload":{"message":"884a0472-5ce3-4da6-acff-088ce3959cd3"}}
-	// Set MaxMessageSize to 500 to allow only 3 messages to come
-	const numExpectedMessages = 3
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     500,
-		MaxOfflineMessages: 32}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	for i := 0; i < numMessages; i++ {
-		// One message size is: timestamp 24 + tag "aosCore" 7 + source "servicemanager" 14 + uuid 36 = 81
-		log.Error(uuid.New().String())
-	}
-
-	select {
-	case alerts := <-alertsHandler.AlertsChannel:
-		if len(alerts) != numExpectedMessages {
-			t.Errorf("Wrong message count received: %d", len(alerts))
-		}
-
-	case <-time.After(5 * time.Second):
-		t.Errorf("Result failed: %s", errTimeout)
-	}
-}
-
-func TestAlertsMaxOfflineMessages(t *testing.T) {
-	const numMessages = 5
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 3}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-		log.Error(messages[len(messages)-1])
-		time.Sleep(1500 * time.Millisecond)
-	}
-
-	messageCount := 0
-
-	for {
-		select {
-		case <-alertsHandler.AlertsChannel:
-			messageCount++
-
-		case <-time.After(1 * time.Second):
-			if messageCount != 3 {
-				t.Errorf("Wrong message count received: %d", messageCount)
-			}
-			return
-		}
-	}
-}
-
-func TestDuplicateAlerts(t *testing.T) {
-	const numMessages = 5
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 25}}, db, db)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, "This is error message")
-		log.Error(messages[len(messages)-1])
-	}
-
-	select {
-	case alerts := <-alertsHandler.AlertsChannel:
-		if len(alerts) != 1 {
-			t.Errorf("Wrong message count received: %d", len(alerts))
-		}
-
-	case <-time.After(5 * time.Second):
-		t.Errorf("Result failed: %s", errTimeout)
-	}
-}
-
 func TestMessageFilter(t *testing.T) {
 	const numMessages = 3
 
@@ -622,7 +659,7 @@ func TestMessageFilter(t *testing.T) {
 		SendPeriod:         config.Duration{Duration: 1 * time.Second},
 		MaxMessageSize:     1024,
 		MaxOfflineMessages: 32,
-		Filter:             filter}}, db, db)
+		Filter:             filter}}, &serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
@@ -681,7 +718,7 @@ func TestWrongFilter(t *testing.T) {
 		SendPeriod:         config.Duration{Duration: 1 * time.Second},
 		MaxMessageSize:     1024,
 		MaxOfflineMessages: 32,
-		Filter:             []string{"", "*(test)^"}}}, db, db)
+		Filter:             []string{"", "*(test)^"}}}, &serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}

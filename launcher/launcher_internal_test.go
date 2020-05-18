@@ -43,7 +43,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/platform"
 )
@@ -89,11 +88,16 @@ type testSender struct {
 	stateRequestChannel chan stateRequest
 }
 
+type testServiceProvider struct {
+	services      map[string]*Service
+	usersServices []*UsersService
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var db *database.Database
+var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
 
 /*******************************************************************************
  * Init
@@ -109,482 +113,10 @@ func init() {
 }
 
 /*******************************************************************************
- * Private
- ******************************************************************************/
-
-func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, sender, db, monitor)
-	if err != nil {
-		return launcher, err
-	}
-
-	launcher.downloader = downloader
-
-	return launcher, err
-}
-
-func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
-	imageDir, err := ioutil.TempDir("", "aos_")
-	if err != nil {
-		log.Error("Can't create image dir : ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(imageDir)
-
-	// create dir
-	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, err
-	}
-
-	if err := generatePythonContent(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
-	if err != nil {
-		return outputFile, err
-	}
-
-	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
-
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
-	}
-	spec.ocSpec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
-
-	if err = spec.save(); err != nil {
-		return outputFile, err
-	}
-
-	imageFile, err := ioutil.TempFile("", "aos_")
-	if err != nil {
-		return outputFile, err
-	}
-	outputFile = imageFile.Name()
-	imageFile.Close()
-
-	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, err
-	}
-
-	return outputFile, nil
-}
-
-func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
-	imageDir, err := ioutil.TempDir("", "aos_")
-	if err != nil {
-		log.Error("Can't create image dir : ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(imageDir)
-
-	// create dir
-	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, err
-	}
-
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
-	if err != nil {
-		return outputFile, err
-	}
-
-	spec.ocSpec.Process.Args = []string{"iperf", "-s"}
-
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
-	}
-	spec.ocSpec.Annotations[aosProductPrefix+"network.uploadSpeed"] = "4096"
-	spec.ocSpec.Annotations[aosProductPrefix+"network.downloadSpeed"] = "8192"
-
-	if err = spec.save(); err != nil {
-		return outputFile, err
-	}
-
-	imageFile, err := ioutil.TempFile("", "aos_")
-	if err != nil {
-		return outputFile, err
-	}
-	outputFile = imageFile.Name()
-	imageFile.Close()
-
-	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, err
-	}
-
-	return outputFile, nil
-}
-
-func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
-	imageDir, err := ioutil.TempDir("", "aos_")
-	if err != nil {
-		log.Error("Can't create image dir : ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(imageDir)
-
-	// create dir
-	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, err
-	}
-
-	if err := generateFtpContent(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, ocConfigFile))
-	if err != nil {
-		return outputFile, err
-	}
-
-	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
-
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
-	}
-	spec.ocSpec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
-	spec.ocSpec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
-
-	if err = spec.save(); err != nil {
-		return outputFile, err
-	}
-
-	imageFile, err := ioutil.TempFile("", "aos_")
-	if err != nil {
-		return outputFile, err
-	}
-	outputFile = imageFile.Name()
-	imageFile.Close()
-
-	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, err
-	}
-
-	return outputFile, nil
-}
-
-func newTestMonitor() (monitor *testMonitor, err error) {
-	monitor = &testMonitor{}
-
-	monitor.startChannel = make(chan *testMonitorInfo, 100)
-	monitor.stopChannel = make(chan string, 100)
-
-	return monitor, nil
-}
-
-func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig monitoring.ServiceMonitoringConfig) (err error) {
-
-	monitor.startChannel <- &testMonitorInfo{serviceID, monitorConfig}
-
-	return nil
-}
-
-func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
-	monitor.stopChannel <- serviceID
-
-	return nil
-}
-
-func newTestSender() (sender *testSender) {
-	sender = &testSender{}
-
-	sender.statusChannel = make(chan amqp.ServiceInfo, maxExecutedActions)
-	sender.stateRequestChannel = make(chan stateRequest, 32)
-
-	return sender
-}
-
-func (sender *testSender) SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error) {
-	sender.statusChannel <- serviceStatus
-
-	return nil
-}
-
-func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) (err error) {
-	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
-
-	return nil
-}
-
-func (launcher *Launcher) removeAllServices() (err error) {
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return err
-	}
-
-	statusChannel := make(chan error, len(services))
-
-	for _, service := range services {
-		go func(service database.ServiceEntry) {
-			err := launcher.removeService(service)
-			if err != nil {
-				log.Errorf("Can't remove service %s: %s", service.ID, err)
-			}
-			statusChannel <- err
-		}(service)
-	}
-
-	// Wait all services are deleted
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-
-	err = launcher.systemd.Reload()
-	if err != nil {
-		return err
-	}
-
-	services, err = launcher.serviceProvider.GetServices()
-	if err != nil {
-		return err
-	}
-	if len(services) != 0 {
-		return errors.New("can't remove all services")
-	}
-
-	usersList, err := launcher.serviceProvider.GetUsersList()
-	if err != nil {
-		return err
-	}
-	if len(usersList) != 0 {
-		return errors.New("can't remove all users")
-	}
-
-	return err
-}
-
-func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
-	}
-
-	db, err = database.New("tmp/servicemanager.db")
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func cleanup() (err error) {
-	defer db.Close()
-
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
-	if err != nil {
-		return err
-	}
-	defer launcher.Close()
-
-	if err := launcher.removeAllServices(); err != nil {
-		return err
-	}
-
-	if err := os.RemoveAll("tmp"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func generatePythonContent(imagePath string) (err error) {
-	serviceContent := `#!/usr/bin/python
-
-import time
-import socket
-import sys
-
-i = 0
-serviceName = sys.argv[1]
-serviceVersion = sys.argv[2]
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
-message = serviceName + ", version: " + serviceVersion
-sock.sendto(str.encode(message), ("172.19.0.1", 10001))
-sock.close()
-
-print(">>>> Start", serviceName, "version", serviceVersion)
-while True:
-	print(">>>> aos", serviceName, "version", serviceVersion, "count", i)
-	i = i + 1
-	time.sleep(5)`
-
-	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func generateFtpContent(imagePath string) (err error) {
-	serviceContent := `#!/usr/bin/python
-
-from pyftpdlib.authorizers import DummyAuthorizer
-from pyftpdlib.handlers import FTPHandler
-from pyftpdlib.servers import FTPServer
-
-authorizer = DummyAuthorizer()
-authorizer.add_anonymous("/home/service/storage", perm="elradfmw")
-
-handler = FTPHandler
-handler.authorizer = authorizer
-
-server = FTPServer(("", 21), handler)
-server.serve_forever()`
-
-	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func generateConfig(imagePath string) (err error) {
-	// remove json
-	if err := os.Remove(path.Join(imagePath, "config.json")); err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-	}
-
-	// generate config spec
-	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
-	if err != nil {
-		return errors.New(string(out))
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.ServerConn, err error) {
-	service, err := launcher.serviceProvider.GetService(serviceID)
-	if err != nil {
-		return nil, err
-	}
-
-	ip, err := monitoring.GetServiceIPAddress(service.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	ftpConnection, err = ftp.DialTimeout(ip+":21", 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = ftpConnection.Login("anonymous", "anonymous"); err != nil {
-		ftpConnection.Quit()
-		return nil, err
-	}
-
-	return ftpConnection, nil
-}
-
-func generateImageConfig() (config *imagespec.Image, err error) {
-	configStr := `{
-		"created": "2015-10-31T22:22:56.015925234Z",
-		"author": "Alyssa P. Hacker <alyspdev@example.com>",
-		"architecture": "amd64",
-		"os": "Linux",
-		"config": {
-			"ExposedPorts": {
-				"8080/tcp": {}
-			},
-			"Env": [
-				"PATH=/usr/local/sbin",
-				"FOO=oci_is_a",
-				"BAR=well_written_spec",
-				"MY_VAR",
-				"TERM"
-			],
-			"Entrypoint": [
-				"/bin/my-app-binary"
-			],
-			"Cmd": [
-				"--foreground",
-				"--config",
-				"/etc/my-app.d/default.cfg"
-			],
-			"Volumes": {
-				"/var/job-result-data": {},
-				"/var/log/my-app-logs": {}
-			},
-			"WorkingDir": "/home/alice",
-			"Labels": {
-				"com.example.project.git.url": "https://example.com/project.git",
-				"com.example.project.git.commit": "45a939b2999782a3f005621a8d0f29aa387e1d6b"
-			}
-		},
-		"rootfs": {
-		  "diff_ids": [
-			"sha256:c6f988f4874bb0add23a778f753c65efe992244e148a1d2ec2a8b664fb66bbd1",
-			"sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
-		  ],
-		  "type": "layers"
-		},
-		"history": [
-		  {
-			"created": "2015-10-31T22:22:54.690851953Z",
-			"created_by": "/bin/sh -c #(nop) ADD file:a3bc1e842b69636f9df5256c49c5374fb4eef1e281fe3f282c65fb853ee171c5 in /"
-		  },
-		  {
-			"created": "2015-10-31T22:22:55.613815829Z",
-			"created_by": "/bin/sh -c #(nop) CMD [\"sh\"]",
-			"empty_layer": true
-		  }
-		]
-	}
-	`
-	var imageConfig imagespec.Image
-	if err = json.Unmarshal([]byte(configStr), &imageConfig); err != nil {
-		return nil, err
-	}
-
-	return &imageConfig, nil
-}
-
-func saveImageConfig(folderPath string, config *imagespec.Image) (filePath string, err error) {
-	filePath = path.Join(folderPath, "imageConfig.json")
-
-	if err := os.Remove(filePath); err != nil {
-		if !os.IsNotExist(err) {
-			return "", err
-		}
-	}
-
-	data, err := json.Marshal(config)
-	if err != nil {
-		return "", err
-	}
-
-	jsonFile, err := os.Create(filePath)
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := jsonFile.Write(data); err != nil {
-		return "", err
-	}
-
-	return filePath, err
-}
-
-/*******************************************************************************
  * Main
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-
 	if err := setup(); err != nil {
 		log.Fatalf("Error creating service images: %s", err)
 	}
@@ -968,9 +500,9 @@ func TestVisPermissions(t *testing.T) {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
-	service, err := db.GetService("service0")
-	if err != nil {
-		t.Fatalf("Can't get service: %s", err)
+	service, ok := serviceProvider.services["service0"]
+	if !ok {
+		t.Fatalf("Service not found")
 	}
 
 	if service.Permissions != `{"*": "rw", "123": "rw"}` {
@@ -1029,13 +561,15 @@ func TestUsersServices(t *testing.T) {
 		count := 0
 		for _, service := range services {
 			if service.State == stateRunning {
-				exist, err := launcher.serviceProvider.IsUsersService(users, service.ID)
-				if err != nil {
+				_, err = launcher.serviceProvider.GetUsersService(users, service.ID)
+				if err != nil && !strings.Contains(err.Error(), "not exist") {
 					t.Errorf("Can't check users service: %s", err)
 				}
-				if !exist {
+
+				if err != nil {
 					t.Errorf("Service doesn't belong to users: %s", service.ID)
 				}
+
 				count++
 			}
 		}
@@ -1062,13 +596,15 @@ func TestUsersServices(t *testing.T) {
 		count := 0
 		for _, service := range services {
 			if service.State == stateRunning {
-				exist, err := launcher.serviceProvider.IsUsersService(users, service.ID)
-				if err != nil {
+				_, err = launcher.serviceProvider.GetUsersService(users, service.ID)
+				if err != nil && !strings.Contains(err.Error(), "not exist") {
 					t.Errorf("Can't check users service: %s", err)
 				}
-				if !exist {
+
+				if err != nil {
 					t.Errorf("Service doesn't belong to users: %s", service.ID)
 				}
+
 				count++
 			}
 		}
@@ -1132,13 +668,8 @@ func TestServiceTTL(t *testing.T) {
 		t.Fatal("Wrong service quantity")
 	}
 
-	usersList, err := launcher.serviceProvider.GetUsersList()
-	if err != nil {
-		t.Fatalf("Can't get users list: %s", err)
-	}
-
-	if len(usersList) != 0 {
-		t.Fatal("Wrong users quantity", usersList)
+	if len(serviceProvider.usersServices) != 0 {
+		t.Fatalf("Wrong users quantity: %d", len(serviceProvider.usersServices))
 	}
 }
 
@@ -1570,4 +1101,658 @@ func TestSpecFromImageConfig(t *testing.T) {
 	if false == reflect.DeepEqual(runtimeSpec.ocSpec.Process.Env, origEnv) {
 		t.Errorf("Error crating env from config")
 	}
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
+	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, sender, &serviceProvider, monitor)
+	if err != nil {
+		return launcher, err
+	}
+
+	launcher.downloader = downloader
+
+	return launcher, err
+}
+
+func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generatePythonContent(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
+	if err != nil {
+		return outputFile, err
+	}
+
+	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
+	}
+	spec.ocSpec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
+
+	if err = spec.save(); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
+	if err != nil {
+		return outputFile, err
+	}
+
+	spec.ocSpec.Process.Args = []string{"iperf", "-s"}
+
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
+	}
+	spec.ocSpec.Annotations[aosProductPrefix+"network.uploadSpeed"] = "4096"
+	spec.ocSpec.Annotations[aosProductPrefix+"network.downloadSpeed"] = "8192"
+
+	if err = spec.save(); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateFtpContent(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	if err := generateConfig(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	spec, err := loadServiceSpec(path.Join(imageDir, ocConfigFile))
+	if err != nil {
+		return outputFile, err
+	}
+
+	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+
+	if spec.ocSpec.Annotations == nil {
+		spec.ocSpec.Annotations = make(map[string]string)
+	}
+	spec.ocSpec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
+	spec.ocSpec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
+
+	if err = spec.save(); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func newTestMonitor() (monitor *testMonitor, err error) {
+	monitor = &testMonitor{}
+
+	monitor.startChannel = make(chan *testMonitorInfo, 100)
+	monitor.stopChannel = make(chan string, 100)
+
+	return monitor, nil
+}
+
+func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig monitoring.ServiceMonitoringConfig) (err error) {
+
+	monitor.startChannel <- &testMonitorInfo{serviceID, monitorConfig}
+
+	return nil
+}
+
+func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
+	monitor.stopChannel <- serviceID
+
+	return nil
+}
+
+func newTestSender() (sender *testSender) {
+	sender = &testSender{}
+
+	sender.statusChannel = make(chan amqp.ServiceInfo, maxExecutedActions)
+	sender.stateRequestChannel = make(chan stateRequest, 32)
+
+	return sender
+}
+
+func (sender *testSender) SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error) {
+	sender.statusChannel <- serviceStatus
+
+	return nil
+}
+
+func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) (err error) {
+	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
+
+	return nil
+}
+
+func (launcher *Launcher) removeAllServices() (err error) {
+	services, err := launcher.serviceProvider.GetServices()
+	if err != nil {
+		return err
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	for _, service := range services {
+		go func(service Service) {
+			err := launcher.removeService(service)
+			if err != nil {
+				log.Errorf("Can't remove service %s: %s", service.ID, err)
+			}
+			statusChannel <- err
+		}(service)
+	}
+
+	// Wait all services are deleted
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
+
+	err = launcher.systemd.Reload()
+	if err != nil {
+		return err
+	}
+
+	services, err = launcher.serviceProvider.GetServices()
+	if err != nil {
+		return err
+	}
+	if len(services) != 0 {
+		return errors.New("can't remove all services")
+	}
+
+	if len(serviceProvider.usersServices) != 0 {
+		return errors.New("can't remove all users")
+	}
+
+	return err
+}
+
+func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
+	if _, ok := serviceProvider.services[service.ID]; ok {
+		return fmt.Errorf("service %s already exists", service.ID)
+	}
+
+	serviceProvider.services[service.ID] = &service
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) UpdateService(service Service) (err error) {
+	if _, ok := serviceProvider.services[service.ID]; !ok {
+		return fmt.Errorf("service %s does not exist", service.ID)
+	}
+
+	serviceProvider.services[service.ID] = &service
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) RemoveService(serviceID string) (err error) {
+	if _, ok := serviceProvider.services[serviceID]; !ok {
+		return fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	delete(serviceProvider.services, serviceID)
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) GetService(serviceID string) (service Service, err error) {
+	servicePtr, ok := serviceProvider.services[serviceID]
+	if !ok {
+		return service, fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	return *servicePtr, nil
+}
+
+func (serviceProvider *testServiceProvider) GetServices() (services []Service, err error) {
+	services = make([]Service, 0, len(serviceProvider.services))
+
+	for _, servicePtr := range serviceProvider.services {
+		services = append(services, *servicePtr)
+	}
+
+	return services, nil
+}
+
+func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service Service, err error) {
+	for _, servicePtr := range serviceProvider.services {
+		if service.UnitName == unitName {
+			return *servicePtr, nil
+		}
+	}
+
+	return service, fmt.Errorf("service with unit %s does not exist", unitName)
+}
+
+func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, status int) (err error) {
+	if _, ok := serviceProvider.services[serviceID]; !ok {
+		return fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	serviceProvider.services[serviceID].Status = status
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, state int) (err error) {
+	if _, ok := serviceProvider.services[serviceID]; !ok {
+		return fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	serviceProvider.services[serviceID].State = state
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) SetServiceStartTime(serviceID string, time time.Time) (err error) {
+	if _, ok := serviceProvider.services[serviceID]; !ok {
+		return fmt.Errorf("service %s does not exist", serviceID)
+	}
+
+	serviceProvider.services[serviceID].StartAt = time
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) AddServiceToUsers(users []string, serviceID string) (err error) {
+	if _, err = serviceProvider.GetUsersService(users, serviceID); err == nil {
+		return fmt.Errorf("service %s already in users", serviceID)
+	}
+
+	serviceProvider.usersServices = append(serviceProvider.usersServices, &UsersService{Users: users, ServiceID: serviceID})
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) RemoveServiceFromUsers(users []string, serviceID string) (err error) {
+	if _, err = serviceProvider.GetUsersService(users, serviceID); err != nil {
+		return err
+	}
+
+	i := 0
+
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		if !reflect.DeepEqual(usersServicePtr.Users, users) || usersServicePtr.ServiceID != serviceID {
+			serviceProvider.usersServices[i] = usersServicePtr
+			i++
+		}
+	}
+
+	serviceProvider.usersServices = serviceProvider.usersServices[:i]
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) GetUsersServices(users []string) (services []Service, err error) {
+	for _, usersService := range serviceProvider.usersServices {
+		if reflect.DeepEqual(usersService.Users, users) {
+			service, err := serviceProvider.GetService(usersService.ServiceID)
+			if err != nil {
+				return nil, err
+			}
+
+			services = append(services, service)
+		}
+	}
+
+	return services, nil
+}
+
+func (serviceProvider *testServiceProvider) RemoveServiceFromAllUsers(serviceID string) (err error) {
+	i := 0
+
+	for _, usersService := range serviceProvider.usersServices {
+		if usersService.ServiceID != serviceID {
+			serviceProvider.usersServices[i] = usersService
+			i++
+		}
+	}
+
+	serviceProvider.usersServices = serviceProvider.usersServices[:i]
+
+	return nil
+}
+
+func (serviceProvider *testServiceProvider) GetUsersService(users []string, serviceID string) (userService UsersService, err error) {
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
+			return *usersServicePtr, nil
+		}
+	}
+
+	return userService, fmt.Errorf("service %s does not exist in users", serviceID)
+}
+
+func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error) {
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		userServices = append(userServices, *usersServicePtr)
+	}
+
+	return userServices, nil
+}
+
+func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
+			usersServicePtr.StorageFolder = storageFolder
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("service %s does not exist in users", serviceID)
+}
+
+func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
+			usersServicePtr.StateChecksum = checksum
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("service %s does not exist in users", serviceID)
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func setup() (err error) {
+	if err := os.MkdirAll("tmp", 0755); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func cleanup() (err error) {
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
+	if err != nil {
+		return err
+	}
+	defer launcher.Close()
+
+	if err := launcher.removeAllServices(); err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll("tmp"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generatePythonContent(imagePath string) (err error) {
+	serviceContent := `#!/usr/bin/python
+
+import time
+import socket
+import sys
+
+i = 0
+serviceName = sys.argv[1]
+serviceVersion = sys.argv[2]
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+message = serviceName + ", version: " + serviceVersion
+sock.sendto(str.encode(message), ("172.19.0.1", 10001))
+sock.close()
+
+print(">>>> Start", serviceName, "version", serviceVersion)
+while True:
+	print(">>>> aos", serviceName, "version", serviceVersion, "count", i)
+	i = i + 1
+	time.sleep(5)`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generateFtpContent(imagePath string) (err error) {
+	serviceContent := `#!/usr/bin/python
+
+from pyftpdlib.authorizers import DummyAuthorizer
+from pyftpdlib.handlers import FTPHandler
+from pyftpdlib.servers import FTPServer
+
+authorizer = DummyAuthorizer()
+authorizer.add_anonymous("/home/service/storage", perm="elradfmw")
+
+handler = FTPHandler
+handler.authorizer = authorizer
+
+server = FTPServer(("", 21), handler)
+server.serve_forever()`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generateConfig(imagePath string) (err error) {
+	// remove json
+	if err := os.Remove(path.Join(imagePath, "config.json")); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	// generate config spec
+	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
+	if err != nil {
+		return errors.New(string(out))
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.ServerConn, err error) {
+	service, err := launcher.serviceProvider.GetService(serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	ip, err := monitoring.GetServiceIPAddress(service.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	ftpConnection, err = ftp.DialTimeout(ip+":21", 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = ftpConnection.Login("anonymous", "anonymous"); err != nil {
+		ftpConnection.Quit()
+		return nil, err
+	}
+
+	return ftpConnection, nil
+}
+
+func generateImageConfig() (config *imagespec.Image, err error) {
+	configStr := `{
+		"created": "2015-10-31T22:22:56.015925234Z",
+		"author": "Alyssa P. Hacker <alyspdev@example.com>",
+		"architecture": "amd64",
+		"os": "Linux",
+		"config": {
+			"ExposedPorts": {
+				"8080/tcp": {}
+			},
+			"Env": [
+				"PATH=/usr/local/sbin",
+				"FOO=oci_is_a",
+				"BAR=well_written_spec",
+				"MY_VAR",
+				"TERM"
+			],
+			"Entrypoint": [
+				"/bin/my-app-binary"
+			],
+			"Cmd": [
+				"--foreground",
+				"--config",
+				"/etc/my-app.d/default.cfg"
+			],
+			"Volumes": {
+				"/var/job-result-data": {},
+				"/var/log/my-app-logs": {}
+			},
+			"WorkingDir": "/home/alice",
+			"Labels": {
+				"com.example.project.git.url": "https://example.com/project.git",
+				"com.example.project.git.commit": "45a939b2999782a3f005621a8d0f29aa387e1d6b"
+			}
+		},
+		"rootfs": {
+		  "diff_ids": [
+			"sha256:c6f988f4874bb0add23a778f753c65efe992244e148a1d2ec2a8b664fb66bbd1",
+			"sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+		  ],
+		  "type": "layers"
+		},
+		"history": [
+		  {
+			"created": "2015-10-31T22:22:54.690851953Z",
+			"created_by": "/bin/sh -c #(nop) ADD file:a3bc1e842b69636f9df5256c49c5374fb4eef1e281fe3f282c65fb853ee171c5 in /"
+		  },
+		  {
+			"created": "2015-10-31T22:22:55.613815829Z",
+			"created_by": "/bin/sh -c #(nop) CMD [\"sh\"]",
+			"empty_layer": true
+		  }
+		]
+	}
+	`
+	var imageConfig imagespec.Image
+	if err = json.Unmarshal([]byte(configStr), &imageConfig); err != nil {
+		return nil, err
+	}
+
+	return &imageConfig, nil
+}
+
+func saveImageConfig(folderPath string, config *imagespec.Image) (filePath string, err error) {
+	filePath = path.Join(folderPath, "imageConfig.json")
+
+	if err := os.Remove(filePath); err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+
+	jsonFile, err := os.Create(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := jsonFile.Write(data); err != nil {
+		return "", err
+	}
+
+	return filePath, err
 }

@@ -28,7 +28,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -48,7 +48,7 @@ const (
 
 // ServiceProvider provides service info
 type ServiceProvider interface {
-	GetService(serviceID string) (service database.ServiceEntry, err error)
+	GetService(serviceID string) (service launcher.Service, err error)
 }
 
 // Logging instance
@@ -120,7 +120,7 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 		}
 	}()
 
-	var service database.ServiceEntry
+	var service launcher.Service
 
 	service, err = instance.serviceProvider.GetService(request.ServiceID)
 	if err != nil {
@@ -217,7 +217,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		}
 	}()
 
-	var service database.ServiceEntry
+	var service launcher.Service
 
 	service, err = instance.serviceProvider.GetService(request.ServiceID)
 	if err != nil {

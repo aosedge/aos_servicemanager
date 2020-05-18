@@ -28,8 +28,8 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/wsclient"
 
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
 	"aos_servicemanager/identification/visidentifier/dbushandler"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -71,7 +71,7 @@ type Instance struct {
 
 // ServiceProvider provides service info
 type ServiceProvider interface {
-	GetService(serviceID string) (service database.ServiceEntry, err error)
+	GetService(serviceID string) (service launcher.Service, err error)
 }
 
 type instanceConfig struct {

@@ -40,7 +40,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/umclient"
 )
@@ -80,12 +79,17 @@ type testSender struct {
 type messageProcessor struct {
 }
 
+type testStorage struct {
+	state   int
+	data    amqp.SystemUpgrade
+	version uint64
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var (
-	db     *database.Database
 	sender *testSender
 	server *wsserver.Server
 	client *umclient.Client
@@ -95,6 +99,8 @@ var (
 	imageVersion     uint64
 	operationVersion uint64
 )
+
+var storage testStorage
 
 var OfflinePrivKeyPem = []byte(`
 -----BEGIN PRIVATE KEY-----
@@ -165,12 +171,10 @@ func TestMain(m *testing.M) {
 	}
 	defer server.Close()
 
-	sender = newTestSender()
+	// Wait for server becomes ready
+	time.Sleep(1 * time.Second)
 
-	db, err = database.New(path.Join(tmpDir, " servicemanager.db"))
-	if err != nil {
-		log.Fatalf("Can't create db: %s", err)
-	}
+	sender = newTestSender()
 
 	rootCert := []byte(`
 -----BEGIN CERTIFICATE-----
@@ -216,7 +220,7 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Cannot load offline key file: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, crypt, sender, db)
+	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, crypt, sender, &storage)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}
@@ -346,6 +350,40 @@ func TestRevertUpgrade(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Error("Waiting for upgrade status timeout")
 	}
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func (storage *testStorage) SetUpgradeState(state int) (err error) {
+	storage.state = state
+
+	return nil
+}
+
+func (storage *testStorage) GetUpgradeState() (state int, err error) {
+	return storage.state, nil
+}
+
+func (storage *testStorage) SetUpgradeData(data amqp.SystemUpgrade) (err error) {
+	storage.data = data
+
+	return nil
+}
+
+func (storage *testStorage) GetUpgradeData() (data amqp.SystemUpgrade, err error) {
+	return storage.data, nil
+}
+
+func (storage *testStorage) SetUpgradeVersion(version uint64) (err error) {
+	storage.version = version
+
+	return nil
+}
+
+func (storage *testStorage) GetUpgradeVersion() (version uint64, err error) {
+	return storage.version, nil
 }
 
 /*******************************************************************************

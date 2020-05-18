@@ -24,7 +24,7 @@ import (
 	"github.com/godbus/dbus/introspect"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/database"
+	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -67,7 +67,7 @@ const intro = `
 
 // ServiceProvider provides service info
 type ServiceProvider interface {
-	GetService(serviceID string) (service database.ServiceEntry, err error)
+	GetService(serviceID string) (service launcher.Service, err error)
 }
 
 // DBusHandler d-bus interface structure
