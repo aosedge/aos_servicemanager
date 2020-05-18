@@ -590,7 +590,7 @@ func TestCursor(t *testing.T) {
 	}
 }
 
-func TestGetServiceByServiceName(t *testing.T) {
+func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
 	service1 := ServiceEntry{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
@@ -600,7 +600,7 @@ func TestGetServiceByServiceName(t *testing.T) {
 	}
 
 	// GetService
-	service, err := db.GetServiceByServiceName("service1.service")
+	service, err := db.GetServiceByUnitName("service1.service")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}

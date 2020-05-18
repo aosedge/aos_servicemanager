@@ -98,7 +98,7 @@ type ServiceProvider interface {
 	RemoveService(serviceID string) (err error)
 	GetService(serviceID string) (service database.ServiceEntry, err error)
 	GetServices() (services []database.ServiceEntry, err error)
-	GetServiceByServiceName(serviceName string) (service database.ServiceEntry, err error)
+	GetServiceByUnitName(unitName string) (service database.ServiceEntry, err error)
 	SetServiceStatus(serviceID string, status int) (err error)
 	SetServiceState(serviceID string, state int) (err error)
 	SetServiceStartTime(serviceID string, time time.Time) (err error)
@@ -694,7 +694,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 }
 
 func (launcher *Launcher) restartService(service database.ServiceEntry) (err error) {
-	fileName, err := filepath.Abs(path.Join(service.Path, service.ServiceName))
+	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 	if err != nil {
 		return err
 	}
@@ -714,12 +714,12 @@ func (launcher *Launcher) restartService(service database.ServiceEntry) (err err
 	}
 
 	channel := make(chan string)
-	if _, err = launcher.systemd.RestartUnit(service.ServiceName, "replace", channel); err != nil {
+	if _, err = launcher.systemd.RestartUnit(service.UnitName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Restart service")
+	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Restart service")
 
 	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
@@ -729,7 +729,7 @@ func (launcher *Launcher) restartService(service database.ServiceEntry) (err err
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
-	launcher.services.Store(service.ServiceName, service.ID)
+	launcher.services.Store(service.UnitName, service.ID)
 
 	return nil
 }
@@ -740,12 +740,12 @@ func (launcher *Launcher) startService(service database.ServiceEntry) (err error
 	}
 
 	channel := make(chan string)
-	if _, err = launcher.systemd.StartUnit(service.ServiceName, "replace", channel); err != nil {
+	if _, err = launcher.systemd.StartUnit(service.UnitName, "replace", channel); err != nil {
 		return err
 	}
 	status := <-channel
 
-	log.WithFields(log.Fields{"name": service.ServiceName, "status": status}).Debug("Start service")
+	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Start service")
 
 	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
@@ -755,7 +755,7 @@ func (launcher *Launcher) startService(service database.ServiceEntry) (err error
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
-	launcher.services.Store(service.ServiceName, service.ID)
+	launcher.services.Store(service.UnitName, service.ID)
 
 	return nil
 }
@@ -791,7 +791,7 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) stopService(service database.ServiceEntry) (retErr error) {
-	launcher.services.Delete(service.ServiceName)
+	launcher.services.Delete(service.UnitName)
 
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
 		if retErr == nil {
@@ -801,7 +801,7 @@ func (launcher *Launcher) stopService(service database.ServiceEntry) (retErr err
 	}
 
 	channel := make(chan string)
-	if _, err := launcher.systemd.StopUnit(service.ServiceName, "replace", channel); err != nil {
+	if _, err := launcher.systemd.StopUnit(service.UnitName, "replace", channel); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't stop systemd unit: %s", err)
 			retErr = err
@@ -945,14 +945,14 @@ func (launcher *Launcher) prepareService(installDir string,
 	}
 
 	service = database.ServiceEntry{
-		ID:          serviceInfo.ID,
-		Version:     serviceInfo.Version,
-		Path:        installDir,
-		ServiceName: serviceName,
-		UserName:    userName,
-		State:       stateInit,
-		Status:      statusOk,
-		AlertRules:  string(alertRules)}
+		ID:         serviceInfo.ID,
+		Version:    serviceInfo.Version,
+		Path:       installDir,
+		UnitName:   serviceName,
+		UserName:   userName,
+		State:      stateInit,
+		Status:     statusOk,
+		AlertRules: string(alertRules)}
 
 	if err = launcher.updateServiceFromSpec(&service, &spec.ocSpec); err != nil {
 		return service, err
@@ -1009,7 +1009,7 @@ func (launcher *Launcher) updateService(oldService, newService database.ServiceE
 		}
 	}()
 
-	launcher.services.Delete(oldService.ServiceName)
+	launcher.services.Delete(oldService.UnitName)
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
 		panic("Update service state failed")
@@ -1054,7 +1054,7 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	if _, err := launcher.systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
+	if _, err := launcher.systemd.DisableUnitFiles([]string{service.UnitName}, false); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't disable systemd unit: %s", err)
 			retErr = err

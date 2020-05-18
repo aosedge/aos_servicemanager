@@ -135,7 +135,7 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 	}
 	defer journal.Close()
 
-	if err = journal.AddMatch(serviceField + "=" + service.ServiceName); err != nil {
+	if err = journal.AddMatch(serviceField + "=" + service.UnitName); err != nil {
 		panic("Can't add filter")
 	}
 
@@ -232,7 +232,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 	}
 	defer journal.Close()
 
-	if err = journal.AddMatch(unitField + "=" + service.ServiceName); err != nil {
+	if err = journal.AddMatch(unitField + "=" + service.UnitName); err != nil {
 		panic("Can't add filter")
 	}
 
@@ -289,7 +289,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			panic("Can't add filter")
 		}
 
-		if err = journal.AddMatch(serviceField + "=" + service.ServiceName); err != nil {
+		if err = journal.AddMatch(serviceField + "=" + service.UnitName); err != nil {
 			panic("Can't add filter")
 		}
 
@@ -315,7 +315,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 				break
 			}
 
-			if serviceName, ok := logEntry.Fields[serviceField]; ok && service.ServiceName == serviceName {
+			if serviceName, ok := logEntry.Fields[serviceField]; ok && service.UnitName == serviceName {
 				if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
 					panic("Can't archive log")
 				}

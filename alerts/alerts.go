@@ -52,7 +52,7 @@ const (
 // ServiceProvider provides service info
 type ServiceProvider interface {
 	GetService(serviceID string) (service database.ServiceEntry, err error)
-	GetServiceByServiceName(serviceName string) (service database.ServiceEntry, err error)
+	GetServiceByUnitName(unitName string) (service database.ServiceEntry, err error)
 }
 
 // CursorStorage provides API to set and get journal cursor
@@ -308,7 +308,7 @@ func (instance *Alerts) processJournal() (err error) {
 			unit := entry.Fields["UNIT"]
 
 			if strings.HasPrefix(unit, "aos") {
-				service, err := instance.serviceProvider.GetServiceByServiceName(unit)
+				service, err := instance.serviceProvider.GetServiceByUnitName(unit)
 				if err != nil {
 					continue
 				}

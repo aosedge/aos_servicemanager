@@ -37,7 +37,7 @@ import (
  ******************************************************************************/
 
 const (
-	dbVersion   = 4
+	dbVersion   = 5
 	busyTimeout = 60000
 	journalMode = "WAL"
 	syncMode    = "NORMAL"
@@ -67,7 +67,7 @@ type ServiceEntry struct {
 	ID            string    // service id
 	Version       uint64    // service version
 	Path          string    // path to service bundle
-	ServiceName   string    // systemd service name
+	UnitName      string    // systemd unit name
 	UserName      string    // user used to run this service
 	Permissions   string    // VIS permissions
 	State         int       // service state
@@ -148,7 +148,7 @@ func (db *Database) AddService(service ServiceEntry) (err error) {
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(service.ID, service.Version, service.Path, service.ServiceName,
+	_, err = stmt.Exec(service.ID, service.Version, service.Path, service.UnitName,
 		service.UserName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.StorageLimit, service.StateLimit)
 
@@ -158,7 +158,7 @@ func (db *Database) AddService(service ServiceEntry) (err error) {
 // UpdateService updates service
 func (db *Database) UpdateService(service ServiceEntry) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET version = ?, path = ?, service = ?, user = ?,
+								 SET version = ?, path = ?, unit = ?, user = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?,
 								 storageLimit = ?, stateLimit = ? WHERE id = ?`)
@@ -167,7 +167,7 @@ func (db *Database) UpdateService(service ServiceEntry) (err error) {
 	}
 	defer stmt.Close()
 
-	result, err := stmt.Exec(service.Version, service.Path, service.ServiceName, service.UserName, service.Permissions,
+	result, err := stmt.Exec(service.Version, service.Path, service.UnitName, service.UserName, service.Permissions,
 		service.State, service.Status, service.StartAt, service.TTL, service.AlertRules, service.UploadLimit, service.DownloadLimit,
 		service.StorageLimit, service.StateLimit, service.ID)
 	if err != nil {
@@ -207,7 +207,7 @@ func (db *Database) GetService(serviceID string) (service ServiceEntry, err erro
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.Path, &service.ServiceName,
+	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 		&service.UserName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.StorageLimit, &service.StateLimit)
@@ -232,7 +232,7 @@ func (db *Database) GetServices() (services []ServiceEntry, err error) {
 	for rows.Next() {
 		var service ServiceEntry
 
-		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.ServiceName,
+		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 			&service.UserName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.StorageLimit, &service.StateLimit)
@@ -246,15 +246,15 @@ func (db *Database) GetServices() (services []ServiceEntry, err error) {
 	return services, rows.Err()
 }
 
-// GetServiceByServiceName returns service by systend service name
-func (db *Database) GetServiceByServiceName(serviceName string) (service ServiceEntry, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE service = ?")
+// GetServiceByUnitName returns service by systemd unit name
+func (db *Database) GetServiceByUnitName(unitName string) (service ServiceEntry, err error) {
+	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")
 	if err != nil {
 		return service, err
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(serviceName).Scan(&service.ID, &service.Version, &service.Path, &service.ServiceName,
+	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 		&service.UserName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.StorageLimit, &service.StateLimit)
@@ -499,7 +499,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []ServiceEnt
 	for rows.Next() {
 		var service ServiceEntry
 
-		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.ServiceName,
+		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
 			&service.UserName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.StorageLimit, &service.StateLimit)
@@ -897,7 +897,7 @@ func (db *Database) createServiceTable() (err error) {
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
 															   version INTEGER,
 															   path TEXT,
-															   service TEXT,
+															   unit TEXT,
 															   user TEXT,
 															   permissions TEXT,
 															   state INTEGER,

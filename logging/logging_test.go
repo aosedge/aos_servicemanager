@@ -90,7 +90,7 @@ func cleanup() {
 			log.Errorf("Can't stop service: %s", err)
 		}
 
-		if _, err := systemd.DisableUnitFiles([]string{service.ServiceName}, false); err != nil {
+		if _, err := systemd.DisableUnitFiles([]string{service.UnitName}, false); err != nil {
 			log.Errorf("Can't disable service: %s", err)
 		}
 	}
@@ -120,7 +120,7 @@ func createService(serviceID string) (err error) {
 
 	serviceName := "aos_" + serviceID + ".service"
 
-	if err = db.AddService(database.ServiceEntry{ID: serviceID, ServiceName: serviceName}); err != nil {
+	if err = db.AddService(database.ServiceEntry{ID: serviceID, UnitName: serviceName}); err != nil {
 		return err
 	}
 
