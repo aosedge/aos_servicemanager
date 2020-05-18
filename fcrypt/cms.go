@@ -149,23 +149,22 @@ func getContentInfo(ci asnContentInfo) (*contentInfo, error) {
 }
 
 func decryptCMSKey(ktri *keyTransRecipientInfo, decryptor crypto.Decrypter) (symmetrickey []byte, err error) {
-	switch {
-	case ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid):
-		if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
-			return nil, errors.New("extra paramaters for RSA algorithm found")
-		}
-
-		symmetrickey, err = decryptor.Decrypt(nil, ktri.EncryptedKey, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		log.Debugf("AES KEY: %#v", symmetrickey)
-
-		return symmetrickey, nil
-	default:
+	if !ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid) {
 		return nil, errors.New("unknown public encryption OID")
 	}
+
+	if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
+		return nil, errors.New("extra paramaters for RSA algorithm found")
+	}
+
+	symmetrickey, err = decryptor.Decrypt(nil, ktri.EncryptedKey, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debugf("AES KEY: %#v", symmetrickey)
+
+	return symmetrickey, nil
 }
 
 func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {

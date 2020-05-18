@@ -38,6 +38,18 @@ import (
 	"aos_servicemanager/config"
 )
 
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const (
+	certDERIdent = "CERTIFICATE"
+)
+
+/*******************************************************************************
+ * Variables
+ ******************************************************************************/
+
 var fcryptCfg config.Crypt
 var onlinePrivate *tpmPrivateKeyRSA
 var offlinePrivate *tpmPrivateKeyRSA
@@ -117,7 +129,7 @@ func loadClientCertificate(file string) (certificates [][]byte, err error) {
 			break
 		}
 
-		if certDERBlock.Type == "CERTIFICATE" {
+		if certDERBlock.Type == certDERIdent {
 			certificates = append(certificates, certDERBlock.Bytes)
 		}
 	}
