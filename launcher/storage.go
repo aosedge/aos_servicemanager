@@ -122,7 +122,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		"storageLimit": service.StorageLimit,
 		"stateLimit":   service.StateLimit}).Debug("Mount storage folder")
 
-	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
+	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return err
 	}
@@ -140,8 +140,8 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 	}()
 
 	if service.StorageLimit == 0 {
-		if entry.StorageFolder != "" {
-			os.RemoveAll(entry.StorageFolder)
+		if usersService.StorageFolder != "" {
+			os.RemoveAll(usersService.StorageFolder)
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, ""); err != nil {
@@ -151,34 +151,34 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		return spec.removeStorageFolder()
 	}
 
-	if entry.StorageFolder != "" {
-		if _, err = os.Stat(entry.StorageFolder); err != nil {
+	if usersService.StorageFolder != "" {
+		if _, err = os.Stat(usersService.StorageFolder); err != nil {
 			if !os.IsNotExist(err) {
 				return err
 			}
 
 			log.WithFields(log.Fields{
-				"folder":    entry.StorageFolder,
+				"folder":    usersService.StorageFolder,
 				"serviceID": service.ID}).Warning("Storage folder doesn't exist")
 
-			entry.StorageFolder = ""
+			usersService.StorageFolder = ""
 		}
 	}
 
-	if entry.StorageFolder == "" {
-		if entry.StorageFolder, err = createStorageFolder(handler.storagePath, service.UserName); err != nil {
+	if usersService.StorageFolder == "" {
+		if usersService.StorageFolder, err = createStorageFolder(handler.storagePath, service.UserName); err != nil {
 			return err
 		}
 
-		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, entry.StorageFolder); err != nil {
+		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, usersService.StorageFolder); err != nil {
 			return err
 		}
 
-		log.WithFields(log.Fields{"folder": entry.StorageFolder, "serviceID": service.ID}).Debug("Create storage folder")
+		log.WithFields(log.Fields{"folder": usersService.StorageFolder, "serviceID": service.ID}).Debug("Create storage folder")
 	}
 
 	if service.StateLimit == 0 {
-		if _, err = os.Stat(path.Join(entry.StorageFolder, stateFile)); err != nil {
+		if _, err = os.Stat(path.Join(usersService.StorageFolder, stateFile)); err != nil {
 			if !os.IsNotExist(err) {
 				return err
 			}
@@ -189,7 +189,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service databa
 		}
 	}
 
-	if err = spec.addStorageFolder(entry.StorageFolder); err != nil {
+	if err = spec.addStorageFolder(usersService.StorageFolder); err != nil {
 		return err
 	}
 
@@ -210,7 +210,7 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 		return nil
 	}
 
-	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
+	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		if err == database.ErrNotExist {
 			return nil
@@ -219,7 +219,7 @@ func (handler *storageHandler) StopStateWatching(users []string, service databas
 		return err
 	}
 
-	return handler.stopStateWatching(path.Join(entry.StorageFolder, stateFile), entry.StorageFolder)
+	return handler.stopStateWatching(path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder)
 }
 
 func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
@@ -266,12 +266,12 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 		return errors.New("state is too big")
 	}
 
-	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
+	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return err
 	}
 
-	if err = ioutil.WriteFile(path.Join(entry.StorageFolder, stateFile), []byte(state), 0644); err != nil {
+	if err = ioutil.WriteFile(path.Join(usersService.StorageFolder, stateFile), []byte(state), 0644); err != nil {
 		return err
 	}
 
@@ -290,17 +290,17 @@ func (handler *storageHandler) UpdateState(users []string, service database.Serv
 func (handler *storageHandler) startStateWatching(users []string, service database.ServiceEntry) (err error) {
 	// no mutex as it is called from locked context
 
-	entry, err := handler.serviceProvider.GetUsersEntry(users, service.ID)
+	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return err
 	}
 
-	stateFileName := path.Join(entry.StorageFolder, stateFile)
+	stateFileName := path.Join(usersService.StorageFolder, stateFile)
 
 	log.WithFields(log.Fields{"serviceID": service.ID, "stateFile": stateFileName}).Debug("Start state watching")
 
 	if _, ok := handler.statesMap[stateFileName]; ok {
-		if err = handler.stopStateWatching(stateFileName, entry.StorageFolder); err != nil {
+		if err = handler.stopStateWatching(stateFileName, usersService.StorageFolder); err != nil {
 			return err
 		}
 	}
@@ -317,7 +317,7 @@ func (handler *storageHandler) startStateWatching(users []string, service databa
 		return err
 	}
 
-	if !reflect.DeepEqual(entry.StateChecksum, checksum) {
+	if !reflect.DeepEqual(usersService.StateChecksum, checksum) {
 		log.WithFields(log.Fields{
 			"serviceID": service.ID,
 			"checksum":  hex.EncodeToString(checksum)}).Warn("State file checksum mistmatch. Send state request")
@@ -328,7 +328,7 @@ func (handler *storageHandler) startStateWatching(users []string, service databa
 		}
 	}
 
-	if err = handler.watcher.Add(entry.StorageFolder); err != nil {
+	if err = handler.watcher.Add(usersService.StorageFolder); err != nil {
 		return err
 	}
 

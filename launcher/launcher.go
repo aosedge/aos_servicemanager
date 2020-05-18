@@ -93,23 +93,23 @@ const (
 
 // ServiceProvider provides API to create, remove or access services DB
 type ServiceProvider interface {
-	AddService(entry database.ServiceEntry) (err error)
-	UpdateService(entry database.ServiceEntry) (err error)
-	RemoveService(id string) (err error)
-	GetService(id string) (entry database.ServiceEntry, err error)
-	GetServices() (entries []database.ServiceEntry, err error)
-	GetServiceByServiceName(serviceName string) (entry database.ServiceEntry, err error)
-	SetServiceStatus(id string, status int) (err error)
-	SetServiceState(id string, state int) (err error)
-	SetServiceStartTime(id string, time time.Time) (err error)
-	AddUsersService(users []string, serviceID string) (err error)
-	RemoveUsersService(users []string, serviceID string) (err error)
-	GetUsersServices(users []string) (entries []database.ServiceEntry, err error)
-	IsUsersService(users []string, id string) (result bool, err error)
+	AddService(service database.ServiceEntry) (err error)
+	UpdateService(service database.ServiceEntry) (err error)
+	RemoveService(serviceID string) (err error)
+	GetService(serviceID string) (service database.ServiceEntry, err error)
+	GetServices() (services []database.ServiceEntry, err error)
+	GetServiceByServiceName(serviceName string) (service database.ServiceEntry, err error)
+	SetServiceStatus(serviceID string, status int) (err error)
+	SetServiceState(serviceID string, state int) (err error)
+	SetServiceStartTime(serviceID string, time time.Time) (err error)
+	AddServiceToUsers(users []string, serviceID string) (err error)
+	RemoveServiceFromUsers(users []string, serviceID string) (err error)
+	GetUsersServices(users []string) (services []database.ServiceEntry, err error)
+	IsUsersService(users []string, serviceID string) (result bool, err error)
 	GetUsersList() (usersList [][]string, err error)
-	DeleteUsersByServiceID(id string) (err error)
-	GetUsersEntry(users []string, serviceID string) (entry database.UsersEntry, err error)
-	GetUsersEntriesByServiceID(serviceID string) (entries []database.UsersEntry, err error)
+	RemoveServiceFromAllUsers(serviceID string) (err error)
+	GetUsersService(users []string, serviceID string) (userService database.UsersEntry, err error)
+	GetUsersServicesByServiceID(serviceID string) (userServices []database.UsersEntry, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
 }
@@ -296,13 +296,13 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	for i, service := range services {
 		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: statusStr[service.Status]}
 
-		entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
+		userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 		if err != nil {
 			return info, err
 		}
 
 		if service.StateLimit != 0 {
-			info[i].StateChecksum = hex.EncodeToString(entry.StateChecksum)
+			info[i].StateChecksum = hex.EncodeToString(userService.StateChecksum)
 		}
 	}
 
@@ -470,12 +470,12 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 		panic(err.Error())
 	}
 
-	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, id)
+	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, id)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	status.StateChecksum = hex.EncodeToString(entry.StateChecksum)
+	status.StateChecksum = hex.EncodeToString(userService.StateChecksum)
 
 	if launcher.sender != nil {
 		launcher.sender.SendServiceStatus(status)
@@ -598,22 +598,22 @@ func (launcher *Launcher) uninstallService(id string) (version uint64, err error
 		return version, err
 	}
 
-	entry, err := launcher.serviceProvider.GetUsersEntry(launcher.users, service.ID)
+	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 	if err != nil {
 		return version, err
 	}
 
-	if entry.StorageFolder != "" {
+	if userService.StorageFolder != "" {
 		log.WithFields(log.Fields{
-			"folder":    entry.StorageFolder,
+			"folder":    userService.StorageFolder,
 			"serviceID": service.ID}).Debug("Remove storage folder")
 
-		if err = os.RemoveAll(entry.StorageFolder); err != nil {
+		if err = os.RemoveAll(userService.StorageFolder); err != nil {
 			return version, err
 		}
 	}
 
-	if err = launcher.serviceProvider.RemoveUsersService(launcher.users, service.ID); err != nil {
+	if err = launcher.serviceProvider.RemoveServiceFromUsers(launcher.users, service.ID); err != nil {
 		return version, err
 	}
 
@@ -1061,21 +1061,21 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	entries, err := launcher.serviceProvider.GetUsersEntriesByServiceID(service.ID)
+	usersServices, err := launcher.serviceProvider.GetUsersServicesByServiceID(service.ID)
 	if err != nil {
 		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't get users entry: %s", err)
+			log.WithField("name", service.ID).Errorf("Can't get users services: %s", err)
 			retErr = err
 		}
 	}
 
-	for _, entry := range entries {
-		if entry.StorageFolder != "" {
+	for _, userService := range usersServices {
+		if userService.StorageFolder != "" {
 			log.WithFields(log.Fields{
-				"folder":    entry.StorageFolder,
+				"folder":    userService.StorageFolder,
 				"serviceID": service.ID}).Debug("Remove storage folder")
 
-			if err := os.RemoveAll(entry.StorageFolder); err != nil {
+			if err := os.RemoveAll(userService.StorageFolder); err != nil {
 				if retErr == nil {
 					log.WithField("name", service.ID).Errorf("Can't remove storage folder: %s", err)
 					retErr = err
@@ -1084,7 +1084,7 @@ func (launcher *Launcher) removeService(service database.ServiceEntry) (retErr e
 		}
 	}
 
-	if err := launcher.serviceProvider.DeleteUsersByServiceID(service.ID); err != nil {
+	if err := launcher.serviceProvider.RemoveServiceFromAllUsers(service.ID); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't delete users from DB: %s", err)
 			retErr = err
@@ -1288,7 +1288,7 @@ func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error)
 		return err
 	}
 	if !exist {
-		if err = launcher.serviceProvider.AddUsersService(launcher.users, serviceID); err != nil {
+		if err = launcher.serviceProvider.AddServiceToUsers(launcher.users, serviceID); err != nil {
 			return err
 		}
 	}

@@ -49,10 +49,10 @@ const (
  * Types
  ******************************************************************************/
 
-// ServiceProvider provides service entry
+// ServiceProvider provides service info
 type ServiceProvider interface {
-	GetService(id string) (entry database.ServiceEntry, err error)
-	GetServiceByServiceName(serviceName string) (entry database.ServiceEntry, err error)
+	GetService(serviceID string) (service database.ServiceEntry, err error)
+	GetServiceByServiceName(serviceName string) (service database.ServiceEntry, err error)
 }
 
 // CursorStorage provides API to set and get journal cursor

@@ -73,7 +73,7 @@ func TestAddService(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// GetService
@@ -98,7 +98,7 @@ func TestUpdateService(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	service1 = ServiceEntry{"service1", 2, "to/new_service1", "new_service1.service", "new_user1",
@@ -107,7 +107,7 @@ func TestUpdateService(t *testing.T) {
 	// UpdateService
 	err = db.UpdateService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't update service: %s", err)
 	}
 
 	// GetService
@@ -141,7 +141,7 @@ func TestSetServiceStatus(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// SetServiceStatus
@@ -168,7 +168,7 @@ func TestSetServiceState(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// SetServiceState
@@ -195,7 +195,7 @@ func TestSetServiceStartTime(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	time := time.Date(2018, 1, 1, 15, 35, 49, 0, time.UTC)
@@ -224,13 +224,13 @@ func TestRemoveService(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// RemoveService
 	err = db.RemoveService("service1")
 	if err != nil {
-		t.Errorf("Can't remove entry: %s", err)
+		t.Errorf("Can't remove service: %s", err)
 	}
 	_, err = db.GetService("service1")
 	if err == nil {
@@ -244,7 +244,7 @@ func TestGetServices(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 2
@@ -252,7 +252,7 @@ func TestGetServices(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// GetServices
@@ -281,23 +281,23 @@ func TestAddUsersService(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	service2 := ServiceEntry{"service2", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err = db.AddService(service2)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
-	// Add users services
-	err = db.AddUsersService([]string{"user1"}, "service1")
+	// Add service to users
+	err = db.AddServiceToUsers([]string{"user1"}, "service1")
 	if err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
-	err = db.AddUsersService([]string{"user2"}, "service2")
+	err = db.AddServiceToUsers([]string{"user2"}, "service2")
 	if err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
@@ -342,13 +342,13 @@ func TestAddUsersService(t *testing.T) {
 
 func TestAddSameUsersService(t *testing.T) {
 	// Add service
-	err := db.AddUsersService([]string{"user0", "user1"}, "service1")
+	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
 	if err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
 	// Add service
-	err = db.AddUsersService([]string{"user0", "user1"}, "service1")
+	err = db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
 	if err == nil {
 		t.Error("Error adding same users service")
 	}
@@ -373,13 +373,13 @@ func TestNotExistUsersServices(t *testing.T) {
 
 func TestRemoveUsersService(t *testing.T) {
 	// Add service
-	err := db.AddUsersService([]string{"user0", "user1"}, "service1")
+	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
 	if err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
 	// Remove service
-	err = db.RemoveUsersService([]string{"user0", "user1"}, "service1")
+	err = db.RemoveServiceFromUsers([]string{"user0", "user1"}, "service1")
 	if err != nil {
 		t.Errorf("Can't remove users service: %s", err)
 	}
@@ -401,7 +401,7 @@ func TestAddUsersList(t *testing.T) {
 	for i := 0; i < numUsers; i++ {
 		users := []string{fmt.Sprintf("user%d", i)}
 		for j := 0; j < numServices; j++ {
-			err := db.AddUsersService(users, fmt.Sprintf("service%d", j))
+			err := db.AddServiceToUsers(users, fmt.Sprintf("service%d", j))
 			if err != nil {
 				t.Errorf("Can't add users service: %s", err)
 			}
@@ -436,31 +436,31 @@ func TestAddUsersList(t *testing.T) {
 	for j := 0; j < numServices; j++ {
 		serviceID := fmt.Sprintf("service%d", j)
 
-		entries, err := db.GetUsersEntriesByServiceID(serviceID)
+		usersServices, err := db.GetUsersServicesByServiceID(serviceID)
 		if err != nil {
-			t.Errorf("Can't get users entries: %s", err)
+			t.Errorf("Can't get users services: %s", err)
 		}
 
-		for _, entry := range entries {
-			if entry.ServiceID != serviceID {
-				t.Errorf("Invalid serviceID: %s", entry.ServiceID)
+		for _, userService := range usersServices {
+			if userService.ServiceID != serviceID {
+				t.Errorf("Invalid serviceID: %s", userService.ServiceID)
 			}
 
 			ok := false
 
 			for i := 0; i < numUsers; i++ {
-				if entry.Users[0] == fmt.Sprintf("user%d", i) {
+				if userService.Users[0] == fmt.Sprintf("user%d", i) {
 					ok = true
 					break
 				}
 			}
 
 			if !ok {
-				t.Errorf("Invalid users: %s", entry.Users)
+				t.Errorf("Invalid users: %s", userService.Users)
 			}
 		}
 
-		err = db.DeleteUsersByServiceID(serviceID)
+		err = db.RemoveServiceFromAllUsers(serviceID)
 		if err != nil {
 			t.Errorf("Can't delete users: %s", err)
 		}
@@ -483,19 +483,19 @@ func TestAddUsersList(t *testing.T) {
 
 func TestUsersStorage(t *testing.T) {
 	// Add users service
-	err := db.AddUsersService([]string{"user1"}, "service1")
+	err := db.AddServiceToUsers([]string{"user1"}, "service1")
 	if err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
 	// Check default values
-	entry, err := db.GetUsersEntry([]string{"user1"}, "service1")
+	usersService, err := db.GetUsersService([]string{"user1"}, "service1")
 	if err != nil {
-		t.Errorf("Can't get users entry: %s", err)
+		t.Errorf("Can't get users service: %s", err)
 	}
 
-	if entry.StorageFolder != "" || len(entry.StateChecksum) != 0 {
-		t.Error("Wrong users entry value")
+	if usersService.StorageFolder != "" || len(usersService.StateChecksum) != 0 {
+		t.Error("Wrong users service value")
 	}
 
 	if err = db.SetUsersStorageFolder([]string{"user1"}, "service1", "stateFolder1"); err != nil {
@@ -506,13 +506,13 @@ func TestUsersStorage(t *testing.T) {
 		t.Errorf("Can't set users state checksum: %s", err)
 	}
 
-	entry, err = db.GetUsersEntry([]string{"user1"}, "service1")
+	usersService, err = db.GetUsersService([]string{"user1"}, "service1")
 	if err != nil {
-		t.Errorf("Can't get users entry: %s", err)
+		t.Errorf("Can't get users service: %s", err)
 	}
 
-	if entry.StorageFolder != "stateFolder1" || !reflect.DeepEqual(entry.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
-		t.Error("Wrong users entry value")
+	if usersService.StorageFolder != "stateFolder1" || !reflect.DeepEqual(usersService.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
+		t.Error("Wrong users service value")
 	}
 
 	// Clear DB
@@ -596,7 +596,7 @@ func TestGetServiceByServiceName(t *testing.T) {
 		time.Now().UTC(), 0, "", 0, 0, 0, 0}
 	err := db.AddService(service1)
 	if err != nil {
-		t.Errorf("Can't add entry: %s", err)
+		t.Errorf("Can't add service: %s", err)
 	}
 
 	// GetService
