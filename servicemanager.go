@@ -50,6 +50,11 @@ const reconnectTimeout = 10 * time.Second
 
 const dbFileName = "servicemanager.db"
 
+// IMPORTANT: if new functionality doesn't allow existing services to work
+// properly, this value should be increased. It will force to remove all
+// services and their storages before first start.
+const operationVersion = 1
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -104,7 +109,7 @@ func init() {
  ******************************************************************************/
 
 func cleanup(cfg *config.Config, dbFile string) {
-	log.Debug("System cleanup")
+	log.Info("System cleanup")
 
 	if err := launcher.Cleanup(cfg); err != nil {
 		log.Fatalf("Can't cleanup launcher: %s", err)
@@ -117,6 +122,13 @@ func cleanup(cfg *config.Config, dbFile string) {
 }
 
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
+	defer func() {
+		if err != nil {
+			sm.close()
+			sm = nil
+		}
+	}()
+
 	var names []string
 	sm = &serviceManager{cfg: cfg}
 
@@ -124,14 +136,23 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	dbFile := path.Join(cfg.WorkingDir, dbFileName)
 
 	if sm.db, err = database.New(dbFile); err != nil {
-		if err == database.ErrVersionMismatch {
-			log.Warning("Unsupported database version")
-			cleanup(cfg, dbFile)
-			sm.db, err = database.New(dbFile)
-		}
+		return sm, err
+	}
 
-		if err != nil {
-			goto err
+	// Check operation version
+
+	version, err := sm.db.GetOperationVersion()
+	if err != nil {
+		return sm, err
+	}
+
+	if operationVersion != version {
+		log.Warning("Unsupported operation version")
+
+		cleanup(cfg, dbFile)
+
+		if err = sm.db.SetOperationVersion(operationVersion); err != nil {
+			return sm, err
 		}
 	}
 
@@ -158,15 +179,15 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create crypto context
 	if sm.crypt, err = fcrypt.CreateContext(cfg.Crypt); err != nil {
-		goto err
+		return sm, err
 	}
 
 	if err = sm.crypt.LoadOfflineKey(); err != nil {
-		goto err
+		return sm, err
 	}
 
 	if err = sm.crypt.LoadOnlineKey(); err != nil {
-		goto err
+		return sm, err
 	}
 
 	// Create alerts
@@ -174,7 +195,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		if err == alerts.ErrDisabled {
 			log.Warn(err)
 		} else {
-			goto err
+			return sm, err
 		}
 	}
 
@@ -183,44 +204,39 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
 		} else {
-			goto err
+			return sm, err
 		}
 	}
 
 	// Create amqp
 	if sm.amqp, err = amqp.New(); err != nil {
-		goto err
+		return sm, err
 	}
 
 	// Create launcher
 	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.monitor); err != nil {
-		goto err
+		return sm, err
 	}
 
 	// Create identifier
 	// Use appropriate identifier from identification folder
 	if sm.identifier, err = visidentifier.New(cfg.Identifier, sm.db); err != nil {
-		goto err
+		return sm, err
 	}
 
 	// Create UM client
 	if cfg.UMServerURL != "" {
 		if sm.um, err = umclient.New(cfg, sm.crypt, sm.amqp, sm.db); err != nil {
-			goto err
+			return sm, err
 		}
 	}
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
-		goto err
+		return sm, err
 	}
 
 	return sm, nil
-
-err:
-	sm.close()
-
-	return nil, err
 }
 
 func (sm *serviceManager) close() {

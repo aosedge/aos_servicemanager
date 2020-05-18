@@ -38,7 +38,6 @@ import (
  ******************************************************************************/
 
 const (
-	dbVersion   = 5
 	busyTimeout = 60000
 	journalMode = "WAL"
 	syncMode    = "NORMAL"
@@ -50,9 +49,6 @@ const (
 
 // ErrNotExist is returned when requested entry not exist in DB
 var ErrNotExist = errors.New("entry does not exist")
-
-// ErrVersionMismatch is returned when DB has unsupported DB version
-var ErrVersionMismatch = errors.New("version mismatch")
 
 /*******************************************************************************
  * Types
@@ -102,16 +98,46 @@ func New(name string) (db *Database, err error) {
 		return db, err
 	}
 
-	version, err := db.getVersion()
-	if err != nil {
-		return db, err
-	}
-
-	if version != dbVersion {
-		return db, ErrVersionMismatch
-	}
-
 	return db, nil
+}
+
+// GetOperationVersion returns operation version
+func (db *Database) GetOperationVersion() (version uint64, err error) {
+	stmt, err := db.sql.Prepare("SELECT version FROM config")
+	if err != nil {
+		return version, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow().Scan(&version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return version, ErrNotExist
+		}
+
+		return version, err
+	}
+
+	return version, nil
+}
+
+// SetOperationVersion sets operation version
+func (db *Database) SetOperationVersion(version uint64) (err error) {
+	result, err := db.sql.Exec("UPDATE config SET version = ?", version)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
 }
 
 // AddService adds new service
@@ -732,43 +758,6 @@ func (db *Database) Close() {
  * Private
  ******************************************************************************/
 
-func (db *Database) getVersion() (version uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT version FROM config")
-	if err != nil {
-		return version, err
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&version)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return version, ErrNotExist
-		}
-
-		return version, err
-	}
-
-	return version, nil
-}
-
-func (db *Database) setVersion(version uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET version = ?", version)
-	if err != nil {
-		return err
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
 func (db *Database) isTableExist(name string) (result bool, err error) {
 	rows, err := db.sql.Query("SELECT * FROM sqlite_master WHERE name = ? and type='table'", name)
 	if err != nil {
@@ -809,7 +798,7 @@ func (db *Database) createConfigTable() (err error) {
 			cursor,
 			upgradeState,
 			upgradeData,
-			upgradeVersion) values(?, ?, ?, ?, ?)`, dbVersion, "", 0, []byte{}, 3); err != nil {
+			upgradeVersion) values(?, ?, ?, ?, ?)`, 0, "", 0, []byte{}, 3); err != nil {
 		return err
 	}
 

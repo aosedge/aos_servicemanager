@@ -553,26 +553,21 @@ func TestTrafficMonitor(t *testing.T) {
 	}
 }
 
-func TestDBVersion(t *testing.T) {
-	db, err := New("tmp/version.db")
+func TestOperationVersion(t *testing.T) {
+	var setOperationVersion uint64 = 123
+
+	if err := db.SetOperationVersion(setOperationVersion); err != nil {
+		t.Fatalf("Can't set operation version: %s", err)
+	}
+
+	getOperationVersion, err := db.GetOperationVersion()
 	if err != nil {
-		log.Fatalf("Can't create database: %s", err)
+		t.Fatalf("Can't get operation version: %s", err)
 	}
 
-	if err = db.setVersion(dbVersion - 1); err != nil {
-		log.Errorf("Can't set database version: %s", err)
+	if setOperationVersion != getOperationVersion {
+		t.Errorf("Wrong operation version: %d", getOperationVersion)
 	}
-
-	db.Close()
-
-	db, err = New("tmp/version.db")
-	if err == nil {
-		log.Error("Expect version mismatch error")
-	} else if err != ErrVersionMismatch {
-		log.Errorf("Can't create database: %s", err)
-	}
-
-	db.Close()
 }
 
 func TestCursor(t *testing.T) {
