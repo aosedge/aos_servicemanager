@@ -68,11 +68,6 @@ const (
  * Vars
  ******************************************************************************/
 
-var (
-	statusStr = []string{"OK", "Error"}
-	stateStr  = []string{"Init", "Running", "Stopped"}
-)
-
 // Service status
 const (
 	statusOk = iota
@@ -118,21 +113,21 @@ type Launcher struct {
 
 // Service describes service structure
 type Service struct {
-	ID            string    // service id
-	Version       uint64    // service version
-	Path          string    // path to service bundle
-	UnitName      string    // systemd unit name
-	UserName      string    // user used to run this service
-	Permissions   string    // VIS permissions
-	State         int       // service state
-	Status        int       // service status
-	StartAt       time.Time // time at which service was started
-	TTL           uint64    // expiration service duration in days
-	AlertRules    string    // alert rules in json format
-	UploadLimit   uint64    // upload traffic limit
-	DownloadLimit uint64    // download traffic limit
-	StorageLimit  uint64    // storage limit
-	StateLimit    uint64    // state limit
+	ID            string        // service id
+	Version       uint64        // service version
+	Path          string        // path to service bundle
+	UnitName      string        // systemd unit name
+	UserName      string        // user used to run this service
+	Permissions   string        // VIS permissions
+	State         ServiceState  // service state
+	Status        ServiceStatus // service status
+	StartAt       time.Time     // time at which service was started
+	TTL           uint64        // expiration service duration in days
+	AlertRules    string        // alert rules in json format
+	UploadLimit   uint64        // upload traffic limit
+	DownloadLimit uint64        // download traffic limit
+	StorageLimit  uint64        // storage limit
+	StateLimit    uint64        // state limit
 }
 
 // UsersService describes users service structure
@@ -151,8 +146,8 @@ type ServiceProvider interface {
 	GetService(serviceID string) (service Service, err error)
 	GetServices() (services []Service, err error)
 	GetServiceByUnitName(unitName string) (service Service, err error)
-	SetServiceStatus(serviceID string, status int) (err error)
-	SetServiceState(serviceID string, state int) (err error)
+	SetServiceStatus(serviceID string, status ServiceStatus) (err error)
+	SetServiceState(serviceID string, state ServiceState) (err error)
 	SetServiceStartTime(serviceID string, time time.Time) (err error)
 	AddServiceToUsers(users []string, serviceID string) (err error)
 	RemoveServiceFromUsers(users []string, serviceID string) (err error)
@@ -183,6 +178,12 @@ type NewState struct {
 	State         string
 	Checksum      string
 }
+
+// ServiceStatus service status
+type ServiceStatus int
+
+// ServiceState service state
+type ServiceState int
 
 type actionType int
 
@@ -318,7 +319,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 	info = make([]amqp.ServiceInfo, len(services))
 
 	for i, service := range services {
-		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: statusStr[service.Status]}
+		info[i] = amqp.ServiceInfo{ID: service.ID, Version: service.Version, Status: service.Status.String()}
 
 		userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 		if err != nil {
@@ -442,6 +443,14 @@ func Cleanup(cfg *config.Config) (err error) {
 	}
 
 	return nil
+}
+
+func (state ServiceState) String() string {
+	return [...]string{"Init", "Running", "Stopped"}[state]
+}
+
+func (status ServiceStatus) String() string {
+	return [...]string{"OK", "Error"}[status]
 }
 
 /*******************************************************************************
@@ -686,7 +695,7 @@ func (launcher *Launcher) doStateAcceptance(id string, data interface{}) {
 	}
 }
 
-func (launcher *Launcher) updateServiceState(id string, state int, status int) (err error) {
+func (launcher *Launcher) updateServiceState(id string, state ServiceState, status ServiceStatus) (err error) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return err
@@ -699,7 +708,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	}
 
 	if service.State != state {
-		log.WithField("id", id).Debugf("Set service state: %s", stateStr[state])
+		log.WithField("id", id).Debugf("Set service state: %s", state)
 
 		if err = launcher.serviceProvider.SetServiceState(id, state); err != nil {
 			return err
@@ -707,7 +716,7 @@ func (launcher *Launcher) updateServiceState(id string, state int, status int) (
 	}
 
 	if service.Status != status {
-		log.WithField("id", id).Debugf("Set service status: %s", statusStr[status])
+		log.WithField("id", id).Debugf("Set service status: %s", status)
 
 		if err = launcher.serviceProvider.SetServiceStatus(id, status); err != nil {
 			return err
@@ -1221,7 +1230,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
-func (launcher *Launcher) updateMonitoring(service Service, state int) (err error) {
+func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) (err error) {
 	switch state {
 	case stateRunning:
 		var rules amqp.ServiceAlertRules

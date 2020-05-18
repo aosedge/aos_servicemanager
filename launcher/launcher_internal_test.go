@@ -1414,7 +1414,7 @@ func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string
 	return service, fmt.Errorf("service with unit %s does not exist", unitName)
 }
 
-func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, status int) (err error) {
+func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, status ServiceStatus) (err error) {
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}
@@ -1424,7 +1424,7 @@ func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, s
 	return nil
 }
 
-func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, state int) (err error) {
+func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, state ServiceState) (err error) {
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}

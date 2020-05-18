@@ -243,7 +243,7 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 }
 
 // SetServiceStatus sets service status
-func (db *Database) SetServiceStatus(serviceID string, status int) (err error) {
+func (db *Database) SetServiceStatus(serviceID string, status launcher.ServiceStatus) (err error) {
 	stmt, err := db.sql.Prepare("UPDATE services SET status = ? WHERE id = ?")
 	if err != nil {
 		return err
@@ -268,7 +268,7 @@ func (db *Database) SetServiceStatus(serviceID string, status int) (err error) {
 }
 
 // SetServiceState sets service state
-func (db *Database) SetServiceState(serviceID string, state int) (err error) {
+func (db *Database) SetServiceState(serviceID string, state launcher.ServiceState) (err error) {
 	stmt, err := db.sql.Prepare("UPDATE services SET state = ? WHERE id = ?")
 	if err != nil {
 		return err
