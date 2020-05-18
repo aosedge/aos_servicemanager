@@ -91,6 +91,32 @@ const (
  * Types
  ******************************************************************************/
 
+// Launcher instance
+type Launcher struct {
+	// NewStateChannel used to notify about new service state
+	NewStateChannel chan NewState
+
+	sender          Sender
+	serviceProvider ServiceProvider
+	monitor         ServiceMonitor
+	systemd         *dbus.Conn
+	config          *config.Config
+
+	actionHandler  *actionHandler
+	storageHandler *storageHandler
+
+	downloader downloader
+
+	users []string
+
+	services sync.Map
+
+	serviceTemplate  string
+	runcPath         string
+	netnsPath        string
+	wonderShaperPath string
+}
+
 // ServiceProvider provides API to create, remove or access services DB
 type ServiceProvider interface {
 	AddService(service database.ServiceEntry) (err error)
@@ -126,8 +152,6 @@ type Sender interface {
 	SendStateRequest(serviceID string, defaultState bool) (err error)
 }
 
-type actionType int
-
 // NewState new state message
 type NewState struct {
 	CorrelationID string
@@ -136,34 +160,10 @@ type NewState struct {
 	Checksum      string
 }
 
+type actionType int
+
 type downloader interface {
 	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
-}
-
-// Launcher instance
-type Launcher struct {
-	// NewStateChannel used to notify about new service state
-	NewStateChannel chan NewState
-
-	sender          Sender
-	serviceProvider ServiceProvider
-	monitor         ServiceMonitor
-	systemd         *dbus.Conn
-	config          *config.Config
-
-	actionHandler  *actionHandler
-	storageHandler *storageHandler
-
-	downloader downloader
-
-	users []string
-
-	services sync.Map
-
-	serviceTemplate  string
-	runcPath         string
-	netnsPath        string
-	wonderShaperPath string
 }
 
 type stateAcceptance struct {
