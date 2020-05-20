@@ -64,6 +64,37 @@ const (
 	stateChannelSize = 32
 )
 
+const serviceTemplate = `# This is template file used to launch AOS services
+# Known variables:
+# * ${ID}            - service id
+# * ${SERVICEPATH}   - path to service dir
+# * ${RUNC}          - path to runc
+# * ${SETNETLIMIT}   - command to set net limit
+# * ${CLEARNETLIMIT} - command to clear net limit
+[Unit]
+Description=AOS Service
+After=network.target
+
+[Service]
+Type=forking
+Restart=always
+RestartSec=1
+ExecStartPre=${RUNC} delete -f ${ID}
+ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
+ExecStartPost=${SETNETLIMIT}
+
+ExecStop=${CLEARNETLIMIT}
+ExecStop=${RUNC} kill ${ID} SIGKILL
+ExecStopPost=${RUNC} delete -f ${ID}
+PIDFile=${SERVICEPATH}/.pid
+SuccessExitStatus=SIGKILL
+
+[Install]
+WantedBy=multi-user.target
+`
+
+const serviceTemplateFile = "template.service"
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -1153,35 +1184,7 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 }
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
-	template = `# This is template file used to launch AOS services
-# Known variables:
-# * ${ID}            - service id
-# * ${SERVICEPATH}   - path to service dir
-# * ${RUNC}          - path to runc
-# * ${SETNETLIMIT}   - command to set net limit
-# * ${CLEARNETLIMIT} - command to clear net limit
-[Unit]
-Description=AOS Service
-After=network.target
-
-[Service]
-Type=forking
-Restart=always
-RestartSec=1
-ExecStartPre=${RUNC} delete -f ${ID}
-ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
-ExecStartPost=${SETNETLIMIT}
-
-ExecStop=${CLEARNETLIMIT}
-ExecStop=${RUNC} kill ${ID} SIGKILL
-ExecStopPost=${RUNC} delete -f ${ID}
-PIDFile=${SERVICEPATH}/.pid
-SuccessExitStatus=SIGKILL
-
-[Install]
-WantedBy=multi-user.target
-`
-	fileName := path.Join(workingDir, "template.service")
+	fileName := path.Join(workingDir, serviceTemplateFile)
 	fileContent, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -1190,14 +1193,14 @@ WantedBy=multi-user.target
 
 		log.Warnf("Service template file does not exist. Creating %s", fileName)
 
-		if err = ioutil.WriteFile(fileName, []byte(template), 0644); err != nil {
+		if err = ioutil.WriteFile(fileName, []byte(serviceTemplate), 0644); err != nil {
 			return template, err
 		}
-	} else {
-		template = string(fileContent)
+
+		return serviceTemplate, nil
 	}
 
-	return template, nil
+	return string(fileContent), nil
 }
 
 func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *runtimespec.Spec) (err error) {
