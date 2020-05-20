@@ -42,8 +42,7 @@ import (
  ******************************************************************************/
 
 const (
-	storageDir = "storages"  // storages directory
-	stateFile  = "state.dat" // stat file name
+	stateFile = "state.dat" // state file name
 
 	stateChangeTimeout    = 1 * time.Second
 	acceptanceWaitTimeout = 10 * time.Second
@@ -55,7 +54,7 @@ const (
 
 type storageHandler struct {
 	serviceProvider ServiceProvider
-	storagePath     string
+	storageDir      string
 	sync.Mutex
 	watcher         *fsnotify.Watcher
 	statesMap       map[string]*stateParams
@@ -79,20 +78,20 @@ type stateParams struct {
  * Storage related API
  ******************************************************************************/
 
-func newStorageHandler(storageBaseDir string, serviceProvider ServiceProvider,
+func newStorageHandler(storageDir string, serviceProvider ServiceProvider,
 	newStateChannel chan<- NewState, sender Sender) (handler *storageHandler, err error) {
 	handler = &storageHandler{
 		serviceProvider: serviceProvider,
-		storagePath:     path.Join(storageBaseDir, storageDir),
+		storageDir:      storageDir,
 		newStateChannel: newStateChannel,
 		sender:          sender}
 
-	if _, err = os.Stat(handler.storagePath); err != nil {
+	if _, err = os.Stat(handler.storageDir); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
 
-		if err = os.MkdirAll(handler.storagePath, 0755); err != nil {
+		if err = os.MkdirAll(handler.storageDir, 0755); err != nil {
 			return nil, err
 		}
 	}
@@ -165,7 +164,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 	}
 
 	if usersService.StorageFolder == "" {
-		if usersService.StorageFolder, err = createStorageFolder(handler.storagePath, service.UserName); err != nil {
+		if usersService.StorageFolder, err = createStorageFolder(handler.storageDir, service.UserName); err != nil {
 			return err
 		}
 

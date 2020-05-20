@@ -45,6 +45,7 @@ func createConfigFile() (err error) {
 	},
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
+	"storageDir" : "/var/aos/storage",
 	"upgradeDir" : "/var/aos/upgrade",
 	"visServer" : "wss://localhost:8088",
 	"umServer" : "wss://localhost:8089",

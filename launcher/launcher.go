@@ -434,12 +434,16 @@ func Cleanup(cfg *config.Config) (err error) {
 		log.Fatalf("Can't remove service folder: %s", err)
 	}
 
-	storageDir := path.Join(cfg.StorageDir, storageDir)
+	log.WithField("dir", cfg.StorageDir).Debug("Remove storage dir")
 
-	log.WithField("dir", storageDir).Debug("Remove storage dir")
-
-	if err := os.RemoveAll(storageDir); err != nil {
+	if err := os.RemoveAll(cfg.StorageDir); err != nil {
 		log.Fatalf("Can't remove storage folder: %s", err)
+	}
+
+	log.WithField("dir", cfg.UpgradeDir).Debug("Remove upgrade dir")
+
+	if err := os.RemoveAll(cfg.UpgradeDir); err != nil {
+		log.Fatalf("Can't remove upgrade folder: %s", err)
 	}
 
 	return nil

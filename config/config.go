@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"path"
 	"time"
 )
 
@@ -109,7 +110,6 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		StorageDir:        "/var/aos/storage",
 		DefaultServiceTTL: 30,
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},
@@ -126,6 +126,14 @@ func New(fileName string) (config *Config, err error) {
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err
+	}
+
+	if config.StorageDir == "" {
+		config.StorageDir = path.Join(config.WorkingDir, "storages")
+	}
+
+	if config.UpgradeDir == "" {
+		config.UpgradeDir = path.Join(config.WorkingDir, "upgrade")
 	}
 
 	return config, nil
