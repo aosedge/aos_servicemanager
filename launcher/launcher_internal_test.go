@@ -1615,12 +1615,15 @@ func setup() (err error) {
 func cleanup() (err error) {
 	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
 	if err != nil {
-		return err
+		log.Errorf("Can't create test launcher: %s", err)
 	}
-	defer launcher.Close()
 
-	if err := launcher.removeAllServices(); err != nil {
-		return err
+	if launcher != nil {
+		if err := launcher.removeAllServices(); err != nil {
+			log.Errorf("Can't remove all services: %s", err)
+		}
+
+		launcher.Close()
 	}
 
 	if err := deleteStoragePartition("tmp/storage"); err != nil {
@@ -1628,7 +1631,7 @@ func cleanup() (err error) {
 	}
 
 	if err := os.RemoveAll("tmp"); err != nil {
-		return err
+		log.Errorf("Can't remove tmp folder: %s", err)
 	}
 
 	return nil
