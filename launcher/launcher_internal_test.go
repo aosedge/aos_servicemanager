@@ -120,7 +120,7 @@ func init() {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Error creating service images: %s", err)
+		log.Fatalf("Error setting up: %s", err)
 	}
 
 	ret := m.Run()
@@ -790,7 +790,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	diskUsage, err := platform.GetUserFSQuotaUsage(launcher.config.WorkingDir, service.UserName)
+	diskUsage, err := platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UserName)
 	if err != nil {
 		t.Errorf("Can't get disk usage: %s", err)
 	}
@@ -804,7 +804,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	diskUsage, err = platform.GetUserFSQuotaUsage(launcher.config.WorkingDir, service.UserName)
+	diskUsage, err = platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UserName)
 	if err != nil {
 		t.Errorf("Can't get disk usage: %s", err)
 	}
@@ -825,7 +825,7 @@ func TestServiceStorage(t *testing.T) {
 
 func TestServiceState(t *testing.T) {
 	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceState")
+		log.Debug("Skip TestServiceStorage")
 		return
 	}
 
@@ -1605,6 +1605,10 @@ func setup() (err error) {
 		return err
 	}
 
+	if err := createStoragePartition("tmp/storage", "ext4", 16); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1619,8 +1623,69 @@ func cleanup() (err error) {
 		return err
 	}
 
+	if err := deleteStoragePartition("tmp/storage"); err != nil {
+		log.Errorf("Can't remove storage partition: %s", err)
+	}
+
 	if err := os.RemoveAll("tmp"); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func createStoragePartition(mountPoint string, fsType string, size uint64) (err error) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip creating storage partition")
+		return nil
+	}
+
+	defer func() {
+		if err != nil {
+			deleteStoragePartition(mountPoint)
+		}
+	}()
+
+	var output []byte
+
+	if output, err = exec.Command("dd", "if=/dev/zero", "of=tmp/storage.img", "bs=1M",
+		"count="+strconv.FormatUint(size, 10)).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	if output, err = exec.Command("mkfs."+fsType, "tmp/storage.img").CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	if err = os.MkdirAll(mountPoint, 0755); err != nil {
+		return err
+	}
+
+	if output, err = exec.Command("mount", "-o,usrjquota=aquota.user,jqfmt=vfsv0", "tmp/storage.img", mountPoint).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	if output, err = exec.Command("quotacheck", "-avum").CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	if output, err = exec.Command("quotaon", "-avu").CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
+}
+
+func deleteStoragePartition(mountPoint string) (err error) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip deleting storage partition")
+		return nil
+	}
+
+	var output []byte
+
+	if output, err = exec.Command("umount", mountPoint).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
 	return nil
