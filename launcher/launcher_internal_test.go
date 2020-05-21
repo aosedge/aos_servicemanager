@@ -32,6 +32,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -89,6 +90,7 @@ type testSender struct {
 }
 
 type testServiceProvider struct {
+	sync.Mutex
 	services      map[string]*Service
 	usersServices []*UsersService
 }
@@ -1356,6 +1358,9 @@ func (launcher *Launcher) removeAllServices() (err error) {
 }
 
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[service.ID]; ok {
 		return fmt.Errorf("service %s already exists", service.ID)
 	}
@@ -1366,6 +1371,9 @@ func (serviceProvider *testServiceProvider) AddService(service Service) (err err
 }
 
 func (serviceProvider *testServiceProvider) UpdateService(service Service) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[service.ID]; !ok {
 		return fmt.Errorf("service %s does not exist", service.ID)
 	}
@@ -1376,6 +1384,9 @@ func (serviceProvider *testServiceProvider) UpdateService(service Service) (err 
 }
 
 func (serviceProvider *testServiceProvider) RemoveService(serviceID string) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}
@@ -1386,6 +1397,9 @@ func (serviceProvider *testServiceProvider) RemoveService(serviceID string) (err
 }
 
 func (serviceProvider *testServiceProvider) GetService(serviceID string) (service Service, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	servicePtr, ok := serviceProvider.services[serviceID]
 	if !ok {
 		return service, fmt.Errorf("service %s does not exist", serviceID)
@@ -1395,6 +1409,9 @@ func (serviceProvider *testServiceProvider) GetService(serviceID string) (servic
 }
 
 func (serviceProvider *testServiceProvider) GetServices() (services []Service, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	services = make([]Service, 0, len(serviceProvider.services))
 
 	for _, servicePtr := range serviceProvider.services {
@@ -1405,6 +1422,9 @@ func (serviceProvider *testServiceProvider) GetServices() (services []Service, e
 }
 
 func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service Service, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, servicePtr := range serviceProvider.services {
 		if service.UnitName == unitName {
 			return *servicePtr, nil
@@ -1415,6 +1435,9 @@ func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string
 }
 
 func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, status ServiceStatus) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}
@@ -1425,6 +1448,9 @@ func (serviceProvider *testServiceProvider) SetServiceStatus(serviceID string, s
 }
 
 func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, state ServiceState) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}
@@ -1435,6 +1461,9 @@ func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, st
 }
 
 func (serviceProvider *testServiceProvider) SetServiceStartTime(serviceID string, time time.Time) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	if _, ok := serviceProvider.services[serviceID]; !ok {
 		return fmt.Errorf("service %s does not exist", serviceID)
 	}
@@ -1445,8 +1474,13 @@ func (serviceProvider *testServiceProvider) SetServiceStartTime(serviceID string
 }
 
 func (serviceProvider *testServiceProvider) AddServiceToUsers(users []string, serviceID string) (err error) {
-	if _, err = serviceProvider.GetUsersService(users, serviceID); err == nil {
-		return fmt.Errorf("service %s already in users", serviceID)
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
+	for _, usersServicePtr := range serviceProvider.usersServices {
+		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
+			return fmt.Errorf("service %s already in users", serviceID)
+		}
 	}
 
 	serviceProvider.usersServices = append(serviceProvider.usersServices, &UsersService{Users: users, ServiceID: serviceID})
@@ -1455,9 +1489,8 @@ func (serviceProvider *testServiceProvider) AddServiceToUsers(users []string, se
 }
 
 func (serviceProvider *testServiceProvider) RemoveServiceFromUsers(users []string, serviceID string) (err error) {
-	if _, err = serviceProvider.GetUsersService(users, serviceID); err != nil {
-		return err
-	}
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
 
 	i := 0
 
@@ -1474,14 +1507,17 @@ func (serviceProvider *testServiceProvider) RemoveServiceFromUsers(users []strin
 }
 
 func (serviceProvider *testServiceProvider) GetUsersServices(users []string) (services []Service, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, usersService := range serviceProvider.usersServices {
 		if reflect.DeepEqual(usersService.Users, users) {
-			service, err := serviceProvider.GetService(usersService.ServiceID)
-			if err != nil {
-				return nil, err
+			service, ok := serviceProvider.services[usersService.ServiceID]
+			if !ok {
+				return nil, fmt.Errorf("service %s does not exist", usersService.ServiceID)
 			}
 
-			services = append(services, service)
+			services = append(services, *service)
 		}
 	}
 
@@ -1489,6 +1525,9 @@ func (serviceProvider *testServiceProvider) GetUsersServices(users []string) (se
 }
 
 func (serviceProvider *testServiceProvider) RemoveServiceFromAllUsers(serviceID string) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	i := 0
 
 	for _, usersService := range serviceProvider.usersServices {
@@ -1504,6 +1543,9 @@ func (serviceProvider *testServiceProvider) RemoveServiceFromAllUsers(serviceID 
 }
 
 func (serviceProvider *testServiceProvider) GetUsersService(users []string, serviceID string) (userService UsersService, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, usersServicePtr := range serviceProvider.usersServices {
 		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
 			return *usersServicePtr, nil
@@ -1514,6 +1556,9 @@ func (serviceProvider *testServiceProvider) GetUsersService(users []string, serv
 }
 
 func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, usersServicePtr := range serviceProvider.usersServices {
 		userServices = append(userServices, *usersServicePtr)
 	}
@@ -1522,6 +1567,9 @@ func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceI
 }
 
 func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, usersServicePtr := range serviceProvider.usersServices {
 		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
 			usersServicePtr.StorageFolder = storageFolder
@@ -1534,6 +1582,9 @@ func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string
 }
 
 func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
 	for _, usersServicePtr := range serviceProvider.usersServices {
 		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
 			usersServicePtr.StateChecksum = checksum
