@@ -94,6 +94,7 @@ type Config struct {
 	Logging             Logging         `json:"logging"`
 	Alerts              Alerts          `json:"alerts"`
 	Identifier          json.RawMessage `json:"identifier"`
+	HostBinds           []string        `json:"hostBinds"`
 	Devices             []string        `json:"devices"`
 	Groups              []string        `json:"groups"`
 }

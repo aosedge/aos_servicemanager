@@ -220,6 +220,13 @@ The configuration file has JSON format. Following is JSON schema:
             "items": {
                 "type": "string"
             }
+        },
+        "hostBinds": {
+            "description": "The list of host directories/files which should be mounted to the service",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
         }
     }
 }

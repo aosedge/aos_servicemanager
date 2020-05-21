@@ -81,7 +81,8 @@ func createConfigFile() (err error) {
 		"param2": 123
 	},
 	"devices": ["device0", "device1", "device2"],
-	"groups": ["group0", "group1", "group2"]
+	"groups": ["group0", "group1", "group2"],
+	"hostBinds": ["dir0", "dir1", "dir2"]
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -366,5 +367,18 @@ func TestGroups(t *testing.T) {
 
 	if !reflect.DeepEqual(config.Groups, devices) {
 		t.Errorf("Wrong groups value: %v", config.Groups)
+	}
+}
+
+func TestHostBinds(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	dirs := []string{"dir0", "dir1", "dir2"}
+
+	if !reflect.DeepEqual(config.HostBinds, dirs) {
+		t.Errorf("Wrong hostDirs value: %v", config.HostBinds)
 	}
 }
