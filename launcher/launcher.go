@@ -48,6 +48,19 @@ import (
  * Consts
  ******************************************************************************/
 
+// Service status
+const (
+	statusOk = iota
+	statusError
+)
+
+// Service state
+const (
+	stateInit = iota
+	stateRunning
+	stateStopped
+)
+
 const (
 	serviceDir = "services" // services directory
 
@@ -99,18 +112,6 @@ const serviceTemplateFile = "template.service"
  * Vars
  ******************************************************************************/
 
-// Service status
-const (
-	statusOk = iota
-	statusError
-)
-
-// Service state
-const (
-	stateInit = iota
-	stateRunning
-	stateStopped
-)
 
 /*******************************************************************************
  * Types
