@@ -32,7 +32,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -779,11 +778,11 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 		return err
 	}
 
-	opts := "lowerdir=/:" + path.Join(service.Path, serviceRootfsDir)
-
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
-	if err = syscall.Mount("overlay", mergedDir, "overlay", 0, opts); err != nil {
+	if err = overlayMount(mergedDir, []string{
+		path.Join(service.Path, serviceRootfsDir),
+		"/"}, "", ""); err != nil {
 		return err
 	}
 
@@ -795,7 +794,7 @@ func (launcher *Launcher) umountLayers(service Service) (err error) {
 
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service layers")
 
-	if err = syscall.Unmount(mergedDir, 0); err != nil {
+	if err = umountWithRetry(mergedDir, 0); err != nil {
 		return err
 	}
 
