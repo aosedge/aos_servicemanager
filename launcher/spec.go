@@ -233,21 +233,7 @@ func (spec *serviceSpec) setUser(user string) (err error) {
 	return nil
 }
 
-func (spec *serviceSpec) mountHostFS(workingDir string) (err error) {
-	mounts := []runtimespec.Mount{
-		runtimespec.Mount{Destination: "/bin", Type: "bind", Source: "/bin", Options: []string{"bind", "ro"}},
-		runtimespec.Mount{Destination: "/sbin", Type: "bind", Source: "/sbin", Options: []string{"bind", "ro"}},
-		runtimespec.Mount{Destination: "/lib", Type: "bind", Source: "/lib", Options: []string{"bind", "ro"}},
-		runtimespec.Mount{Destination: "/usr", Type: "bind", Source: "/usr", Options: []string{"bind", "ro"}},
-	}
-
-	spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, mounts...)
-
-	// add lib64 if exists
-	if _, err := os.Stat("/lib64"); err == nil {
-		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{Destination: "/lib64", Type: "bind", Source: "/lib64", Options: []string{"bind", "ro"}})
-	}
-
+func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 	// TODO: all services should have their own certificates
 	// this mound for demo only and should be removed
 	// mount /etc/ssl
@@ -411,6 +397,14 @@ func (spec *serviceSpec) addGroup(groupName string) (err error) {
 	}
 
 	spec.ocSpec.Process.User.AdditionalGids = append(spec.ocSpec.Process.User.AdditionalGids, uint32(gid))
+
+	return nil
+}
+
+func (spec *serviceSpec) setRootfs(rootfsPath string) (err error) {
+	log.WithFields(log.Fields{"rootfs": rootfsPath}).Debug("Add rootfs to spec")
+
+	spec.ocSpec.Root = &runtimespec.Root{Path: rootfsPath}
 
 	return nil
 }

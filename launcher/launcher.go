@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -107,6 +108,11 @@ WantedBy=multi-user.target
 `
 
 const serviceTemplateFile = "template.service"
+
+const (
+	serviceMergedDir = "merged"
+	serviceRootfsDir = "rootfs"
+)
 
 /*******************************************************************************
  * Vars
@@ -765,6 +771,37 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 	return nil
 }
 
+func (launcher *Launcher) mountLayers(service Service) (err error) {
+	mergedDir := path.Join(service.Path, serviceMergedDir)
+
+	// create merged dir
+	if err = os.MkdirAll(mergedDir, 0755); err != nil {
+		return err
+	}
+
+	opts := "lowerdir=/:" + path.Join(service.Path, serviceRootfsDir)
+
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
+
+	if err = syscall.Mount("overlay", mergedDir, "overlay", 0, opts); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) umountLayers(service Service) (err error) {
+	mergedDir := path.Join(service.Path, serviceMergedDir)
+
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service layers")
+
+	if err = syscall.Unmount(mergedDir, 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) restartService(service Service) (err error) {
 	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 	if err != nil {
@@ -782,6 +819,10 @@ func (launcher *Launcher) restartService(service Service) (err error) {
 	}
 
 	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
+		return err
+	}
+
+	if err = launcher.mountLayers(service); err != nil {
 		return err
 	}
 
@@ -808,6 +849,10 @@ func (launcher *Launcher) restartService(service Service) (err error) {
 
 func (launcher *Launcher) startService(service Service) (err error) {
 	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
+		return err
+	}
+
+	if err = launcher.mountLayers(service); err != nil {
 		return err
 	}
 
@@ -863,6 +908,20 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
+	if err := launcher.umountLayers(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
+			retErr = err
+		}
+	}
+
+	if err := launcher.umountLayers(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
+			retErr = err
+		}
+	}
+
 	launcher.services.Delete(service.UnitName)
 
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
@@ -981,7 +1040,7 @@ func (launcher *Launcher) prepareService(installDir string,
 		return service, err
 	}
 
-	if err = spec.mountHostFS(launcher.config.WorkingDir); err != nil {
+	if err = spec.bindHostDirs(launcher.config.WorkingDir); err != nil {
 		return service, err
 	}
 
@@ -1003,6 +1062,10 @@ func (launcher *Launcher) prepareService(installDir string,
 		if err = spec.addGroup(group); err != nil {
 			return service, err
 		}
+	}
+
+	if err = spec.setRootfs(serviceMergedDir); err != nil {
+		return service, err
 	}
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
@@ -1079,6 +1142,14 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 						Status:  "removed"})
 				}
 			}
+
+			if err = launcher.umountLayers(newService); err != nil {
+				log.WithField("id", newService.ID).Errorf("Can't umount layers: %s", err)
+			}
+
+			if err = os.RemoveAll(newService.Path); err != nil {
+				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
+			}
 		}
 	}()
 
@@ -1101,6 +1172,10 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 	}
 
 	if err = launcher.restartService(newService); err != nil {
+		return err
+	}
+
+	if err = launcher.umountLayers(oldService); err != nil {
 		return err
 	}
 
