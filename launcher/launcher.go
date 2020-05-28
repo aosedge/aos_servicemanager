@@ -112,7 +112,6 @@ const serviceTemplateFile = "template.service"
  * Vars
  ******************************************************************************/
 
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -516,12 +515,14 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 }
 
 func (launcher *Launcher) doActionInstall(id string, data interface{}) {
+	var err error
+
 	status := amqp.ServiceInfo{ID: id, Status: "installed"}
 
 	defer func() {
-		if r := recover(); r != nil {
+		if err != nil {
 			status.Status = "error"
-			status.Error = "Can't install service: " + r.(string)
+			status.Error = "Can't install service: " + err.Error()
 			if launcher.sender != nil {
 				launcher.sender.SendServiceStatus(status)
 			}
@@ -530,18 +531,20 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 
 	serviceInfo, ok := data.(amqp.ServiceInfoFromCloud)
 	if !ok {
-		panic("wrong data type")
+		err = errors.New("wrong data type")
+		return
 	}
 
 	status.Version = serviceInfo.Version
 
-	if err := launcher.installService(serviceInfo); err != nil {
-		panic(err.Error())
+	if err = launcher.installService(serviceInfo); err != nil {
+		return
 	}
 
-	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, id)
-	if err != nil {
-		panic(err.Error())
+	var userService UsersService
+
+	if userService, err = launcher.serviceProvider.GetUsersService(launcher.users, id); err != nil {
+		return
 	}
 
 	status.StateChecksum = hex.EncodeToString(userService.StateChecksum)
@@ -604,8 +607,8 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	}
 
 	defer func() {
-		if r := recover(); r != nil {
-			log.WithField("serviceID", serviceInfo.ID).Error(r)
+		if err != nil {
+			log.WithField("serviceID", serviceInfo.ID).Errorf("Error install service: %s", err)
 
 			if !serviceExists {
 				// Remove system user
@@ -629,22 +632,22 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	// download and unpack
 	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, installDir); err != nil {
-		panic("Download failed")
+		return err
 	}
 
 	var newService Service
 
 	if newService, err = launcher.prepareService(installDir, serviceInfo); err != nil {
-		panic("Prepare failed")
+		return err
 	}
 
 	if !serviceExists {
 		if err = launcher.addService(newService); err != nil {
-			panic("Install failed")
+			return err
 		}
 	} else {
 		if err = launcher.updateService(service, newService); err != nil {
-			panic("Update failed")
+			return err
 		}
 	}
 
@@ -1044,18 +1047,19 @@ func (launcher *Launcher) addService(service Service) (err error) {
 	}
 
 	defer func() {
-		if r := recover(); r != nil {
-			log.WithField("id", service.ID).Error(r)
+		if err != nil {
+			log.WithField("id", service.ID).Errorf("Error adding service: %s", err)
+
 			launcher.removeService(service)
 		}
 	}()
 
 	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
-		panic("Add service to users failed")
+		return err
 	}
 
 	if err = launcher.restartService(service); err != nil {
-		panic("Restart service failed")
+		return err
 	}
 
 	return err
@@ -1063,8 +1067,8 @@ func (launcher *Launcher) addService(service Service) (err error) {
 
 func (launcher *Launcher) updateService(oldService, newService Service) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			log.WithField("id", newService.ID).Error(r)
+		if err != nil {
+			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
 
 			if err := launcher.restoreService(oldService); err != nil {
 				launcher.removeService(oldService)
@@ -1081,27 +1085,27 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 	launcher.services.Delete(oldService.UnitName)
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
-		panic("Update service state failed")
+		return err
 	}
 
 	if err = launcher.addServiceToCurrentUsers(newService.ID); err != nil {
-		panic("Add service to user failed")
+		return err
 	}
 
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit, newService.UserName); err != nil {
-		panic("Set service quota failed")
+		return err
 	}
 
 	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
-		panic("Update service failed")
+		return err
 	}
 
 	if err = launcher.restartService(newService); err != nil {
-		panic("Restart service failed")
+		return err
 	}
 
 	if err = os.RemoveAll(oldService.Path); err != nil {
-		panic("Remove service dir failed")
+		return err
 	}
 
 	if launcher.sender != nil {
