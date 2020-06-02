@@ -32,11 +32,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -109,13 +111,21 @@ WantedBy=multi-user.target
 const serviceTemplateFile = "template.service"
 
 const (
+	hostfsWiteoutsDir = "hostfs/whiteouts"
+)
+
+const (
 	serviceMergedDir = "merged"
+	serviceWorkDir   = "workdir"
+	serviceUpperDir  = "upperdir"
 	serviceRootfsDir = "rootfs"
 )
 
 /*******************************************************************************
  * Vars
  ******************************************************************************/
+
+var defaultHostfsBinds = []string{"bin", "sbin", "lib", "lib64", "usr"}
 
 /*******************************************************************************
  * Types
@@ -303,6 +313,10 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if err = launcher.prepareHostfsDir(); err != nil {
+		return nil, err
 	}
 
 	return launcher, nil
@@ -496,6 +510,59 @@ func (status ServiceStatus) String() string {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (launcher *Launcher) prepareHostfsDir() (err error) {
+	witeoutsDir := path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir)
+
+	if err = os.MkdirAll(witeoutsDir, 0755); err != nil {
+		return err
+	}
+
+	allowedDirs := defaultHostfsBinds
+
+	if len(launcher.config.HostBinds) > 0 {
+		allowedDirs = launcher.config.HostBinds
+	}
+
+	rootContent, err := ioutil.ReadDir("/")
+	if err != nil {
+		return err
+	}
+
+	for _, item := range rootContent {
+		itemPath := path.Join(witeoutsDir, item.Name())
+
+		if _, err = os.Stat(itemPath); err == nil {
+			// skip already exists items
+			continue
+		}
+
+		if !os.IsNotExist(err) {
+			return err
+		}
+
+		allowed := false
+
+		for _, allowedItem := range allowedDirs {
+			if item.Name() == allowedItem {
+				allowed = true
+
+				break
+			}
+		}
+
+		if allowed {
+			continue
+		}
+
+		// Create whiteout for not allowed items
+		if err = syscall.Mknod(itemPath, syscall.S_IFCHR, int(unix.Mkdev(0, 0))); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 func isUsersEqual(users1, users2 []string) (result bool) {
 	if users1 == nil && users2 == nil {
@@ -778,11 +845,26 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 		return err
 	}
 
+	workDir := path.Join(service.Path, serviceWorkDir)
+
+	// create work dir
+	if err = os.MkdirAll(workDir, 0755); err != nil {
+		return err
+	}
+
+	upperDir := path.Join(service.Path, serviceUpperDir)
+
+	// create work dir
+	if err = os.MkdirAll(upperDir, 0755); err != nil {
+		return err
+	}
+
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
 	if err = overlayMount(mergedDir, []string{
 		path.Join(service.Path, serviceRootfsDir),
-		"/"}, "", ""); err != nil {
+		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir),
+		"/"}, workDir, upperDir); err != nil {
 		return err
 	}
 

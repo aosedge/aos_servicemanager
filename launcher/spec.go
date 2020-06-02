@@ -404,7 +404,7 @@ func (spec *serviceSpec) addGroup(groupName string) (err error) {
 func (spec *serviceSpec) setRootfs(rootfsPath string) (err error) {
 	log.WithFields(log.Fields{"rootfs": rootfsPath}).Debug("Add rootfs to spec")
 
-	spec.ocSpec.Root = &runtimespec.Root{Path: rootfsPath}
+	spec.ocSpec.Root = &runtimespec.Root{Path: rootfsPath, Readonly: true}
 
 	return nil
 }
