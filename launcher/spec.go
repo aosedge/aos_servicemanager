@@ -46,6 +46,7 @@ import (
  ******************************************************************************/
 
 const serviceStorageFolder = "/home/service/storage"
+const defaultCpuPeriod uint64 = 100000
 
 /*******************************************************************************
  * Types
@@ -153,6 +154,93 @@ func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string)
 	}
 
 	return spec, nil
+}
+
+func (spec *serviceSpec) applyAosServiceConfig(path string) (err error) {
+	if path == "" {
+		return nil
+	}
+
+	spec.aosConfig = new(aosServiceConfig)
+	if err = getJSONFromFile(path, (interface{})(spec.aosConfig)); err != nil {
+		return err
+	}
+
+	if spec.aosConfig.Hostname != nil {
+		spec.ocSpec.Hostname = *spec.aosConfig.Hostname
+	}
+
+	if spec.aosConfig.Sysctl != nil {
+		spec.ocSpec.Linux.Sysctl = *spec.aosConfig.Sysctl
+	}
+
+	if spec.aosConfig.Quotas.RAMLimit != nil {
+		if spec.ocSpec.Linux.Resources.Memory == nil {
+			spec.ocSpec.Linux.Resources.Memory = &runtimespec.LinuxMemory{}
+		}
+
+		spec.ocSpec.Linux.Resources.Memory.Limit = spec.aosConfig.Quotas.RAMLimit
+	}
+
+	if spec.aosConfig.Quotas.PidsLimit != nil {
+		if spec.ocSpec.Linux.Resources.Pids == nil {
+			spec.ocSpec.Linux.Resources.Pids = &runtimespec.LinuxPids{}
+		}
+
+		spec.ocSpec.Linux.Resources.Pids.Limit = *spec.aosConfig.Quotas.PidsLimit
+
+		ociRlimit := runtimespec.POSIXRlimit{Type: "RLIMIT_NPROC",
+			Hard: (uint64)(spec.ocSpec.Linux.Resources.Pids.Limit),
+			Soft: (uint64)(spec.ocSpec.Linux.Resources.Pids.Limit)}
+
+		spec.addRlimit(ociRlimit)
+	}
+
+	if spec.aosConfig.Quotas.NoFileLimit != nil {
+		ociRlimit := runtimespec.POSIXRlimit{Type: "RLIMIT_NOFILE",
+			Hard: *spec.aosConfig.Quotas.NoFileLimit,
+			Soft: *spec.aosConfig.Quotas.NoFileLimit}
+
+		spec.addRlimit(ociRlimit)
+	}
+
+	if spec.aosConfig.Quotas.CPULimit != nil {
+		if spec.ocSpec.Linux.Resources.CPU == nil {
+			spec.ocSpec.Linux.Resources.CPU = &runtimespec.LinuxCPU{}
+		}
+
+		cpuQuota := int64((defaultCpuPeriod * (*spec.aosConfig.Quotas.CPULimit)) / 100)
+		cpuPeriod := defaultCpuPeriod
+
+		spec.ocSpec.Linux.Resources.CPU.Period = &cpuPeriod
+		spec.ocSpec.Linux.Resources.CPU.Quota = &cpuQuota
+	}
+
+	//add tmp folder
+	if spec.aosConfig.Quotas.TmpLimit != nil {
+		sizeStr := "size=" + strconv.FormatUint(*spec.aosConfig.Quotas.TmpLimit, 10)
+		newMount := runtimespec.Mount{
+			Destination: "/tmp",
+			Type:        "tmpfs",
+			Source:      "tmpfs",
+			Options:     []string{"nosuid", "strictatime", "mode=1777", sizeStr}}
+
+		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, newMount)
+	}
+
+	return nil
+}
+
+func (spec *serviceSpec) addRlimit(rlimit runtimespec.POSIXRlimit) {
+	for i := range spec.ocSpec.Process.Rlimits {
+		if spec.ocSpec.Process.Rlimits[i].Type == rlimit.Type {
+			spec.ocSpec.Process.Rlimits[i] = rlimit
+
+			return
+		}
+	}
+
+	spec.ocSpec.Process.Rlimits = append(spec.ocSpec.Process.Rlimits, rlimit)
 }
 
 func (spec *serviceSpec) mergeEnv(configEnv []string) {

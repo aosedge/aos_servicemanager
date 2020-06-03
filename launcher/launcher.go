@@ -1463,6 +1463,37 @@ func (launcher *Launcher) updateServiceFromSpec(service *Service, spec *runtimes
 	return nil
 }
 
+func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrvConfig *aosServiceConfig) (err error) {
+	service.TTL = launcher.config.DefaultServiceTTL
+	if aosSrvConfig == nil {
+		return nil
+	}
+
+	if aosSrvConfig.ServiceTTL != nil {
+		service.TTL = *aosSrvConfig.ServiceTTL
+	}
+
+	if aosSrvConfig.Quotas.UploadLimit != nil {
+		service.UploadLimit = *aosSrvConfig.Quotas.UploadLimit
+	}
+
+	if aosSrvConfig.Quotas.DownloadLimit != nil {
+		service.DownloadLimit = *aosSrvConfig.Quotas.DownloadLimit
+	}
+
+	if aosSrvConfig.Quotas.StorageLimit != nil {
+		service.StorageLimit = *aosSrvConfig.Quotas.StorageLimit
+	}
+
+	if aosSrvConfig.Quotas.StateLimit != nil {
+		service.StateLimit = *aosSrvConfig.Quotas.StateLimit
+	}
+
+	service.Permissions = aosSrvConfig.Quotas.VisPermissions
+
+	return nil
+}
+
 func (launcher *Launcher) generateNetLimitsCmds(spec *runtimespec.Spec) (setCmd, clearCmd string) {
 	value, exist := spec.Annotations[aosProductPrefix+"network.downloadSpeed"]
 	if exist {
@@ -1472,6 +1503,31 @@ func (launcher *Launcher) generateNetLimitsCmds(spec *runtimespec.Spec) (setCmd,
 	if exist {
 		setCmd = setCmd + " -u " + value
 	}
+
+	if setCmd != "" {
+		setCmd = "-" + launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
+		clearCmd = "-" + launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
+
+		log.Debugf("Set net limit cmd: %s", setCmd)
+		log.Debugf("Clear net limit cmd: %s", clearCmd)
+	}
+
+	return setCmd, clearCmd
+}
+
+func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(config *aosServiceConfig) (setCmd, clearCmd string) {
+	if config == nil {
+		return setCmd, clearCmd
+	}
+
+	if config.Quotas.DownloadSpeed != nil {
+		setCmd = setCmd + " -d " + strconv.FormatUint(*config.Quotas.DownloadSpeed, 10)
+	}
+
+	if config.Quotas.UploadSpeed != nil {
+		setCmd = setCmd + " -u " + strconv.FormatUint(*config.Quotas.UploadSpeed, 10)
+	}
+
 	if setCmd != "" {
 		setCmd = "-" + launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
 		clearCmd = "-" + launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
