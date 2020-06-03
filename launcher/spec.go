@@ -71,17 +71,25 @@ var errNotDevice = errors.New("not a device")
  * Private
  ******************************************************************************/
 
+func getJSONFromFile(fileName string, data interface{}) (err error) {
+	byteValue, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	if err = json.Unmarshal(byteValue, data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 	log.WithField("fileName", fileName).Debug("Load service spec")
 
 	spec = &serviceSpec{fileName: fileName}
 
-	specJSON, err := ioutil.ReadFile(spec.fileName)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = json.Unmarshal(specJSON, &spec.ocSpec); err != nil {
+	if err = getJSONFromFile(spec.fileName, &spec.ocSpec); err != nil {
 		return spec, err
 	}
 
@@ -89,20 +97,9 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 }
 
 func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string) (spec *serviceSpec, err error) {
-	imageConfigJSONFile, err := os.Open(fileImagConfigPath)
-	if err != nil {
-		return nil, err
-	}
-
-	defer imageConfigJSONFile.Close()
-
-	byteValue, _ := ioutil.ReadAll(imageConfigJSONFile)
-	if err != nil {
-		return nil, err
-	}
-
 	var imageConfig imagespec.Image
-	if err = json.Unmarshal(byteValue, &imageConfig); err != nil {
+
+	if err = getJSONFromFile(fileImagConfigPath, &imageConfig); err != nil {
 		return nil, err
 	}
 
