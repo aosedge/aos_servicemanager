@@ -848,6 +848,9 @@ func TestServiceState(t *testing.T) {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
 	ftp, err := launcher.connectToFtp("service0")
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
@@ -1154,23 +1157,39 @@ func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
+	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+	aosSrvConfig := generateAosSrvConfig()
+	aosSrvConfig.Quotas.VisPermissions = `{"*": "rw", "123": "rw"}`
 
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
+	data, err := json.Marshal(aosSrvConfig)
+	if err != nil {
+		return outputFile, err
 	}
-	spec.ocSpec.Annotations[aosProductPrefix+"vis.permissions"] = `{"*": "rw", "123": "rw"}`
 
-	if err = spec.save(); err != nil {
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
+	if err != nil {
+		return outputFile, err
+	}
+
+	ociImgSpec := imagespec.Image{}
+	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+
+	dataImgSpec, err := json.Marshal(ociImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
 		return outputFile, err
 	}
 
@@ -1201,24 +1220,43 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 		return outputFile, err
 	}
 
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, "config.json"))
+	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.ocSpec.Process.Args = []string{"iperf", "-s"}
+	var uploadSpeed uint64 = 4096
+	var downloadSpeed uint64 = 8192
 
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
+	aosSrvConfig := generateAosSrvConfig()
+	aosSrvConfig.Quotas.UploadSpeed = &uploadSpeed
+	aosSrvConfig.Quotas.DownloadSpeed = &downloadSpeed
+
+	data, err := json.Marshal(aosSrvConfig)
+	if err != nil {
+		return outputFile, err
 	}
-	spec.ocSpec.Annotations[aosProductPrefix+"network.uploadSpeed"] = "4096"
-	spec.ocSpec.Annotations[aosProductPrefix+"network.downloadSpeed"] = "8192"
 
-	if err = spec.save(); err != nil {
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
+	if err != nil {
+		return outputFile, err
+	}
+
+	ociImgSpec := imagespec.Image{}
+	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Cmd = []string{"iperf", "-s"}
+
+	dataImgSpec, err := json.Marshal(ociImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
 		return outputFile, err
 	}
 
@@ -1253,24 +1291,40 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 		return outputFile, err
 	}
 
-	if err := generateConfig(imageDir); err != nil {
-		return outputFile, err
-	}
-
-	spec, err := loadServiceSpec(path.Join(imageDir, ocConfigFile))
+	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
 		return outputFile, err
 	}
 
-	spec.ocSpec.Process.Args = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+	aosSrvConfig := generateAosSrvConfig()
+	aosSrvConfig.Quotas.StorageLimit = &downloader.storageLimit
+	aosSrvConfig.Quotas.StateLimit = &downloader.stateLimit
 
-	if spec.ocSpec.Annotations == nil {
-		spec.ocSpec.Annotations = make(map[string]string)
+	data, err := json.Marshal(aosSrvConfig)
+	if err != nil {
+		return outputFile, err
 	}
-	spec.ocSpec.Annotations[aosProductPrefix+"storage.limit"] = strconv.FormatUint(downloader.storageLimit, 10)
-	spec.ocSpec.Annotations[aosProductPrefix+"state.limit"] = strconv.FormatUint(downloader.stateLimit, 10)
 
-	if err = spec.save(); err != nil {
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
+	if err != nil {
+		return outputFile, err
+	}
+
+	ociImgSpec := imagespec.Image{}
+	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", serviceInfo.ID, fmt.Sprintf("%d", serviceInfo.Version)}
+
+	dataImgSpec, err := json.Marshal(ociImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
 		return outputFile, err
 	}
 
@@ -1828,19 +1882,30 @@ func generateFakeImage(folderPath string) (err error) {
 		return err
 	}
 
-	var layers []imagespec.Descriptor
-	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
-		Digest: layerDigest,
+	if err := genarateImageManfest(folderPath, &configDigest, &aosConfigDigest, &layerDigest); err != nil {
+		return err
 	}
 
+	return nil
+}
+
+func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest) (err error) {
 	var manifest serviceManifest
 	manifest.SchemaVersion = 2
+
 	manifest.Config = imagespec.Descriptor{MediaType: "application/vnd.oci.image.config.v1+json",
-		Digest: configDigest,
+		Digest: *imgConfig,
 	}
 
-	manifest.AosService = &imagespec.Descriptor{MediaType: "application/vnd.aos.service.config.v1+json",
-		Digest: aosConfigDigest,
+	if aosSrvConfig != nil {
+		manifest.AosService = &imagespec.Descriptor{MediaType: "application/vnd.aos.service.config.v1+json",
+			Digest: *aosSrvConfig,
+		}
+	}
+
+	var layers []imagespec.Descriptor
+	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		Digest: *rootfsLayer,
 	}
 
 	manifest.Layers = append(layers, layerDescriptor)
@@ -1973,4 +2038,49 @@ func saveImageConfig(folderPath string, config *imagespec.Image) (filePath strin
 	}
 
 	return filePath, err
+}
+
+func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error) {
+	blobsDir := path.Join(imgFolder, "blobs")
+	if err := os.MkdirAll(blobsDir, 0755); err != nil {
+		return digest, err
+	}
+
+	tarFile := path.Join(blobsDir, "_temp.tar.gz")
+
+	if output, err := exec.Command("tar", "-C", rootfs, "-czf", tarFile, "./").CombinedOutput(); err != nil {
+		return digest, fmt.Errorf("error: %s, code: %s", string(output), err)
+	}
+	defer os.Remove(tarFile)
+
+	file, err := os.Open(tarFile)
+	if err != nil {
+		return digest, err
+	}
+	defer file.Close()
+
+	byteValue, err := ioutil.ReadAll(file)
+	if err != nil {
+		return digest, err
+	}
+
+	digest, err = generateAndSaveDigest(blobsDir, byteValue)
+	if err != nil {
+		return digest, err
+	}
+
+	os.RemoveAll(rootfs)
+
+	return digest, nil
+}
+
+func generateAosSrvConfig() (cfg aosServiceConfig) {
+	cfg.Author = "Test Author"
+	cfg.Created = time.Now()
+
+	var nofileLimit uint64 = 1024
+
+	cfg.Quotas.NoFileLimit = &nofileLimit
+
+	return cfg
 }
