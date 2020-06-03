@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/specconv"
@@ -56,9 +57,39 @@ type serviceManifest struct {
 	AosService *imagespec.Descriptor `json:"aosService,omitempty"`
 }
 
+type aosServiceConfig struct {
+	Created    time.Time          `json:"created"`
+	Author     string             `json:"author"`
+	Hostname   *string            `json:"hostname,omitempty"`
+	Sysctl     *map[string]string `json:"sysctl,omitempty"`
+	ServiceTTL *uint64            `json:"serviceTTL,omitempty"`
+	Quotas     struct {
+		StateLimit     *uint64 `json:"stateLimit,omitempty"`
+		StorageLimit   *uint64 `json:"storageLimit,omitempty"`
+		UploadSpeed    *uint64 `json:"uploadSpeed,omitempty"`
+		DownloadSpeed  *uint64 `json:"downloadSpeed,omitempty"`
+		UploadLimit    *uint64 `json:"uploadLimit,omitempty"`
+		DownloadLimit  *uint64 `json:"downloadLimit,omitempty"`
+		RAMLimit       *int64  `json:"ramLimit,omitempty"`
+		PidsLimit      *int64  `json:"pidsLimit,omitempty"`
+		NoFileLimit    *uint64 `json:"noFileLimit,omitempty"`
+		CPULimit       *uint64 `json:"cpuLimit,omitempty"`
+		TmpLimit       *uint64 `json:"tmpLimit,omitempty"`
+		VisPermissions string  `json:"visPermissions,omitempty"`
+	} `json:"quotas"`
+	Mounts *[]struct {
+		ContainerPath string   `json:"containerPath"`
+		Type          string   `json:"type,omitempty"`
+		HostPath      string   `json:"hostPath"`
+		Options       []string `json:"options,omitempty"`
+	} `json:"mounts,omitempty"`
+	Devices []string `json:"devices,omitempty"`
+}
+
 type serviceSpec struct {
-	ocSpec   runtimespec.Spec
-	fileName string
+	ocSpec          runtimespec.Spec
+	runtimeFileName string
+	aosConfig       *aosServiceConfig
 }
 
 /*******************************************************************************
@@ -87,9 +118,9 @@ func getJSONFromFile(fileName string, data interface{}) (err error) {
 func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 	log.WithField("fileName", fileName).Debug("Load service spec")
 
-	spec = &serviceSpec{fileName: fileName}
+	spec = &serviceSpec{runtimeFileName: fileName}
 
-	if err = getJSONFromFile(spec.fileName, &spec.ocSpec); err != nil {
+	if err = getJSONFromFile(spec.runtimeFileName, &spec.ocSpec); err != nil {
 		return spec, err
 	}
 
@@ -108,7 +139,7 @@ func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string)
 		return nil, fmt.Errorf("unsupported OS in image config %s", imageConfig.OS)
 	}
 
-	spec = &serviceSpec{fileName: fileNameRuntimeSpec}
+	spec = &serviceSpec{runtimeFileName: fileNameRuntimeSpec}
 
 	spec.ocSpec = *specconv.Example()
 
@@ -164,9 +195,9 @@ func (spec *serviceSpec) createArgs(config *imagespec.ImageConfig) {
 }
 
 func (spec *serviceSpec) save() (err error) {
-	log.WithField("fileName", spec.fileName).Debug("Save service spec")
+	log.WithField("fileName", spec.runtimeFileName).Debug("Save service spec")
 
-	file, err := os.Create(spec.fileName)
+	file, err := os.Create(spec.runtimeFileName)
 	if err != nil {
 		return err
 	}
