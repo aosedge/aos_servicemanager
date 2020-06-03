@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"github.com/jlaffaye/ftp"
+	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
@@ -1105,6 +1107,21 @@ func TestSpecFromImageConfig(t *testing.T) {
 	}
 }
 
+func TestValidateUnpackedImage(t *testing.T) {
+	fakeImageFolder := path.Join("tmp", "fakeImage")
+	if err := os.MkdirAll(fakeImageFolder, 0755); err != nil {
+		log.Fatalf("Can't create fakeImage Folder %s", err)
+	}
+
+	if err := generateFakeImage(fakeImageFolder); err != nil {
+		log.Fatalf("Can't generate fakeImage %s", err)
+	}
+
+	if err := validateUnpackedImage(fakeImageFolder); err != nil {
+		t.Errorf("Error validateUnpackedImage %s", err)
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -1758,6 +1775,88 @@ func generateConfig(imagePath string) (err error) {
 	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
 	if err != nil {
 		return errors.New(string(out))
+	}
+
+	return nil
+}
+
+func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
+	fullPath := path.Join(folder, "sha256")
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return retDigest, err
+	}
+
+	h := sha256.New()
+	h.Write(data)
+	retDigest = digest.NewDigest("sha256", h)
+
+	file, err := os.Create(path.Join(fullPath, retDigest.Hex()))
+	if err != nil {
+		return retDigest, err
+	}
+	defer file.Close()
+
+	_, err = file.Write(data)
+	if err != nil {
+		return retDigest, err
+	}
+
+	return retDigest, nil
+}
+
+func generateFakeImage(folderPath string) (err error) {
+	blobsDir := path.Join(folderPath, "blobs")
+	if err := os.MkdirAll(blobsDir, 0755); err != nil {
+		return err
+	}
+
+	configString := "This is fake image config"
+	configDigest, err := generateAndSaveDigest(blobsDir, []byte(configString))
+	if err != nil {
+		return err
+	}
+
+	aosConfigString := "AOS Serice config fake file"
+	aosConfigDigest, err := generateAndSaveDigest(blobsDir, []byte(aosConfigString))
+	if err != nil {
+		return err
+	}
+
+	layerString := "Fake Serice rootfs"
+	layerDigest, err := generateAndSaveDigest(blobsDir, []byte(layerString))
+	if err != nil {
+		return err
+	}
+
+	var layers []imagespec.Descriptor
+	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		Digest: layerDigest,
+	}
+
+	var manifest serviceManifest
+	manifest.SchemaVersion = 2
+	manifest.Config = imagespec.Descriptor{MediaType: "application/vnd.oci.image.config.v1+json",
+		Digest: configDigest,
+	}
+
+	manifest.AosService = &imagespec.Descriptor{MediaType: "application/vnd.aos.service.config.v1+json",
+		Digest: aosConfigDigest,
+	}
+
+	manifest.Layers = append(layers, layerDescriptor)
+
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+
+	jsonFile, err := os.Create(path.Join(folderPath, "manifest.json"))
+	if err != nil {
+		return err
+	}
+
+	if _, err := jsonFile.Write(data); err != nil {
+		return err
 	}
 
 	return nil

@@ -50,6 +50,12 @@ const serviceStorageFolder = "/home/service/storage"
  * Types
  ******************************************************************************/
 
+//serviceManifest OCI image manifest with aos sevice config
+type serviceManifest struct {
+	imagespec.Manifest
+	AosService *imagespec.Descriptor `json:"aosService,omitempty"`
+}
+
 type serviceSpec struct {
 	ocSpec   runtimespec.Spec
 	fileName string

@@ -21,12 +21,16 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
 
@@ -35,10 +39,22 @@ import (
 )
 
 /*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const manifestFileName = "manifest.json"
+
+/*******************************************************************************
  * Type
  ******************************************************************************/
 
 type imageHandler struct {
+}
+
+type imageParts struct {
+	imageConfigPath    string
+	aosSrvConfigPath   string
+	serviceFSLayerPath string
 }
 
 /*******************************************************************************
@@ -127,6 +143,86 @@ func downloadAndUnpackImage(downloader downloader, serviceInfo amqp.ServiceInfoF
 	// unpack image there
 	if err = unpackImage(image, installDir); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func validateUnpackedImage(installDir string) (err error) {
+	manifest, err := getImageManifest(installDir)
+	if err != nil {
+		return err
+	}
+
+	//validate image config
+	if err = validateDigest(installDir, manifest.Config.Digest); err != nil {
+		return err
+	}
+
+	//validate aos service config
+	if manifest.AosService != nil {
+		if err = validateDigest(installDir, manifest.AosService.Digest); err != nil {
+			return err
+		}
+	}
+
+	layersSize := len(manifest.Layers)
+	if layersSize == 0 {
+		return errors.New("no layers in image")
+	}
+
+	//validate service rootfs layer
+	if err = validateDigest(installDir, manifest.Layers[layersSize-1].Digest); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getImageManifest(installDir string) (manifest *serviceManifest, err error) {
+	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
+	if err != nil {
+		return nil, err
+	}
+
+	manifest = new(serviceManifest)
+	if err = json.Unmarshal(manifestJSON, manifest); err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
+func validateDigest(installDir string, digest digest.Digest) (err error) {
+	if err = digest.Validate(); err != nil {
+		return err
+	}
+
+	file, err := os.Open(path.Join(installDir, "blobs", string(digest.Algorithm()), digest.Hex()))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 1024*1024)
+	verifier := digest.Verifier()
+
+	for {
+		count, err := file.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				return err
+			}
+
+			break
+		}
+
+		if _, err := verifier.Write(buffer[:count]); err != nil {
+			return err
+		}
+	}
+
+	if verifier.Verified() == false {
+		return errors.New("hash missmach")
 	}
 
 	return nil
@@ -245,4 +341,27 @@ func unpackImage(name, destination string) (err error) {
 			}
 		}
 	}
+}
+
+func getImageParts(installDir string) (parts imageParts, err error) {
+	manifest, err := getImageManifest(installDir)
+	if err != nil {
+		return parts, err
+	}
+
+	parts.imageConfigPath = path.Join(installDir, "blobs", string(manifest.Config.Digest.Algorithm()), string(manifest.Config.Digest.Hex()))
+
+	if manifest.AosService != nil {
+		parts.aosSrvConfigPath = path.Join(installDir, "blobs", string(manifest.AosService.Digest.Algorithm()), string(manifest.AosService.Digest.Hex()))
+	}
+
+	layersSize := len(manifest.Layers)
+	if layersSize == 0 {
+		return parts, errors.New("no layers in image")
+	}
+
+	rootFSDigest := manifest.Layers[layersSize-1].Digest
+	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), string(rootFSDigest.Hex()))
+
+	return parts, nil
 }
