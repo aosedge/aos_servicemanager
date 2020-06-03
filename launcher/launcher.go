@@ -670,6 +670,18 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return nil
 	}
 
+	unpackDir, err := ioutil.TempDir("", "aos_")
+	defer os.RemoveAll(unpackDir)
+
+	// download and unpack
+	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, unpackDir); err != nil {
+		return err
+	}
+
+	if err = validateUnpackedImage(unpackDir); err != nil {
+		return err
+	}
+
 	// We need to install or update the service
 
 	// create install dir
@@ -702,14 +714,8 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.ID}).Debug("Create install dir")
 
-	// download and unpack
-	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, installDir); err != nil {
-		return err
-	}
-
 	var newService Service
-
-	if newService, err = launcher.prepareService(installDir, serviceInfo); err != nil {
+	if newService, err = launcher.prepareService(unpackDir, installDir, serviceInfo); err != nil {
 		return err
 	}
 
@@ -1100,15 +1106,29 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 	return retErr
 }
 
-func (launcher *Launcher) prepareService(installDir string,
+func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
 	userName, err := platform.CreateUser(serviceInfo.ID)
 	if err != nil {
 		return service, err
 	}
 
-	// update config.json
-	spec, err := loadServiceSpec(path.Join(installDir, ocConfigFile))
+	imageParts, err := getImageParts(unpackDir)
+	if err != nil {
+		return service, err
+	}
+
+	//unpack rootfs layer
+	if err := unpackImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
+		return service, err
+	}
+
+	// generate config.json
+	spec, err := generateSpecFromImageConfig(imageParts.imageConfigPath, path.Join(installDir, ocConfigFile))
+	if err != nil {
+		return service, err
+	}
+
 	defer func() {
 		if specErr := spec.save(); specErr != nil {
 			if err == nil {
@@ -1117,7 +1137,7 @@ func (launcher *Launcher) prepareService(installDir string,
 		}
 	}()
 
-	if err = spec.disableTerminal(); err != nil {
+	if err := spec.applyAosServiceConfig(imageParts.aosSrvConfigPath); err != nil {
 		return service, err
 	}
 
@@ -1151,7 +1171,7 @@ func (launcher *Launcher) prepareService(installDir string,
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, &spec.ocSpec); err != nil {
+	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec.aosConfig); err != nil {
 		return service, err
 	}
 
@@ -1170,7 +1190,7 @@ func (launcher *Launcher) prepareService(installDir string,
 		Status:     statusOk,
 		AlertRules: string(alertRules)}
 
-	if err = launcher.updateServiceFromSpec(&service, &spec.ocSpec); err != nil {
+	if err = launcher.updateServiceFromAosSrvConfig(&service, spec.aosConfig); err != nil {
 		return service, err
 	}
 
@@ -1364,7 +1384,7 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	return string(fileContent), nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *runtimespec.Spec) (err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *aosServiceConfig) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
@@ -1376,7 +1396,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		return err
 	}
 
-	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmds(spec)
+	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(spec)
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
