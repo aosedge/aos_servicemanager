@@ -144,6 +144,8 @@ func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string)
 
 	spec.ocSpec = *specconv.Example()
 
+	spec.ocSpec.Process.Terminal = false
+
 	spec.mergeEnv(imageConfig.Config.Env)
 
 	spec.createArgs(&imageConfig.Config)
@@ -370,12 +372,6 @@ func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 
 		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"}})
 	}
-
-	return nil
-}
-
-func (spec *serviceSpec) disableTerminal() (err error) {
-	spec.ocSpec.Process.Terminal = false
 
 	return nil
 }

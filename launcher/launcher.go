@@ -36,7 +36,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
-	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
@@ -69,8 +68,6 @@ const (
 	runcName         = "runc"         // runc file name
 	netnsName        = "netns"        // netns file name
 	wonderShaperName = "wondershaper" // wondershaper name
-
-	aosProductPrefix = "com.epam.aos." //prefix used in annotations to get aos related entries
 
 	ocConfigFile = "config.json"
 )
@@ -1445,44 +1442,6 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 	return nil
 }
 
-func (launcher *Launcher) updateServiceFromSpec(service *Service, spec *runtimespec.Spec) (err error) {
-	service.TTL = launcher.config.DefaultServiceTTL
-
-	if ttlString, ok := spec.Annotations[aosProductPrefix+"service.TTL"]; ok {
-		if service.TTL, err = strconv.ParseUint(ttlString, 10, 64); err != nil {
-			return err
-		}
-	}
-
-	if uploadLimitString, ok := spec.Annotations[aosProductPrefix+"network.uploadLimit"]; ok {
-		if service.UploadLimit, err = strconv.ParseUint(uploadLimitString, 10, 64); err != nil {
-			return err
-		}
-	}
-
-	if downloadLimitString, ok := spec.Annotations[aosProductPrefix+"network.downloadLimit"]; ok {
-		if service.DownloadLimit, err = strconv.ParseUint(downloadLimitString, 10, 64); err != nil {
-			return err
-		}
-	}
-
-	service.Permissions = spec.Annotations[aosProductPrefix+"vis.permissions"]
-
-	if storageLimitString, ok := spec.Annotations[aosProductPrefix+"storage.limit"]; ok {
-		if service.StorageLimit, err = strconv.ParseUint(storageLimitString, 10, 64); err != nil {
-			return err
-		}
-	}
-
-	if stateLimitString, ok := spec.Annotations[aosProductPrefix+"state.limit"]; ok {
-		if service.StateLimit, err = strconv.ParseUint(stateLimitString, 10, 64); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrvConfig *aosServiceConfig) (err error) {
 	service.TTL = launcher.config.DefaultServiceTTL
 	if aosSrvConfig == nil {
@@ -1512,27 +1471,6 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	service.Permissions = aosSrvConfig.Quotas.VisPermissions
 
 	return nil
-}
-
-func (launcher *Launcher) generateNetLimitsCmds(spec *runtimespec.Spec) (setCmd, clearCmd string) {
-	value, exist := spec.Annotations[aosProductPrefix+"network.downloadSpeed"]
-	if exist {
-		setCmd = setCmd + " -d " + value
-	}
-	value, exist = spec.Annotations[aosProductPrefix+"network.uploadSpeed"]
-	if exist {
-		setCmd = setCmd + " -u " + value
-	}
-
-	if setCmd != "" {
-		setCmd = "-" + launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
-		clearCmd = "-" + launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
-
-		log.Debugf("Set net limit cmd: %s", setCmd)
-		log.Debugf("Clear net limit cmd: %s", clearCmd)
-	}
-
-	return setCmd, clearCmd
 }
 
 func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(config *aosServiceConfig) (setCmd, clearCmd string) {
