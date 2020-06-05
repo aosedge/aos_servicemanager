@@ -112,7 +112,7 @@ func pathToDevice(path string) (device string, err error) {
 
 	// Retrieve mount info
 	var mountInfos []*mount.Info
-	if mountInfos, err = mount.GetMounts(); err != nil {
+	if mountInfos, err = mount.GetMounts(nil); err != nil {
 		return
 	}
 
