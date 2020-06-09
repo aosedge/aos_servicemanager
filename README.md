@@ -26,7 +26,7 @@ export GOPRIVATE=gitpct.epam.com/*
 
 ```golang
 go mod init
-go mod vendors
+go mod vendor
 ```
 
 ## Required native packages
