@@ -64,8 +64,10 @@ type iperfImage struct {
 
 // Generates test image with ftp server
 type ftpImage struct {
+	ftpDir       string
 	storageLimit uint64
 	stateLimit   uint64
+	tmpLimit     uint64
 }
 
 // Test monitor info
@@ -757,7 +759,7 @@ func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
 
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
-	launcher, err := newTestLauncher(&ftpImage{8192*2 + 4096, 0}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -833,7 +835,7 @@ func TestServiceState(t *testing.T) {
 
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(&ftpImage{1024 * 12, 256}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -972,6 +974,108 @@ func TestServiceState(t *testing.T) {
 	if err := launcher.removeAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
+}
+
+func TestTmpDir(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip TestServiceStorage")
+		return
+	}
+
+	sender := newTestSender()
+
+	// Test no tmp limit
+
+	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0}, sender, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
+	if status := <-sender.statusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+	}
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err == nil {
+		t.Error("Unexpected nil error")
+	}
+
+	launcher.Close()
+
+	// Test tmp limit
+
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192}, sender, nil); err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1", Version: 0})
+	if status := <-sender.statusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+	}
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	ftp, err = launcher.connectToFtp("service1")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+
+	testData := make([]byte, 8192)
+
+	if err := ftp.Stor("test1.dat", bytes.NewReader(testData)); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	if err := ftp.Stor("test2.dat", bytes.NewReader(testData)); err == nil {
+		t.Error("Unexpected nil error")
+	}
+
+	ftp.Quit()
+
+	// Test tmp works after restarts
+
+	launcher.Close()
+
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0}, sender, nil); err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	ftp, err = launcher.connectToFtp("service1")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+
+	if err := ftp.Stor("test3.dat", bytes.NewReader(testData)); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	ftp.Quit()
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+
+	launcher.Close()
 }
 
 func TestSpec(t *testing.T) {
@@ -1287,7 +1391,7 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 		return outputFile, err
 	}
 
-	if err := generateFtpContent(imageDir); err != nil {
+	if err := generateFtpContent(imageDir, downloader.ftpDir); err != nil {
 		return outputFile, err
 	}
 
@@ -1297,8 +1401,18 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
-	aosSrvConfig.Quotas.StorageLimit = &downloader.storageLimit
-	aosSrvConfig.Quotas.StateLimit = &downloader.stateLimit
+
+	if downloader.storageLimit > 0 {
+		aosSrvConfig.Quotas.StorageLimit = &downloader.storageLimit
+	}
+
+	if downloader.stateLimit > 0 {
+		aosSrvConfig.Quotas.StateLimit = &downloader.stateLimit
+	}
+
+	if downloader.tmpLimit > 0 {
+		aosSrvConfig.Quotas.TmpLimit = &downloader.tmpLimit
+	}
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
@@ -1794,7 +1908,7 @@ while True:
 	return nil
 }
 
-func generateFtpContent(imagePath string) (err error) {
+func generateFtpContent(imagePath string, ftpDir string) (err error) {
 	serviceContent := `#!/usr/bin/python
 
 from pyftpdlib.authorizers import DummyAuthorizer
@@ -1802,7 +1916,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 authorizer = DummyAuthorizer()
-authorizer.add_anonymous("/home/service/storage", perm="elradfmw")
+authorizer.add_anonymous("%s", perm="elradfmw")
 
 handler = FTPHandler
 handler.authorizer = authorizer
@@ -1810,7 +1924,9 @@ handler.authorizer = authorizer
 server = FTPServer(("", 21), handler)
 server.serve_forever()`
 
-	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
+	if err := ioutil.WriteFile(
+		path.Join(imagePath, "rootfs", "home", "service.py"),
+		[]byte(fmt.Sprintf(serviceContent, ftpDir)), 0644); err != nil {
 		return err
 	}
 
