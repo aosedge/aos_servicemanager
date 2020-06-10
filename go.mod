@@ -17,11 +17,16 @@ require (
 	github.com/hashicorp/go-version v1.2.0 // indirect
 	github.com/jlaffaye/ftp v0.0.0-20200331144919-d4caf6ffcab8
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible
+	github.com/opencontainers/go-digest v1.0.0
+	github.com/opencontainers/image-spec v1.0.1
+	github.com/opencontainers/runc v1.0.0-rc10
 	github.com/opencontainers/runtime-spec v1.0.2
+	github.com/seccomp/libseccomp-golang v0.9.1 // indirect
 	github.com/shirou/gopsutil v2.20.3+incompatible
 	github.com/sirupsen/logrus v1.5.0
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/streadway/amqp v0.0.0-20200108173154-1c71cc93ed71
 	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20200415150449-14cbd70bccaf
 	golang.org/x/crypto v0.0.0-20200414173820-0848c9571904
+	golang.org/x/sys v0.0.0-20191005200804-aed5e4c7ecf9
 )
