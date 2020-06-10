@@ -16,9 +16,9 @@ echo "Install  netns"
 
 export NETNS_SHA256="8a3a48183ed5182a0619b18f05ef42ba5c4c3e3e499a2e2cb33787bd7fbdaa5c"
 # Download and check the sha256sum.
-$ curl -fSL "https://github.com/genuinetools/netns/releases/download/v0.5.3/netns-linux-amd64" -o "/usr/local/bin/netns" \
+sudo curl -fSL "https://github.com/genuinetools/netns/releases/download/v0.5.3/netns-linux-amd64" -o "/usr/local/bin/netns" \
 	&& echo "${NETNS_SHA256}  /usr/local/bin/netns" | sha256sum -c - \
-	&& chmod a+x "/usr/local/bin/netns"
+	&& sudo chmod a+x "/usr/local/bin/netns"
 
 cd /tmp
 git clone  https://github.com/magnific0/wondershaper.git

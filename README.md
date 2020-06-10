@@ -135,6 +135,11 @@ Following python3 packages are required to launch telemetry-emulator:
 
 # Test
 
+Install all necessary dependencies:
+```
+./ci/setup_env.sh
+```
+
 Test all packages:
 
 ```
