@@ -116,7 +116,10 @@ type AOSMessage struct {
 
 // DesiredStatus desired status message
 type DesiredStatus struct {
-	Services []byte `json:"services"`
+	Services          []byte             `json:"services"`
+	Layers            []byte             `json:"layers"`
+	CertificateChains []CertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []Certificate      `json:"certificates,omitempty"`
 }
 
 // RequestServiceCrashLog request service crash log message
@@ -146,8 +149,8 @@ type SystemRevert struct {
 	ImageVersion uint64 `json:"imageVersion"`
 }
 
-// UpgradeDecryptionInfo upgrade decryption info
-type UpgradeDecryptionInfo struct {
+// DecryptionInfo upgrade decryption info
+type DecryptionInfo struct {
 	BlockAlg     string `json:"blockAlg"`
 	BlockIv      []byte `json:"blockIv"`
 	BlockKey     []byte `json:"blockKey"`
@@ -158,8 +161,8 @@ type UpgradeDecryptionInfo struct {
 	} `json:"receiverInfo"`
 }
 
-// UpgradeSigns upgrade signs
-type UpgradeSigns struct {
+// Signs message signature
+type Signs struct {
 	ChainName        string   `json:"chainName"`
 	Alg              string   `json:"alg"`
 	Value            []byte   `json:"value"`
@@ -167,29 +170,34 @@ type UpgradeSigns struct {
 	OcspValues       []string `json:"ocspValues"`
 }
 
-// UpgradeCertificateChain upgrade certificate chain
-type UpgradeCertificateChain struct {
+// CertificateChain  certificate chain
+type CertificateChain struct {
 	Name         string   `json:"name"`
 	Fingerprints []string `json:"fingerprints"`
 }
 
-// UpgradeCertificate upgrade certificate
-type UpgradeCertificate struct {
+// Certificate certificate structure
+type Certificate struct {
 	Fingerprint string `json:"fingerprint"`
 	Certificate []byte `json:"certificate"`
 }
 
 // SystemUpgrade system upgrade structure
 type SystemUpgrade struct {
-	ImageVersion      uint64                    `json:"imageVersion"`
-	URLs              []string                  `json:"urls"`
-	Sha256            []byte                    `json:"sha256"`
-	Sha512            []byte                    `json:"sha512"`
-	Size              uint64                    `json:"size"`
-	DecryptionInfo    *UpgradeDecryptionInfo    `json:"decryptionInfo,omitempty"`
-	Signs             *UpgradeSigns             `json:"signs,omitempty"`
-	CertificateChains []UpgradeCertificateChain `json:"certificateChains,omitempty"`
-	Certificates      []UpgradeCertificate      `json:"certificates,omitempty"`
+	ImageVersion uint64 `json:"imageVersion"`
+	DecryptDataStruct
+	CertificateChains []CertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []Certificate      `json:"certificates,omitempty"`
+}
+
+//DecryptDataStruct struct contains how to decrypt data
+type DecryptDataStruct struct {
+	URLs           []string        `json:"urls"`
+	Sha256         []byte          `json:"sha256"`
+	Sha512         []byte          `json:"sha512"`
+	Size           uint64          `json:"size"`
+	DecryptionInfo *DecryptionInfo `json:"decryptionInfo,omitempty"`
+	Signs          *Signs          `json:"signs,omitempty"`
 }
 
 // UpdateState state update message
@@ -289,6 +297,7 @@ type SystemVersion struct {
 // UnitStatus untit status structure
 type UnitStatus struct {
 	Services []ServiceInfo `json:"services"`
+	Layers   []LayerInfo   `json:"layers,omitempty"`
 }
 
 // ServiceInfo struct with service information
@@ -298,6 +307,14 @@ type ServiceInfo struct {
 	Status        string `json:"status"`
 	Error         string `json:"error,omitempty"`
 	StateChecksum string `json:"stateChecksum,omitempty"`
+}
+
+//LayerInfo struct with layer info and status
+type LayerInfo struct {
+	LayerID string `json:"layerId"`
+	Digest  string `json:"digest"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Message structure used to send/receive data by amqp
@@ -336,6 +353,22 @@ type ServiceInfoFromCloud struct {
 	EncryptionMode         string             `json:"encryptionMode"`
 	EncryptionModeParams   string             `json:"encryptionModeParams"`
 	AlertRules             *ServiceAlertRules `json:"alertRules,omitempty"`
+}
+
+// LayerInfoFromCloud service layer decryption info
+type LayerInfoFromCloud struct {
+	LayerID string `json:"layerId"`
+	Digest  string `json:"digest"`
+	Name    string `json:"name,omitempty"`
+	DecryptDataStruct
+}
+
+// DecodedDesiredStatus decoded Desired configuration
+type DecodedDesiredStatus struct {
+	Layers            []LayerInfoFromCloud
+	Services          []ServiceInfoFromCloud
+	CertificateChains []CertificateChain
+	Certificates      []Certificate
 }
 
 type serviceDiscoveryResp struct {
@@ -881,10 +914,20 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 					continue
 				}
 
-				if data, err = decodeServices(encodedData.Services); err != nil {
+				layersList, err := decodeLayers(encodedData.Layers)
+				if err != nil {
+					log.Errorf("Can't decode layers: %s", err)
+					continue
+				}
+
+				servicesList, err := decodeServices(encodedData.Services)
+				if err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
 				}
+
+				data = DecodedDesiredStatus{Layers: layersList, Services: servicesList,
+					CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
 			}
 
 			handler.MessageChannel <- Message{delivery.CorrelationId, data}
@@ -905,6 +948,25 @@ func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
 	}
 
 	return services, nil
+}
+
+func decodeLayers(data []byte) (layers []LayerInfoFromCloud, err error) {
+	if len(data) == 0 {
+		return layers, nil
+	}
+
+	decryptData, err := fcrypt.DecryptMetadata(data)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithField("data", string(decryptData)).Debug("Decrypted data")
+
+	if err = json.Unmarshal(decryptData, &layers); err != nil {
+		return nil, err
+	}
+
+	return layers, nil
 }
 
 func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (msg AOSMessage) {

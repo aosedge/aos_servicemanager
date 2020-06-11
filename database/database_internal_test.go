@@ -631,10 +631,11 @@ func TestUpgradeState(t *testing.T) {
 
 func TestUpgradeData(t *testing.T) {
 	setUpgradeData := amqp.SystemUpgrade{
-		URLs:   []string{"url1", "url2", "url3"},
-		Sha256: []byte("sha256"),
-		Sha512: []byte("sha512"),
-		Size:   1234}
+		DecryptDataStruct: amqp.DecryptDataStruct{URLs: []string{"url1", "url2", "url3"},
+			Sha256: []byte("sha256"),
+			Sha512: []byte("sha512"),
+			Size:   1234},
+	}
 
 	if err := db.SetUpgradeData(setUpgradeData); err != nil {
 		t.Fatalf("Can't set upgrade data: %s", err)

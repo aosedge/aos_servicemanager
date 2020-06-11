@@ -296,8 +296,8 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
-	case []amqp.ServiceInfoFromCloud:
-		log.WithField("len", len(data)).Info("Receive services info")
+	case amqp.DecodedDesiredStatus:
+		log.WithField("len", len(data.Services)).Info("Receive services info")
 
 		currentList, err := sm.launcher.GetServicesInfo()
 		if err != nil {
@@ -317,7 +317,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 			servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
 		}
 
-		for _, item := range data {
+		for _, item := range data.Services {
 			serviceInfoFromCloud := item
 
 			if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {

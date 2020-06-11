@@ -533,7 +533,7 @@ func (um *Client) clearDirs() (err error) {
 	return nil
 }
 
-func (um *Client) decryptImage(srcFileName, dstFileName string, decryptionInfo *amqp.UpgradeDecryptionInfo) (err error) {
+func (um *Client) decryptImage(srcFileName, dstFileName string, decryptionInfo *amqp.DecryptionInfo) (err error) {
 	context, err := um.crypt.ImportSessionKey(fcrypt.CryptoSessionKeyInfo{
 		SymmetricAlgName:  decryptionInfo.BlockAlg,
 		SessionKey:        decryptionInfo.BlockKey,
