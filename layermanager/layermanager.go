@@ -28,6 +28,7 @@ import (
 
 // LayerManager instance
 type LayerManager struct {
+	layersDir         string
 	layerInfoProvider LayerInfoProvider
 }
 
@@ -44,8 +45,8 @@ type LayerInfoProvider interface {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
-	layermanager = &LayerManager{layerInfoProvider: infoProvider}
+func New(layersStorageDir string, infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
+	layermanager = &LayerManager{layersDir: layersStorageDir, layerInfoProvider: infoProvider}
 
 	return layermanager, nil
 }
@@ -61,7 +62,7 @@ func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.Laye
 // GetLayersInfo provied list of already installed fs layers
 func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err error) {
 
-	return layers, nil
+	return layermanager.layerInfoProvider.GetLayersInfo()
 }
 
 // GetLayerPathByDigest privides fs layer path by layer digest

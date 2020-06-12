@@ -517,9 +517,9 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 	return nil
 }
 
-// SendInitialSetup sends initial list of available services
-func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo) (err error) {
-	statusMsg := handler.createAosMessage(UnitStatusType, UnitStatus{Services: serviceList})
+// SendInitialSetup sends initial list of available services and layers
+func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo, layersList []LayerInfo) (err error) {
+	statusMsg := handler.createAosMessage(UnitStatusType, UnitStatus{Services: serviceList, Layers: layersList})
 
 	handler.sendChannel <- Message{"", statusMsg}
 

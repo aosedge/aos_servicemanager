@@ -270,6 +270,12 @@ func TestReceiveMessages(t *testing.T) {
 		amqphandler.ServiceInfo{ID: "service2", Version: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
 	}
 
+	initialLayersSetupData := []amqphandler.LayerInfo{
+		amqphandler.LayerInfo{LayerID: "layer0", Digest: "sha256:0", Status: "installed"},
+		amqphandler.LayerInfo{LayerID: "layer1", Digest: "sha256:1", Status: "installed"},
+		amqphandler.LayerInfo{LayerID: "layer2", Digest: "sha256:2", Status: "installed"},
+	}
+
 	monitoringData := amqphandler.MonitoringData{Timestamp: time.Now().UTC()}
 	monitoringData.Global.RAM = 1024
 	monitoringData.Global.CPU = 50
@@ -321,11 +327,11 @@ func TestReceiveMessages(t *testing.T) {
 	testData := []messageDesc{
 		messageDesc{
 			call: func() error {
-				return amqpHandler.SendInitialSetup(initialSetupData)
+				return amqpHandler.SendInitialSetup(initialSetupData, initialLayersSetupData)
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.UnitStatus{Services: initialSetupData}},
+				Data:   &amqphandler.UnitStatus{Services: initialSetupData, Layers: initialLayersSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},

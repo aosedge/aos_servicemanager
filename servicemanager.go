@@ -37,6 +37,7 @@ import (
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/identification/visidentifier"
 	"aos_servicemanager/launcher"
+	"aos_servicemanager/layermanager"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/umclient"
@@ -70,6 +71,7 @@ type serviceManager struct {
 	logging    *logging.Logging
 	monitor    *monitoring.Monitor
 	um         *umclient.Client
+	layerMgr   *layermanager.LayerManager
 }
 
 type identifier interface {
@@ -236,6 +238,10 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
+	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.db); err != nil {
+		return sm, err
+	}
+
 	return sm, nil
 }
 
@@ -287,7 +293,12 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 		log.Fatalf("Can't get services: %s", err)
 	}
 
-	if err = sm.amqp.SendInitialSetup(initialList); err != nil {
+	initialLayerList, err := sm.layerMgr.GetLayersInfo()
+	if err != nil {
+		log.Fatalf("Can't get layers list: %s", err)
+	}
+
+	if err = sm.amqp.SendInitialSetup(initialList, initialLayerList); err != nil {
 		return err
 	}
 
