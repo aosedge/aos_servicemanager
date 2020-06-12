@@ -28,6 +28,15 @@ import (
 
 // LayerManager instance
 type LayerManager struct {
+	layerInfoProvider LayerInfoProvider
+}
+
+// LayerInfoProvider provides API to add, remove or access layer information
+type LayerInfoProvider interface {
+	AddLayer(digest, layerID, path, osVersion string) (err error)
+	DeleteLayerByDigest(digest string) (err error)
+	GetLayerPathByDigest(digest string) (path string, err error)
+	GetLayersInfo() (layersList []amqp.LayerInfo, err error)
 }
 
 /*******************************************************************************
@@ -35,8 +44,8 @@ type LayerManager struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New() (layermanager *LayerManager, err error) {
-	layermanager = &LayerManager{}
+func New(infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
+	layermanager = &LayerManager{layerInfoProvider: infoProvider}
 
 	return layermanager, nil
 }

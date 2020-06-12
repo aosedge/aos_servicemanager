@@ -717,6 +717,46 @@ func TestMultiThread(t *testing.T) {
 	wg.Wait()
 }
 
+func TestLayers(t *testing.T) {
+	if err := db.AddLayer("sha256:1", "id1", "path1", "1"); err != nil {
+		t.Errorf("Can't add layer %s", err)
+	}
+
+	if err := db.AddLayer("sha256:2", "id2", "path2", "1"); err != nil {
+		t.Errorf("Can't add layer %s", err)
+	}
+
+	if err := db.AddLayer("sha256:3", "id3", "path3", "1"); err != nil {
+		t.Errorf("Can't add layer %s", err)
+	}
+
+	path, err := db.GetLayerPathByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path %s", err)
+	}
+
+	if path != "path2" {
+		t.Errorf("Path form db %s != path2", path)
+	}
+
+	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
+		t.Errorf("Should be error: entry does not exist")
+	}
+
+	if err := db.DeleteLayerByDigest("sha256:2"); err != nil {
+		t.Errorf("Can't delete layer %s", err)
+	}
+
+	layers, err := db.GetLayersInfo()
+	if err != nil {
+		t.Errorf("Can't get layers info %s", err)
+	}
+
+	if len(layers) != 2 {
+		t.Errorf("Count of layers in DB %d != 2", len(layers))
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/

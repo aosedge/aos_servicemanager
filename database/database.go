@@ -43,6 +43,8 @@ const (
 	syncMode    = "NORMAL"
 )
 
+const installedStatus = "installed"
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -95,6 +97,9 @@ func New(name string) (db *Database, err error) {
 		return db, err
 	}
 	if err := db.createTrafficMonitorTable(); err != nil {
+		return db, err
+	}
+	if err := db.createLayersTable(); err != nil {
 		return db, err
 	}
 
@@ -749,6 +754,72 @@ func (db *Database) GetUpgradeVersion() (version uint64, err error) {
 	return version, nil
 }
 
+//AddLayer add layer to layers table
+func (db *Database) AddLayer(digest, layerID, path, osVersion string) (err error) {
+	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(digest, layerID, path, osVersion)
+
+	return err
+}
+
+//DeleteLayerByDigest remove layer from DB by digest
+func (db *Database) DeleteLayerByDigest(digest string) (err error) {
+	stmt, err := db.sql.Prepare("DELETE FROM layers WHERE digest = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(digest)
+
+	return err
+}
+
+//GetLayerPathByDigest return layer installation path by digest
+func (db *Database) GetLayerPathByDigest(digest string) (path string, err error) {
+	stmt, err := db.sql.Prepare("SELECT path FROM layers WHERE digest = ?")
+	if err != nil {
+		return path, err
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(digest).Scan(&path)
+	if err == sql.ErrNoRows {
+		return path, ErrNotExist
+	}
+	if err != nil {
+		return path, err
+	}
+
+	return path, nil
+}
+
+//GetLayersInfo get all installed layers
+func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
+	rows, err := db.sql.Query("SELECT digest, layerId FROM layers ")
+	if err != nil {
+		return layersList, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		layer := amqp.LayerInfo{Status: installedStatus}
+
+		if err = rows.Scan(&layer.Digest, &layer.LayerID); err != nil {
+			return layersList, err
+		}
+
+		layersList = append(layersList, layer)
+	}
+
+	return layersList, rows.Err()
+}
+
 // Close closes database
 func (db *Database) Close() {
 	db.sql.Close()
@@ -845,6 +916,17 @@ func (db *Database) createTrafficMonitorTable() (err error) {
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
 																	 time TIMESTAMP,
 																	 value INTEGER)`)
+
+	return err
+}
+
+func (db *Database) createLayersTable() (err error) {
+	log.Info("Create layers table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
+															 layerId TEXT,
+															 path TEXT,
+															 osVersion TEXT	)`)
 
 	return err
 }
