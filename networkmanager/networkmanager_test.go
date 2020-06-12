@@ -104,7 +104,7 @@ func TestAddRemoveService(t *testing.T) {
 		t.Fatalf("Can't create network: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("service0", "network0"); err != nil {
+	if err := manager.AddServiceToNetwork("service0", tmpDir, "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -130,14 +130,14 @@ func TestInternet(t *testing.T) {
 		t.Fatalf("Can't create network: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("service0", "network0"); err != nil {
-		t.Fatalf("Can't add service to network: %s", err)
-	}
-
 	containerPath := path.Join(tmpDir, "service0")
 
-	if err := createOCIContainer(containerPath, "service0", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
+	if err := createOCIContainer(containerPath, "service0", []string{"ping", "google.com", "-c10", "-w10"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", containerPath, "network0"); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
 	}
 
 	if err := runOCIContainer(containerPath, "service0"); err != nil {
@@ -210,8 +210,14 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	spec.Process.Args = args
 
-	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf", "/etc/ssl"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount, Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
+			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+	}
+
+	for _, mount := range []string{"hosts", "resolv.conf"} {
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
+			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
 	}
 
 	spec.Hooks = new(runtimespec.Hooks)

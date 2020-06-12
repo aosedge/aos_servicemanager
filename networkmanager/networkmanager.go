@@ -21,6 +21,7 @@ package networkmanager
 
 import (
 	"fmt"
+	"path"
 
 	"github.com/docker/libnetwork"
 	netconfig "github.com/docker/libnetwork/config"
@@ -38,6 +39,11 @@ import (
 
 const (
 	typeBridge = "bridge"
+)
+
+const (
+	serviceHostsPath       = "/etc/hosts"
+	serviceResolveConfPath = "/etc/resolv.conf"
 )
 
 /*******************************************************************************
@@ -158,7 +164,7 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, servicePath, spID string) (err error) {
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
 	network, err := manager.controller.NetworkByName(spID)
@@ -185,7 +191,9 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string) (err 
 			return err
 		}
 
-		if sandbox, err = manager.controller.NewSandbox(serviceID); err != nil {
+		if sandbox, err = manager.controller.NewSandbox(serviceID,
+			libnetwork.OptionHostsPath(path.Join(servicePath, serviceHostsPath)),
+			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath))); err != nil {
 			return err
 		}
 	}
