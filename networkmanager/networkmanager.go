@@ -132,6 +132,8 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 		sandbox := ep.Info().Sandbox()
 
 		if sandbox != nil {
+			log.WithFields(log.Fields{"serviceID": sandbox.ContainerID(), "spID": network.Name()}).Debug("Service removed from network")
+
 			if leaveErr := ep.Leave(sandbox); leaveErr != nil {
 				if err == nil {
 					err = leaveErr
@@ -164,7 +166,7 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, servicePath, spID string) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath, hostname string) (err error) {
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
 	network, err := manager.controller.NetworkByName(spID)
@@ -191,9 +193,16 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, servicePath, spID 
 			return err
 		}
 
-		if sandbox, err = manager.controller.NewSandbox(serviceID,
+		options := []libnetwork.SandboxOption{
 			libnetwork.OptionHostsPath(path.Join(servicePath, serviceHostsPath)),
-			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath))); err != nil {
+			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath)),
+		}
+
+		if hostname != "" {
+			options = append(options, libnetwork.OptionHostname(hostname))
+		}
+
+		if sandbox, err = manager.controller.NewSandbox(serviceID, options...); err != nil {
 			return err
 		}
 	}

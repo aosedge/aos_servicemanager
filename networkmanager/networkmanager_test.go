@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/docker/docker/pkg/reexec"
@@ -104,7 +105,7 @@ func TestAddRemoveService(t *testing.T) {
 		t.Fatalf("Can't create network: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("service0", tmpDir, "network0"); err != nil {
+	if err := manager.AddServiceToNetwork("service0", "network0", tmpDir, ""); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -136,13 +137,61 @@ func TestInternet(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("service0", containerPath, "network0"); err != nil {
+	if err := manager.AddServiceToNetwork("service0", "network0", containerPath, ""); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
 	if err := runOCIContainer(containerPath, "service0"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
+
+	if err := manager.DeleteNetwork("network0"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+}
+
+func TestInterServiceConnection(t *testing.T) {
+	if err := manager.CreateNetwork("network0"); err != nil {
+		t.Fatalf("Can't create network: %s", err)
+	}
+
+	container0Path := path.Join(tmpDir, "service0")
+
+	if err := createOCIContainer(container0Path, "service0", []string{"sleep", "12"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", "network0", container0Path, "service1"); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		if err := runOCIContainer(container0Path, "service0"); err != nil {
+			t.Errorf("Error: %s", err)
+		}
+	}()
+
+	container1Path := path.Join(tmpDir, "service1")
+
+	if err := createOCIContainer(container1Path, "service1", []string{"ping", "service0", "-c10", "-w10"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service1", "network0", container1Path, "service1"); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	if err := runOCIContainer(container1Path, "service1"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	wg.Wait()
 
 	if err := manager.DeleteNetwork("network0"); err != nil {
 		t.Fatalf("Can't Delete network: %s", err)
