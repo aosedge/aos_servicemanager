@@ -18,11 +18,19 @@
 package networkmanager_test
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
+	"path"
+	"strconv"
 	"testing"
 
 	"github.com/docker/docker/pkg/reexec"
+	"github.com/docker/docker/pkg/stringid"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/config"
@@ -117,6 +125,30 @@ func TestAddRemoveService(t *testing.T) {
 	}
 }
 
+func TestInternet(t *testing.T) {
+	if err := manager.CreateNetwork("network0"); err != nil {
+		t.Fatalf("Can't create network: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", "network0"); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	containerPath := path.Join(tmpDir, "service0")
+
+	if err := createOCIContainer(containerPath, "service0", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := runOCIContainer(containerPath, "service0"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	if err := manager.DeleteNetwork("network0"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -147,4 +179,74 @@ func cleanup() {
 	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp dir: %s", err)
 	}
+}
+
+func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
+	if err = os.RemoveAll(imagePath); err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
+		return err
+	}
+
+	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
+	if err != nil {
+		return errors.New(string(out))
+	}
+
+	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
+	if err != nil {
+		return err
+	}
+
+	var spec runtimespec.Spec
+
+	if err = json.Unmarshal(specJSON, &spec); err != nil {
+		return err
+	}
+
+	spec.Process.Terminal = false
+
+	spec.Process.Args = args
+
+	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf", "/etc/ssl"} {
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount, Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+	}
+
+	spec.Hooks = new(runtimespec.Hooks)
+
+	spec.Hooks.Prestart = append(spec.Hooks.Poststart, runtimespec.Hook{
+		Path: path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"),
+		Args: []string{
+			"libnetwork-setkey",
+			"-exec-root=/run/aos",
+			containerID,
+			stringid.TruncateID(manager.GetID()),
+		}})
+
+	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
+	spec.Process.Capabilities.Effective = append(spec.Process.Capabilities.Effective, "CAP_NET_RAW")
+	spec.Process.Capabilities.Inheritable = append(spec.Process.Capabilities.Inheritable, "CAP_NET_RAW")
+	spec.Process.Capabilities.Permitted = append(spec.Process.Capabilities.Permitted, "CAP_NET_RAW")
+	spec.Process.Capabilities.Ambient = append(spec.Process.Capabilities.Ambient, "CAP_NET_RAW")
+
+	if specJSON, err = json.Marshal(&spec); err != nil {
+		return err
+	}
+
+	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runOCIContainer(imagePath string, containerID string) (err error) {
+	output, err := exec.Command("runc", "run", "-b", imagePath, containerID).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("message: %s, err: %s", string(output), err)
+	}
+
+	return nil
 }
