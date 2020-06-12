@@ -88,6 +88,10 @@ The configuration file has JSON format. Following is JSON schema:
             "description": "Directory where upgrade image are stored",
             "type": "string"
         },
+        "layersDir": {
+            "description": "Directory where service layers are stored",
+            "type": "string"
+        },
         "defaultServiceTTLDays": {
             "description": "Specifies how long  to keep service and its data when it is not used",
             "type": "integer",
