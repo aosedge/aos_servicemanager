@@ -85,6 +85,9 @@ type testStorage struct {
 	version uint64
 }
 
+type clientHandler struct {
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -165,7 +168,7 @@ func TestMain(m *testing.M) {
 
 	server, err = wsserver.New("TestServer", url.Host,
 		"../ci/crt.pem",
-		"../ci/key.pem", processMessage)
+		"../ci/key.pem", new(clientHandler))
 	if err != nil {
 		log.Fatalf("Can't create ws server: %s", err)
 	}
@@ -411,7 +414,7 @@ func (sender *testSender) SendSystemUpgradeStatus(upgradeStatus, upgradeError st
 	return nil
 }
 
-func processMessage(messageType int, messageIn []byte) (messageOut []byte, err error) {
+func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType int, messageIn []byte) (messageOut []byte, err error) {
 	var message umprotocol.Message
 	var response interface{}
 
@@ -504,6 +507,14 @@ func processMessage(messageType int, messageIn []byte) (messageOut []byte, err e
 	}
 
 	return messageOut, nil
+}
+
+func (handler clientHandler) ClientConnected(client *wsserver.Client) {
+
+}
+
+func (handler clientHandler) ClientDisconnected(client *wsserver.Client) {
+
 }
 
 func createUpgradeData(version uint64, fileName string, content []byte) (data amqp.SystemUpgrade, err error) {
