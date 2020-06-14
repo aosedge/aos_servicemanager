@@ -20,12 +20,10 @@ package umclient
 import (
 	"encoding/json"
 	"errors"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -36,6 +34,7 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/fcrypt"
+	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -91,12 +90,6 @@ type Storage interface {
 	GetUpgradeData() (data amqp.SystemUpgrade, err error)
 	SetUpgradeVersion(version uint64) (err error)
 	GetUpgradeVersion() (version uint64, err error)
-}
-
-// Image provides API to download, decrypt images
-type Image interface {
-	Download(dstDir, url string) (fileName string, err error)
-	Decrypt(srcFileName, dstFileName string, asymAlg, blockAlg string, blockKey, blockIv []byte) (err error)
 }
 
 /*******************************************************************************
@@ -411,87 +404,37 @@ func (um *Client) sendRevertStatus(revertStatus, revertError string) {
 	}
 }
 
-func (um *Client) checkFile(fileName string, data amqp.SystemUpgrade) (err error) {
-	// This function is called under locked context but we need to unlock for downloads
-	um.Unlock()
-	defer um.Lock()
-
-	if err = image.CheckFileInfo(fileName, image.FileInfo{
-		Sha256: data.Sha256,
-		Sha512: data.Sha512,
-		Size:   data.Size}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (um *Client) downloadImage() {
 	um.Lock()
 	defer um.Unlock()
 
-	image, err := image.New()
+	decryptData := amqp.DecryptDataStruct{URLs: um.upgradeData.URLs,
+		Sha256:         um.upgradeData.Sha256,
+		Sha512:         um.upgradeData.Sha512,
+		Size:           um.upgradeData.Size,
+		DecryptionInfo: um.upgradeData.DecryptionInfo,
+		Signs:          um.upgradeData.Signs}
+
+	fileName, err := utils.DownloadImage(decryptData, um.downloadDir)
 	if err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "can't create image instance")
-		return
-	}
-
-	if len(um.upgradeData.URLs) == 0 {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "upgrade file list URLs is empty")
-		return
-	}
-
-	fileDownloaded := false
-	fileName := ""
-
-	for _, rawURL := range um.upgradeData.URLs {
-		url, err := url.Parse(rawURL)
-		if err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		// skip already downloaded and decrypted files
-		if !url.IsAbs() {
-			break
-		}
-
-		var stat syscall.Statfs_t
-
-		syscall.Statfs(um.downloadDir, &stat)
-
-		if um.upgradeData.Size > stat.Bavail*uint64(stat.Bsize) {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, "not enough space")
-			return
-		}
-
-		if fileName, err = image.Download(um.downloadDir, rawURL); err != nil {
-			log.WithField("url", rawURL).Warningf("Can't download file: %s", err)
-			continue
-		}
-
-		fileDownloaded = true
-
-		break
-	}
-
-	if !fileDownloaded {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "can't download file from any source")
-		return
-	}
-
-	if err = um.checkFile(fileName, um.upgradeData); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
+
+	um.Unlock()
+	if err = utils.CheckFile(fileName, decryptData); err != nil {
+		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
+		return
+	}
+	um.Lock()
 
 	if um.upgradeData.DecryptionInfo == nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, "no decryption info provided")
 		return
 	}
 
-	if err = um.decryptImage(
-		fileName, path.Join(um.upgradeDir, filepath.Base(fileName)), um.upgradeData.DecryptionInfo); err != nil {
+	destinationFile := path.Join(um.upgradeDir, filepath.Base(fileName))
+	if err = utils.DecryptImage(fileName, destinationFile, um.crypt, um.upgradeData.DecryptionInfo); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
@@ -503,7 +446,8 @@ func (um *Client) downloadImage() {
 		return
 	}
 
-	if err = um.checkSigns(); err != nil {
+	if err = utils.CheckSigns(destinationFile,
+		um.crypt, um.upgradeData.Signs, um.upgradeData.CertificateChains, um.upgradeData.Certificates); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
@@ -527,75 +471,6 @@ func (um *Client) clearDirs() (err error) {
 	}
 
 	if err = os.MkdirAll(um.downloadDir, 0755); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (um *Client) decryptImage(srcFileName, dstFileName string, decryptionInfo *amqp.DecryptionInfo) (err error) {
-	context, err := um.crypt.ImportSessionKey(fcrypt.CryptoSessionKeyInfo{
-		SymmetricAlgName:  decryptionInfo.BlockAlg,
-		SessionKey:        decryptionInfo.BlockKey,
-		SessionIV:         decryptionInfo.BlockIv,
-		AsymmetricAlgName: decryptionInfo.AsymAlg})
-	if err != nil {
-		return err
-	}
-
-	srcFile, err := os.Open(srcFileName)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.OpenFile(dstFileName, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	log.WithFields(log.Fields{"srcFile": srcFile.Name(), "dstFile": dstFile.Name()}).Debug("Decrypt image")
-
-	if err = context.DecryptFile(srcFile, dstFile); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (um *Client) checkSigns() (err error) {
-	context, err := um.crypt.CreateSignContext()
-	if err != nil {
-		return err
-	}
-
-	for _, cert := range um.upgradeData.Certificates {
-		if err = context.AddCertificate(cert.Fingerprint, cert.Certificate); err != nil {
-			return err
-		}
-	}
-
-	for _, chain := range um.upgradeData.CertificateChains {
-		if err = context.AddCertificateChain(chain.Name, chain.Fingerprints); err != nil {
-			return err
-		}
-	}
-
-	if um.upgradeData.Signs == nil {
-		return errors.New("upgradeData does not have signature")
-	}
-
-	file, err := os.Open(path.Join(um.upgradeDir, um.upgradeData.URLs[0]))
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	log.WithField("file", file.Name()).Debug("Check signature")
-
-	if err = context.VerifySign(file, um.upgradeData.Signs.ChainName, um.upgradeData.Signs.Alg,
-		um.upgradeData.Signs.Value); err != nil {
 		return err
 	}
 
