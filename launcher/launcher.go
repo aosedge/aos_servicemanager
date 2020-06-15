@@ -31,6 +31,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -82,9 +83,6 @@ const serviceTemplate = `# This is template file used to launch AOS services
 # * ${RUNC}          - path to runc
 # * ${SETNETLIMIT}   - command to set net limit
 # * ${CLEARNETLIMIT} - command to clear net limit
-# * ${CLEARMOUNT}    - command to prepare rootfs mount
-# * ${MOUNT}         - command to mount rootfs
-# * ${UMOUNT}        - command to umount rootfs
 [Unit]
 Description=AOS Service
 After=network.target
@@ -93,16 +91,13 @@ After=network.target
 Type=forking
 Restart=always
 RestartSec=1
-ExecStartPre=${CLEARMOUNT}
-ExecStartPre=${MOUNT}
 ExecStartPre=${RUNC} delete -f ${ID}
 ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
 ExecStartPost=${SETNETLIMIT}
 
 ExecStop=${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
-ExecStopPost=-${RUNC} delete -f ${ID}
-ExecStopPost=-${UMOUNT}
+ExecStopPost=${RUNC} delete -f ${ID}
 PIDFile=${SERVICEPATH}/.pid
 SuccessExitStatus=SIGKILL
 
@@ -150,6 +145,8 @@ type Launcher struct {
 	downloader downloader
 
 	users []string
+
+	services sync.Map
 
 	serviceTemplate  string
 	runcPath         string
@@ -690,10 +687,6 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return err
 	}
 
-	if installDir, err = filepath.Abs(installDir); err != nil {
-		return err
-	}
-
 	defer func() {
 		if err != nil {
 			log.WithField("serviceID", serviceInfo.ID).Errorf("Error install service: %s", err)
@@ -719,7 +712,6 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.ID}).Debug("Create install dir")
 
 	var newService Service
-
 	if newService, err = launcher.prepareService(unpackDir, installDir, serviceInfo); err != nil {
 		return err
 	}
@@ -848,17 +840,61 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 	return nil
 }
 
-func (launcher *Launcher) restartService(service Service) (err error) {
-	channel := make(chan string)
-	if _, err = launcher.systemd.StopUnit(service.UnitName, "replace", channel); err == nil {
-		status := <-channel
+func (launcher *Launcher) mountLayers(service Service) (err error) {
+	mergedDir := path.Join(service.Path, serviceMergedDir)
 
-		log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Stop service")
+	// create merged dir
+	if err = os.MkdirAll(mergedDir, 0755); err != nil {
+		return err
+	}
+
+	workDir := path.Join(service.Path, serviceWorkDir)
+
+	// create work dir
+	if err = os.MkdirAll(workDir, 0755); err != nil {
+		return err
+	}
+
+	upperDir := path.Join(service.Path, serviceUpperDir)
+
+	// create work dir
+	if err = os.MkdirAll(upperDir, 0755); err != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
+
+	if err = overlayMount(mergedDir, []string{
+		path.Join(service.Path, serviceRootfsDir),
+		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir),
+		"/"}, workDir, upperDir); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) umountLayers(service Service) (err error) {
+	mergedDir := path.Join(service.Path, serviceMergedDir)
+
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service layers")
+
+	if err = umountWithRetry(mergedDir, 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) restartService(service Service) (err error) {
+	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
+	if err != nil {
+		return err
 	}
 
 	// Use launcher.systemd.EnableUnitFiles if services should be started automatically
 	// on system restart
-	if _, err = launcher.systemd.LinkUnitFiles([]string{path.Join(service.Path, service.UnitName)}, false, true); err != nil {
+	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
 		return err
 	}
 
@@ -866,15 +902,41 @@ func (launcher *Launcher) restartService(service Service) (err error) {
 		return err
 	}
 
-	if err = launcher.startService(service); err != nil {
+	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
 		return err
 	}
+
+	if err = launcher.mountLayers(service); err != nil {
+		return err
+	}
+
+	channel := make(chan string)
+	if _, err = launcher.systemd.RestartUnit(service.UnitName, "replace", channel); err != nil {
+		return err
+	}
+	status := <-channel
+
+	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Restart service")
+
+	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
+	}
+
+	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
+		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
+	}
+
+	launcher.services.Store(service.UnitName, service.ID)
 
 	return nil
 }
 
 func (launcher *Launcher) startService(service Service) (err error) {
 	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
+		return err
+	}
+
+	if err = launcher.mountLayers(service); err != nil {
 		return err
 	}
 
@@ -893,6 +955,8 @@ func (launcher *Launcher) startService(service Service) (err error) {
 	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
+
+	launcher.services.Store(service.UnitName, service.ID)
 
 	return nil
 }
@@ -928,6 +992,22 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
+	if err := launcher.umountLayers(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
+			retErr = err
+		}
+	}
+
+	if err := launcher.umountLayers(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
+			retErr = err
+		}
+	}
+
+	launcher.services.Delete(service.UnitName)
+
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
@@ -1088,18 +1168,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	witeoutsDir, err := filepath.Abs(path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir))
-	if err != nil {
-		return service, err
-	}
-
-	layerDirs := []string{
-		path.Join(installDir, serviceRootfsDir),
-		witeoutsDir,
-		"/",
-	}
-
-	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, layerDirs, spec.aosConfig); err != nil {
+	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec.aosConfig); err != nil {
 		return service, err
 	}
 
@@ -1172,11 +1241,17 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 				}
 			}
 
+			if err = launcher.umountLayers(newService); err != nil {
+				log.WithField("id", newService.ID).Errorf("Can't umount layers: %s", err)
+			}
+
 			if err = os.RemoveAll(newService.Path); err != nil {
 				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
 			}
 		}
 	}()
+
+	launcher.services.Delete(oldService.UnitName)
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
 		return err
@@ -1195,6 +1270,10 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 	}
 
 	if err = launcher.restartService(newService); err != nil {
+		return err
+	}
+
+	if err = launcher.umountLayers(oldService); err != nil {
 		return err
 	}
 
@@ -1302,46 +1381,19 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	return string(fileContent), nil
 }
 
-func (launcher *Launcher) prepareMount(installDir string, layerDirs []string) (mountCmd, umountCmd, clearMountCmd string, err error) {
-	mergedDir := path.Join(installDir, serviceMergedDir)
-
-	if err = os.MkdirAll(mergedDir, 0755); err != nil {
-		return "", "", "", err
-	}
-
-	upperDir := path.Join(installDir, serviceUpperDir)
-
-	if err = os.MkdirAll(upperDir, 0755); err != nil {
-		return "", "", "", err
-	}
-
-	workDir := path.Join(installDir, serviceWorkDir)
-
-	if err = os.MkdirAll(workDir, 0755); err != nil {
-		return "", "", "", err
-	}
-
-	mountCmd = fmt.Sprintf("/bin/mount -t overlay overlay -o lowerdir=%s,workdir=%s,upperdir=%s %s",
-		strings.Join(layerDirs, ":"), workDir, upperDir, mergedDir)
-	umountCmd = fmt.Sprintf("/bin/umount %s", mergedDir)
-	clearMountCmd = fmt.Sprintf(`/bin/sh -c "rm -rf %s/* %s/* %s/*"`, workDir, upperDir, mergedDir)
-
-	return mountCmd, umountCmd, clearMountCmd, nil
-}
-
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string,
-	layerDirs []string, spec *aosServiceConfig) (err error) {
-	log.WithField("unit", serviceName).Debug("Create systemd service file")
-
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *aosServiceConfig) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(spec)
+	absServicePath, err := filepath.Abs(installDir)
+	if err != nil {
+		return err
+	}
 
-	mountCmd, umountCmd, clearMountCmd, err := launcher.prepareMount(installDir, layerDirs)
+	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(spec)
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
@@ -1353,12 +1405,10 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		// replaces variables with values
 		line = strings.Replace(line, "${RUNC}", launcher.runcPath, -1)
 		line = strings.Replace(line, "${ID}", id, -1)
-		line = strings.Replace(line, "${SERVICEPATH}", installDir, -1)
+		line = strings.Replace(line, "${SERVICEPATH}", absServicePath, -1)
 		line = strings.Replace(line, "${SETNETLIMIT}", setNetLimitCmd, -1)
 		line = strings.Replace(line, "${CLEARNETLIMIT}", clearNetLimitCmd, -1)
-		line = strings.Replace(line, "${MOUNT}", mountCmd, -1)
-		line = strings.Replace(line, "${UMOUNT}", umountCmd, -1)
-		line = strings.Replace(line, "${CLEARMOUNT}", clearMountCmd, -1)
+
 		fmt.Fprint(f, line)
 	}
 
