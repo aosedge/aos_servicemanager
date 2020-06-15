@@ -999,13 +999,6 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 		}
 	}
 
-	if err := launcher.umountLayers(service); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
-			retErr = err
-		}
-	}
-
 	launcher.services.Delete(service.UnitName)
 
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
