@@ -43,6 +43,7 @@ import (
 	"aos_servicemanager/config"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/platform"
+	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -1163,7 +1164,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	//unpack rootfs layer
-	if err := unpackImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
+	if err := utils.UnpackTarGzImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
 		return service, err
 	}
 

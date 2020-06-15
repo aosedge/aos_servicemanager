@@ -18,9 +18,13 @@
 package utils
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"errors"
+	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -166,4 +170,70 @@ func CheckSigns(filePath string, crypt *fcrypt.CryptoContext,
 	}
 
 	return nil
+}
+
+// UnpackTarGzImage extract tar gz archive
+func UnpackTarGzImage(source, destination string) (err error) {
+	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack image")
+
+	reader, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(destination, 0755); err != nil {
+		return err
+	}
+
+	gzReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return err
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	for {
+		header, err := tarReader.Next()
+
+		switch {
+		case err == io.EOF:
+			return nil
+
+		case err != nil:
+			return err
+
+		case header == nil:
+			continue
+		}
+
+		target := filepath.Join(destination, header.Name)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if _, err := os.Stat(target); err != nil {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					return err
+				}
+			}
+
+		case tar.TypeReg:
+			dir, _ := filepath.Split(target)
+			if _, err := os.Stat(dir); err != nil {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return err
+				}
+			}
+
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+
+			if _, err := io.Copy(file, tarReader); err != nil {
+				return err
+			}
+		}
+	}
 }

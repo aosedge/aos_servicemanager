@@ -30,12 +30,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
 	"github.com/cavaliercoder/grab"
+	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/fcrypt"
+	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -141,7 +142,7 @@ func downloadAndUnpackImage(downloader downloader, serviceInfo amqp.ServiceInfoF
 	}
 
 	// unpack image there
-	if err = unpackImage(image, installDir); err != nil {
+	if err = utils.UnpackTarGzImage(image, installDir); err != nil {
 		return err
 	}
 
@@ -276,71 +277,6 @@ func packImage(source, name string) (err error) {
 		_, err = io.Copy(tarWriter, file)
 		return err
 	})
-}
-
-func unpackImage(name, destination string) (err error) {
-	log.WithFields(log.Fields{"name": name, "destination": destination}).Debug("Unpack image")
-
-	reader, err := os.Open(name)
-	if err != nil {
-		return err
-	}
-
-	if err = os.MkdirAll(destination, 0755); err != nil {
-		return err
-	}
-
-	gzReader, err := gzip.NewReader(reader)
-	if err != nil {
-		return err
-	}
-	defer gzReader.Close()
-
-	tarReader := tar.NewReader(gzReader)
-
-	for {
-		header, err := tarReader.Next()
-
-		switch {
-		case err == io.EOF:
-			return nil
-
-		case err != nil:
-			return err
-
-		case header == nil:
-			continue
-		}
-
-		target := filepath.Join(destination, header.Name)
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if _, err := os.Stat(target); err != nil {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					return err
-				}
-			}
-
-		case tar.TypeReg:
-			dir, _ := filepath.Split(target)
-			if _, err := os.Stat(dir); err != nil {
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					return err
-				}
-			}
-
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			if _, err := io.Copy(file, tarReader); err != nil {
-				return err
-			}
-		}
-	}
 }
 
 func getImageParts(installDir string) (parts imageParts, err error) {
