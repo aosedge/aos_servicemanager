@@ -140,6 +140,7 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 	if service.StorageLimit == 0 {
 		if usersService.StorageFolder != "" {
 			os.RemoveAll(usersService.StorageFolder)
+			os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder))
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, ""); err != nil {
@@ -147,6 +148,10 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 		}
 
 		return spec.removeStorageFolder()
+	}
+
+	if err = os.MkdirAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder), 0755); err != nil {
+		return err
 	}
 
 	if usersService.StorageFolder != "" {

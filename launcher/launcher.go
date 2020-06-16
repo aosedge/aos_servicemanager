@@ -112,10 +112,9 @@ const (
 )
 
 const (
-	serviceMergedDir = "merged"
-	serviceWorkDir   = "workdir"
-	serviceUpperDir  = "upperdir"
-	serviceRootfsDir = "rootfs"
+	serviceMergedDir      = "merged"
+	serviceRootfsDir      = "rootfs"
+	serviceMountPointsDir = "mounts"
 )
 
 /*******************************************************************************
@@ -848,26 +847,13 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 		return err
 	}
 
-	workDir := path.Join(service.Path, serviceWorkDir)
-
-	// create work dir
-	if err = os.MkdirAll(workDir, 0755); err != nil {
-		return err
-	}
-
-	upperDir := path.Join(service.Path, serviceUpperDir)
-
-	// create work dir
-	if err = os.MkdirAll(upperDir, 0755); err != nil {
-		return err
-	}
-
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
 	if err = overlayMount(mergedDir, []string{
+		path.Join(service.Path, serviceMountPointsDir),
 		path.Join(service.Path, serviceRootfsDir),
 		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir),
-		"/"}, workDir, upperDir); err != nil {
+		"/"}, "", ""); err != nil {
 		return err
 	}
 
@@ -1096,6 +1082,74 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 	return retErr
 }
 
+func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec) (err error) {
+	mountPointsDir := path.Join(serviceDir, serviceMountPointsDir)
+
+	if err = os.MkdirAll(mountPointsDir, 0755); err != nil {
+		return err
+	}
+
+	for _, mount := range spec.ocSpec.Mounts {
+
+		var permissions uint64
+
+		for _, option := range mount.Options {
+			nameValue := strings.Split(strings.TrimSpace(option), "=")
+
+			if len(nameValue) > 1 && nameValue[0] == "mode" {
+				if permissions, err = strconv.ParseUint(nameValue[1], 8, 32); err != nil {
+					return err
+				}
+			}
+		}
+
+		itemPath := path.Join(mountPointsDir, mount.Destination)
+
+		switch mount.Type {
+		case "proc", "tmpfs", "sysfs":
+			if err = os.MkdirAll(itemPath, 0755); err != nil {
+				return err
+			}
+
+			if permissions != 0 {
+				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
+					return err
+				}
+			}
+
+		case "bind":
+			stat, err := os.Stat(mount.Source)
+			if err != nil {
+				return err
+			}
+
+			if stat.IsDir() {
+				if err = os.MkdirAll(itemPath, 0755); err != nil {
+					return err
+				}
+			} else {
+				if err = os.MkdirAll(filepath.Dir(itemPath), 0755); err != nil {
+					return err
+				}
+
+				file, err := os.OpenFile(itemPath, os.O_CREATE, 0644)
+				if err != nil {
+					return err
+				}
+				file.Close()
+			}
+
+			if permissions != 0 {
+				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
 	userName, err := platform.CreateUser(serviceInfo.ID)
@@ -1156,6 +1210,10 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	if err = spec.setRootfs(serviceMergedDir); err != nil {
+		return service, err
+	}
+
+	if err = launcher.createMountPoints(installDir, spec); err != nil {
 		return service, err
 	}
 
