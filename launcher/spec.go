@@ -46,7 +46,7 @@ import (
  ******************************************************************************/
 
 const serviceStorageFolder = "/home/service/storage"
-const defaultCpuPeriod uint64 = 100000
+const defaultCPUPeriod uint64 = 100000
 
 /*******************************************************************************
  * Types
@@ -211,8 +211,8 @@ func (spec *serviceSpec) applyAosServiceConfig(path string) (err error) {
 			spec.ocSpec.Linux.Resources.CPU = &runtimespec.LinuxCPU{}
 		}
 
-		cpuQuota := int64((defaultCpuPeriod * (*spec.aosConfig.Quotas.CPULimit)) / 100)
-		cpuPeriod := defaultCpuPeriod
+		cpuQuota := int64((defaultCPUPeriod * (*spec.aosConfig.Quotas.CPULimit)) / 100)
+		cpuPeriod := defaultCPUPeriod
 
 		spec.ocSpec.Linux.Resources.CPU.Period = &cpuPeriod
 		spec.ocSpec.Linux.Resources.CPU.Quota = &cpuQuota

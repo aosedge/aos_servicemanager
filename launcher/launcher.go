@@ -1432,7 +1432,7 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	return string(fileContent), nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, spec *aosServiceConfig) (err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, aosConfig *aosServiceConfig) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
@@ -1444,7 +1444,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		return err
 	}
 
-	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(spec)
+	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(aosConfig)
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
@@ -1524,17 +1524,17 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	return nil
 }
 
-func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(config *aosServiceConfig) (setCmd, clearCmd string) {
-	if config == nil {
+func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(aosConfig *aosServiceConfig) (setCmd, clearCmd string) {
+	if aosConfig == nil {
 		return setCmd, clearCmd
 	}
 
-	if config.Quotas.DownloadSpeed != nil {
-		setCmd = setCmd + " -d " + strconv.FormatUint(*config.Quotas.DownloadSpeed, 10)
+	if aosConfig.Quotas.DownloadSpeed != nil {
+		setCmd = setCmd + " -d " + strconv.FormatUint(*aosConfig.Quotas.DownloadSpeed, 10)
 	}
 
-	if config.Quotas.UploadSpeed != nil {
-		setCmd = setCmd + " -u " + strconv.FormatUint(*config.Quotas.UploadSpeed, 10)
+	if aosConfig.Quotas.UploadSpeed != nil {
+		setCmd = setCmd + " -u " + strconv.FormatUint(*aosConfig.Quotas.UploadSpeed, 10)
 	}
 
 	if setCmd != "" {
