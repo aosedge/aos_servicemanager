@@ -62,6 +62,14 @@ type CryptoContext struct {
 	privateKey crypto.PrivateKey
 }
 
+// SymmetricContextInterface interface for SymmetricCipherContext
+type SymmetricContextInterface interface {
+	GenerateKeyAndIV(algString string) (err error)
+	DecryptFile(encryptedFile, clearFile *os.File) (err error)
+	EncryptFile(clearFile, encryptedFile *os.File) (err error)
+	IsReady() (ready bool)
+}
+
 type SymmetricCipherContext struct {
 	key         []byte
 	iv          []byte
@@ -80,6 +88,13 @@ type certificateInfo struct {
 type certificateChainInfo struct {
 	name         string
 	fingerprints []string
+}
+
+// SignContextInterface interface for SignContext
+type SignContextInterface interface {
+	AddCertificate(fingerprint string, asn1Bytes []byte) (err error)
+	AddCertificateChain(name string, fingerprints []string) (err error)
+	VerifySign(f *os.File, chainName string, algName string, signValue []byte) (err error)
 }
 
 type SignContext struct {
@@ -113,7 +128,7 @@ func CreateContext(conf config.Crypt) (*CryptoContext, error) {
 	return ctx, nil
 }
 
-func (ctx *CryptoContext) CreateSignContext() (*SignContext, error) {
+func (ctx *CryptoContext) CreateSignContext() (SignContextInterface, error) {
 	if ctx == nil || ctx.rootCertPool == nil {
 		return nil, errors.New("asymmetric context not initialized")
 	}
@@ -320,7 +335,7 @@ func (ctx *CryptoContext) LoadOnlineKey() error {
 	return err
 }
 
-func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (*SymmetricCipherContext, error) {
+func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (SymmetricContextInterface, error) {
 
 	if ctx == nil || ctx.privateKey == nil {
 		return nil, errors.New("asymmetric context not initialized")

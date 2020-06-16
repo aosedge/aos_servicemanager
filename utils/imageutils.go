@@ -35,6 +35,16 @@ import (
 	"aos_servicemanager/fcrypt"
 )
 
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+// FcryptInterface api to work with aoscrypto engine
+type FcryptInterface interface {
+	ImportSessionKey(keyInfo fcrypt.CryptoSessionKeyInfo) (symetrContext fcrypt.SymmetricContextInterface, err error)
+	CreateSignContext() (fcrypt.SignContextInterface, error)
+}
+
 // DownloadImage download encrypted image
 func DownloadImage(data amqp.DecryptDataStruct, downloadDir string) (fileName string, err error) {
 
@@ -98,7 +108,7 @@ func CheckFile(fileName string, data amqp.DecryptDataStruct) (err error) {
 }
 
 // DecryptImage decrypt already downloaded image
-func DecryptImage(srcFileName, dstFileName string, crypt *fcrypt.CryptoContext, decryptionInfo *amqp.DecryptionInfo) (err error) {
+func DecryptImage(srcFileName, dstFileName string, crypt FcryptInterface, decryptionInfo *amqp.DecryptionInfo) (err error) {
 	if decryptionInfo == nil {
 		return errors.New("image decryption info = nil")
 	}
@@ -134,7 +144,7 @@ func DecryptImage(srcFileName, dstFileName string, crypt *fcrypt.CryptoContext, 
 }
 
 // CheckSigns check image signature
-func CheckSigns(filePath string, crypt *fcrypt.CryptoContext,
+func CheckSigns(filePath string, crypt FcryptInterface,
 	signs *amqp.Signs, chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
 	context, err := crypt.CreateSignContext()
 	if err != nil {
