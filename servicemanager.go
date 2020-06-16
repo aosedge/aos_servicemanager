@@ -238,7 +238,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.db); err != nil {
+	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.crypt, sm.db); err != nil {
 		return sm, err
 	}
 
@@ -308,6 +308,11 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
 	case amqp.DecodedDesiredStatus:
+		if err := sm.layerMgr.ProcessDesiredLayersList(data.Layers, data.CertificateChains, data.Certificates); err != nil {
+			log.Error("Can't process layer list: ", err)
+			return err
+		}
+
 		log.WithField("len", len(data.Services)).Info("Receive services info")
 
 		currentList, err := sm.launcher.GetServicesInfo()
