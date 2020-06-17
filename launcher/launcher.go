@@ -1357,15 +1357,14 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	service = Service{
-		ID:              serviceInfo.ID,
-		Version:         serviceInfo.Version,
-		ServiceProvider: defaultServiceProvider,
-		Path:            installDir,
-		UnitName:        serviceName,
-		UserName:        userName,
-		State:           stateInit,
-		Status:          statusOk,
-		AlertRules:      string(alertRules)}
+		ID:         serviceInfo.ID,
+		Version:    serviceInfo.Version,
+		Path:       installDir,
+		UnitName:   serviceName,
+		UserName:   userName,
+		State:      stateInit,
+		Status:     statusOk,
+		AlertRules: string(alertRules)}
 
 	for _, layerDigest := range imageParts.layersDigest {
 		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
@@ -1695,6 +1694,11 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 
 	if aosSrvConfig.Hostname != nil {
 		service.HostName = *aosSrvConfig.Hostname
+	}
+
+	service.ServiceProvider = aosSrvConfig.ServiceProvider
+	if service.ServiceProvider == "" {
+		service.ServiceProvider = defaultServiceProvider
 	}
 
 	return nil
