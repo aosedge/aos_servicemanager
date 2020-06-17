@@ -157,22 +157,24 @@ type Launcher struct {
 
 // Service describes service structure
 type Service struct {
-	ID            string        // service id
-	Version       uint64        // service version
-	Path          string        // path to service bundle
-	UnitName      string        // systemd unit name
-	UserName      string        // user used to run this service
-	Permissions   string        // VIS permissions
-	State         ServiceState  // service state
-	Status        ServiceStatus // service status
-	StartAt       time.Time     // time at which service was started
-	TTL           uint64        // expiration service duration in days
-	AlertRules    string        // alert rules in json format
-	UploadLimit   uint64        // upload traffic limit
-	DownloadLimit uint64        // download traffic limit
-	StorageLimit  uint64        // storage limit
-	StateLimit    uint64        // state limit
-	Layers        []string      //list layers dir
+	ID              string        // service id
+	Version         uint64        // service version
+	ServiceProvider string        // service provider
+	Path            string        // path to service bundle
+	UnitName        string        // systemd unit name
+	UserName        string        // user used to run this service
+	HostName        string        // service host name
+	Permissions     string        // VIS permissions
+	State           ServiceState  // service state
+	Status          ServiceStatus // service status
+	StartAt         time.Time     // time at which service was started
+	TTL             uint64        // expiration service duration in days
+	AlertRules      string        // alert rules in json format
+	UploadLimit     uint64        // upload traffic limit
+	DownloadLimit   uint64        // download traffic limit
+	StorageLimit    uint64        // storage limit
+	StateLimit      uint64        // state limit
+	Layers          []string      // list layers dir
 }
 
 // UsersService describes users service structure

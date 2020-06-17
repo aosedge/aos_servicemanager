@@ -147,7 +147,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -158,9 +158,10 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 		return err
 	}
 
-	_, err = stmt.Exec(service.ID, service.Version, service.Path, service.UnitName,
-		service.UserName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
-		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.StorageLimit, service.StateLimit, layerTextList)
+	_, err = stmt.Exec(service.ID, service.Version, service.ServiceProvider, service.Path, service.UnitName,
+		service.UserName, service.HostName, service.Permissions, service.State, service.Status, service.StartAt,
+		service.TTL, service.AlertRules, service.UploadLimit, service.DownloadLimit, service.StorageLimit,
+		service.StateLimit, layerTextList)
 
 	return err
 }
@@ -168,7 +169,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 // UpdateService updates service
 func (db *Database) UpdateService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET version = ?, path = ?, unit = ?, user = ?,
+								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, user = ?, hostName = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?,
 								 storageLimit = ?, stateLimit = ?, layerList = ? WHERE id = ? `)
@@ -182,9 +183,10 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 		return err
 	}
 
-	result, err := stmt.Exec(service.Version, service.Path, service.UnitName, service.UserName, service.Permissions,
-		service.State, service.Status, service.StartAt, service.TTL, service.AlertRules, service.UploadLimit, service.DownloadLimit,
-		service.StorageLimit, service.StateLimit, layerTextList, service.ID)
+	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UserName,
+		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
+		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.StorageLimit, service.StateLimit,
+		layerTextList, service.ID)
 	if err != nil {
 		return err
 	}
@@ -224,8 +226,8 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 
 	var layerListText string
 
-	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
-		&service.UserName, &service.Permissions, &service.State, &service.Status,
+	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
+		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.StorageLimit, &service.StateLimit, &layerListText)
 	if err == sql.ErrNoRows {
@@ -252,8 +254,8 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		var service launcher.Service
 		var layerListText string
 
-		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
-			&service.UserName, &service.Permissions, &service.State, &service.Status,
+		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.StorageLimit, &service.StateLimit, &layerListText)
 		if err != nil {
@@ -281,8 +283,8 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 
 	var layerListText string
 
-	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
-		&service.UserName, &service.Permissions, &service.State, &service.Status,
+	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
+		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.StorageLimit, &service.StateLimit, &layerListText)
 	if err == sql.ErrNoRows {
@@ -530,8 +532,8 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 
 		var layerListText string
 
-		err = rows.Scan(&service.ID, &service.Version, &service.Path, &service.UnitName,
-			&service.UserName, &service.Permissions, &service.State, &service.Status,
+		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.StorageLimit, &service.StateLimit, &layerListText)
 		if err != nil {
@@ -912,9 +914,11 @@ func (db *Database) createServiceTable() (err error) {
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
 															   version INTEGER,
+															   serviceProvider TEXT,
 															   path TEXT,
 															   unit TEXT,
 															   user TEXT,
+															   hostName TEXT,
 															   permissions TEXT,
 															   state INTEGER,
 															   status INTEGER,

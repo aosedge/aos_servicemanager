@@ -71,7 +71,7 @@ func TestMain(m *testing.M) {
 
 func TestAddService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -96,16 +96,16 @@ func TestAddService(t *testing.T) {
 
 func TestUpdateService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = launcher.Service{"service1", 2, "to/new_service1", "new_service1.service", "new_user1",
-		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}",
-		123, 456, 789, 1024, []string{"path1", "path2"}}
+	service1 = launcher.Service{"service1", 2, "new_sp", "to/new_service1", "new_service1.service", "new_user1", "new_host",
+		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}", 123, 456, 789, 1024,
+		[]string{"path1", "path2"}}
 
 	// UpdateService
 	err = db.UpdateService(service1)
@@ -140,7 +140,7 @@ func TestNotExistService(t *testing.T) {
 
 func TestSetServiceStatus(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -167,7 +167,7 @@ func TestSetServiceStatus(t *testing.T) {
 }
 
 func TestSetServiceState(t *testing.T) {
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestSetServiceState(t *testing.T) {
 }
 
 func TestSetServiceStartTime(t *testing.T) {
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", `{"*":"rw"}`, "host", 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestSetServiceStartTime(t *testing.T) {
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestRemoveService(t *testing.T) {
 
 func TestGetServices(t *testing.T) {
 	// Add service 1
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
@@ -251,7 +251,7 @@ func TestGetServices(t *testing.T) {
 	}
 
 	// Add service 2
-	service2 := launcher.Service{"service2", 1, "to/service2", "service2.service", "user2", `{"*":"rw"}`, 0, 0,
+	service2 := launcher.Service{"service2", 1, "sp1", "to/service2", "service2.service", "user2", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service2)
 	if err != nil {
@@ -280,14 +280,14 @@ func TestGetServices(t *testing.T) {
 
 func TestAddUsersService(t *testing.T) {
 	// Add services
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service2 := launcher.Service{"service2", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service2 := launcher.Service{"service2", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service2)
 	if err != nil {
@@ -590,7 +590,7 @@ func TestCursor(t *testing.T) {
 
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "to/service1", "service1.service", "user1", `{"*":"rw"}`, 0, 0,
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
 		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
