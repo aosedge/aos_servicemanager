@@ -271,6 +271,25 @@ func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (resul
 	return true, nil
 }
 
+// GetServiceIP return service IP address
+func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, err error) {
+	network, err := manager.controller.NetworkByName(spID)
+	if err != nil {
+		return "", err
+	}
+
+	endpoint, err := network.EndpointByName(serviceID)
+	if err != nil {
+		return "", err
+	}
+
+	ip = endpoint.Info().Iface().Address().IP.String()
+
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID, "ip": ip}).Debug("Get service IP")
+
+	return ip, nil
+}
+
 // DeleteAllNetworks deletes all networks
 func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 	log.Debug("Delete all networks")

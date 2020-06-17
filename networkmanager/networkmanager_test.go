@@ -113,6 +113,10 @@ func TestAddRemoveService(t *testing.T) {
 		t.Error("Service should be in network")
 	}
 
+	if _, err := manager.GetServiceIP("service0", "network0"); err != nil {
+		t.Errorf("Can't get service ip: %s", err)
+	}
+
 	if err := manager.RemoveServiceFromNetwork("service0", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
