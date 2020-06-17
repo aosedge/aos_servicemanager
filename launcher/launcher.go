@@ -171,6 +171,7 @@ type Service struct {
 	DownloadLimit uint64        // download traffic limit
 	StorageLimit  uint64        // storage limit
 	StateLimit    uint64        // state limit
+	Layers        []string      //list layers dir
 }
 
 // UsersService describes users service structure

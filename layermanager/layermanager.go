@@ -145,10 +145,10 @@ func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err 
 	return layermanager.layerInfoProvider.GetLayersInfo()
 }
 
-// GetLayerPathByDigest privides fs layer path by layer digest
+// GetLayerPathByDigest provied installed layer path by digest
 func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
 
-	return layerPath, nil
+	return layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
 }
 
 /*******************************************************************************
