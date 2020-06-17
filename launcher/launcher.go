@@ -1306,8 +1306,15 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		}
 	}()
 
-	if err := spec.applyAosServiceConfig(imageParts.aosSrvConfigPath); err != nil {
+	aosConfig, err := getAosServiceConfig(imageParts.aosSrvConfigPath)
+	if err != nil && !os.IsNotExist(err) {
 		return service, err
+	}
+
+	if err == nil {
+		if err = spec.applyAosServiceConfig(aosConfig); err != nil {
+			return service, err
+		}
 	}
 
 	if err = spec.bindHostDirs(launcher.config.WorkingDir); err != nil {
@@ -1340,7 +1347,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
-	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, spec.aosConfig); err != nil {
+	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID, aosConfig); err != nil {
 		return service, err
 	}
 
@@ -1369,7 +1376,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		service.Layers = append(service.Layers, layerPath)
 	}
 
-	if err = launcher.updateServiceFromAosSrvConfig(&service, spec.aosConfig); err != nil {
+	if err = launcher.updateServiceFromAosSrvConfig(&service, aosConfig); err != nil {
 		return service, err
 	}
 
@@ -1598,7 +1605,7 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	return string(fileContent), nil
 }
 
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, aosConfig *aosServiceConfig) (err error) {
+func (launcher *Launcher) createSystemdService(installDir, serviceName, id string, aosConfig aosServiceConfig) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
 		return err
@@ -1659,11 +1666,8 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 	return nil
 }
 
-func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrvConfig *aosServiceConfig) (err error) {
+func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrvConfig aosServiceConfig) (err error) {
 	service.TTL = launcher.config.DefaultServiceTTL
-	if aosSrvConfig == nil {
-		return nil
-	}
 
 	if aosSrvConfig.ServiceTTL != nil {
 		service.TTL = *aosSrvConfig.ServiceTTL
@@ -1696,11 +1700,7 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	return nil
 }
 
-func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(aosConfig *aosServiceConfig) (setCmd, clearCmd string) {
-	if aosConfig == nil {
-		return setCmd, clearCmd
-	}
-
+func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(aosConfig aosServiceConfig) (setCmd, clearCmd string) {
 	if aosConfig.Quotas.DownloadSpeed != nil {
 		setCmd = setCmd + " -d " + strconv.FormatUint(*aosConfig.Quotas.DownloadSpeed, 10)
 	}
