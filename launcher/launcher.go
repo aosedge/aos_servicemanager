@@ -897,7 +897,7 @@ func (launcher *Launcher) umountLayers(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) restartService(service Service) (err error) {
+func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 	if err != nil {
 		return err
@@ -912,32 +912,6 @@ func (launcher *Launcher) restartService(service Service) (err error) {
 	if err = launcher.systemd.Reload(); err != nil {
 		return err
 	}
-
-	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
-		return err
-	}
-
-	if err = launcher.mountLayers(service); err != nil {
-		return err
-	}
-
-	channel := make(chan string)
-	if _, err = launcher.systemd.RestartUnit(service.UnitName, "replace", channel); err != nil {
-		return err
-	}
-	status := <-channel
-
-	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Restart service")
-
-	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
-		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
-	}
-
-	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
-		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
-	}
-
-	launcher.services.Store(service.UnitName, service.ID)
 
 	return nil
 }
@@ -1097,7 +1071,14 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 		}
 	}
 
-	if err := launcher.restartService(service); err != nil {
+	if err := launcher.addServiceToSystemd(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't add service to systemd: %s", err)
+			retErr = err
+		}
+	}
+
+	if err := launcher.startService(service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't install service: %s", err)
 			retErr = err
@@ -1304,7 +1285,11 @@ func (launcher *Launcher) addService(service Service) (err error) {
 		return err
 	}
 
-	if err = launcher.restartService(service); err != nil {
+	if err = launcher.addServiceToSystemd(service); err != nil {
+		return err
+	}
+
+	if err = launcher.startService(service); err != nil {
 		return err
 	}
 
@@ -1316,6 +1301,14 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		if err != nil {
 			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
 
+			if err = launcher.stopService(newService); err != nil {
+				log.WithField("id", newService.ID).Errorf("Can't stop service: %s", err)
+			}
+
+			if err = os.RemoveAll(newService.Path); err != nil {
+				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
+			}
+
 			if err := launcher.restoreService(oldService); err != nil {
 				launcher.removeService(oldService)
 				if launcher.sender != nil {
@@ -1324,14 +1317,6 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 						Version: oldService.Version,
 						Status:  "removed"})
 				}
-			}
-
-			if err = launcher.umountLayers(newService); err != nil {
-				log.WithField("id", newService.ID).Errorf("Can't umount layers: %s", err)
-			}
-
-			if err = os.RemoveAll(newService.Path); err != nil {
-				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
 			}
 		}
 	}()
@@ -1350,19 +1335,23 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return err
 	}
 
-	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
-		return err
-	}
-
-	if err = launcher.restartService(newService); err != nil {
-		return err
-	}
-
-	if err = launcher.umountLayers(oldService); err != nil {
+	if err = launcher.stopService(oldService); err != nil {
 		return err
 	}
 
 	if err = os.RemoveAll(oldService.Path); err != nil {
+		return err
+	}
+
+	if err = launcher.addServiceToSystemd(newService); err != nil {
+		return err
+	}
+
+	if err = launcher.startService(newService); err != nil {
+		return err
+	}
+
+	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
 		return err
 	}
 
