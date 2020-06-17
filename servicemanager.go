@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/pkg/reexec"
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/alerts"
@@ -40,6 +41,7 @@ import (
 	"aos_servicemanager/layermanager"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
+	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/umclient"
 )
 
@@ -54,7 +56,7 @@ const dbFileName = "servicemanager.db"
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
 // services and their storages before first start.
-const operationVersion = 1
+const operationVersion = 2
 
 /*******************************************************************************
  * Types
@@ -70,6 +72,7 @@ type serviceManager struct {
 	launcher   *launcher.Launcher
 	logging    *logging.Logging
 	monitor    *monitoring.Monitor
+	network    *networkmanager.NetworkManager
 	um         *umclient.Client
 	layerMgr   *layermanager.LayerManager
 }
@@ -114,12 +117,23 @@ func cleanup(cfg *config.Config, dbFile string) {
 	log.Info("System cleanup")
 
 	if err := launcher.Cleanup(cfg); err != nil {
-		log.Fatalf("Can't cleanup launcher: %s", err)
+		log.Errorf("Can't cleanup launcher: %s", err)
 	}
 
 	log.WithField("file", dbFile).Debug("Delete DB file")
 	if err := os.RemoveAll(dbFile); err != nil {
-		log.Fatalf("Can't cleanup database: %s", err)
+		log.Errorf("Can't cleanup database: %s", err)
+	}
+
+	log.WithField("file", dbFile).Debug("Delete networks")
+
+	network, err := networkmanager.New(cfg)
+	if err != nil {
+		log.Errorf("Can't create network: %s", err)
+	}
+
+	if err = network.DeleteAllNetworks(); err != nil {
+		log.Errorf("Can't delete networks: %s", err)
 	}
 }
 
@@ -207,6 +221,11 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	// Create network
+	if sm.network, err = networkmanager.New(cfg); err != nil {
+		return sm, err
+	}
+
 	// Create monitor
 	if sm.monitor, err = monitoring.New(cfg, sm.db, sm.alerts); err != nil {
 		if err == monitoring.ErrDisabled {
@@ -226,7 +245,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network); err != nil {
 		return sm, err
 	}
 
@@ -279,6 +298,11 @@ func (sm *serviceManager) close() {
 
 	// Close monitor
 	if sm.monitor != nil {
+		sm.monitor.Close()
+	}
+
+	// Close network
+	if sm.network != nil {
 		sm.monitor.Close()
 	}
 
@@ -562,6 +586,11 @@ func (sm *serviceManager) run() {
  ******************************************************************************/
 
 func main() {
+	// This is network manager reexec initialization
+	if reexec.Init() {
+		return
+	}
+
 	// Initialize command line flags
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
 	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)

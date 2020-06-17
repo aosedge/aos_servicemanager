@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/docker/docker/pkg/stringid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
@@ -67,7 +68,6 @@ const (
 	serviceDir = "services" // services directory
 
 	runcName         = "runc"         // runc file name
-	netnsName        = "netns"        // netns file name
 	wonderShaperName = "wondershaper" // wondershaper name
 
 	ocConfigFile = "config.json"
@@ -118,6 +118,8 @@ const (
 	serviceMountPointsDir = "mounts"
 )
 
+const defaultServiceProvider = "default"
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -136,6 +138,7 @@ type Launcher struct {
 	sender          Sender
 	serviceProvider ServiceProvider
 	monitor         ServiceMonitor
+	network         NetworkProvider
 	systemd         *dbus.Conn
 	config          *config.Config
 	layerProvider   layerProvider
@@ -151,7 +154,6 @@ type Launcher struct {
 
 	serviceTemplate  string
 	runcPath         string
-	netnsPath        string
 	wonderShaperPath string
 }
 
@@ -221,6 +223,16 @@ type Sender interface {
 	SendStateRequest(serviceID string, defaultState bool) (err error)
 }
 
+// NetworkProvider provides network interface
+type NetworkProvider interface {
+	GetID() (id string)
+	CreateNetwork(spID string) (err error)
+	NetworkExists(spID string) (err error)
+	DeleteNetwork(spID string) (err error)
+	AddServiceToNetwork(serviceID, spID, servicePath, hostname string) (err error)
+	RemoveServiceFromNetwork(serviceID, spID string) (err error)
+}
+
 // NewState new state message
 type NewState struct {
 	CorrelationID string
@@ -256,11 +268,18 @@ type layerProvider interface {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, sender Sender, serviceProvider ServiceProvider, layerProvider layerProvider,
-	monitor ServiceMonitor) (launcher *Launcher, err error) {
+func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
+	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	launcher = &Launcher{sender: sender, serviceProvider: serviceProvider, config: config, layerProvider: layerProvider, monitor: monitor}
+	launcher = &Launcher{
+		config:          config,
+		sender:          sender,
+		serviceProvider: serviceProvider,
+		layerProvider:   layerProvider,
+		monitor:         monitor,
+		network:         network,
+	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 
@@ -302,16 +321,6 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider, 
 	launcher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
 		return nil, err
-	}
-
-	// Retrieve netns abs path
-	launcher.netnsPath, _ = filepath.Abs(path.Join(config.WorkingDir, netnsName))
-	if _, err := os.Stat(launcher.netnsPath); err != nil {
-		// check system PATH
-		launcher.netnsPath, err = exec.LookPath(netnsName)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// Retrieve wondershaper abs path
@@ -897,6 +906,99 @@ func (launcher *Launcher) umountLayers(service Service) (err error) {
 	return nil
 }
 
+func (launcher *Launcher) updateStorageFolder(spec *serviceSpec, service Service) (err error) {
+	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
+	if err != nil {
+		return err
+	}
+
+	if storageFolder != "" {
+		if err = spec.addBindMount(storageFolder, serviceStorageFolder, "rw"); err != nil {
+			return err
+		}
+
+		if err = os.MkdirAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder), 0755); err != nil {
+			return err
+		}
+
+	} else {
+		spec.removeBindMount(serviceStorageFolder)
+		os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder))
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err error) {
+	networkFiles := []string{"/etc/hosts", "/etc/resolv.conf"}
+
+	if launcher.network == nil {
+		for _, networkFile := range networkFiles {
+			spec.removeBindMount(networkFile)
+			os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, networkFile))
+		}
+
+		return nil
+	}
+
+	if launcher.network != nil {
+		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider,
+			service.Path, service.HostName); err != nil {
+			return err
+		}
+
+		for _, networkFile := range networkFiles {
+			if err = spec.addBindMount(path.Join(service.Path, networkFile), networkFile, "ro"); err != nil {
+				return err
+			}
+
+			file, err := os.OpenFile(path.Join(service.Path, serviceMountPointsDir, networkFile), os.O_CREATE, 0644)
+			if err != nil {
+				return err
+			}
+			file.Close()
+		}
+
+		if err = spec.addPrestartHook(path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"), []string{
+			"libnetwork-setkey",
+			"-exec-root=/run/aos",
+			service.ID,
+			stringid.TruncateID(launcher.network.GetID())}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) prestartService(service Service) (err error) {
+	spec, err := loadServiceSpec(path.Join(service.Path, ocConfigFile))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if specErr := spec.save(); specErr != nil {
+			if err == nil {
+				err = specErr
+			}
+		}
+	}()
+
+	if err = launcher.updateStorageFolder(spec, service); err != nil {
+		return err
+	}
+
+	if err = launcher.updateNetwork(spec, service); err != nil {
+		return err
+	}
+
+	if err = launcher.mountLayers(service); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 	if err != nil {
@@ -917,11 +1019,7 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 }
 
 func (launcher *Launcher) startService(service Service) (err error) {
-	if err = launcher.storageHandler.MountStorageFolder(launcher.users, service); err != nil {
-		return err
-	}
-
-	if err = launcher.mountLayers(service); err != nil {
+	if err = launcher.prestartService(service); err != nil {
 		return err
 	}
 
@@ -976,7 +1074,7 @@ func (launcher *Launcher) startServices() {
 	}
 }
 
-func (launcher *Launcher) stopService(service Service) (retErr error) {
+func (launcher *Launcher) poststopService(service Service) (retErr error) {
 	if err := launcher.umountLayers(service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
@@ -984,14 +1082,28 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 		}
 	}
 
-	launcher.services.Delete(service.UnitName)
-
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
 			retErr = err
 		}
 	}
+
+	if launcher.network != nil {
+		if err := launcher.network.RemoveServiceFromNetwork(
+			service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
+			if retErr == nil {
+				log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
+				retErr = err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) stopService(service Service) (retErr error) {
+	launcher.services.Delete(service.UnitName)
 
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(service.UnitName, "replace", channel); err != nil {
@@ -1002,6 +1114,13 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 	} else {
 		status := <-channel
 		log.WithFields(log.Fields{"id": service.ID, "status": status}).Debug("Stop service")
+	}
+
+	if err := launcher.poststopService(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't perform post stop: %s", err)
+			retErr = err
+		}
 	}
 
 	if err := launcher.updateServiceState(service.ID, stateStopped, statusOk); err != nil {
@@ -1199,10 +1318,6 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	if err = spec.addPrestartHook(launcher.netnsPath); err != nil {
-		return service, err
-	}
-
 	for _, device := range launcher.config.Devices {
 		if err = spec.addHostDevice(device); err != nil {
 			return service, err
@@ -1235,14 +1350,15 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	service = Service{
-		ID:         serviceInfo.ID,
-		Version:    serviceInfo.Version,
-		Path:       installDir,
-		UnitName:   serviceName,
-		UserName:   userName,
-		State:      stateInit,
-		Status:     statusOk,
-		AlertRules: string(alertRules)}
+		ID:              serviceInfo.ID,
+		Version:         serviceInfo.Version,
+		ServiceProvider: defaultServiceProvider,
+		Path:            installDir,
+		UnitName:        serviceName,
+		UserName:        userName,
+		State:           stateInit,
+		Status:          statusOk,
+		AlertRules:      string(alertRules)}
 
 	for _, layerDigest := range imageParts.layersDigest {
 		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
@@ -1280,6 +1396,14 @@ func (launcher *Launcher) addService(service Service) (err error) {
 			launcher.removeService(service)
 		}
 	}()
+
+	if launcher.network != nil {
+		if err = launcher.network.NetworkExists(service.ServiceProvider); err != nil {
+			if err = launcher.network.CreateNetwork(service.ServiceProvider); err != nil {
+				return err
+			}
+		}
+	}
 
 	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
 		return err
@@ -1418,6 +1542,25 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
+	if launcher.network != nil {
+		spServices, err := launcher.serviceProvider.GetServiceProviderServices(service.ServiceProvider)
+		if err != nil {
+			if retErr == nil {
+				log.WithField("name", service.ID).Errorf("Can't get service provider services: %s", err)
+				retErr = err
+			}
+		} else {
+			if len(spServices) == 0 {
+				if err := launcher.network.DeleteNetwork(service.ServiceProvider); err != nil {
+					if retErr == nil {
+						log.WithField("name", service.ID).Errorf("Can't remove network: %s", err)
+						retErr = err
+					}
+				}
+			}
+		}
+	}
+
 	if err := os.RemoveAll(service.Path); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't remove service folder: %s", err)
@@ -1543,6 +1686,12 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	}
 
 	service.Permissions = aosSrvConfig.Quotas.VisPermissions
+
+	service.HostName = service.ID
+
+	if aosSrvConfig.Hostname != nil {
+		service.HostName = *aosSrvConfig.Hostname
+	}
 
 	return nil
 }

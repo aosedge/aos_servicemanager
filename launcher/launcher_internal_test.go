@@ -37,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/pkg/reexec"
 	"github.com/jlaffaye/ftp"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -47,6 +48,7 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/monitoring"
+	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
 )
 
@@ -109,6 +111,7 @@ type testLayerProvider struct {
 
 var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
 var layerProviderForTest = testLayerProvider{}
+var networkProvider *networkmanager.NetworkManager
 
 /*******************************************************************************
  * Init
@@ -128,6 +131,10 @@ func init() {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
+	if reexec.Init() {
+		return
+	}
+
 	if err := setup(); err != nil {
 		log.Fatalf("Error setting up: %s", err)
 	}
@@ -148,7 +155,7 @@ func TestMain(m *testing.M) {
 func TestInstallRemove(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -218,7 +225,7 @@ func TestInstallRemove(t *testing.T) {
 func TestAutoStart(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -244,7 +251,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err = newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -296,7 +303,7 @@ func TestAutoStart(t *testing.T) {
 func TestErrors(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -342,7 +349,7 @@ func TestErrors(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, networkProvider)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -411,7 +418,7 @@ func TestUpdate(t *testing.T) {
 func TestNetworkSpeed(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(iperfImage), sender, nil)
+	launcher, err := newTestLauncher(new(iperfImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -495,7 +502,7 @@ func TestNetworkSpeed(t *testing.T) {
 func TestVisPermissions(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -528,7 +535,7 @@ func TestVisPermissions(t *testing.T) {
 func TestUsersServices(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -633,7 +640,7 @@ func TestUsersServices(t *testing.T) {
 func TestServiceTTL(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -692,7 +699,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, monitor)
+	launcher, err := newTestLauncher(new(pythonImage), sender, monitor, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -764,7 +771,7 @@ func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
 
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0, nil}, sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -840,7 +847,7 @@ func TestServiceState(t *testing.T) {
 
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0, nil}, sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -991,7 +998,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1017,7 +1024,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test tmp limit
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1054,7 +1061,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1261,7 +1268,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	digests := []digest.Digest{"sha:12345"}
 
-	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1303,11 +1310,13 @@ func TestServiceWithLayers(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
+func newTestLauncher(
+	downloader downloader, sender Sender,
+	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30},
-		sender, &serviceProvider, &layerProviderForTest, monitor)
+		sender, &serviceProvider, &layerProviderForTest, monitor, network)
 	if err != nil {
-		return launcher, err
+		return nil, err
 	}
 
 	launcher.downloader = downloader
@@ -1885,11 +1894,15 @@ func setup() (err error) {
 		return err
 	}
 
+	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: "tmp"}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil, nil)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
 	}
@@ -1900,6 +1913,14 @@ func cleanup() (err error) {
 		}
 
 		launcher.Close()
+	}
+
+	if err := networkProvider.DeleteAllNetworks(); err != nil {
+		log.Errorf("Can't delete all networks: %s", err)
+	}
+
+	if err := networkProvider.Close(); err != nil {
+		log.Errorf("Can't close network provider: %s", err)
 	}
 
 	if err := deleteStoragePartition("tmp/storage"); err != nil {
@@ -1976,6 +1997,7 @@ func generatePythonContent(imagePath string) (err error) {
 import time
 import socket
 import sys
+import netifaces
 
 i = 0
 serviceName = sys.argv[1]
@@ -1983,7 +2005,8 @@ serviceVersion = sys.argv[2]
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
 message = serviceName + ", version: " + serviceVersion
-sock.sendto(str.encode(message), ("172.19.0.1", 10001))
+
+sock.sendto(str.encode(message), (netifaces.gateways()['default'][netifaces.AF_INET][0], 10001))
 sock.close()
 
 print(">>>> Start", serviceName, "version", serviceVersion)

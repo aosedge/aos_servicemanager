@@ -111,7 +111,7 @@ func (handler *storageHandler) Close() {
 	handler.watcher.Close()
 }
 
-func (handler *storageHandler) MountStorageFolder(users []string, service Service) (err error) {
+func (handler *storageHandler) PrepareStorageFolder(users []string, service Service) (storageFolder string, err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
@@ -122,42 +122,25 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
-
-	spec, err := loadServiceSpec(path.Join(service.Path, ocConfigFile))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if specErr := spec.save(); specErr != nil {
-			if err == nil {
-				err = specErr
-			}
-		}
-	}()
 
 	if service.StorageLimit == 0 {
 		if usersService.StorageFolder != "" {
 			os.RemoveAll(usersService.StorageFolder)
-			os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder))
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, ""); err != nil {
-			return err
+			return "", err
 		}
 
-		return spec.removeStorageFolder()
-	}
-
-	if err = os.MkdirAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder), 0755); err != nil {
-		return err
+		return "", nil
 	}
 
 	if usersService.StorageFolder != "" {
 		if _, err = os.Stat(usersService.StorageFolder); err != nil {
 			if !os.IsNotExist(err) {
-				return err
+				return "", err
 			}
 
 			log.WithFields(log.Fields{
@@ -170,11 +153,11 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 
 	if usersService.StorageFolder == "" {
 		if usersService.StorageFolder, err = createStorageFolder(handler.storageDir, service.UserName); err != nil {
-			return err
+			return "", err
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, usersService.StorageFolder); err != nil {
-			return err
+			return "", err
 		}
 
 		log.WithFields(log.Fields{"folder": usersService.StorageFolder, "serviceID": service.ID}).Debug("Create storage folder")
@@ -183,26 +166,22 @@ func (handler *storageHandler) MountStorageFolder(users []string, service Servic
 	if service.StateLimit == 0 {
 		if _, err = os.Stat(path.Join(usersService.StorageFolder, stateFile)); err != nil {
 			if !os.IsNotExist(err) {
-				return err
+				return "", err
 			}
 		}
 
 		if err = handler.serviceProvider.SetUsersStateChecksum(users, service.ID, []byte{}); err != nil {
-			return err
+			return "", err
 		}
-	}
-
-	if err = spec.addStorageFolder(usersService.StorageFolder); err != nil {
-		return err
 	}
 
 	if service.StateLimit > 0 {
 		if err = handler.startStateWatching(users, service); err != nil {
-			return err
+			return "", err
 		}
 	}
 
-	return nil
+	return usersService.StorageFolder, nil
 }
 
 func (handler *storageHandler) StopStateWatching(users []string, service Service) (err error) {

@@ -299,44 +299,44 @@ func (spec *serviceSpec) save() (err error) {
 	return encoder.Encode(spec.ocSpec)
 }
 
-func (spec *serviceSpec) addStorageFolder(storageFolder string) (err error) {
-	absStorageFolder, err := filepath.Abs(storageFolder)
+func (spec *serviceSpec) addBindMount(source, destination, attr string) (err error) {
+	absSource, err := filepath.Abs(source)
 	if err != nil {
 		return err
 	}
 
 	newMount := runtimespec.Mount{
-		Destination: serviceStorageFolder,
+		Destination: destination,
 		Type:        "bind",
-		Source:      absStorageFolder,
-		Options:     []string{"bind", "rw"}}
+		Source:      absSource,
+		Options:     []string{"bind", attr}}
 
-	storageIndex := len(spec.ocSpec.Mounts)
+	existIndex := len(spec.ocSpec.Mounts)
 
 	for i, mount := range spec.ocSpec.Mounts {
-		if mount.Destination == serviceStorageFolder {
-			storageIndex = i
+		if mount.Destination == destination {
+			existIndex = i
+
 			break
 		}
 	}
 
-	if storageIndex == len(spec.ocSpec.Mounts) {
+	if existIndex == len(spec.ocSpec.Mounts) {
 		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, newMount)
 
 		return nil
 	}
 
-	spec.ocSpec.Mounts[storageIndex] = newMount
+	spec.ocSpec.Mounts[existIndex] = newMount
 
 	return nil
 }
 
-func (spec *serviceSpec) removeStorageFolder() (err error) {
+func (spec *serviceSpec) removeBindMount(destination string) (err error) {
 	var mounts []runtimespec.Mount
 
 	for _, mount := range spec.ocSpec.Mounts {
-		if mount.Destination == serviceStorageFolder {
-
+		if mount.Destination == destination {
 			continue
 		}
 
@@ -361,7 +361,7 @@ func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 	// TODO: all services should have their own certificates
 	// this mound for demo only and should be removed
 	// mount /etc/ssl
-	etcItems := []string{"hosts", "resolv.conf", "nsswitch.conf", "group", "ssl"}
+	etcItems := []string{"nsswitch.conf", "group", "ssl"}
 
 	for _, item := range etcItems {
 		// Check if in working dir
@@ -376,12 +376,12 @@ func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 	return nil
 }
 
-func (spec *serviceSpec) addPrestartHook(path string) (err error) {
+func (spec *serviceSpec) addPrestartHook(path string, args []string) (err error) {
 	if spec.ocSpec.Hooks == nil {
 		spec.ocSpec.Hooks = &runtimespec.Hooks{}
 	}
 
-	spec.ocSpec.Hooks.Prestart = append(spec.ocSpec.Hooks.Prestart, runtimespec.Hook{Path: path})
+	spec.ocSpec.Hooks.Prestart = append(spec.ocSpec.Hooks.Prestart, runtimespec.Hook{Path: path, Args: args})
 
 	return nil
 }
