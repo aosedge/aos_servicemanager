@@ -72,7 +72,7 @@ func TestMain(m *testing.M) {
 func TestAddService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -97,14 +97,14 @@ func TestAddService(t *testing.T) {
 func TestUpdateService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	service1 = launcher.Service{"service1", 2, "new_sp", "to/new_service1", "new_service1.service", "new_user1", "new_host",
-		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}", 123, 456, 789, 1024,
+		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}", 123, 456, 342, 696, 789, 1024,
 		[]string{"path1", "path2"}}
 
 	// UpdateService
@@ -141,7 +141,7 @@ func TestNotExistService(t *testing.T) {
 func TestSetServiceStatus(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -168,7 +168,7 @@ func TestSetServiceStatus(t *testing.T) {
 
 func TestSetServiceState(t *testing.T) {
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -195,7 +195,7 @@ func TestSetServiceState(t *testing.T) {
 
 func TestSetServiceStartTime(t *testing.T) {
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", `{"*":"rw"}`, "host", 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -224,7 +224,7 @@ func TestSetServiceStartTime(t *testing.T) {
 func TestRemoveService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -244,7 +244,7 @@ func TestRemoveService(t *testing.T) {
 func TestGetServices(t *testing.T) {
 	// Add service 1
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -252,7 +252,7 @@ func TestGetServices(t *testing.T) {
 
 	// Add service 2
 	service2 := launcher.Service{"service2", 1, "sp1", "to/service2", "service2.service", "user2", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -281,7 +281,7 @@ func TestGetServices(t *testing.T) {
 func TestGetServiceProviderServices(t *testing.T) {
 	// Add service 1
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -289,7 +289,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 2
 	service2 := launcher.Service{"service2", 1, "sp1", "to/service2", "service2.service", "user2", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -297,7 +297,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 3
 	service3 := launcher.Service{"service3", 1, "sp2", "to/service3", "service3.service", "user3", "host3", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service3)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -305,7 +305,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 4
 	service4 := launcher.Service{"service4", 1, "sp2", "to/service4", "service4.service", "user4", "host4", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service4)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -320,7 +320,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 		t.Error("Wrong service count")
 	}
 	for _, service := range servicesSp1 {
-		if service != service1 && service != service2 {
+		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
 			t.Error("Error getting services")
 		}
 	}
@@ -334,7 +334,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 		t.Error("Wrong service count")
 	}
 	for _, service := range servicesSp2 {
-		if service != service3 && service != service4 {
+		if !reflect.DeepEqual(service, service3) && !reflect.DeepEqual(service, service4) {
 			t.Error("Error getting services")
 		}
 	}
@@ -347,14 +347,14 @@ func TestGetServiceProviderServices(t *testing.T) {
 func TestAddUsersService(t *testing.T) {
 	// Add services
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	service2 := launcher.Service{"service2", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -657,7 +657,7 @@ func TestCursor(t *testing.T) {
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, []string{"path1", "path2"}}
+		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)

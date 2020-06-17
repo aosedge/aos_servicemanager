@@ -170,6 +170,8 @@ type Service struct {
 	StartAt         time.Time     // time at which service was started
 	TTL             uint64        // expiration service duration in days
 	AlertRules      string        // alert rules in json format
+	UploadSpeed     uint64        // upload traffic speed
+	DownloadSpeed   uint64        // download traffic speed
 	UploadLimit     uint64        // upload traffic limit
 	DownloadLimit   uint64        // download traffic limit
 	StorageLimit    uint64        // storage limit
