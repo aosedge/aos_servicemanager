@@ -215,8 +215,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
+	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.crypt, sm.db); err != nil {
+		return sm, err
+	}
+
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.monitor); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor); err != nil {
 		return sm, err
 	}
 
@@ -235,10 +239,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
-		return sm, err
-	}
-
-	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.crypt, sm.db); err != nil {
 		return sm, err
 	}
 
@@ -370,6 +370,8 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 				sm.launcher.UninstallService(service.serviceInfo.ID)
 			}
 		}
+
+		sm.launcher.FinishProcessingLayers()
 
 	case *amqp.StateAcceptance:
 		log.WithFields(log.Fields{

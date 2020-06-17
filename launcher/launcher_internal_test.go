@@ -68,6 +68,7 @@ type ftpImage struct {
 	storageLimit uint64
 	stateLimit   uint64
 	tmpLimit     uint64
+	layersDigest []digest.Digest
 }
 
 // Test monitor info
@@ -99,11 +100,15 @@ type testServiceProvider struct {
 	usersServices []*UsersService
 }
 
+type testLayerProvider struct {
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
+var layerProviderForTest = testLayerProvider{}
 
 /*******************************************************************************
  * Init
@@ -759,7 +764,7 @@ func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
 
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -835,7 +840,7 @@ func TestServiceState(t *testing.T) {
 
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -986,7 +991,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0}, sender, nil)
+	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1012,7 +1017,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test tmp limit
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192}, sender, nil); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1049,7 +1054,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0}, sender, nil); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1229,12 +1234,78 @@ func TestValidateUnpackedImage(t *testing.T) {
 	}
 }
 
+func TestServiceWithLayers(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		log.Debug("Skip TestServiceStorage")
+		return
+	}
+
+	layerDir := path.Join("tmp", "layerStorage", "layer1")
+	if err := os.MkdirAll(layerDir, 0755); err != nil {
+		t.Fatalf("Can't create layer dir: %s", err)
+	}
+
+	file, err := os.Create(path.Join(layerDir, "someFile.txt"))
+	if err != nil {
+		t.Fatalf("Can't create layer file: %s", err)
+	}
+	defer file.Close()
+
+	testString := "This is test layer file"
+	_, err = file.Write([]byte(testString))
+	if err != nil {
+		t.Fatalf("Can't write layer file: %s", err)
+	}
+
+	sender := newTestSender()
+
+	digests := []digest.Digest{"sha:12345"}
+
+	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0})
+	if status := <-sender.statusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+	}
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err != nil {
+		t.Error("Can't connect to server")
+		return
+	}
+
+	resp, err := ftp.Retr("someFile.txt")
+	if err != nil {
+		t.Error("No files")
+	}
+	defer resp.Close()
+
+	ftp.Quit()
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+
+	launcher.Close()
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
 
 func newTestLauncher(downloader downloader, sender Sender, monitor ServiceMonitor) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, sender, &serviceProvider, monitor)
+	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30},
+		sender, &serviceProvider, &layerProviderForTest, monitor)
 	if err != nil {
 		return launcher, err
 	}
@@ -1293,7 +1364,7 @@ func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCl
 		return outputFile, err
 	}
 
-	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
 		return outputFile, err
 	}
 
@@ -1360,7 +1431,7 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 		return outputFile, err
 	}
 
-	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
 		return outputFile, err
 	}
 
@@ -1438,7 +1509,8 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 		return outputFile, err
 	}
 
-	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest); err != nil {
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest,
+		&fsDigest, downloader.layersDigest); err != nil {
 		return outputFile, err
 	}
 
@@ -1781,6 +1853,14 @@ func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string
 	return fmt.Errorf("service %s does not exist in users", serviceID)
 }
 
+func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
+	return path.Join("tmp", "layerStorage"), nil
+}
+
+func (layerProvider *testLayerProvider) DeleteUnneededLayers() (err error) {
+	return nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -1998,14 +2078,15 @@ func generateFakeImage(folderPath string) (err error) {
 		return err
 	}
 
-	if err := genarateImageManfest(folderPath, &configDigest, &aosConfigDigest, &layerDigest); err != nil {
+	if err := genarateImageManfest(folderPath, &configDigest, &aosConfigDigest, &layerDigest, nil); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest) (err error) {
+func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest,
+	srvLayers []digest.Digest) (err error) {
 	var manifest serviceManifest
 	manifest.SchemaVersion = 2
 
@@ -2019,12 +2100,19 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 		}
 	}
 
-	var layers []imagespec.Descriptor
+	for _, layerDigest := range srvLayers {
+		layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.aos.image.layer.v1.tar",
+			Digest: layerDigest,
+		}
+
+		manifest.Layers = append(manifest.Layers, layerDescriptor)
+	}
+
 	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 		Digest: *rootfsLayer,
 	}
 
-	manifest.Layers = append(layers, layerDescriptor)
+	manifest.Layers = append(manifest.Layers, layerDescriptor)
 
 	data, err := json.Marshal(manifest)
 	if err != nil {

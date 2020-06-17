@@ -138,6 +138,7 @@ type Launcher struct {
 	monitor         ServiceMonitor
 	systemd         *dbus.Conn
 	config          *config.Config
+	layerProvider   layerProvider
 
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
@@ -240,16 +241,21 @@ type stateAcceptance struct {
 	acceptance    amqp.StateAcceptance
 }
 
+type layerProvider interface {
+	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
+	DeleteUnneededLayers() (err error)
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
+func New(config *config.Config, sender Sender, serviceProvider ServiceProvider, layerProvider layerProvider,
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	launcher = &Launcher{sender: sender, serviceProvider: serviceProvider, config: config, monitor: monitor}
+	launcher = &Launcher{sender: sender, serviceProvider: serviceProvider, config: config, layerProvider: layerProvider, monitor: monitor}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 
@@ -353,6 +359,11 @@ func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) 
 // UninstallService stops and removes service
 func (launcher *Launcher) UninstallService(id string) {
 	launcher.actionHandler.PutInQueue(serviceAction{id, nil, launcher.doActionUninstall})
+}
+
+// FinishProcessingLayers triggers layers cleanup
+func (launcher *Launcher) FinishProcessingLayers() {
+	launcher.actionHandler.PutInQueue(serviceAction{"", nil, launcher.doFinishProcessingLayers})
 }
 
 // GetServicesInfo returns information about all installed services
@@ -639,6 +650,12 @@ func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
 	}
 }
 
+func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) {
+	if err := launcher.layerProvider.DeleteUnneededLayers(); err != nil {
+		log.Error("DeleteUnneededLayers error: ", err)
+	}
+}
+
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
 	if launcher.users == nil {
 		return errors.New("users are not set")
@@ -851,11 +868,12 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
-	if err = overlayMount(mergedDir, []string{
-		path.Join(service.Path, serviceMountPointsDir),
-		path.Join(service.Path, serviceRootfsDir),
-		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir),
-		"/"}, "", ""); err != nil {
+	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir)}
+	layerDirs = append(layerDirs, service.Layers...)
+	layerDirs = append(layerDirs, []string{path.Join(service.Path, serviceRootfsDir),
+		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir), "/"}...)
+
+	if err = overlayMount(mergedDir, layerDirs, "", ""); err != nil {
 		return err
 	}
 
@@ -1239,6 +1257,15 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		State:      stateInit,
 		Status:     statusOk,
 		AlertRules: string(alertRules)}
+
+	for _, layerDigest := range imageParts.layersDigest {
+		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
+		if err != nil {
+			return service, err
+		}
+
+		service.Layers = append(service.Layers, layerPath)
+	}
 
 	if err = launcher.updateServiceFromAosSrvConfig(&service, spec.aosConfig); err != nil {
 		return service, err

@@ -56,6 +56,7 @@ type imageParts struct {
 	imageConfigPath    string
 	aosSrvConfigPath   string
 	serviceFSLayerPath string
+	layersDigest       []string
 }
 
 /*******************************************************************************
@@ -297,7 +298,14 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 	}
 
 	rootFSDigest := manifest.Layers[layersSize-1].Digest
+
 	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), string(rootFSDigest.Hex()))
+
+	manifest.Layers = manifest.Layers[:layersSize-1]
+
+	for _, layer := range manifest.Layers {
+		parts.layersDigest = append(parts.layersDigest, string(layer.Digest))
+	}
 
 	return parts, nil
 }
