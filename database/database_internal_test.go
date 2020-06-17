@@ -278,6 +278,72 @@ func TestGetServices(t *testing.T) {
 	}
 }
 
+func TestGetServiceProviderServices(t *testing.T) {
+	// Add service 1
+	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,
+		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+	err := db.AddService(service1)
+	if err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	// Add service 2
+	service2 := launcher.Service{"service2", 1, "sp1", "to/service2", "service2.service", "user2", "host1", `{"*":"rw"}`, 0, 0,
+		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+	err = db.AddService(service2)
+	if err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	// Add service 3
+	service3 := launcher.Service{"service3", 1, "sp2", "to/service3", "service3.service", "user3", "host3", `{"*":"rw"}`, 0, 0,
+		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+	err = db.AddService(service3)
+	if err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	// Add service 4
+	service4 := launcher.Service{"service4", 1, "sp2", "to/service4", "service4.service", "user4", "host4", `{"*":"rw"}`, 0, 0,
+		time.Now().UTC(), 0, "", 0, 0, 0, 0}
+	err = db.AddService(service4)
+	if err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	// Get sp1 services
+	servicesSp1, err := db.GetServiceProviderServices("sp1")
+	if err != nil {
+		t.Errorf("Can't get services: %s", err)
+	}
+	if len(servicesSp1) != 2 {
+		t.Error("Wrong service count")
+	}
+	for _, service := range servicesSp1 {
+		if service != service1 && service != service2 {
+			t.Error("Error getting services")
+		}
+	}
+
+	// Get sp2 services
+	servicesSp2, err := db.GetServiceProviderServices("sp2")
+	if err != nil {
+		t.Errorf("Can't get services: %s", err)
+	}
+	if len(servicesSp2) != 2 {
+		t.Error("Wrong service count")
+	}
+	for _, service := range servicesSp2 {
+		if service != service3 && service != service4 {
+			t.Error("Error getting services")
+		}
+	}
+
+	// Clear DB
+	if err = db.removeAllServices(); err != nil {
+		t.Errorf("Can't remove all services: %s", err)
+	}
+}
 func TestAddUsersService(t *testing.T) {
 	// Add services
 	service1 := launcher.Service{"service1", 1, "sp1", "to/service1", "service1.service", "user1", "host1", `{"*":"rw"}`, 0, 0,

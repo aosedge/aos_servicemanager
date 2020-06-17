@@ -1669,10 +1669,21 @@ func (serviceProvider *testServiceProvider) GetServices() (services []Service, e
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
-	services = make([]Service, 0, len(serviceProvider.services))
-
 	for _, servicePtr := range serviceProvider.services {
 		services = append(services, *servicePtr)
+	}
+
+	return services, nil
+}
+
+func (serviceProvider *testServiceProvider) GetServiceProviderServices(spID string) (services []Service, err error) {
+	serviceProvider.Lock()
+	defer serviceProvider.Unlock()
+
+	for _, servicePtr := range serviceProvider.services {
+		if servicePtr.ServiceProvider == spID {
+			services = append(services, *servicePtr)
+		}
 	}
 
 	return services, nil

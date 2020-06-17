@@ -273,6 +273,31 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 	return services, rows.Err()
 }
 
+// GetServiceProviderServices returns all services belong to specified service provider
+func (db *Database) GetServiceProviderServices(serviceProvider string) (services []launcher.Service, err error) {
+	rows, err := db.sql.Query("SELECT * FROM services WHERE serviceProvider = ?", serviceProvider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var service launcher.Service
+
+		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
+			&service.StorageLimit, &service.StateLimit)
+		if err != nil {
+			return services, err
+		}
+
+		services = append(services, service)
+	}
+
+	return services, rows.Err()
+}
+
 // GetServiceByUnitName returns service by systemd unit name
 func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
 	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")

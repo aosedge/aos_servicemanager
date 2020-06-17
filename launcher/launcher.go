@@ -192,6 +192,7 @@ type ServiceProvider interface {
 	RemoveService(serviceID string) (err error)
 	GetService(serviceID string) (service Service, err error)
 	GetServices() (services []Service, err error)
+	GetServiceProviderServices(serviceProvider string) (services []Service, err error)
 	GetServiceByUnitName(unitName string) (service Service, err error)
 	SetServiceStatus(serviceID string, status ServiceStatus) (err error)
 	SetServiceState(serviceID string, state ServiceState) (err error)
