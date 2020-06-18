@@ -147,7 +147,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 	_, err = stmt.Exec(service.ID, service.Version, service.ServiceProvider, service.Path, service.UnitName,
 		service.UserName, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices)
 
 	return err
 }
@@ -172,7 +172,8 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, user = ?, hostName = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?, ulSpeed = ?, dlSpeed = ?,
-								 storageLimit = ?, stateLimit = ?, layerList = ? WHERE id = ?`)
+								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ? WHERE id = ?`)
+
 	if err != nil {
 		return err
 	}
@@ -186,7 +187,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UserName,
 		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList, service.ID)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, service.ID)
 	if err != nil {
 		return err
 	}
@@ -229,7 +230,7 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText)
+		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -257,7 +258,7 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText)
+			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText, &service.Devices)
 		if err != nil {
 			return services, err
 		}
@@ -288,7 +289,7 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
 		if err != nil {
 			return services, err
 		}
@@ -317,7 +318,7 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText)
+		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -566,7 +567,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText)
+			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText, &service.Devices)
 		if err != nil {
 			return usersServices, err
 		}
@@ -962,7 +963,8 @@ func (db *Database) createServiceTable() (err error) {
 															   dlSpeed INTEGER,
 															   storageLimit INTEGER,
 															   stateLimit INTEGER,
-															   layerList TEXT)`)
+															   layerList TEXT,
+															   deviceResources TEXT)`)
 
 	return err
 }
