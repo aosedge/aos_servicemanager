@@ -18,17 +18,24 @@
 package monitoring
 
 import (
+	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/docker/docker/pkg/reexec"
+	"github.com/docker/docker/pkg/stringid"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
+	"aos_servicemanager/networkmanager"
 )
 
 /*******************************************************************************
@@ -68,11 +75,18 @@ type testTrafficStorage struct {
 var trafficStorage = testTrafficStorage{
 	chainData: make(map[string]chainData)}
 
+var networkManager *networkmanager.NetworkManager
+var tmpDir string
+
 /*******************************************************************************
  * Main
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
+	if reexec.Init() {
+		return
+	}
+
 	if err := setup(); err != nil {
 		log.Fatalf("Error setting up: %s", err)
 	}
@@ -245,14 +259,13 @@ func TestServices(t *testing.T) {
 	}
 	defer monitor.Close()
 
-	cmd1 := exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
-	cmd2 := exec.Command("runc", "run", "--pid-file", "tmp/service2/.pid", "-b", "tmp/service2", "service2")
-
-	if err := cmd1.Start(); err != nil {
+	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1")
+	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
-	if err := cmd2.Start(); err != nil {
+	cmd2, err := runContainerCmd(path.Join(tmpDir, "service2"), "service2")
+	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
@@ -375,8 +388,8 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 
-	cmd1.Wait()
-	cmd2.Wait()
+	runContainerWait("service1", cmd1)
+	runContainerWait("service2", cmd2)
 }
 
 func TestTrafficLimit(t *testing.T) {
@@ -405,18 +418,23 @@ func TestTrafficLimit(t *testing.T) {
 	// wait for beginning of next minute
 	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
 
-	cmd1 := exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
-
-	if err := cmd1.Start(); err != nil {
+	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1")
+	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
 	// Wait while .ip amd .pid files are created
 	time.Sleep(1 * time.Second)
 
+	ipAddress, err := networkManager.GetServiceIP("service1", "default")
+	if err != nil {
+		t.Fatalf("Can't get service IP: %s", err)
+	}
+
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			ServiceDir:    "tmp/service1",
+			IPAddress:     ipAddress,
 			User:          "test",
 			UploadLimit:   300,
 			DownloadLimit: 300})
@@ -424,7 +442,7 @@ func TestTrafficLimit(t *testing.T) {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	if err := cmd1.Wait(); err == nil {
+	if err := runContainerWait("service1", cmd1); err == nil {
 		t.Error("Ping should fail")
 	}
 
@@ -438,10 +456,12 @@ func TestTrafficLimit(t *testing.T) {
 
 	// Start again
 
-	cmd1 = exec.Command("runc", "run", "--pid-file", "tmp/service1/.pid", "-b", "tmp/service1", "service1")
-
-	if err := cmd1.Start(); err != nil {
+	if cmd1, err = runContainerCmd(path.Join(tmpDir, "service1"), "service1"); err != nil {
 		t.Fatalf("Can't start service: %s", err)
+	}
+
+	if ipAddress, err = networkManager.GetServiceIP("service1", "default"); err != nil {
+		t.Fatalf("Can't get service IP: %s", err)
 	}
 
 	// Wait while .ip amd .pid files are created
@@ -450,6 +470,7 @@ func TestTrafficLimit(t *testing.T) {
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
 			ServiceDir:    "tmp/service1",
+			IPAddress:     ipAddress,
 			User:          "test",
 			UploadLimit:   2000,
 			DownloadLimit: 2000})
@@ -457,7 +478,7 @@ func TestTrafficLimit(t *testing.T) {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	if err := cmd1.Wait(); err != nil {
+	if err = runContainerWait("service1", cmd1); err != nil {
 		t.Errorf("Wait for service error: %s", err)
 	}
 
@@ -505,313 +526,23 @@ func (storage *testTrafficStorage) RemoveTrafficMonitorData(chain string) (err e
  ******************************************************************************/
 
 func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
+	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
 		return err
 	}
 
-	// Make containers
-
-	serviceConfig := `
-{
-	"ociVersion": "1.0.0",
-	"process": {
-		"user": {
-			"uid": 0,
-			"gid": 0
-		},
-		"args": [
-			"ping", "8.8.8.8", "-c10", "-w10"
-		],
-		"env": [
-			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-			"TERM=xterm"
-		],
-		"cwd": "/",
-		"capabilities": {
-			"bounding": [
-				"CAP_AUDIT_WRITE",
-				"CAP_KILL",
-				"CAP_NET_BIND_SERVICE",
-				"CAP_NET_RAW"
-			],
-			"effective": [
-				"CAP_AUDIT_WRITE",
-				"CAP_KILL",
-				"CAP_NET_BIND_SERVICE",
-				"CAP_NET_RAW"
-			],
-			"inheritable": [
-				"CAP_AUDIT_WRITE",
-				"CAP_KILL",
-				"CAP_NET_BIND_SERVICE",
-				"CAP_NET_RAW"
-			],
-			"permitted": [
-				"CAP_AUDIT_WRITE",
-				"CAP_KILL",
-				"CAP_NET_BIND_SERVICE",
-				"CAP_NET_RAW"
-			],
-			"ambient": [
-				"CAP_AUDIT_WRITE",
-				"CAP_KILL",
-				"CAP_NET_BIND_SERVICE",
-				"CAP_NET_RAW"
-			]
-		},
-		"rlimits": [
-			{
-				"type": "RLIMIT_NOFILE",
-				"hard": 1024,
-				"soft": 1024
-			}
-		],
-		"noNewPrivileges": true
-	},
-	"root": {
-		"path": "rootfs",
-		"readonly": true
-	},
-	"hostname": "runc",
-	"mounts": [
-		{
-			"destination": "/proc",
-			"type": "proc",
-			"source": "proc"
-		},
-		{
-			"destination": "/dev",
-			"type": "tmpfs",
-			"source": "tmpfs",
-			"options": [
-				"nosuid",
-				"strictatime",
-				"mode=755",
-				"size=65536k"
-			]
-		},
-		{
-			"destination": "/dev/pts",
-			"type": "devpts",
-			"source": "devpts",
-			"options": [
-				"nosuid",
-				"noexec",
-				"newinstance",
-				"ptmxmode=0666",
-				"mode=0620",
-				"gid=5"
-			]
-		},
-		{
-			"destination": "/dev/shm",
-			"type": "tmpfs",
-			"source": "shm",
-			"options": [
-				"nosuid",
-				"noexec",
-				"nodev",
-				"mode=1777",
-				"size=65536k"
-			]
-		},
-		{
-			"destination": "/dev/mqueue",
-			"type": "mqueue",
-			"source": "mqueue",
-			"options": [
-				"nosuid",
-				"noexec",
-				"nodev"
-			]
-		},
-		{
-			"destination": "/sys",
-			"type": "sysfs",
-			"source": "sysfs",
-			"options": [
-				"nosuid",
-				"noexec",
-				"nodev",
-				"ro"
-			]
-		},
-		{
-			"destination": "/sys/fs/cgroup",
-			"type": "cgroup",
-			"source": "cgroup",
-			"options": [
-				"nosuid",
-				"noexec",
-				"nodev",
-				"relatime",
-				"ro"
-			]
-		},
-		{
-			"destination": "/bin",
-			"type": "bind",
-			"source": "/bin",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/sbin",
-			"type": "bind",
-			"source": "/sbin",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/lib",
-			"type": "bind",
-			"source": "/lib",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/usr",
-			"type": "bind",
-			"source": "/usr",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/tmp",
-			"type": "bind",
-			"source": "/tmp",
-			"options": [
-				"bind",
-				"rw"
-			]
-		},
-		{
-			"destination": "/lib64",
-			"type": "bind",
-			"source": "/lib64",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/etc/hosts",
-			"type": "bind",
-			"source": "/etc/hosts",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/etc/resolv.conf",
-			"type": "bind",
-			"source": "/etc/resolv.conf",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/etc/nsswitch.conf",
-			"type": "bind",
-			"source": "/etc/nsswitch.conf",
-			"options": [
-				"bind",
-				"ro"
-			]
-		},
-		{
-			"destination": "/etc/ssl",
-			"type": "bind",
-			"source": "/etc/ssl",
-			"options": [
-				"bind",
-				"ro"
-			]
-		}
-	],
-	"hooks": {
-		"prestart": [
-			{
-				"path": "/usr/local/bin/netns",
-				"args": ["-d"]
-			}
-		]
-	},
-	"linux": {
-		"resources": {
-			"devices": [
-				{
-					"allow": false,
-					"access": "rwm"
-				}
-			],
-			"cpu": {
-				"shares": 1024
-			},
-			"network": {
-				"classID": 10
-			}
-		},
-		"namespaces": [
-			{
-				"type": "pid"
-			},
-			{
-				"type": "network"
-			},
-			{
-				"type": "ipc"
-			},
-			{
-				"type": "uts"
-			},
-			{
-				"type": "mount"
-			}
-		],
-		"maskedPaths": [
-			"/proc/kcore",
-			"/proc/latency_stats",
-			"/proc/timer_list",
-			"/proc/timer_stats",
-			"/proc/sched_debug",
-			"/sys/firmware",
-			"/proc/scsi"
-		],
-		"readonlyPaths": [
-			"/proc/asound",
-			"/proc/bus",
-			"/proc/fs",
-			"/proc/irq",
-			"/proc/sys",
-			"/proc/sysrq-trigger"
-		]
-	}
-}
-`
-	if err := os.MkdirAll("tmp/service1/rootfs", 0755); err != nil {
+	if err = os.MkdirAll(tmpDir, 0755); err != nil {
 		return err
 	}
 
-	if err := ioutil.WriteFile("tmp/service1/config.json", []byte(serviceConfig), 0644); err != nil {
+	if networkManager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}); err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll("tmp/service2/rootfs", 0755); err != nil {
+	if err = networkManager.CreateNetwork("default"); err != nil {
 		return err
 	}
 
-	if err := ioutil.WriteFile("tmp/service2/config.json", []byte(serviceConfig), 0644); err != nil {
+	if err = createOCIContainer(path.Join(tmpDir, "service1"), "service1", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
 		return err
 	}
 
@@ -819,9 +550,104 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	if err := os.RemoveAll("tmp"); err != nil {
+	if err := networkManager.DeleteAllNetworks(); err != nil {
+		log.Errorf("Can't remove networks: %s", err)
+	}
+
+	networkManager.Close()
+
+	if err := os.RemoveAll(tmpDir); err != nil {
+		log.Errorf("Can't remove tmp dir: %s", err)
+	}
+
+	return nil
+}
+
+func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
+	if err = os.RemoveAll(imagePath); err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
+		return err
+	}
+
+	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
+	if err != nil {
+		return errors.New(string(out))
+	}
+
+	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
+	if err != nil {
+		return err
+	}
+
+	var spec runtimespec.Spec
+
+	if err = json.Unmarshal(specJSON, &spec); err != nil {
+		return err
+	}
+
+	spec.Process.Terminal = false
+
+	spec.Process.Args = args
+
+	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
+			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+	}
+
+	for _, mount := range []string{"hosts", "resolv.conf"} {
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
+			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
+	}
+
+	spec.Hooks = new(runtimespec.Hooks)
+
+	spec.Hooks.Prestart = append(spec.Hooks.Poststart, runtimespec.Hook{
+		Path: path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"),
+		Args: []string{
+			"libnetwork-setkey",
+			"-exec-root=/run/aos",
+			containerID,
+			stringid.TruncateID(networkManager.GetID()),
+		}})
+
+	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
+	spec.Process.Capabilities.Effective = append(spec.Process.Capabilities.Effective, "CAP_NET_RAW")
+	spec.Process.Capabilities.Inheritable = append(spec.Process.Capabilities.Inheritable, "CAP_NET_RAW")
+	spec.Process.Capabilities.Permitted = append(spec.Process.Capabilities.Permitted, "CAP_NET_RAW")
+	spec.Process.Capabilities.Ambient = append(spec.Process.Capabilities.Ambient, "CAP_NET_RAW")
+
+	if specJSON, err = json.Marshal(&spec); err != nil {
+		return err
+	}
+
+	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func runContainerCmd(imagePath string, containerID string) (cmd *exec.Cmd, err error) {
+	if err = networkManager.AddServiceToNetwork(containerID, "default", imagePath, ""); err != nil {
+		return nil, err
+	}
+
+	cmd = exec.Command("runc", "run", "--pid-file", path.Join(imagePath, ".pid"), "-b", imagePath, containerID)
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	return cmd, nil
+}
+
+func runContainerWait(containerID string, cmd *exec.Cmd) (err error) {
+	err = cmd.Wait()
+
+	networkManager.RemoveServiceFromNetwork(containerID, "default")
+
+	return err
 }

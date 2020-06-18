@@ -227,6 +227,7 @@ type NetworkProvider interface {
 	DeleteNetwork(spID string) (err error)
 	AddServiceToNetwork(serviceID, spID, servicePath, hostname string) (err error)
 	RemoveServiceFromNetwork(serviceID, spID string) (err error)
+	GetServiceIP(serviceID, spID string) (ip string, err error)
 }
 
 // NewState new state message
@@ -1642,8 +1643,17 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 			return err
 		}
 
+		var ipAddress string
+
+		if launcher.network != nil {
+			if ipAddress, err = launcher.network.GetServiceIP(service.ID, service.ServiceProvider); err != nil {
+				return err
+			}
+		}
+
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			ServiceDir:    service.Path,
+			IPAddress:     ipAddress,
 			User:          service.UserName,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),

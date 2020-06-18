@@ -106,6 +106,7 @@ type Monitor struct {
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
 	ServiceDir    string
+	IPAddress     string
 	User          string
 	UploadLimit   uint64
 	DownloadLimit uint64
@@ -253,41 +254,39 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		return nil
 	}
 
-	ipAddress, err := GetServiceIPAddress(monitoringConfig.ServiceDir)
-	if err != nil {
-		return err
-	}
-
 	log.WithFields(log.Fields{
 		"id": serviceID,
-		"ip": ipAddress}).Debug("Start service monitoring")
+		"ip": monitoringConfig.IPAddress}).Debug("Start service monitoring")
 
 	// convert id to hashed u64 value
 	hash := fnv.New64a()
 	hash.Write([]byte(serviceID))
 
-	// create base chain name
-	chainBase := strconv.FormatUint(hash.Sum64(), 16)
-
 	serviceMonitoring := serviceMonitoring{
 		serviceDir: monitoringConfig.ServiceDir,
 		user:       monitoringConfig.User,
-		inChain:    "AOS_" + chainBase + "_IN",
-		outChain:   "AOS_" + chainBase + "_OUT",
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
 
-	if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD", ipAddress); err != nil {
-		return err
+	if monitoringConfig.IPAddress != "" {
+		// create base chain name
+		chainBase := strconv.FormatUint(hash.Sum64(), 16)
+
+		serviceMonitoring.inChain = "AOS_" + chainBase + "_IN"
+		serviceMonitoring.outChain = "AOS_" + chainBase + "_OUT"
+
+		if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
+			return err
+		}
+
+		monitor.trafficMap[serviceMonitoring.inChain].limit = monitoringConfig.DownloadLimit
+
+		if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
+			return err
+		}
+
+		monitor.trafficMap[serviceMonitoring.outChain].limit = monitoringConfig.UploadLimit
 	}
-
-	monitor.trafficMap[serviceMonitoring.inChain].limit = monitoringConfig.DownloadLimit
-
-	if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD", ipAddress); err != nil {
-		return err
-	}
-
-	monitor.trafficMap[serviceMonitoring.outChain].limit = monitoringConfig.UploadLimit
 
 	rules := monitoringConfig.ServiceRules
 
@@ -375,12 +374,16 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 		return nil
 	}
 
-	if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].inChain, "FORWARD"); err != nil {
-		log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+	if monitor.serviceMap[serviceID].inChain != "" {
+		if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].inChain, "FORWARD"); err != nil {
+			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+		}
 	}
 
-	if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].outChain, "FORWARD"); err != nil {
-		log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+	if monitor.serviceMap[serviceID].outChain != "" {
+		if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].outChain, "FORWARD"); err != nil {
+			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+		}
 	}
 
 	for _, e := range monitor.serviceMap[serviceID].alertProcessorElements {
@@ -390,18 +393,6 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 	delete(monitor.serviceMap, serviceID)
 
 	return nil
-}
-
-// GetServiceIPAddress returns ip address assigned to service
-func GetServiceIPAddress(servicePath string) (address string, err error) {
-	data, err := ioutil.ReadFile(path.Join(servicePath, ".ip"))
-	if err != nil {
-		return address, err
-	}
-
-	address = string(data)
-
-	return address, nil
 }
 
 // GetServicePid returns service PID
@@ -499,11 +490,6 @@ func (monitor *Monitor) getCurrentSystemData() {
 
 func (monitor *Monitor) getCurrentServicesData() {
 	for serviceID, value := range monitor.serviceMap {
-		err := monitor.updateServiceParams(serviceID, value)
-		if err != nil {
-			log.Errorf("Can't update service params: %s", err)
-		}
-
 		cpuUsage, err := getServiceCPUUsage(value.user)
 		if err != nil {
 			log.Errorf("Can't get service CPU: %s", err)
@@ -523,14 +509,10 @@ func (monitor *Monitor) getCurrentServicesData() {
 
 		if traffic, ok := monitor.trafficMap[value.inChain]; ok {
 			value.monitoringData.InTraffic = traffic.currentValue
-		} else {
-			log.WithField("chain", value.inChain).Error("Can't get service traffic value")
 		}
 
 		if traffic, ok := monitor.trafficMap[value.outChain]; ok {
 			value.monitoringData.OutTraffic = traffic.currentValue
-		} else {
-			log.WithField("chain", value.outChain).Error("Can't get service traffic value")
 		}
 
 		log.WithFields(log.Fields{
@@ -842,7 +824,7 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 		return err
 	}
 
-	if err = monitor.iptables.Append("filter", rootChain, "-j", chain); err != nil {
+	if err = monitor.iptables.Insert("filter", rootChain, 1, "-j", chain); err != nil {
 		return err
 	}
 
@@ -869,46 +851,6 @@ func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (
 	return nil
 }
 
-func (monitor *Monitor) editTrafficChain(chain, addresses string) (err error) {
-	var addrType string
-
-	log.WithField("chain", chain).Debug("Edit iptables chain")
-
-	traffic, ok := monitor.trafficMap[chain]
-	if !ok {
-		return errors.New("chain doesn't exist")
-	}
-
-	if strings.HasSuffix(chain, "_IN") {
-		addrType = "-d"
-	}
-
-	if strings.HasSuffix(chain, "_OUT") {
-		addrType = "-s"
-	}
-
-	traffic.addresses = addresses
-
-	if traffic.disabled {
-		if err = monitor.deleteAllRules(chain, addrType, traffic.addresses, "-j", "DROP"); err != nil {
-			return err
-		}
-
-		if err = monitor.iptables.Append("filter", chain, addrType, addresses, "-j", "DROP"); err != nil {
-			return err
-		}
-	} else {
-		if err = monitor.deleteAllRules(chain, addrType, traffic.addresses); err != nil {
-			return err
-		}
-
-		if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 func (monitor *Monitor) deleteAllRules(chain string, rulespec ...string) (err error) {
 	for {
 		if err = monitor.iptables.Delete("filter", chain, rulespec...); err != nil {
@@ -974,37 +916,6 @@ func (monitor *Monitor) deleteAllTrafficChains() (err error) {
 
 		if err != nil {
 			log.WithField("chain", chain).Errorf("Can't delete chain: %s", err)
-		}
-	}
-
-	return nil
-}
-
-func (monitor *Monitor) updateServiceParams(serviceID string, monitoring *serviceMonitoring) (err error) {
-	ipAddress, err := GetServiceIPAddress(monitoring.serviceDir)
-	if err != nil {
-		return err
-	}
-
-	if monitor.trafficMap[monitoring.inChain].addresses != ipAddress {
-		log.WithFields(log.Fields{
-			"chain": monitoring.inChain,
-			"oldIp": monitor.trafficMap[monitoring.inChain].addresses,
-			"newIp": ipAddress}).Warn("Chain IP address changed")
-
-		if err = monitor.editTrafficChain(monitoring.inChain, ipAddress); err != nil {
-			return err
-		}
-	}
-
-	if monitor.trafficMap[monitoring.outChain].addresses != ipAddress {
-		log.WithFields(log.Fields{
-			"chain": monitoring.outChain,
-			"oldIp": monitor.trafficMap[monitoring.outChain].addresses,
-			"newIp": ipAddress}).Warn("Chain IP address changed")
-
-		if err = monitor.editTrafficChain(monitoring.outChain, ipAddress); err != nil {
-			return err
 		}
 	}
 
