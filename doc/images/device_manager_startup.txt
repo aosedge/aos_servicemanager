@@ -1,0 +1,59 @@
+title Resource Manager Startup
+
+actor AOS Cloud
+participant Service Manager
+participant Resource Manager
+
+activate Resource Manager
+activate Service Manager
+Service Manager->Resource Manager:Create Resource Manager object
+Resource Manager->Resource Manager:Discover all devices
+Resource Manager->Resource Manager:Compare Devices with Resource Configuration
+Service Manager->Resource Manager:AreResourcesVaild
+Service Manager<--Resource Manager::status_of_resources
+deactivate Resource Manager
+Service Manager->Service Manager:Store resources status
+alt status_of_resources == false // ResourceManager is not able to check devices or available devices from Resource Config are not presented on system
+activate AOS Cloud
+AOS Cloud<-Service Manager:Alert(Aos Core cannot work with this set of devices)
+Service Manager->Service Manager:Wait FOTA update
+deactivate Service Manager
+AOS Cloud->AOS Cloud:NotifyOEM()
+deactivate AOS Cloud
+else
+activate Service Manager
+Service Manager->Service Manager:Process Stored Service Configuration\n(prepare, launch existing AOS services)
+AOS Cloud->Service Manager:Desired Configuration
+activate AOS Cloud
+Service Manager->Service Manager:IsDeviceResourcesValid
+alt status_of_resources == false // ResourceManager is not able to check devices or available devices from Resource Config are not presented on system
+Service Manager->Service Manager:ProcessDesiredConfiguration
+loop process services
+Service Manager->Service Manager:ExtractDevices
+Service Manager->Resource Manager:RequestDeviceResourcesByName(deviceName)
+activate Resource Manager
+Resource Manager->Resource Manager:Get from available configuration resource for device
+Service Manager<--Resource Manager::device_resource
+deactivate Resource Manager
+Service Manager->Service Manager:PrepareRuntimeSpec
+alt service action == start
+Service Manager->Service Manager:Get service information from DB where store device names
+Service Manager->Resource Manager:RequestDevice(deviceName, serviceId)
+activate Resource Manager
+Resource Manager->Resource Manager:CompareIncomingDeviceWithCurrentState
+Resource Manager->Resource Manager:Update pairs at local storage (map)
+Service Manager<--Resource Manager::status_for_requested_device
+deactivate Resource Manager
+else service action == stop
+Service Manager->Resource Manager:ReleaseDevice(deviceName, serviceId)
+activate Resource Manager
+Resource Manager->Resource Manager:CompareIncomingDeviceWithCurrentState
+Resource Manager->Resource Manager:Update pairs at local storage (map)
+Service Manager<--Resource Manager::status_for_requested_device
+deactivate Resource Manager
+end
+end
+end
+AOS Cloud<--Service Manager:Services Updated Message
+
+end

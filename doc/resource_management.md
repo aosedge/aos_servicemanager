@@ -72,7 +72,7 @@ By default we should limit number of opened file descriptors to 10 (TBD)
 
 ### Devices
 
-Shall we provide access to host devices (TBD)
+Access should by provided and handled by [Device Manager](./devicemanager.md) module.
 
 ### Memory
 
