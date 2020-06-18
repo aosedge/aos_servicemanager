@@ -58,6 +58,12 @@ type serviceManifest struct {
 	AosService *imagespec.Descriptor `json:"aosService,omitempty"`
 }
 
+// Device configuration for system and service logging
+type Device struct {
+	Name        string `json:"name"`
+	Permissions string `json:"permissions"`
+}
+
 type aosServiceConfig struct {
 	Created         time.Time          `json:"created"`
 	Author          string             `json:"author"`
@@ -85,7 +91,7 @@ type aosServiceConfig struct {
 		HostPath      string   `json:"hostPath"`
 		Options       []string `json:"options,omitempty"`
 	} `json:"mounts,omitempty"`
-	Devices []string `json:"devices,omitempty"`
+	Devices []Device `json:"devices,omitempty"`
 }
 
 type serviceSpec struct {
@@ -385,12 +391,12 @@ func (spec *serviceSpec) createPrestartHook(path string, args []string) (err err
 	return nil
 }
 
-func addDevice(deviceName string) (device *runtimespec.LinuxDevice, err error) {
-	log.WithFields(log.Fields{"device": deviceName}).Debug("Add device")
+func addDevice(hostDevice Device) (device *runtimespec.LinuxDevice, err error) {
+	log.WithFields(log.Fields{"device": hostDevice.Name}).Debug("Add device")
 
 	var stat unix.Stat_t
 
-	if err := unix.Lstat(deviceName, &stat); err != nil {
+	if err := unix.Lstat(hostDevice.Name, &stat); err != nil {
 		return nil, err
 	}
 
@@ -405,13 +411,17 @@ func addDevice(deviceName string) (device *runtimespec.LinuxDevice, err error) {
 		devType = "b"
 	case stat.Mode&unix.S_IFCHR == unix.S_IFCHR:
 		devType = "c"
+	case stat.Mode&unix.S_IFIFO == unix.S_IFIFO:
+		devType = "p"
+	default:
+		return nil, errNotDevice
 	}
 
 	mode := os.FileMode(stat.Mode)
 
 	return &runtimespec.LinuxDevice{
 		Type:     devType,
-		Path:     deviceName,
+		Path:     hostDevice.Name,
 		Major:    int64(unix.Major(stat.Rdev)),
 		Minor:    int64(unix.Minor(stat.Rdev)),
 		FileMode: &mode,
@@ -420,15 +430,15 @@ func addDevice(deviceName string) (device *runtimespec.LinuxDevice, err error) {
 	}, nil
 }
 
-func addDevices(deviceName string) (devices []runtimespec.LinuxDevice, err error) {
-	stat, err := os.Stat(deviceName)
+func addDevices(hostDevice Device) (devices []runtimespec.LinuxDevice, err error) {
+	stat, err := os.Stat(hostDevice.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	switch {
 	case stat.IsDir():
-		files, err := ioutil.ReadDir(deviceName)
+		files, err := ioutil.ReadDir(hostDevice.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -441,7 +451,9 @@ func addDevices(deviceName string) (devices []runtimespec.LinuxDevice, err error
 				continue
 
 			default:
-				dirDevices, err := addDevices(path.Join(deviceName, file.Name()))
+				dirDevice := Device{Name: path.Join(hostDevice.Name, file.Name()),
+					Permissions: hostDevice.Permissions}
+				dirDevices, err := addDevices(dirDevice)
 				if err != nil {
 					return nil, err
 				}
@@ -453,15 +465,15 @@ func addDevices(deviceName string) (devices []runtimespec.LinuxDevice, err error
 		return devices, nil
 
 	case stat.Name() == "console":
-		log.WithField("device", deviceName).Warnf("Device skipped")
+		log.WithField("device", hostDevice.Name).Warnf("Device skipped")
 
 		return devices, nil
 
 	default:
-		device, err := addDevice(deviceName)
+		device, err := addDevice(hostDevice)
 		if err != nil {
 			if err == errNotDevice {
-				log.WithField("device", deviceName).Warnf("Device skipped as not a device node")
+				log.WithField("device", hostDevice.Name).Warnf("Device skipped as not a device node")
 
 				return nil, nil
 			}
@@ -475,10 +487,10 @@ func addDevices(deviceName string) (devices []runtimespec.LinuxDevice, err error
 	}
 }
 
-func (spec *serviceSpec) addHostDevice(deviceName string) (err error) {
-	log.WithFields(log.Fields{"device": deviceName}).Debug("Add host device")
+func (spec *serviceSpec) addHostDevice(hostDevice Device) (err error) {
+	log.WithFields(log.Fields{"device": hostDevice.Name}).Debug("Add host device")
 
-	specDevices, err := addDevices(deviceName)
+	specDevices, err := addDevices(hostDevice)
 	if err != nil {
 		return err
 	}
@@ -493,14 +505,14 @@ func (spec *serviceSpec) addHostDevice(deviceName string) (err error) {
 			Type:   specDevice.Type,
 			Major:  &major,
 			Minor:  &minor,
-			Access: "rwm",
+			Access: hostDevice.Permissions,
 		})
 	}
 
 	return nil
 }
 
-func (spec *serviceSpec) addGroup(groupName string) (err error) {
+func (spec *serviceSpec) addAdditionalGroup(groupName string) (err error) {
 	log.WithFields(log.Fields{"group": groupName}).Debug("Add group")
 
 	group, err := user.LookupGroup(groupName)

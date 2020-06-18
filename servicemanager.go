@@ -43,6 +43,7 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/pluginprovider"
+	resource "aos_servicemanager/resourcemanager"
 	"aos_servicemanager/umclient"
 )
 
@@ -53,6 +54,7 @@ import (
 const reconnectTimeout = 10 * time.Second
 
 const dbFileName = "servicemanager.db"
+const resourceConfFileName = "available_configuration.cfg"
 
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
@@ -64,18 +66,19 @@ const operationVersion = 2
  ******************************************************************************/
 
 type serviceManager struct {
-	alerts     *alerts.Alerts
-	amqp       *amqp.AmqpHandler
-	cfg        *config.Config
-	crypt      *fcrypt.CryptoContext
-	db         *database.Database
-	identifier pluginprovider.Identifier
-	launcher   *launcher.Launcher
-	logging    *logging.Logging
-	monitor    *monitoring.Monitor
-	network    *networkmanager.NetworkManager
-	um         *umclient.Client
-	layerMgr   *layermanager.LayerManager
+	alerts          *alerts.Alerts
+	amqp            *amqp.AmqpHandler
+	cfg             *config.Config
+	crypt           *fcrypt.CryptoContext
+	db              *database.Database
+	identifier      pluginprovider.Identifier
+	launcher        *launcher.Launcher
+	resourcemanager *resource.ResourceManager
+	logging         *logging.Logging
+	monitor         *monitoring.Monitor
+	network         *networkmanager.NetworkManager
+	um              *umclient.Client
+	layerMgr        *layermanager.LayerManager
 }
 
 /*******************************************************************************
@@ -234,8 +237,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
+	// Create resourcemanager
+	if sm.resourcemanager, err = resource.New(resourceConfFileName); err != nil {
+		return sm, err
+	}
+
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager); err != nil {
 		return sm, err
 	}
 

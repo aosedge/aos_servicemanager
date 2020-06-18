@@ -45,6 +45,7 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
+	"aos_servicemanager/resourcemanager"
 	"aos_servicemanager/utils"
 )
 
@@ -136,6 +137,7 @@ type Launcher struct {
 	serviceProvider ServiceProvider
 	monitor         ServiceMonitor
 	network         NetworkProvider
+	devicemanager   DeviceManagement
 	systemd         *dbus.Conn
 	config          *config.Config
 	layerProvider   layerProvider
@@ -176,6 +178,7 @@ type Service struct {
 	StorageLimit    uint64        // storage limit
 	StateLimit      uint64        // state limit
 	Layers          []string      // list layers dir
+	Devices         string        // device resources in json format
 }
 
 // UsersService describes users service structure
@@ -231,6 +234,14 @@ type NetworkProvider interface {
 	GetServiceIP(serviceID, spID string) (ip string, err error)
 }
 
+// DeviceManagement provides API to validate, request and release devices
+type DeviceManagement interface {
+	AreResourcesValid() (err error)
+	RequestDeviceResourceByName(name string) (deviceResource resourcemanager.DeviceResource, err error)
+	RequestDevice(device string, serviceID string) (err error)
+	ReleaseDevice(device string, serviceID string) (err error)
+}
+
 // NewState new state message
 type NewState struct {
 	CorrelationID string
@@ -267,7 +278,7 @@ type layerProvider interface {
 
 // New creates new launcher object
 func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
-	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
+	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
@@ -277,6 +288,7 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 		layerProvider:   layerProvider,
 		monitor:         monitor,
 		network:         network,
+		devicemanager:   devicemanager,
 	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -416,6 +428,14 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 	launcher.stopServices()
 
 	launcher.users = users
+
+	// run stored service configuration only in case system resources are valid
+	// check available devices with system ones
+	if err = launcher.devicemanager.AreResourcesValid(); err != nil {
+		log.Errorf("Validation resources: %s", err)
+
+		return err
+	}
 
 	launcher.startServices()
 
@@ -671,6 +691,14 @@ func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) 
 func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
 	if launcher.users == nil {
 		return errors.New("users are not set")
+	}
+
+	// Install service only in case system resources are valid
+	// check available devices with system ones
+	if err = launcher.devicemanager.AreResourcesValid(); err != nil {
+		log.Errorf("Validation resources: %s", err)
+
+		return err
 	}
 
 	service, err := launcher.serviceProvider.GetService(serviceInfo.ID)
@@ -1002,6 +1030,10 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
+	if err = launcher.requestDeviceResources(service); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1024,8 +1056,29 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 	return nil
 }
 
+func (launcher *Launcher) requestDeviceResources(service Service) (err error) {
+	var deviceNames []string
+	if err := json.Unmarshal([]byte(service.Devices), &deviceNames); err != nil {
+		return err
+	}
+
+	for _, device := range deviceNames {
+		log.Debugf("Request device %s, for %s service", device, service.ID)
+
+		if err = launcher.devicemanager.RequestDevice(device, service.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) startService(service Service) (err error) {
 	if err = launcher.prestartService(service); err != nil {
+		return err
+	}
+
+	if err = launcher.requestDeviceResources(service); err != nil {
 		return err
 	}
 
@@ -1080,6 +1133,23 @@ func (launcher *Launcher) startServices() {
 	}
 }
 
+func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
+	var deviceNames []string
+	if err := json.Unmarshal([]byte(service.Devices), &deviceNames); err != nil {
+		return err
+	}
+
+	for _, device := range deviceNames {
+		log.Debugf("Release device %s, for %s service", device, service.ID)
+
+		if err = launcher.devicemanager.ReleaseDevice(device, service.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) poststopService(service Service) (retErr error) {
 	if err := launcher.umountLayers(service); err != nil {
 		if retErr == nil {
@@ -1091,6 +1161,13 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
+			retErr = err
+		}
+	}
+
+	if err := launcher.releaseDeviceResources(service); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't release devices: %s", err)
 			retErr = err
 		}
 	}
@@ -1281,6 +1358,42 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	return nil
 }
 
+func (launcher *Launcher) setDevices(spec *serviceSpec, aosConfig aosServiceConfig) (deviceNamesBytes []byte, err error) {
+	// get devices from aos service configuration
+	// and get all resource information for device from device manager
+	// and add groups and host devices for class device
+	var deviceNames []string
+
+	for _, device := range aosConfig.Devices {
+		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
+		if err != nil {
+			return []byte{}, err
+		}
+
+		for _, hostDevice := range deviceResource.HostDevices {
+			// use absolute path from host devices and permissions from aos configuration
+			if err = spec.addHostDevice(Device{hostDevice, device.Permissions}); err != nil {
+				return []byte{}, err
+			}
+		}
+
+		for _, group := range deviceResource.Groups {
+			if err = spec.addAdditionalGroup(group); err != nil {
+				return []byte{}, err
+			}
+		}
+
+		deviceNames = append(deviceNames, deviceResource.Name)
+	}
+
+	deviceNamesBytes, err = json.Marshal(deviceNames)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return deviceNamesBytes, nil
+}
+
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
 	userName, err := platform.CreateUser(serviceInfo.ID)
@@ -1331,16 +1444,9 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	for _, device := range launcher.config.Devices {
-		if err = spec.addHostDevice(device); err != nil {
-			return service, err
-		}
-	}
-
-	for _, group := range launcher.config.Groups {
-		if err = spec.addGroup(group); err != nil {
-			return service, err
-		}
+	deviceResourcesForService, err := launcher.setDevices(spec, aosConfig)
+	if err != nil {
+		return service, err
 	}
 
 	if err = spec.setRootfs(serviceMergedDir); err != nil {
@@ -1370,7 +1476,8 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		UserName:   userName,
 		State:      stateInit,
 		Status:     statusOk,
-		AlertRules: string(alertRules)}
+		AlertRules: string(alertRules),
+		Devices:    string(deviceResourcesForService)}
 
 	for _, layerDigest := range imageParts.layersDigest {
 		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
