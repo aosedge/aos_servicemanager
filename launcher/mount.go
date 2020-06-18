@@ -56,6 +56,10 @@ func isOverlayMount(mountPoint string) (mounted bool, err error) {
 	var buf syscall.Statfs_t
 
 	if err = syscall.Statfs(mountPoint, &buf); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+
 		return false, err
 	}
 
