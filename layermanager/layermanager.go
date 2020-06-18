@@ -54,6 +54,7 @@ type LayerManager struct {
 	layerInfoProvider LayerInfoProvider
 	downloadDir       string
 	layersToRemove    []amqp.LayerInfo
+	statusSender      LayerStatusSender
 }
 
 // LayerInfoProvider provides API to add, remove or access layer information
@@ -64,14 +65,20 @@ type LayerInfoProvider interface {
 	GetLayersInfo() (layersList []amqp.LayerInfo, err error)
 }
 
+//LayerStatusSender provides API to send messages to the cloud
+type LayerStatusSender interface {
+	SendLayerStatus(serviceStatus amqp.LayerInfo) (err error)
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new launcher object
-func New(layersStorageDir string, fcrypt utils.FcryptInterface, infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
+func New(layersStorageDir string, fcrypt utils.FcryptInterface, infoProvider LayerInfoProvider,
+	sender LayerStatusSender) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{layersDir: layersStorageDir, crypt: fcrypt, layerInfoProvider: infoProvider,
-		downloadDir: path.Join(layersStorageDir, downloadDirName)}
+		downloadDir: path.Join(layersStorageDir, downloadDirName), statusSender: sender}
 
 	if err := os.MkdirAll(layermanager.downloadDir, 0755); err != nil {
 		return nil, err
@@ -103,12 +110,18 @@ func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.Laye
 		}
 
 		if !layerInstalled {
-			if _, err := layermanager.installLayer(desiredLayer, chains, certs); err != nil {
+			layerInfo, err := layermanager.installLayer(desiredLayer, chains, certs)
+			layerStatus := amqp.LayerInfo{Digest: layerInfo.Digest, LayerID: layerInfo.LayerID, Status: layerInfo.Status}
+			if err != nil {
 				log.Error("Can't install layer ", err)
-
+				layerStatus.Error = err.Error()
 				if resultError == nil {
 					resultError = err
 				}
+			}
+
+			if err := layermanager.statusSender.SendLayerStatus(layerStatus); err != nil {
+				log.Error("Can't send Layer status")
 			}
 		}
 	}
@@ -124,19 +137,27 @@ func (layermanager *LayerManager) DeleteUnneededLayers() (err error) {
 	defer func() { layermanager.layersToRemove = nil }()
 
 	for _, layer := range layermanager.layersToRemove {
+		layerStatus := amqp.LayerInfo{Digest: layer.Digest, LayerID: layer.LayerID, Status: "removed"}
+
 		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
 		if err != nil {
-			return err
+			layerStatus.Status = "error"
+			layerStatus.Error = err.Error()
+		} else {
+			os.RemoveAll(layerPath)
 		}
 
-		os.RemoveAll(layerPath)
-
 		if err = layermanager.layerInfoProvider.DeleteLayerByDigest(layer.Digest); err != nil {
-			return err
+			layerStatus.Status = "error"
+			layerStatus.Error = err.Error()
+		}
+
+		if err = layermanager.statusSender.SendLayerStatus(layerStatus); err != nil {
+			log.Error("Can't send Layer status")
 		}
 	}
 
-	return nil
+	return err
 }
 
 // GetLayersInfo provied list of already installed fs layers

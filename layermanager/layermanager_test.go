@@ -58,6 +58,9 @@ type fakeSymmetricContext struct {
 type fakeSignContext struct {
 }
 
+type fakeLayerSender struct {
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -208,6 +211,10 @@ func (sigCont fakeSignContext) VerifySign(f *os.File, chainName string, algName 
 	return nil
 }
 
+func (sender fakeLayerSender) SendLayerStatus(serviceStatus amqp.LayerInfo) (err error) {
+	return nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -230,7 +237,7 @@ func setup() (err error) {
 		log.Fatalf("Can't create database: %s", err)
 	}
 
-	layerMgr, err = New(path.Join(tmpDir, "layerStorage"), new(fakeFcrypt), db)
+	layerMgr, err = New(path.Join(tmpDir, "layrStorage"), new(fakeFcrypt), db, new(fakeLayerSender))
 	if err != nil {
 		log.Fatalf("Can't layer manager: %s", err)
 	}

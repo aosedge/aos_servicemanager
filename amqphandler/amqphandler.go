@@ -536,6 +536,16 @@ func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err er
 	return nil
 }
 
+// SendLayerStatus sends message with layer status
+func (handler *AmqpHandler) SendLayerStatus(serviceStatus LayerInfo) (err error) {
+	statusMsg := handler.createAosMessage(ServiceStatusType,
+		UnitStatus{Layers: []LayerInfo{serviceStatus}})
+
+	handler.sendChannel <- Message{"", statusMsg}
+
+	return nil
+}
+
 // SendMonitoringData sends monitoring data
 func (handler *AmqpHandler) SendMonitoringData(monitoringData MonitoringData) (err error) {
 	monitoringMsg := handler.createAosMessage(MonitoringDataType, monitoringData)
