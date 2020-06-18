@@ -756,8 +756,8 @@ func (monitor *Monitor) setupTrafficMonitor() (err error) {
 	// We have to count only interned traffic.  Skip local sub networks and netns
 	// bridge network from traffic count.
 	monitor.skipAddresses = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-	if monitor.config.NetnsBridgeIP != "" {
-		monitor.skipAddresses += "," + monitor.config.NetnsBridgeIP
+	if monitor.config.BridgeIP != "" {
+		monitor.skipAddresses += "," + monitor.config.BridgeIP
 	}
 
 	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {

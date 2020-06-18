@@ -123,8 +123,8 @@ The configuration file has JSON format. Following is JSON schema:
                     "minimum": 0,
                     "default": 25
                 },
-                "netnsBridgeIP": {
-                    "description": "Specifies netns bridge subnet to count as local traffic. Should be set if netns bridge subnet is changed",
+                "bridgeIP": {
+                    "description": "Specifies bridge subnet to count as local traffic. Should be set if bridge subnet is not in local segment",
                     "type": "string",
                     "default": "172.19.0.0/16"
                 },

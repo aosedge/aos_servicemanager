@@ -57,7 +57,7 @@ type Monitoring struct {
 	SendPeriod         Duration   `json:"sendPeriod"`
 	PollPeriod         Duration   `json:"pollPeriod"`
 	MaxOfflineMessages int        `json:"maxOfflineMessages"`
-	NetnsBridgeIP      string     `json:"netnsBridgeIP"`
+	BridgeIP           string     `json:"bridgeIP"`
 	RAM                *AlertRule `json:"ram"`
 	CPU                *AlertRule `json:"cpu"`
 	UsedDisk           *AlertRule `json:"usedDisk"`
@@ -117,7 +117,7 @@ func New(fileName string) (config *Config, err error) {
 			SendPeriod:         Duration{1 * time.Minute},
 			PollPeriod:         Duration{10 * time.Second},
 			MaxOfflineMessages: 25,
-			NetnsBridgeIP:      "172.19.0.0/16"},
+			BridgeIP:           "172.19.0.0/16"},
 		Logging: Logging{
 			MaxPartSize:  524288,
 			MaxPartCount: 20},

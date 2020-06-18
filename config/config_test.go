@@ -285,8 +285,8 @@ func TestGetMonitoringConfig(t *testing.T) {
 		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
 	}
 
-	if config.Monitoring.NetnsBridgeIP != "192.168.0.0/24" {
-		t.Errorf("Wrong value: %s", config.Monitoring.NetnsBridgeIP)
+	if config.Monitoring.BridgeIP != "192.168.0.0/24" {
+		t.Errorf("Wrong value: %s", config.Monitoring.BridgeIP)
 	}
 }
 
