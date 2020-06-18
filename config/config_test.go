@@ -90,8 +90,6 @@ func createConfigFile() (err error) {
 				"param2": 123
 		  }
 	},
-	"devices": ["device0", "device1", "device2"],
-	"groups": ["group0", "group1", "group2"],
 	"hostBinds": ["dir0", "dir1", "dir2"]
 }`
 
@@ -382,32 +380,6 @@ func TestGetIdentification(t *testing.T) {
 
 	if params.Param2 != 123 {
 		t.Errorf("Wrong param2: %v", params.Param2)
-	}
-}
-
-func TestDevices(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	devices := []string{"device0", "device1", "device2"}
-
-	if !reflect.DeepEqual(config.Devices, devices) {
-		t.Errorf("Wrong device value: %v", config.Devices)
-	}
-}
-
-func TestGroups(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	devices := []string{"group0", "group1", "group2"}
-
-	if !reflect.DeepEqual(config.Groups, devices) {
-		t.Errorf("Wrong groups value: %v", config.Groups)
 	}
 }
 

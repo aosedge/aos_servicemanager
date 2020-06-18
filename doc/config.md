@@ -211,20 +211,6 @@ The configuration file has JSON format. Following is JSON schema:
                 "module"
             ]
         },
-        "devices": {
-            "description": "The list of host devices which are accessible by services",
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
-        "groups": {
-            "description": "The list of host groups which should be added to service",
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
         "hostBinds": {
             "description": "The list of host directories/files which should be mounted to the service",
             "type": "array",

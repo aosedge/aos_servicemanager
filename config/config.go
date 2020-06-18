@@ -112,8 +112,6 @@ type Config struct {
 		Config json.RawMessage `json:"config"`
 	} `json:"identifier"`
 	HostBinds []string `json:"hostBinds"`
-	Devices   []string `json:"devices"`
-	Groups    []string `json:"groups"`
 }
 
 /*******************************************************************************
