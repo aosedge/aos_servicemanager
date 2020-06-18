@@ -50,6 +50,7 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
+	"aos_servicemanager/resourcemanager"
 )
 
 /*******************************************************************************
@@ -105,6 +106,11 @@ type testServiceProvider struct {
 type testLayerProvider struct {
 }
 
+type testDeviceManager struct {
+	sync.Mutex
+	isValid bool
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -112,6 +118,8 @@ type testLayerProvider struct {
 var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
 var layerProviderForTest = testLayerProvider{}
 var networkProvider *networkmanager.NetworkManager
+
+var deviceManager = testDeviceManager{isValid: true}
 
 /*******************************************************************************
  * Init
@@ -412,6 +420,100 @@ func TestUpdate(t *testing.T) {
 
 	if err := launcher.removeAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestDeviceManagementNotValidOnStartup(t *testing.T) {
+	sender := newTestSender()
+
+	// set fake resource system to invalid state (UT emulation)
+	deviceManager.isValid = false
+
+	// create launcher instance
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	defer func() {
+		deviceManager.isValid = true
+		launcher.Close()
+	}()
+
+	// run stored service configuration only in case system resources are valid
+	if err = launcher.SetUsers([]string{"User1"}); err == nil {
+		t.Fatalf("SM can start services when device resources are invalid")
+	}
+}
+
+func TestDeviceManagementRequestDeviceFail(t *testing.T) {
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	defer func() {
+		deviceManager.isValid = true
+		launcher.Close()
+	}()
+
+	// run stored service configuration only in case system resources are valid
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("SM can start services when device resources are invalid")
+	}
+
+	// set fake resource system to invalid state (UT emulation)
+	deviceManager.isValid = false
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
+
+	// wait while service will be installed and tried to run
+	// it should be failed because service requests random device
+	// according to aos service configuration that generates on mocked download operation
+	var status amqp.ServiceInfo
+	if status = <-sender.statusChannel; status.Error == "" {
+		t.Fatalf("SM can remove service when device resource is not released")
+	}
+}
+
+func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	defer func() {
+		launcher.Close()
+		deviceManager.isValid = true
+	}()
+
+	// run stored service configuration only in case system resources are valid
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("SM can start services when device resources are invalid")
+	}
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1})
+
+	// installation should be succesfully
+	var status amqp.ServiceInfo
+	if status = <-sender.statusChannel; status.Error != "" {
+		t.Fatalf("SM cannot start service when device resource is valid")
+	}
+
+	// set fake resource system to invalid state (UT emulation)
+	deviceManager.isValid = false
+
+	launcher.UninstallService(fmt.Sprintf("service0"))
+
+	// wait while service will be stopped and removed
+	// it should be failed because service releases random device
+	// according to aos service configuration that generates on mocked download operation
+	if status := <-sender.statusChannel; status.Error == "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
 	}
 }
 
@@ -1111,12 +1213,35 @@ func TestSpec(t *testing.T) {
 		}
 	}()
 
-	// add device
+	aosConf := generateAosSrvConfig()
+	randomDevice := Device{Name: "random", Permissions: "rwm"}
+	aosConf.Devices = []Device{randomDevice}
 
-	deviceName := "/dev/random"
+	if err != nil {
+		t.Fatalf("Can't load aos service config: %s", err)
+	}
 
-	if err = spec.addHostDevice(deviceName); err != nil {
-		t.Fatalf("Can't add host device: %s", err)
+	// add device and group from resource manager
+
+	for _, device := range aosConf.Devices {
+		// request device resources
+		deviceResource, err := deviceManager.RequestDeviceResourceByName(device.Name)
+		if err != nil {
+			t.Fatalf("Can't request device resource: %s", err)
+		}
+
+		for _, hostDevice := range deviceResource.HostDevices {
+			// use absolute path from host devices and permissions from aos configuration
+			if err = spec.addHostDevice(Device{hostDevice, device.Permissions}); err != nil {
+				t.Fatalf("Can't add host device: %s", err)
+			}
+		}
+
+		for _, group := range deviceResource.Groups {
+			if err = spec.addAdditionalGroup(group); err != nil {
+				t.Fatalf("Can't add host group: %s", err)
+			}
+		}
 	}
 
 	found := false
@@ -1124,7 +1249,7 @@ func TestSpec(t *testing.T) {
 	var device runtimespec.LinuxDevice
 
 	for _, device = range spec.ocSpec.Linux.Devices {
-		if device.Path == deviceName {
+		if strings.Contains(device.Path, path.Join("/dev/", randomDevice.Name)) {
 			found = true
 
 			break
@@ -1169,7 +1294,7 @@ func TestSpec(t *testing.T) {
 		t.Fatalf("Can't parse GID: %s", err)
 	}
 
-	if err = spec.addGroup(groupName); err != nil {
+	if err = spec.addAdditionalGroup(groupName); err != nil {
 		t.Fatalf("Can't add group: %s", err)
 	}
 
@@ -1320,7 +1445,7 @@ func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30},
-		sender, &serviceProvider, &layerProviderForTest, monitor, network)
+		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,6 +1479,7 @@ func (downloader pythonImage) downloadService(serviceInfo amqp.ServiceInfoFromCl
 
 	aosSrvConfig := generateAosSrvConfig()
 	aosSrvConfig.Quotas.VisPermissions = `{"*": "rw", "123": "rw"}`
+	aosSrvConfig.Devices = []Device{{Name: "random", Permissions: "rwm"}}
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
@@ -1421,6 +1547,7 @@ func (downloader iperfImage) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	aosSrvConfig := generateAosSrvConfig()
 	aosSrvConfig.Quotas.UploadSpeed = &uploadSpeed
 	aosSrvConfig.Quotas.DownloadSpeed = &downloadSpeed
+	aosSrvConfig.Devices = []Device{{Name: "random", Permissions: "rwm"}}
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
@@ -1884,6 +2011,52 @@ func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string)
 }
 
 func (layerProvider *testLayerProvider) DeleteUnneededLayers() (err error) {
+	return nil
+}
+
+func (deviceManager *testDeviceManager) AreResourcesValid() (err error) {
+	deviceManager.Lock()
+	defer deviceManager.Unlock()
+
+	if deviceManager.isValid == false {
+		return errors.New("this device isn't presented on System")
+	}
+
+	return nil
+}
+
+func (deviceManager *testDeviceManager) RequestDeviceResourceByName(
+	name string) (deviceResource resourcemanager.DeviceResource, err error) {
+	deviceManager.Lock()
+	defer deviceManager.Unlock()
+
+	if deviceManager.isValid == false {
+		return resourcemanager.DeviceResource{}, errors.New("device resources are not valid")
+	}
+
+	return resourcemanager.DeviceResource{Name: "random", Groups: []string{"root"},
+		HostDevices: []string{"/dev/random"}}, nil
+}
+
+func (deviceManager *testDeviceManager) RequestDevice(device string, serviceID string) (err error) {
+	deviceManager.Lock()
+	defer deviceManager.Unlock()
+
+	if deviceManager.isValid == false {
+		return errors.New("device resources are not valid")
+	}
+
+	return nil
+}
+
+func (deviceManager *testDeviceManager) ReleaseDevice(device string, serviceID string) (err error) {
+	deviceManager.Lock()
+	defer deviceManager.Unlock()
+
+	if deviceManager.isValid == false {
+		return errors.New("device resources are not valid")
+	}
+
 	return nil
 }
 
