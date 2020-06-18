@@ -82,8 +82,6 @@ const serviceTemplate = `# This is template file used to launch AOS services
 # * ${ID}            - service id
 # * ${SERVICEPATH}   - path to service dir
 # * ${RUNC}          - path to runc
-# * ${SETNETLIMIT}   - command to set net limit
-# * ${CLEARNETLIMIT} - command to clear net limit
 [Unit]
 Description=AOS Service
 After=network.target
@@ -94,9 +92,7 @@ Restart=always
 RestartSec=1
 ExecStartPre=${RUNC} delete -f ${ID}
 ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
-ExecStartPost=${SETNETLIMIT}
 
-ExecStop=${CLEARNETLIMIT}
 ExecStop=${RUNC} kill ${ID} SIGKILL
 ExecStopPost=${RUNC} delete -f ${ID}
 PIDFile=${SERVICEPATH}/.pid
@@ -966,6 +962,9 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 			stringid.TruncateID(launcher.network.GetID())}); err != nil {
 			return err
 		}
+
+		// TODO: set traffic speed
+
 	}
 
 	return nil
@@ -1616,8 +1615,6 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		return err
 	}
 
-	setNetLimitCmd, clearNetLimitCmd := launcher.generateNetLimitsCmdsFromAosConfig(aosConfig)
-
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
 	for _, line := range lines {
 		// skip comments
@@ -1629,8 +1626,6 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		line = strings.Replace(line, "${RUNC}", launcher.runcPath, -1)
 		line = strings.Replace(line, "${ID}", id, -1)
 		line = strings.Replace(line, "${SERVICEPATH}", absServicePath, -1)
-		line = strings.Replace(line, "${SETNETLIMIT}", setNetLimitCmd, -1)
-		line = strings.Replace(line, "${CLEARNETLIMIT}", clearNetLimitCmd, -1)
 
 		fmt.Fprint(f, line)
 	}
@@ -1680,6 +1675,14 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 		service.DownloadLimit = *aosSrvConfig.Quotas.DownloadLimit
 	}
 
+	if aosSrvConfig.Quotas.UploadSpeed != nil {
+		service.UploadSpeed = *aosSrvConfig.Quotas.UploadSpeed
+	}
+
+	if aosSrvConfig.Quotas.DownloadSpeed != nil {
+		service.DownloadSpeed = *aosSrvConfig.Quotas.DownloadSpeed
+	}
+
 	if aosSrvConfig.Quotas.StorageLimit != nil {
 		service.StorageLimit = *aosSrvConfig.Quotas.StorageLimit
 	}
@@ -1702,26 +1705,6 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	}
 
 	return nil
-}
-
-func (launcher *Launcher) generateNetLimitsCmdsFromAosConfig(aosConfig aosServiceConfig) (setCmd, clearCmd string) {
-	if aosConfig.Quotas.DownloadSpeed != nil {
-		setCmd = setCmd + " -d " + strconv.FormatUint(*aosConfig.Quotas.DownloadSpeed, 10)
-	}
-
-	if aosConfig.Quotas.UploadSpeed != nil {
-		setCmd = setCmd + " -u " + strconv.FormatUint(*aosConfig.Quotas.UploadSpeed, 10)
-	}
-
-	if setCmd != "" {
-		setCmd = "-" + launcher.wonderShaperPath + " -a netnsv0-${MAINPID}" + setCmd
-		clearCmd = "-" + launcher.wonderShaperPath + " -c -a netnsv0-${MAINPID}"
-
-		log.Debugf("Set net limit cmd: %s", setCmd)
-		log.Debugf("Clear net limit cmd: %s", clearCmd)
-	}
-
-	return setCmd, clearCmd
 }
 
 func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error) {
