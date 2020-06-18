@@ -151,7 +151,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	if operationVersion != version {
 		log.Warning("Unsupported operation version")
 
+		sm.db.Close()
+
 		cleanup(cfg, dbFile)
+
+		if sm.db, err = database.New(dbFile); err != nil {
+			return sm, err
+		}
 
 		if err = sm.db.SetOperationVersion(operationVersion); err != nil {
 			return sm, err
