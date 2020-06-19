@@ -231,3 +231,138 @@ ReleaseDevice(device string, serviceID string) (err error)
 This API will be called by **launcher** on service start and stop accordingly.
 
 The Resource Manager should maintain the number of requested devices and compare it with *available devices* from *resource configuration*.
+
+## Example of real Available devices
+
+Here is a list of resource configuration for real devices
+```json
+{
+    "devices": [
+        {
+            "name": "camera0",
+            "sharedCount": 1,
+            "groups": [
+                "plugdev"
+            ],
+            "hostDevices": [
+                "/dev/video0",
+                "/dev/video1"
+            ]
+        },
+        {
+            "name": "camera1",
+            "sharedCount": 1,
+            "groups": [
+                "plugdev"
+            ],
+            "hostDevices": [
+                "/dev/video2",
+                "/dev/video3"
+            ]
+        },
+        {
+            "name": "camera2",
+            "sharedCount": 1,
+            "groups": [
+                "plugdev"
+            ],
+            "hostDevices": [
+                "/dev/video4",
+                "/dev/video5"
+            ]
+        },
+        {
+            "name": "audio0",
+            "sharedCount": 1,
+            "groups": [
+                "audio"
+            ],
+            "hostDevices": [
+                "/dev/snd/controlC0",
+                "/dev/snd/pcmC0D0p",
+                "/dev/snd/timer"
+            ]
+        },
+        {
+            "name": "mic1",
+            "sharedCount": 1,
+            "groups": [
+                "audio"
+            ],
+            "hostDevices": [
+                    "/dev/snd/controlC1",
+                    "/dev/snd/pcmC1D0c",
+                    "/dev/snd/timer"
+            ]
+        },
+        {
+            "name": "audio1",
+            "sharedCount": 1,
+            "groups": [
+                "audio"
+            ],
+            "hostDevices": [
+                "/dev/snd/controlC1",
+                "/dev/snd/pcmC1D0p",
+                "/dev/snd/timer"
+            ]
+        },
+        {
+            "name": "mic2",
+            "sharedCount": 1,
+            "groups": [
+                "audio"
+            ],
+            "hostDevices": [
+                    "/dev/snd/controlC2",
+                    "/dev/snd/pcmC2D0c",
+                    "/dev/snd/timer"
+            ]
+        },
+        {
+            "name": "audio2",
+            "sharedCount": 1,
+            "groups": [
+                "audio"
+            ],
+            "hostDevices": [
+                "/dev/snd/controlC2",
+                "/dev/snd/pcmC2D0p",
+                "/dev/snd/timer"
+            ]
+        },
+        {
+            "name": "tpm0",
+            "hostDevices": [
+                "/dev/tpmrm0",
+            ]
+        },
+        {
+            "name": "touchscreen0",
+            "sharedCount": 1,
+            "groups": [
+                "input"
+            ],
+            "hostDevices": [
+                "/dev/input/event2",
+            ]
+        },
+        {
+            "name": "screen0",
+            "sharedCount": 1,
+            "hostDevices": [
+                "/dev/dri/card0",
+                "/dev/dri/renderD128"
+            ]
+        },
+        {
+            "name": "gpu0",
+            "sharedCount": 1,
+            "hostDevices": [
+                "/dev/dri/card0",
+                "/dev/dri/renderD128"
+            ]
+        }
+    ]
+}
+```
