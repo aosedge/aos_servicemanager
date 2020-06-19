@@ -28,10 +28,19 @@ import (
 )
 
 /*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+// TestSender instance
+type TestSender struct {
+}
+
+/*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var tmpDir string
+var testSender *TestSender
 
 /*******************************************************************************
  * Init
@@ -73,7 +82,7 @@ func TestValidAvailableResources(t *testing.T) {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -89,7 +98,7 @@ func TestInValidAvailableResources(t *testing.T) {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -101,7 +110,7 @@ func TestInValidAvailableResources(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -127,7 +136,7 @@ func TestRequestAndReleaseDeviceResources(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -158,7 +167,7 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -187,7 +196,7 @@ func TestRequestLimitDeviceResources(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -232,7 +241,7 @@ func TestReleaseNotRequestedDeviceResources(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -270,7 +279,7 @@ func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"))
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -403,4 +412,12 @@ func createInValidResourceConfigFile() (err error) {
 	}
 
 	return nil
+}
+
+func (instance *TestSender) SendValidateResourceAlert(source string, errors map[string][]error) {
+	log.Debugf("SendValidateResourceAlert source %s", source)
+}
+
+func (instance *TestSender) SendRequestResourceAlert(source string, message string) {
+	log.Debugf("SendRequestResourceAlert source %s, message %s", source, message)
 }

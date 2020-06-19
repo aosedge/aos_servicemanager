@@ -237,7 +237,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create resourcemanager
-	if sm.resourcemanager, err = resource.New(cfg.ResourceConfigFile); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.ResourceConfigFile, sm.alerts); err != nil {
 		return sm, err
 	}
 

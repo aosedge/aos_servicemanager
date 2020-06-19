@@ -65,6 +65,11 @@ type testCursorStorage struct {
 	cursor string
 }
 
+type validateAlert struct {
+	source  string
+	message map[string][]error
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -318,6 +323,156 @@ func TestGetResourceAlerts(t *testing.T) {
 					resourceAlerts = append(resourceAlerts[:i], resourceAlerts[i+1:]...)
 
 					if len(resourceAlerts) == 0 {
+						return true, nil
+					}
+
+					return false, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetValidateResourceAlerts(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     2048,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("alertservice2"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	device1 := "test123"
+	device2 := "test234"
+	device3 := "test345"
+
+	error1 := fmt.Errorf("device: %s is unavailable", device1)
+	error2 := fmt.Errorf("device: %s was not provided for %s service", device2, "service234")
+	error3 := fmt.Errorf("device: %s error is %s", device3, "error345")
+	error4 := fmt.Errorf("system error")
+
+	message1 := make(map[string][]error)
+	message1[device1] = []error{error1, error2}
+
+	message2 := make(map[string][]error)
+	message2[device2] = []error{error2, error3}
+	message2[device3] = []error{error3, error4}
+
+	validateAlerts := []validateAlert{
+		validateAlert{"alertservice2", message1},
+		validateAlert{"alertservice2", message2},
+		validateAlert{"system", message1},
+		validateAlert{"system", message2}}
+
+	for _, alert := range validateAlerts {
+		alertsHandler.SendValidateResourceAlert(alert.source, alert.message)
+	}
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		func(alert amqp.AlertItem) (success bool, err error) {
+			if alert.Tag != amqp.AlertTagAosCore {
+				return false, nil
+			}
+
+			for i, originItem := range validateAlerts {
+				receivedAlert, ok := (alert.Payload.(amqp.ResourseValidatePayload))
+				if !ok {
+					return false, errors.New("wrong alert type")
+				}
+
+				receivedMessage := make(map[string][]error)
+
+				for _, item := range receivedAlert.Errors {
+					var errors []error
+
+					for _, message := range item.Errors {
+						errors = append(errors, fmt.Errorf(message))
+					}
+
+					receivedMessage[item.Name] = errors
+				}
+
+				receivedItem := validateAlert{
+					source:  alert.Source,
+					message: receivedMessage}
+
+				if compareValidateAlerts(receivedItem, originItem) {
+					validateAlerts = append(validateAlerts[:i], validateAlerts[i+1:]...)
+
+					if len(validateAlerts) == 0 {
+						return true, nil
+					}
+
+					return false, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetRequestResourceAlerts(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	if err = createService("alertservice3"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	type requestAlert struct {
+		source  string
+		message string
+	}
+
+	message1 := "device: test123 is unavailable"
+	message2 := "device: test234 is unavailable"
+
+	requestAlerts := []requestAlert{
+		requestAlert{"alertservice3", message1},
+		requestAlert{"alertservice3", message2},
+		requestAlert{"system", message1},
+		requestAlert{"system", message2}}
+
+	for _, alert := range requestAlerts {
+		alertsHandler.SendRequestResourceAlert(alert.source, alert.message)
+	}
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		func(alert amqp.AlertItem) (success bool, err error) {
+			if alert.Tag != amqp.AlertTagAosCore {
+				return false, nil
+			}
+
+			for i, originItem := range requestAlerts {
+				receivedAlert, ok := (alert.Payload.(amqp.SystemAlert))
+				if !ok {
+					return false, errors.New("wrong alert type")
+				}
+
+				receivedItem := requestAlert{
+					source:  alert.Source,
+					message: receivedAlert.Message}
+
+				if receivedItem == originItem {
+					requestAlerts = append(requestAlerts[:i], requestAlerts[i+1:]...)
+
+					if len(requestAlerts) == 0 {
 						return true, nil
 					}
 
@@ -723,4 +878,12 @@ func TestWrongFilter(t *testing.T) {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
+}
+
+func compareValidateAlerts(first validateAlert, second validateAlert) (result bool) {
+	if first.source != second.source {
+		return false
+	}
+
+	return reflect.DeepEqual(first.message, second.message)
 }

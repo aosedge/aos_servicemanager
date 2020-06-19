@@ -172,6 +172,64 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 			Value:     value}})
 }
 
+// SendValidateResourceAlert sends request/releases resource alert
+func (instance *Alerts) SendValidateResourceAlert(source string, errors map[string][]error) {
+	time := time.Now()
+
+	log.WithFields(log.Fields{
+		"timestamp": time,
+		"source":    source,
+		"errors":    errors}).Debug("Validate Resource alert")
+
+	var convertedErrors []amqp.ResourceValidateErrors
+
+	for name, reason := range errors {
+		var messages []string
+
+		for _, item := range reason {
+			messages = append(messages, item.Error())
+		}
+
+		err := amqp.ResourceValidateErrors{
+			Name:   name,
+			Errors: messages}
+
+		convertedErrors = append(convertedErrors, err)
+	}
+
+	instance.addAlert(amqp.AlertItem{
+		Timestamp: time,
+		Tag:       amqp.AlertTagAosCore,
+		Source:    source,
+		Payload: amqp.ResourseValidatePayload{
+			Type:   amqp.DeviceErrors,
+			Errors: convertedErrors}})
+}
+
+// SendRequestResourceAlert sends request resource alert
+func (instance *Alerts) SendRequestResourceAlert(source string, message string) {
+	time := time.Now()
+
+	log.WithFields(log.Fields{
+		"timestamp": time,
+		"source":    source,
+		"error":     message}).Debug("Request Resource alert")
+
+	var version *uint64
+
+	if service, err := instance.serviceProvider.GetService(source); err == nil {
+		version = &service.Version
+	}
+
+	instance.addAlert(amqp.AlertItem{
+		Timestamp: time,
+		Tag:       amqp.AlertTagAosCore,
+		Source:    source,
+		Version:   version,
+		Payload: amqp.SystemAlert{
+			Message: message}})
+}
+
 // Levels returns log levels which should be hooked (log Hook interface)
 func (instance *Alerts) Levels() (levels []log.Level) {
 	return []log.Level{log.ErrorLevel, log.FatalLevel, log.PanicLevel}

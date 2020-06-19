@@ -60,6 +60,7 @@ const (
 	SystemRevertType           = "systemRevert"
 	SystemUpgradeType          = "systemUpgrade"
 	UpdateStateType            = "updateState"
+	DeviceErrors               = "deviceErrors"
 )
 
 // amqp response types
@@ -216,6 +217,18 @@ type SystemAlert struct {
 type ResourceAlert struct {
 	Parameter string `json:"parameter"`
 	Value     uint64 `json:"value"`
+}
+
+// ResourceValidateErrors errors structure
+type ResourceValidateErrors struct {
+	Name   string   `json:"name"`
+	Errors []string `json:"error"`
+}
+
+// Validate payload structure
+type ResourseValidatePayload struct {
+	Type   string                   `json:"type"`
+	Errors []ResourceValidateErrors `json:"message"`
 }
 
 // AlertItem alert item structure

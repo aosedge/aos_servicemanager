@@ -53,6 +53,13 @@ type ResourceManager struct {
 	availableResources AvailableResources
 	areResourcesValid  error
 	sync.Mutex
+	sender Sender
+}
+
+// Sender provides sender interface
+type Sender interface {
+	SendValidateResourceAlert(source string, errors map[string][]error)
+	SendRequestResourceAlert(source string, message string)
 }
 
 // DeviceResource describes Device available resource
@@ -73,10 +80,10 @@ type AvailableResources struct {
  ******************************************************************************/
 
 // New creates new resource manager object
-func New(resourceConfigFile string) (resourcemanager *ResourceManager, err error) {
+func New(resourceConfigFile string, sender Sender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New ResourceManager")
 
-	resourcemanager = &ResourceManager{resourceConfigFile: resourceConfigFile}
+	resourcemanager = &ResourceManager{resourceConfigFile: resourceConfigFile, sender: sender}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
 		return nil, err
@@ -128,8 +135,12 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 	// check that Unit has restriction on devices
 	// if not sent alert to cloud and error as return
 	if !resourcemanager.isAvailableResourcesChecked() {
-		// TODO: send alert that Resource configuration is not provided
-		return errors.New("resource configuration is not provided")
+		message := errors.New("resource configuration is not provided")
+
+		if resourcemanager.sender != nil {
+			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		}
+		return message
 	}
 
 	// check that requested device class is contained in available resources
@@ -156,9 +167,12 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 			resourcemanager.deviceWithServices[device] = append(listOfServices, serviceID)
 		}
 	} else {
-		// TODO: send Alert that service is not able to request device
+		message := fmt.Errorf("device: %s is unavailable", device)
 
-		return fmt.Errorf("device: %s is unavailable", device)
+		if resourcemanager.sender != nil {
+			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		}
+		return message
 	}
 
 	return nil
@@ -174,8 +188,13 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 	// check that Unit has restriction on devices
 	// if not sent alert to cloud and error as return
 	if !resourcemanager.isAvailableResourcesChecked() {
-		// TODO: send alert that Resource configuration is not provided
-		return errors.New("resource configuration is not provided")
+		message := errors.New("resource configuration is not provided")
+
+		if resourcemanager.sender != nil {
+			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		}
+
+		return message
 	}
 
 	// check that requested device class is contained in available resources
@@ -195,9 +214,12 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 		// 2. set updated device's map to devices' class map by key: name (class name of device (alias))
 		resourcemanager.deviceWithServices[device] = removeFromSlice(listOfServices, serviceID)
 	} else {
-		// TODO: send Alert that service is not able to release device
+		message := fmt.Errorf("device: %s was not provided for %s service", device, serviceID)
 
-		return fmt.Errorf("device: %s was not provided for %s service", device, serviceID)
+		if resourcemanager.sender != nil {
+			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		}
+		return message
 	}
 
 	return nil
