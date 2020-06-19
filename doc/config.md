@@ -92,6 +92,10 @@ The configuration file has JSON format. Following is JSON schema:
             "description": "Directory where service layers are stored",
             "type": "string"
         },
+        "resourceConfigFile": {
+            "description": "Resource configuration file that contains available system resources for AOS",
+            "type": "string"
+        },
         "defaultServiceTTLDays": {
             "description": "Specifies how long  to keep service and its data when it is not used",
             "type": "integer",

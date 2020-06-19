@@ -54,7 +54,6 @@ import (
 const reconnectTimeout = 10 * time.Second
 
 const dbFileName = "servicemanager.db"
-const resourceConfFileName = "available_configuration.cfg"
 
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
@@ -238,7 +237,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create resourcemanager
-	if sm.resourcemanager, err = resource.New(resourceConfFileName); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.ResourceConfigFile); err != nil {
 		return sm, err
 	}
 

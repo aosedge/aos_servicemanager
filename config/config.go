@@ -103,6 +103,7 @@ type Config struct {
 	UpgradeDir          string     `json:"upgradeDir"`
 	StorageDir          string     `json:"storageDir"`
 	LayersDir           string     `json:"layersDir"`
+	ResourceConfigFile  string     `json:"resourceConfigFile"`
 	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
 	Monitoring          Monitoring `json:"monitoring"`
 	Logging             Logging    `json:"logging"`
@@ -154,6 +155,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.LayersDir == "" {
 		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
+	}
+
+	if config.ResourceConfigFile == "" {
+		config.UpgradeDir = path.Join(config.WorkingDir, "resources", "available_configuration.cfg")
 	}
 
 	return config, nil

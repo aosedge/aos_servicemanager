@@ -54,6 +54,7 @@ func createConfigFile() (err error) {
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
 	"upgradeDir" : "/var/aos/upgrade",
+	"resourceConfigFile" : "/var/aos/resources/available_configuration.cfg",
 	"visServer" : "wss://localhost:8088",
 	"umServer" : "wss://localhost:8089",
 	"defaultServiceTTLDays" : 30,
@@ -215,6 +216,17 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 
 	if config.StorageDir != "/var/aos/storage" {
 		t.Errorf("Wrong storageDir value: %s", config.StorageDir)
+	}
+}
+
+func TestGetResourcesConfigFile(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.ResourceConfigFile != "/var/aos/resources/available_configuration.cfg" {
+		t.Errorf("Wrong storageDir value: %s", config.ResourceConfigFile)
 	}
 }
 
