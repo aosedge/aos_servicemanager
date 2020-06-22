@@ -174,16 +174,13 @@ func CheckSigns(filePath string, crypt *fcrypt.CryptoContext,
 
 // UnpackTarGzImage extract tar gz archive
 func UnpackTarGzImage(source, destination string) (err error) {
-	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack image")
+	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar gz image")
 
 	reader, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-
-	if err = os.MkdirAll(destination, 0755); err != nil {
-		return err
-	}
+	defer reader.Close()
 
 	gzReader, err := gzip.NewReader(reader)
 	if err != nil {
@@ -191,7 +188,32 @@ func UnpackTarGzImage(source, destination string) (err error) {
 	}
 	defer gzReader.Close()
 
-	tarReader := tar.NewReader(gzReader)
+	return unTarFromReader(gzReader, destination)
+}
+
+// UnpackTarImage extract tar image
+func UnpackTarImage(source, destination string) (err error) {
+	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar image")
+
+	reader, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	return unTarFromReader(reader, destination)
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func unTarFromReader(reader io.Reader, destination string) (err error) {
+	if err = os.MkdirAll(destination, 0755); err != nil {
+		return err
+	}
+
+	tarReader := tar.NewReader(reader)
 
 	for {
 		header, err := tarReader.Next()
@@ -229,9 +251,12 @@ func UnpackTarGzImage(source, destination string) (err error) {
 			if err != nil {
 				return err
 			}
-			defer file.Close()
 
-			if _, err := io.Copy(file, tarReader); err != nil {
+			_, err = io.Copy(file, tarReader)
+
+			file.Close()
+
+			if err != nil {
 				return err
 			}
 		}
