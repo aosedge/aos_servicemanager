@@ -78,8 +78,11 @@ func createConfigFile() (err error) {
 		"filter": ["(test)", "(regexp)"]
 	},
 	"identifier": {
-		"param1": "testParam",
-		"param2": 123
+		"type" : "identifier",
+		 "config" : {
+				"param1": "testParam",
+				"param2": 123
+		  }
 	},
 	"devices": ["device0", "device1", "device2"],
 	"groups": ["group0", "group1", "group2"],
@@ -336,6 +339,10 @@ func TestGetIdentification(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
+	if config.Identifier.Type != "identifier" {
+		t.Errorf("Wrong Identifier.Type: %v", config.Identifier.Type)
+	}
+
 	type Params struct {
 		Param1 string
 		Param2 int
@@ -343,7 +350,7 @@ func TestGetIdentification(t *testing.T) {
 
 	var params Params
 
-	if err = json.Unmarshal(config.Identifier, &params); err != nil {
+	if err = json.Unmarshal(config.Identifier.Config, &params); err != nil {
 		t.Errorf("Can't parse identifier params: %s", err)
 	}
 

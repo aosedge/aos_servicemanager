@@ -36,12 +36,13 @@ import (
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/fcrypt"
-	"aos_servicemanager/identification/visidentifier"
+	_ "aos_servicemanager/identification"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/layermanager"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
+	"aos_servicemanager/pluginprovider"
 	"aos_servicemanager/umclient"
 )
 
@@ -68,26 +69,13 @@ type serviceManager struct {
 	cfg        *config.Config
 	crypt      *fcrypt.CryptoContext
 	db         *database.Database
-	identifier identifier
+	identifier pluginprovider.Identifier
 	launcher   *launcher.Launcher
 	logging    *logging.Logging
 	monitor    *monitoring.Monitor
 	network    *networkmanager.NetworkManager
 	um         *umclient.Client
 	layerMgr   *layermanager.LayerManager
-}
-
-type identifier interface {
-	// Close closes identifier
-	Close() (err error)
-	// GetSystemID returns the system ID
-	GetSystemID() (systemID string, err error)
-	// GetUsers returns the user claims
-	GetUsers() (users []string, err error)
-	// UsersChangedChannel returns users changed channel
-	UsersChangedChannel() (channel <-chan []string)
-	// ErrorChannel returns error channel
-	ErrorChannel() (channel <-chan error)
 }
 
 /*******************************************************************************
@@ -250,8 +238,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create identifier
-	// Use appropriate identifier from identification folder
-	if sm.identifier, err = visidentifier.New(cfg.Identifier, sm.db); err != nil {
+	// Use plugged in identifier
+	if sm.identifier, err = pluginprovider.GetIdentifier(cfg.Identifier.Type, cfg.Identifier.Config, sm.db); err != nil {
 		return sm, err
 	}
 

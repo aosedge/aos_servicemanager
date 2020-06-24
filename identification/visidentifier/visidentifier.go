@@ -29,7 +29,7 @@ import (
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/identification/visidentifier/dbushandler"
-	"aos_servicemanager/launcher"
+	"aos_servicemanager/pluginprovider"
 )
 
 /*******************************************************************************
@@ -69,11 +69,6 @@ type Instance struct {
 	sync.Mutex
 }
 
-// ServiceProvider provides service info
-type ServiceProvider interface {
-	GetService(serviceID string) (service launcher.Service, err error)
-}
-
 type instanceConfig struct {
 	VISServer     string
 	ReconnectTime config.Duration
@@ -88,10 +83,10 @@ type instanceConfig struct {
  ******************************************************************************/
 
 // New creates new vis identifier instance
-func New(configJSON []byte, serviceProvider ServiceProvider) (instance *Instance, err error) {
+func New(configJSON []byte, serviceProvider pluginprovider.ServiceProvider) (identifier pluginprovider.Identifier, err error) {
 	log.Info("Create VIS identification instance")
 
-	instance = &Instance{}
+	instance := &Instance{}
 
 	// default reconnect time
 	instance.config.ReconnectTime.Duration = defaultReconnectTime

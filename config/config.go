@@ -82,22 +82,25 @@ type Alerts struct {
 
 // Config instance
 type Config struct {
-	Crypt               Crypt           `json:"fcrypt"`
-	ServiceDiscoveryURL string          `json:"serviceDiscovery"`
-	VISServerURL        string          `json:"visServer"`
-	UMServerURL         string          `json:"umServer"`
-	WorkingDir          string          `json:"workingDir"`
-	UpgradeDir          string          `json:"upgradeDir"`
-	StorageDir          string          `json:"storageDir"`
-	LayersDir           string          `json:"layersDir"`
-	DefaultServiceTTL   uint64          `json:"defaultServiceTTLDays"`
-	Monitoring          Monitoring      `json:"monitoring"`
-	Logging             Logging         `json:"logging"`
-	Alerts              Alerts          `json:"alerts"`
-	Identifier          json.RawMessage `json:"identifier"`
-	HostBinds           []string        `json:"hostBinds"`
-	Devices             []string        `json:"devices"`
-	Groups              []string        `json:"groups"`
+	Crypt               Crypt      `json:"fcrypt"`
+	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
+	VISServerURL        string     `json:"visServer"`
+	UMServerURL         string     `json:"umServer"`
+	WorkingDir          string     `json:"workingDir"`
+	UpgradeDir          string     `json:"upgradeDir"`
+	StorageDir          string     `json:"storageDir"`
+	LayersDir           string     `json:"layersDir"`
+	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
+	Monitoring          Monitoring `json:"monitoring"`
+	Logging             Logging    `json:"logging"`
+	Alerts              Alerts     `json:"alerts"`
+	Identifier          struct {
+		Type   string          `json:"type"`
+		Config json.RawMessage `json:"config"`
+	} `json:"identifier"`
+	HostBinds []string `json:"hostBinds"`
+	Devices   []string `json:"devices"`
+	Groups    []string `json:"groups"`
 }
 
 /*******************************************************************************
