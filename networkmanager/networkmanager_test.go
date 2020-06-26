@@ -204,6 +204,31 @@ func TestInterServiceConnection(t *testing.T) {
 	}
 }
 
+func TestHostName(t *testing.T) {
+	if err := manager.CreateNetwork("network0"); err != nil {
+		t.Fatalf("Can't create network: %s", err)
+	}
+
+	container0Path := path.Join(tmpDir, "service0")
+
+	if err := createOCIContainer(container0Path, "service0", []string{"ping", "myhost", "-c10", "-w10"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", "network0", container0Path,
+		networkmanager.NetworkParams{Hostname: "myhost"}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	if err := runOCIContainer(container0Path, "service0"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	if err := manager.DeleteNetwork("network0"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -265,7 +290,7 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	spec.Process.Args = args
 
-	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
+	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc/nsswitch.conf"} {
 		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
 			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
 	}
