@@ -631,7 +631,8 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 }
 
 func runContainerCmd(imagePath string, containerID string) (cmd *exec.Cmd, err error) {
-	if err = networkManager.AddServiceToNetwork(containerID, "default", imagePath, ""); err != nil {
+	if err = networkManager.AddServiceToNetwork(containerID, "default", imagePath,
+		networkmanager.NetworkParams{}); err != nil {
 		return nil, err
 	}
 

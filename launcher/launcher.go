@@ -43,6 +43,7 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/monitoring"
+	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
 	"aos_servicemanager/utils"
 )
@@ -225,7 +226,7 @@ type NetworkProvider interface {
 	CreateNetwork(spID string) (err error)
 	NetworkExists(spID string) (err error)
 	DeleteNetwork(spID string) (err error)
-	AddServiceToNetwork(serviceID, spID, servicePath, hostname string) (err error)
+	AddServiceToNetwork(serviceID, spID, servicePath string, params networkmanager.NetworkParams) (err error)
 	RemoveServiceFromNetwork(serviceID, spID string) (err error)
 	GetServiceIP(serviceID, spID string) (ip string, err error)
 }
@@ -940,7 +941,7 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 
 	if launcher.network != nil {
 		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider,
-			service.Path, service.HostName); err != nil {
+			service.Path, networkmanager.NetworkParams{Hostname: service.HostName}); err != nil {
 			return err
 		}
 

@@ -55,6 +55,12 @@ type NetworkManager struct {
 	controller libnetwork.NetworkController
 }
 
+// NetworkParams network parameters set for service
+type NetworkParams struct {
+	Hostname string
+	Aliases  []string
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -166,8 +172,9 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath, hostname string) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath string, params NetworkParams) (err error) {
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
+	log.WithFields(log.Fields{"hostname": params.Hostname, "aliases": params.Aliases}).Debug("Network params")
 
 	network, err := manager.controller.NetworkByName(spID)
 	if err != nil {
@@ -183,7 +190,13 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath,
 		return err
 	}
 
-	if endpoint, err = network.CreateEndpoint(serviceID); err != nil {
+	var endpointOptions []libnetwork.EndpointOption
+
+	for _, alias := range params.Aliases {
+		endpointOptions = append(endpointOptions, libnetwork.CreateOptionMyAlias(alias))
+	}
+
+	if endpoint, err = network.CreateEndpoint(serviceID, endpointOptions...); err != nil {
 		return err
 	}
 
@@ -198,8 +211,8 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath,
 			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath)),
 		}
 
-		if hostname != "" {
-			options = append(options, libnetwork.OptionHostname(hostname))
+		if params.Hostname != "" {
+			options = append(options, libnetwork.OptionHostname(params.Hostname))
 		}
 
 		if sandbox, err = manager.controller.NewSandbox(serviceID, options...); err != nil {
