@@ -940,8 +940,13 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 	}
 
 	if launcher.network != nil {
-		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider,
-			service.Path, networkmanager.NetworkParams{Hostname: service.HostName}); err != nil {
+		params := networkmanager.NetworkParams{Hostname: service.HostName}
+
+		if params.Hostname != "" {
+			params.Aliases = append(params.Aliases, params.Hostname)
+		}
+
+		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, service.Path, params); err != nil {
 			return err
 		}
 
@@ -1703,8 +1708,6 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	}
 
 	service.Permissions = aosSrvConfig.Quotas.VisPermissions
-
-	service.HostName = service.ID
 
 	if aosSrvConfig.Hostname != nil {
 		service.HostName = *aosSrvConfig.Hostname
