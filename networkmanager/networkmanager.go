@@ -176,7 +176,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath,
 
 	endpoint, err := network.EndpointByName(serviceID)
 	if err == nil {
-		return fmt.Errorf("service %s alredy in SP network %s", serviceID, spID)
+		return fmt.Errorf("service %s already in SP network %s", serviceID, spID)
 	}
 
 	if _, ok := err.(types.NotFoundError); !ok {
