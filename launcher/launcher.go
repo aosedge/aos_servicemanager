@@ -434,7 +434,8 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 	if err = launcher.devicemanager.AreResourcesValid(); err != nil {
 		log.Errorf("Validation resources: %s", err)
 
-		return err
+		//Do not fail here, just print message
+		return nil
 	}
 
 	launcher.startServices()
@@ -1075,10 +1076,6 @@ func (launcher *Launcher) requestDeviceResources(service Service) (err error) {
 
 func (launcher *Launcher) startService(service Service) (err error) {
 	if err = launcher.prestartService(service); err != nil {
-		return err
-	}
-
-	if err = launcher.requestDeviceResources(service); err != nil {
 		return err
 	}
 
