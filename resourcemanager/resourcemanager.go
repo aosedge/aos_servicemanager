@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jinzhu/copier"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -117,7 +118,23 @@ func (resourcemanager *ResourceManager) RequestDeviceResourceByName(name string)
 
 	log.Debugf("ResourceManager: RequestDeviceResourceByName(%s)", name)
 
-	deviceResource, err = resourcemanager.getAvailableDeviceByName(name)
+	tempDeviceResource, err := resourcemanager.getAvailableDeviceByName(name)
+
+	copier.Copy(&deviceResource, &tempDeviceResource)
+
+	//Cleanup host devices, releasing allocated memory
+	deviceResource.HostDevices = nil
+
+	for _, hostDevice := range tempDeviceResource.HostDevices {
+		listOfDevices, err := resourcemanager.processHostDevice(hostDevice)
+		if err != nil {
+			log.Errorf("ResourceManager: RequestDeviceResourceByName(%s). Can't get list of devices for %s", name, hostDevice)
+			return deviceResource, err
+		}
+
+		deviceResource.HostDevices = append(deviceResource.HostDevices, listOfDevices...)
+	}
+
 	if err != nil {
 		return deviceResource, err
 	}
@@ -228,6 +245,46 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func handleDir(device string) (hostDevices []string, err error) {
+	err = filepath.Walk(device,
+		func(path string, info os.FileInfo, err error) error {
+			if info.IsDir() || err != nil {
+				return err
+			}
+
+			if info.Mode()&os.ModeSymlink == os.ModeSymlink {
+				linkName, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					return err
+				}
+
+				hostDevices = append(hostDevices, linkName)
+			} else {
+				hostDevices = append(hostDevices, path)
+			}
+			return nil
+		})
+
+	return hostDevices, err
+}
+
+func (resourcemanager *ResourceManager) processHostDevice(device string) (hostDevices []string, err error) {
+	fi, err := os.Lstat(device)
+	if err != nil {
+		return []string{}, err
+	}
+
+	if fi.IsDir() {
+		return handleDir(device)
+		//this is dir
+	} else if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		s, err := filepath.EvalSymlinks(device)
+		return []string{s}, err
+	}
+
+	return []string{device}, nil
+}
 
 func (resourcemanager *ResourceManager) discoverHostDevices() (hostDevices []string, err error) {
 	err = filepath.Walk(devHostDirectory,

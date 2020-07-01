@@ -21,11 +21,19 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
 )
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const DRI_DEV_PATH = "/dev/dri/by-path/"
+const STDIN_DEV_PATH = "/dev/stdout"
 
 /*******************************************************************************
  * Types
@@ -76,6 +84,53 @@ func TestMain(m *testing.M) {
 /*******************************************************************************
  * Tests
  ******************************************************************************/
+
+func TestProcessHostDevice(t *testing.T) {
+	if err := createRealResourceConfigFile(); err != nil {
+		t.Errorf("Can't write resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	err = rm.AreResourcesValid()
+	if err != nil {
+		t.Errorf("Detect unavailable device. Error: %s", err)
+	}
+
+	//Test directory with symlinks
+	hs, err := rm.processHostDevice(DRI_DEV_PATH)
+	if err != nil {
+		t.Errorf("Can't process device directory. Error: %s", err)
+	}
+
+	originalHs, err := getDevicePathContents(DRI_DEV_PATH)
+	if err != nil {
+		t.Errorf("Can't process device directory. Error: %s", err)
+	}
+
+	if !reflect.DeepEqual(hs, originalHs) {
+		t.Errorf("Device path contents are not equal. Error: %s", err)
+	}
+
+	//Test symlink
+	hs, err = rm.processHostDevice(STDIN_DEV_PATH)
+	if err != nil {
+		t.Errorf("Can't process device directory. Error: %s", err)
+	}
+
+	linkName, err := filepath.EvalSymlinks(STDIN_DEV_PATH)
+	if err != nil {
+		t.Errorf("Can't read symlink. Error: %s", err)
+	}
+
+	if linkName != hs[0] {
+		t.Errorf("Device symlink is not equal. Error: %s", err)
+	}
+
+}
 
 func TestValidAvailableResources(t *testing.T) {
 	if err := createRealResourceConfigFile(); err != nil {
@@ -182,6 +237,41 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		HostDevices: []string{"/dev/random"}}
 	if !reflect.DeepEqual(deviceResource, randomResource) {
 		t.Fatalf("deviceResource is not equal to randomResource")
+	}
+
+	// request dir resource
+	deviceResource, err = rm.RequestDeviceResourceByName("input")
+	if err != nil {
+		t.Fatalf("Can't request resource: %s", err)
+	}
+
+	inputResource := DeviceResource{Name: "input", SharedCount: 2, Groups: nil,
+		HostDevices: []string{}}
+
+	inputResource.HostDevices, err = getDevicePathContents("/dev/input/by-id")
+	if err != nil {
+		t.Fatalf("Can't request process pts dir: %s", err)
+	}
+
+	if !reflect.DeepEqual(deviceResource, inputResource) {
+		t.Fatalf("deviceResource is not equal to inputResource")
+	}
+
+	deviceResource, err = rm.RequestDeviceResourceByName("stdout")
+	if err != nil {
+		t.Fatalf("Can't request resource: %s", err)
+	}
+
+	linkName, err := filepath.EvalSymlinks("/dev/stdout")
+	if err != nil {
+		t.Fatalf("Can't read symlink with error: %s", err)
+	}
+
+	stdoutResource := DeviceResource{Name: "stdout", SharedCount: 2, Groups: nil,
+		HostDevices: []string{linkName}}
+
+	if !reflect.DeepEqual(deviceResource, stdoutResource) {
+		t.Fatalf("deviceResource is not equal to stdoutResource")
 	}
 
 	// request not existed device class
@@ -303,6 +393,28 @@ func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
  * Private
  ******************************************************************************/
 
+func getDevicePathContents(device string) (hostDevices []string, err error) {
+	err = filepath.Walk(device,
+		func(path string, info os.FileInfo, err error) error {
+			if info.IsDir() || err != nil {
+				return err
+			}
+
+			if info.Mode()&os.ModeSymlink == os.ModeSymlink {
+				linkName, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					return err
+				}
+
+				hostDevices = append(hostDevices, linkName)
+			} else {
+				hostDevices = append(hostDevices, path)
+			}
+			return nil
+		})
+	return hostDevices, err
+}
+
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
 		return err
@@ -374,11 +486,17 @@ func createTestResourceConfigFile() (err error) {
 			]
 		},
 		{
-			"name": "gpu0",
-			"sharedCount": 1,
+			"name": "input",
+			"sharedCount": 2,
 			"hostDevices": [
-				"/dev/gpu0/card",
-				"/dev/gpu0/render"
+				"/dev/input/by-id"
+			]
+		},
+		{
+			"name": "stdout",
+			"sharedCount": 2,
+			"hostDevices": [
+				"/dev/stdout"
 			]
 		}
 	]
