@@ -1272,7 +1272,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	sender := newTestSender()
 
-	digests := []digest.Digest{"sha:12345"}
+	digests := []digest.Digest{}
 
 	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil, networkProvider)
 	if err != nil {
@@ -2140,6 +2140,12 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 		}
 	}
 
+	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		Digest: *rootfsLayer,
+	}
+
+	manifest.Layers = append(manifest.Layers, layerDescriptor)
+
 	for _, layerDigest := range srvLayers {
 		layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.aos.image.layer.v1.tar",
 			Digest: layerDigest,
@@ -2147,12 +2153,6 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 
 		manifest.Layers = append(manifest.Layers, layerDescriptor)
 	}
-
-	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
-		Digest: *rootfsLayer,
-	}
-
-	manifest.Layers = append(manifest.Layers, layerDescriptor)
 
 	data, err := json.Marshal(manifest)
 	if err != nil {

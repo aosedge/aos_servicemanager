@@ -880,10 +880,10 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
-	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir)}
+	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir), path.Join(service.Path, serviceRootfsDir)}
 	layerDirs = append(layerDirs, service.Layers...)
-	layerDirs = append(layerDirs, []string{path.Join(service.Path, serviceRootfsDir),
-		path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir), "/"}...)
+	layerDirs = append(layerDirs, path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir))
+	layerDirs = append(layerDirs, string("/"))
 
 	if err = overlayMount(mergedDir, layerDirs, "", ""); err != nil {
 		return err

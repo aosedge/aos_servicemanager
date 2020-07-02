@@ -174,7 +174,7 @@ func validateUnpackedImage(installDir string) (err error) {
 	}
 
 	//validate service rootfs layer
-	if err = validateDigest(installDir, manifest.Layers[layersSize-1].Digest); err != nil {
+	if err = validateDigest(installDir, manifest.Layers[0].Digest); err != nil {
 		return err
 	}
 
@@ -297,11 +297,11 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 		return parts, errors.New("no layers in image")
 	}
 
-	rootFSDigest := manifest.Layers[layersSize-1].Digest
+	rootFSDigest := manifest.Layers[0].Digest
 
 	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), string(rootFSDigest.Hex()))
 
-	manifest.Layers = manifest.Layers[:layersSize-1]
+	manifest.Layers = manifest.Layers[1:]
 
 	for _, layer := range manifest.Layers {
 		parts.layersDigest = append(parts.layersDigest, string(layer.Digest))
