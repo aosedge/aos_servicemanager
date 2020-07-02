@@ -52,29 +52,33 @@ const (
 
 // amqp request types
 const (
-	DesiredStatusType          = "desiredStatus"
-	RequestServiceCrashLogType = "requestServiceCrashLog"
-	RequestServiceLogType      = "requestServiceLog"
-	ServiceDiscoveryType       = "serviceDiscovery"
-	StateAcceptanceType        = "stateAcceptance"
-	SystemRevertType           = "systemRevert"
-	SystemUpgradeType          = "systemUpgrade"
-	UpdateStateType            = "updateState"
-	DeviceErrors               = "deviceErrors"
+	DesiredStatusType                 = "desiredStatus"
+	RequestServiceCrashLogType        = "requestServiceCrashLog"
+	RequestServiceLogType             = "requestServiceLog"
+	ServiceDiscoveryType              = "serviceDiscovery"
+	StateAcceptanceType               = "stateAcceptance"
+	SystemRevertType                  = "systemRevert"
+	SystemUpgradeType                 = "systemUpgrade"
+	UpdateStateType                   = "updateState"
+	DeviceErrors                      = "deviceErrors"
+	RenewCertificatesNotificationType = "renewCertificatesNotification"
+	IssuedUnitCertificatesType        = "issuedUnitCertificates"
 )
 
 // amqp response types
 const (
-	AlertsType              = "alerts"
-	MonitoringDataType      = "monitoringData"
-	NewStateType            = "newState"
-	PushServiceLogType      = "pushServiceLog"
-	ServiceStatusType       = "serviceStatus"
-	StateRequestType        = "stateRequest"
-	SystemRevertStatusType  = "systemRevertStatus"
-	SystemUpgradeStatusType = "systemUpgradeStatus"
-	SystemVersionType       = "systemVersion"
-	UnitStatusType          = "unitStatus"
+	AlertsType                              = "alerts"
+	MonitoringDataType                      = "monitoringData"
+	NewStateType                            = "newState"
+	PushServiceLogType                      = "pushServiceLog"
+	ServiceStatusType                       = "serviceStatus"
+	StateRequestType                        = "stateRequest"
+	SystemRevertStatusType                  = "systemRevertStatus"
+	SystemUpgradeStatusType                 = "systemUpgradeStatus"
+	SystemVersionType                       = "systemVersion"
+	UnitStatusType                          = "unitStatus"
+	IssueUnitCertificatesRequestType        = "issueUnitCertificates"
+	InstallUnitCertificatesConfirmationType = "installUnitCertificatesConfirmation"
 )
 
 // Alert tags
@@ -420,18 +424,68 @@ type queueInfo struct {
 	NoWait           bool   `json:"noWait"`
 }
 
+// CertificateNotification info aboute certificate renew notification
+type CertificateNotification struct {
+	Type      string    `json:"type"`
+	Serial    string    `json:"serial"`
+	ValidTill time.Time `json:"validTill"`
+}
+
+// RenewCertificatesNotification renew certificate notification from cloud
+type RenewCertificatesNotification struct {
+	Certificates   []CertificateNotification `json:"certificates"`
+	UnitSecureData []byte                    `json:"unitSecureData"`
+}
+
+// CertificateRequest struct wit certificate request
+type CertificateRequest struct {
+	Type string `json:"type"`
+	Csr  string `json:"csr"`
+}
+
+// IssueUnitCertificatesRequest struct request cert to cloud
+type IssueUnitCertificatesRequest struct {
+	Requests []CertificateRequest `json:"requests"`
+}
+
+// IssuedUnitCertificatesInfo info with certificate to applay on device
+type IssuedUnitCertificatesInfo struct {
+	Type             string `json:"type"`
+	CertificateChain string `json:"certificateChain"`
+}
+
+// IssuedUnitCertificates struct with new cert from cloud
+type IssuedUnitCertificates struct {
+	Certificates []IssuedUnitCertificatesInfo `json:"certificates"`
+}
+
+// CertificateConfirmation info about certificate installation
+type CertificateConfirmation struct {
+	Type        string `json:"type"`
+	Serial      string `json:"serial"`
+	Status      string `json:"status"`
+	Description string `json:"description,omitempty"`
+}
+
+// InstallUnitCertificatesConfirmation response to cloud
+type InstallUnitCertificatesConfirmation struct {
+	Certificates []CertificateConfirmation `json:"certificates"`
+}
+
 /*******************************************************************************
  * Variables
  ******************************************************************************/
 
 var messageMap = map[string]func() interface{}{
-	DesiredStatusType:          func() interface{} { return &DesiredStatus{} },
-	RequestServiceCrashLogType: func() interface{} { return &RequestServiceCrashLog{} },
-	RequestServiceLogType:      func() interface{} { return &RequestServiceLog{} },
-	StateAcceptanceType:        func() interface{} { return &StateAcceptance{} },
-	SystemRevertType:           func() interface{} { return &SystemRevert{} },
-	SystemUpgradeType:          func() interface{} { return &SystemUpgrade{} },
-	UpdateStateType:            func() interface{} { return &UpdateState{} },
+	DesiredStatusType:                 func() interface{} { return &DesiredStatus{} },
+	RequestServiceCrashLogType:        func() interface{} { return &RequestServiceCrashLog{} },
+	RequestServiceLogType:             func() interface{} { return &RequestServiceLog{} },
+	StateAcceptanceType:               func() interface{} { return &StateAcceptance{} },
+	SystemRevertType:                  func() interface{} { return &SystemRevert{} },
+	SystemUpgradeType:                 func() interface{} { return &SystemUpgrade{} },
+	UpdateStateType:                   func() interface{} { return &UpdateState{} },
+	RenewCertificatesNotificationType: func() interface{} { return &RenewCertificatesNotification{} },
+	IssuedUnitCertificatesType:        func() interface{} { return &IssuedUnitCertificates{} },
 }
 
 /*******************************************************************************
@@ -632,6 +686,25 @@ func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
 	systemVersionMsg := handler.createAosMessage(SystemVersionType, SystemVersion{ImageVersion: imageVersion})
 
 	handler.sendChannel <- Message{"", systemVersionMsg}
+
+	return nil
+}
+
+//SendIssueUnitCertificatesRequest send request to issue certificate
+func (handler *AmqpHandler) SendIssueUnitCertificatesRequest(requests []CertificateRequest) (err error) {
+	request := handler.createAosMessage(IssueUnitCertificatesRequestType, IssueUnitCertificatesRequest{Requests: requests})
+
+	handler.sendChannel <- Message{"", request}
+
+	return nil
+}
+
+//SendInstallCertificatesConfirmation send status aboute certificate installation
+func (handler *AmqpHandler) SendInstallCertificatesConfirmation(confirmation []CertificateConfirmation) (err error) {
+	response := handler.createAosMessage(InstallUnitCertificatesConfirmationType,
+		InstallUnitCertificatesConfirmation{Certificates: confirmation})
+
+	handler.sendChannel <- Message{"", response}
 
 	return nil
 }

@@ -440,6 +440,14 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 		sm.um.SystemRevert(data.ImageVersion)
 
+	case *amqp.RenewCertificatesNotification:
+		log.Info("RenewCertificatesNotification")
+		//TODO call umclient
+
+	case *amqp.IssuedUnitCertificates:
+		log.Info("IssuedUnitCertificates")
+		//TODO call umclient
+
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
 	}
