@@ -962,7 +962,7 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 			file.Close()
 		}
 
-		if err = spec.addPrestartHook(path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"), []string{
+		if err = spec.createPrestartHook(path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"), []string{
 			"libnetwork-setkey",
 			"-exec-root=/run/aos",
 			service.ID,
