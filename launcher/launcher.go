@@ -1019,6 +1019,17 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		}
 	}()
 
+	var devices []Device
+	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
+		return err
+	}
+
+	//Update Devices in spec
+	_, err = launcher.setDevices(spec, devices)
+	if err != nil {
+		return err
+	}
+
 	if err = launcher.updateStorageFolder(spec, service); err != nil {
 		return err
 	}
@@ -1058,15 +1069,15 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 }
 
 func (launcher *Launcher) requestDeviceResources(service Service) (err error) {
-	var deviceNames []string
-	if err := json.Unmarshal([]byte(service.Devices), &deviceNames); err != nil {
+	var devices []Device
+	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
 		return err
 	}
 
-	for _, device := range deviceNames {
-		log.Debugf("Request device %s, for %s service", device, service.ID)
+	for _, device := range devices {
+		log.Debugf("Request device %s, for %s service", device.Name, service.ID)
 
-		if err = launcher.devicemanager.RequestDevice(device, service.ID); err != nil {
+		if err = launcher.devicemanager.RequestDevice(device.Name, service.ID); err != nil {
 			return err
 		}
 	}
@@ -1131,15 +1142,15 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
-	var deviceNames []string
-	if err := json.Unmarshal([]byte(service.Devices), &deviceNames); err != nil {
+	var devices []Device
+	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
 		return err
 	}
 
-	for _, device := range deviceNames {
-		log.Debugf("Release device %s, for %s service", device, service.ID)
+	for _, device := range devices {
+		log.Debugf("Release device %s, for %s service", device.Name, service.ID)
 
-		if err = launcher.devicemanager.ReleaseDevice(device, service.ID); err != nil {
+		if err = launcher.devicemanager.ReleaseDevice(device.Name, service.ID); err != nil {
 			return err
 		}
 	}
@@ -1355,13 +1366,21 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	return nil
 }
 
-func (launcher *Launcher) setDevices(spec *serviceSpec, aosConfig aosServiceConfig) (deviceNamesBytes []byte, err error) {
+func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (deviceBytes []byte, err error) {
 	// get devices from aos service configuration
 	// and get all resource information for device from device manager
 	// and add groups and host devices for class device
-	var deviceNames []string
 
-	for _, device := range aosConfig.Devices {
+	// clear spec before adding devices
+	if err = spec.clearDeviceData(); err != nil {
+		return []byte{}, err
+	}
+
+	if err = spec.clearAdditionalGroup(); err != nil {
+		return []byte{}, err
+	}
+
+	for _, device := range devices {
 		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
 		if err != nil {
 			return []byte{}, err
@@ -1380,15 +1399,14 @@ func (launcher *Launcher) setDevices(spec *serviceSpec, aosConfig aosServiceConf
 			}
 		}
 
-		deviceNames = append(deviceNames, deviceResource.Name)
 	}
 
-	deviceNamesBytes, err = json.Marshal(deviceNames)
+	deviceBytes, err = json.Marshal(devices)
 	if err != nil {
 		return []byte{}, err
 	}
 
-	return deviceNamesBytes, nil
+	return deviceBytes, nil
 }
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
@@ -1441,7 +1459,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	deviceResourcesForService, err := launcher.setDevices(spec, aosConfig)
+	deviceResourcesForService, err := launcher.setDevices(spec, aosConfig.Devices)
 	if err != nil {
 		return service, err
 	}

@@ -530,6 +530,19 @@ func (spec *serviceSpec) addAdditionalGroup(groupName string) (err error) {
 	return nil
 }
 
+func (spec *serviceSpec) clearDeviceData() (err error) {
+	spec.ocSpec.Linux.Devices = nil
+	spec.ocSpec.Linux.Resources.Devices = nil
+
+	return nil
+}
+
+func (spec *serviceSpec) clearAdditionalGroup() (err error) {
+	spec.ocSpec.Process.User.AdditionalGids = nil
+
+	return nil
+}
+
 func (spec *serviceSpec) setRootfs(rootfsPath string) (err error) {
 	log.WithFields(log.Fields{"rootfs": rootfsPath}).Debug("Add rootfs to spec")
 
