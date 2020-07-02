@@ -123,6 +123,10 @@ func cleanup(cfg *config.Config, dbFile string) {
 	if err = network.DeleteAllNetworks(); err != nil {
 		log.Errorf("Can't delete networks: %s", err)
 	}
+
+	if err := os.RemoveAll(cfg.LayersDir); err != nil {
+		log.Errorf("Can't cleanup layers: %s", err)
+	}
 }
 
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
