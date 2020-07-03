@@ -442,11 +442,21 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 	case *amqp.RenewCertificatesNotification:
 		log.Info("RenewCertificatesNotification")
-		//TODO call umclient
+
+		systemID, err := sm.identifier.GetSystemID()
+		if err != nil {
+			log.Error("Can't get systemID ", err)
+			return err
+		}
+
+		//TODO decrypt data.UnitSecureData
+
+		sm.um.RenewCertificatesNotification(systemID, "pwd", data.Certificates)
 
 	case *amqp.IssuedUnitCertificates:
 		log.Info("IssuedUnitCertificates")
-		//TODO call umclient
+
+		sm.um.IssuedUnitCertificates(data.Certificates)
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))

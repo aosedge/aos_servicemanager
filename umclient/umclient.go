@@ -80,6 +80,8 @@ type Client struct {
 type Sender interface {
 	SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error)
 	SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error)
+	SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error)
+	SendInstallCertificatesConfirmation(confirmation []amqp.CertificateConfirmation) (err error)
 }
 
 // Storage provides API to store/retreive persistent data
@@ -269,6 +271,96 @@ func (um *Client) SystemRevert(imageVersion uint64) {
 			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
 			return
 		}
+	}
+}
+
+// RenewCertificatesNotification send notification aboute renew certificates
+func (um *Client) RenewCertificatesNotification(systemID, pwd string, certInfo []amqp.CertificateNotification) {
+	um.Lock()
+	defer um.Unlock()
+
+	var newCerts []amqp.CertificateRequest
+
+	for _, cert := range certInfo {
+		request := umprotocol.CreateKeysReq{
+			Type:     cert.Type,
+			SystemID: systemID,
+			Password: pwd}
+
+		response := new(umprotocol.CreateKeysRsp)
+
+		if err := um.sendRequest(umprotocol.CreateKeysRequestType, umprotocol.CreateKeysResponseType,
+			&request, response); err != nil {
+			log.Error("Can't send createKeysRequest to update manager ", err)
+			continue
+		}
+
+		if response.Error != "" {
+			log.Error("Can't create certificate ", response.Error)
+			continue
+		}
+
+		newCerts = append(newCerts, amqp.CertificateRequest{Type: response.Type, Csr: response.Csr})
+	}
+
+	if len(newCerts) == 0 {
+		return
+	}
+
+	if err := um.sender.SendIssueUnitCertificatesRequest(newCerts); err != nil {
+		log.Error("Can't send issueUnitCertificates ", err)
+	}
+}
+
+// IssuedUnitCertificates send applyCertRequest to update manager
+func (um *Client) IssuedUnitCertificates(certInfo []amqp.IssuedUnitCertificatesInfo) {
+	um.Lock()
+	defer um.Unlock()
+
+	var confirmations []amqp.CertificateConfirmation
+
+	for _, cert := range certInfo {
+		request := umprotocol.ApplyCertReq{
+			Type: cert.Type,
+			Crt:  cert.CertificateChain}
+
+		response := new(umprotocol.ApplyCertRsp)
+
+		if err := um.sendRequest(umprotocol.ApplyCertRequestType, umprotocol.ApplyCertResponseType,
+			&request, response); err != nil {
+			log.Error("Can't send applyCertRequest to update manager ", err)
+			continue
+		}
+
+		if response.Error != "" {
+			log.Error("Can't apply certificate ", response.Error)
+		}
+
+		certConfirmation := amqp.CertificateConfirmation{Type: response.Type,
+			Status:      "installed",
+			Description: response.Error}
+
+		serial, err := fcrypt.GetCrtSerialByURL(response.CrtURI)
+		if err != nil {
+			certConfirmation.Description = err.Error()
+			log.Error("Can't get cert serial from ", response.CrtURI, err)
+		}
+
+		certConfirmation.Serial = serial
+
+		if certConfirmation.Description != "" {
+			certConfirmation.Serial = "error"
+		}
+
+		confirmations = append(confirmations, certConfirmation)
+	}
+
+	if len(confirmations) == 0 {
+		return
+	}
+
+	if err := um.sender.SendInstallCertificatesConfirmation(confirmations); err != nil {
+		log.Error("Can't send installUnitCertificatesConfirmation ", err)
 	}
 }
 

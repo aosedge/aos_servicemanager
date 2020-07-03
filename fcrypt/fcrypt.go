@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 
 	log "github.com/sirupsen/logrus"
 
@@ -91,6 +92,36 @@ func Init(conf config.Crypt) error {
 	}
 
 	return nil
+}
+
+// GetCrtSerialByURL get cerificate  serial by URI
+func GetCrtSerialByURL(crtURL string) (serial string, err error) {
+	urlVal, err := url.Parse(crtURL)
+	if err != nil {
+		return "", err
+	}
+
+	if urlVal.Scheme != "file" {
+		return "", errors.New("wrong certificate scheme")
+	}
+
+	pemCrt, err := ioutil.ReadFile(urlVal.Path)
+	if err != nil {
+		return "", err
+	}
+
+	block, _ := pem.Decode(pemCrt)
+
+	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+		return "", errors.New("invalid PEM Block")
+	}
+
+	x509Crt, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%X", x509Crt.SerialNumber), nil
 }
 
 func verifyCert(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
@@ -290,25 +321,4 @@ func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	}
 
 	return in[0 : l-pl], nil
-}
-
-//DecryptMetadata decrypt service metadata
-func DecryptMetadata(der []byte) ([]byte, error) {
-	cert, err := getOfflineCert()
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := getPrivKey()
-	if err != nil {
-		return nil, err
-	}
-
-	switch key := key.(type) {
-	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
-		return DecryptMessage(der, key, cert)
-
-	default:
-		return nil, fmt.Errorf("%T private key not yet supported", key)
-	}
 }

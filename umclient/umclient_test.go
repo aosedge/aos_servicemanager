@@ -414,6 +414,14 @@ func (sender *testSender) SendSystemUpgradeStatus(upgradeStatus, upgradeError st
 	return nil
 }
 
+func (sender *testSender) SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error) {
+	return nil
+}
+
+func (sender *testSender) SendInstallCertificatesConfirmation(confirmation []amqp.CertificateConfirmation) (err error) {
+	return nil
+}
+
 func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType int, messageIn []byte) (messageOut []byte, err error) {
 	var message umprotocol.Message
 	var response interface{}
