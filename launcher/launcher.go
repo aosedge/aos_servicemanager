@@ -1294,7 +1294,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	//unpack rootfs layer
-	if err := utils.UnpackTarGzImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
+	if err := utils.UnpackTarImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
 		return service, err
 	}
 

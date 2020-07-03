@@ -143,7 +143,7 @@ func downloadAndUnpackImage(downloader downloader, serviceInfo amqp.ServiceInfoF
 	}
 
 	// unpack image there
-	if err = utils.UnpackTarGzImage(image, installDir); err != nil {
+	if err = utils.UnpackTarImage(image, installDir); err != nil {
 		return err
 	}
 

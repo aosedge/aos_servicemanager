@@ -222,7 +222,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 	}
 
 	unpackDir := path.Join(layermanager.downloadDir, extractDirName, filepath.Base(fileName))
-	if err = utils.UnpackTarGzImage(destinationFile, unpackDir); err != nil {
+	if err = utils.UnpackTarImage(destinationFile, unpackDir); err != nil {
 		err = fmt.Errorf("extract layer package from archive error: %s", err.Error())
 		layerInfo.Error = err.Error()
 		return layerInfo, err

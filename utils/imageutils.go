@@ -18,13 +18,11 @@
 package utils
 
 import (
-	"archive/tar"
-	"compress/gzip"
+	"bytes"
 	"errors"
-	"io"
 	"net/url"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -182,93 +180,35 @@ func CheckSigns(filePath string, crypt FcryptInterface,
 	return nil
 }
 
-// UnpackTarGzImage extract tar gz archive
-func UnpackTarGzImage(source, destination string) (err error) {
-	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar gz image")
-
-	reader, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
-	gzReader, err := gzip.NewReader(reader)
-	if err != nil {
-		return err
-	}
-	defer gzReader.Close()
-
-	return unTarFromReader(gzReader, destination)
-}
-
 // UnpackTarImage extract tar image
 func UnpackTarImage(source, destination string) (err error) {
 	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar image")
 
-	reader, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
-	return unTarFromReader(reader, destination)
+	return unTarFromFile(source, destination)
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
-
-func unTarFromReader(reader io.Reader, destination string) (err error) {
-	if err = os.MkdirAll(destination, 0755); err != nil {
+func unTarFromFile(tarArchieve string, destination string) (err error) {
+	if _, err = os.Stat(tarArchieve); err != nil {
+		log.Error("Can't find tar arcieve")
 		return err
 	}
 
-	tarReader := tar.NewReader(reader)
-
-	for {
-		header, err := tarReader.Next()
-
-		switch {
-		case err == io.EOF:
-			return nil
-
-		case err != nil:
-			return err
-
-		case header == nil:
-			continue
-		}
-
-		target := filepath.Join(destination, header.Name)
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if _, err := os.Stat(target); err != nil {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					return err
-				}
-			}
-
-		case tar.TypeReg:
-			dir, _ := filepath.Split(target)
-			if _, err := os.Stat(dir); err != nil {
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					return err
-				}
-			}
-
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return err
-			}
-
-			_, err = io.Copy(file, tarReader)
-
-			file.Close()
-
-			if err != nil {
-				return err
-			}
-		}
+	if err = os.MkdirAll(destination, 0755); err != nil {
+		return errors.New("can't create tar destination path")
 	}
+
+	cmd := exec.Command("tar", "xf", tarArchieve, "-C", destination)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err = cmd.Run()
+	if err != nil {
+		log.Errorf("Failed to untar archieve. Output is: %s", out.String())
+	}
+
+	return err
 }
