@@ -351,21 +351,10 @@ type ServiceAlertRules struct {
 
 // ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
-	ID                     string             `json:"id"`
-	Version                uint64             `json:"version"`
-	UpdateType             string             `json:"updateType"`
-	DownloadURL            string             `json:"downloadUrl"`
-	URLExpiration          string             `json:"urlExpiration"`
-	SignatureAlgorithm     string             `json:"signatureAlgorithm"`
-	SignatureAlgorithmHash string             `json:"signatureAlgorithmHash"`
-	SignatureScheme        string             `json:"signatureScheme"`
-	ImageSignature         string             `json:"imageSignature"`
-	CertificateChain       string             `json:"certificateChain"`
-	EncryptionKey          string             `json:"encryptionKey"`
-	EncryptionAlgorithm    string             `json:"encryptionAlgorithm"`
-	EncryptionMode         string             `json:"encryptionMode"`
-	EncryptionModeParams   string             `json:"encryptionModeParams"`
-	AlertRules             *ServiceAlertRules `json:"alertRules,omitempty"`
+	ID         string             `json:"id"`
+	Version    uint64             `json:"version"`
+	AlertRules *ServiceAlertRules `json:"alertRules,omitempty"`
+	DecryptDataStruct
 }
 
 // LayerInfoFromCloud service layer decryption info
