@@ -214,6 +214,9 @@ github.com/hashicorp/serf/serf
 # github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07
 ## explicit
 github.com/ishidawataru/sctp
+# github.com/jinzhu/copier v0.0.0-20190924061706-b57f9002281a
+## explicit
+github.com/jinzhu/copier
 # github.com/jlaffaye/ftp v0.0.0-20200602180915-5563613968bf
 ## explicit
 github.com/jlaffaye/ftp

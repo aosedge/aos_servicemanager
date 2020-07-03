@@ -29,7 +29,7 @@ require (
 	github.com/hashicorp/go-version v1.2.0 // indirect
 	github.com/hashicorp/serf v0.9.2 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07 // indirect
-	github.com/jinzhu/copier v0.0.1
+	github.com/jinzhu/copier v0.0.0-20190924061706-b57f9002281a
 	github.com/jlaffaye/ftp v0.0.0-20200602180915-5563613968bf
 	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/mattn/go-shellwords v1.0.10 // indirect
