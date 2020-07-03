@@ -260,7 +260,7 @@ type ServiceState int
 type actionType int
 
 type downloader interface {
-	downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error)
+	downloadService(serviceInfo serviceInfoToInstall, crypt utils.FcryptInterface) (outputFile string, err error)
 }
 
 type stateAcceptance struct {
@@ -271,6 +271,12 @@ type stateAcceptance struct {
 type layerProvider interface {
 	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
 	DeleteUnneededLayers() (err error)
+}
+
+type serviceInfoToInstall struct {
+	serviceDetails amqp.ServiceInfoFromCloud
+	chains         []amqp.CertificateChain
+	certs          []amqp.Certificate
 }
 
 /*******************************************************************************
@@ -378,8 +384,15 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 }
 
 // InstallService installs and runs service
-func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud) {
-	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, serviceInfo, launcher.doActionInstall})
+func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) {
+	serviceInfoForInstall := serviceInfoToInstall{
+		serviceDetails: serviceInfo,
+		chains:         chains,
+		certs:          certs,
+	}
+
+	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, serviceInfoForInstall, launcher.doActionInstall})
 }
 
 // UninstallService stops and removes service
@@ -645,13 +658,13 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 		}
 	}()
 
-	serviceInfo, ok := data.(amqp.ServiceInfoFromCloud)
+	serviceInfo, ok := data.(serviceInfoToInstall)
 	if !ok {
 		err = errors.New("wrong data type")
 		return
 	}
 
-	status.Version = serviceInfo.Version
+	status.Version = serviceInfo.serviceDetails.Version
 
 	if err = launcher.installService(serviceInfo); err != nil {
 		return
@@ -691,7 +704,7 @@ func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) 
 	}
 }
 
-func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) (err error) {
+func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err error) {
 	if launcher.users == nil {
 		return errors.New("users are not set")
 	}
@@ -704,20 +717,20 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 		return err
 	}
 
-	service, err := launcher.serviceProvider.GetService(serviceInfo.ID)
+	service, err := launcher.serviceProvider.GetService(serviceInfo.serviceDetails.ID)
 	if err != nil && !strings.Contains(err.Error(), "not exist") {
 		return err
 	}
 	serviceExists := err == nil
 
 	// Skip incorrect version
-	if serviceExists && serviceInfo.Version < service.Version {
+	if serviceExists && serviceInfo.serviceDetails.Version < service.Version {
 		return errors.New("version mistmatch")
 	}
 
 	// If same service version exists, just start the service
-	if serviceExists && serviceInfo.Version == service.Version {
-		if err = launcher.addServiceToCurrentUsers(serviceInfo.ID); err != nil {
+	if serviceExists && serviceInfo.serviceDetails.Version == service.Version {
+		if err = launcher.addServiceToCurrentUsers(serviceInfo.serviceDetails.ID); err != nil {
 			return err
 		}
 
@@ -732,7 +745,7 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 	defer os.RemoveAll(unpackDir)
 
 	// download and unpack
-	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, unpackDir); err != nil {
+	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, unpackDir, launcher.crypt); err != nil {
 		return err
 	}
 
@@ -750,13 +763,13 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 
 	defer func() {
 		if err != nil {
-			log.WithField("serviceID", serviceInfo.ID).Errorf("Error install service: %s", err)
+			log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Error install service: %s", err)
 
 			if !serviceExists {
 				// Remove system user
-				if platform.IsUserExist(serviceInfo.ID) {
-					if err := platform.DeleteUser(serviceInfo.ID); err != nil {
-						log.WithField("serviceID", serviceInfo.ID).Errorf("Can't delete user: %s", err)
+				if platform.IsUserExist(serviceInfo.serviceDetails.ID) {
+					if err := platform.DeleteUser(serviceInfo.serviceDetails.ID); err != nil {
+						log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Can't delete user: %s", err)
 					}
 				}
 			}
@@ -764,16 +777,16 @@ func (launcher *Launcher) installService(serviceInfo amqp.ServiceInfoFromCloud) 
 			// Remove install dir if exists
 			if _, err := os.Stat(installDir); err == nil {
 				if err := os.RemoveAll(installDir); err != nil {
-					log.WithField("serviceID", serviceInfo.ID).Errorf("Can't remove service dir: %s", err)
+					log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Can't remove service dir: %s", err)
 				}
 			}
 		}
 	}()
 
-	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.ID}).Debug("Create install dir")
+	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.serviceDetails.ID}).Debug("Create install dir")
 
 	var newService Service
-	if newService, err = launcher.prepareService(unpackDir, installDir, serviceInfo); err != nil {
+	if newService, err = launcher.prepareService(unpackDir, installDir, serviceInfo.serviceDetails); err != nil {
 		return err
 	}
 
@@ -1255,7 +1268,6 @@ func (launcher *Launcher) stopServices() {
 					statusChannel <- errors.New("wrong data type")
 					return
 				}
-
 				statusChannel <- launcher.stopService(service)
 			}})
 	}

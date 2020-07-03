@@ -20,9 +20,9 @@ package launcher
 import (
 	"archive/tar"
 	"compress/gzip"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -30,12 +30,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cavaliercoder/grab"
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
-	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/utils"
 )
 
@@ -44,6 +42,7 @@ import (
  ******************************************************************************/
 
 const manifestFileName = "manifest.json"
+const decryptDir = "/tmp/decrypt"
 
 /*******************************************************************************
  * Type
@@ -63,67 +62,47 @@ type imageParts struct {
  * Private
  ******************************************************************************/
 
-func (handler *imageHandler) downloadService(serviceInfo amqp.ServiceInfoFromCloud) (outputFile string, err error) {
-	client := grab.NewClient()
+func (handler *imageHandler) downloadService(serviceInfo serviceInfoToInstall,
+	crypt utils.FcryptInterface) (outputFile string, err error) {
+	decryptData := amqp.DecryptDataStruct{URLs: serviceInfo.serviceDetails.URLs,
+		Sha256:         serviceInfo.serviceDetails.Sha256,
+		Sha512:         serviceInfo.serviceDetails.Sha512,
+		Size:           serviceInfo.serviceDetails.Size,
+		DecryptionInfo: serviceInfo.serviceDetails.DecryptionInfo,
+		Signs:          serviceInfo.serviceDetails.Signs}
 
 	destDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create tmp dir : ", err)
 		return outputFile, err
 	}
-	req, err := grab.NewRequest(destDir, serviceInfo.DownloadURL)
-	if err != nil {
-		log.Error("Can't download package: ", err)
-		return outputFile, err
-	}
-
-	// start download
-	resp := client.Do(req)
 	defer os.RemoveAll(destDir)
 
-	log.WithField("filename", resp.Filename).Debug("Start downloading")
-
-	// wait when finished
-	resp.Wait()
-
-	if err = resp.Err(); err != nil {
+	fileName, err := utils.DownloadImage(decryptData, destDir)
+	if err != nil {
 		log.Error("Can't download package: ", err)
 		return outputFile, err
 	}
+	defer os.RemoveAll(fileName)
 
-	imageSignature, err := hex.DecodeString(serviceInfo.ImageSignature)
-	if err != nil {
-		log.Error("Error decoding HEX string for signature: ", err)
+	if err = utils.CheckFile(fileName, decryptData); err != nil {
+		err = fmt.Errorf("check service checksums error: %s", err.Error())
 		return outputFile, err
 	}
 
-	encryptionKey, err := hex.DecodeString(serviceInfo.EncryptionKey)
-	if err != nil {
-		log.Error("Error decoding HEX string for key: ", err)
+	if err := os.MkdirAll(decryptDir, 0755); err != nil {
+		log.Error("Can't create tmp dir : ", err)
 		return outputFile, err
 	}
 
-	encryptionModeParams, err := hex.DecodeString(serviceInfo.EncryptionModeParams)
-	if err != nil {
-		log.Error("Error decoding HEX string for IV: ", err)
+	outputFile = path.Join(decryptDir, filepath.Base(fileName))
+	if err = utils.DecryptImage(fileName, outputFile, crypt, decryptData.DecryptionInfo); err != nil {
+		err = fmt.Errorf("decrypt service error: %s", err.Error())
 		return outputFile, err
 	}
 
-	certificateChain := strings.Replace(serviceInfo.CertificateChain, "\\n", "", -1)
-	outputFile, err = fcrypt.DecryptImage(
-		resp.Filename,
-		imageSignature,
-		encryptionKey,
-		encryptionModeParams,
-		serviceInfo.SignatureAlgorithm,
-		serviceInfo.SignatureAlgorithmHash,
-		serviceInfo.SignatureScheme,
-		serviceInfo.EncryptionAlgorithm,
-		serviceInfo.EncryptionMode,
-		certificateChain)
-
-	if err != nil {
-		log.Error("Can't decrypt image: ", err)
+	if err = utils.CheckSigns(outputFile, crypt, decryptData.Signs, serviceInfo.chains, serviceInfo.certs); err != nil {
+		err = fmt.Errorf("check service signature error: %s", err.Error())
 		return outputFile, err
 	}
 
@@ -132,9 +111,10 @@ func (handler *imageHandler) downloadService(serviceInfo amqp.ServiceInfoFromClo
 	return outputFile, nil
 }
 
-func downloadAndUnpackImage(downloader downloader, serviceInfo amqp.ServiceInfoFromCloud, installDir string) (err error) {
+func downloadAndUnpackImage(downloader downloader, serviceInfo serviceInfoToInstall,
+	installDir string, crypt utils.FcryptInterface) (err error) {
 	// download image
-	image, err := downloader.downloadService(serviceInfo)
+	image, err := downloader.downloadService(serviceInfo, crypt)
 	if image != "" {
 		defer os.Remove(image)
 	}

@@ -379,7 +379,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 						"from": service.serviceInfo.Version,
 						"to":   service.serviceInfoFromCloud.Version}).Info("Update service")
 
-					sm.launcher.InstallService(*service.serviceInfoFromCloud)
+					sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
 				}
 			} else if service.serviceInfoFromCloud != nil {
 				// Install
@@ -387,7 +387,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 					"id":      service.serviceInfoFromCloud.ID,
 					"version": service.serviceInfoFromCloud.Version}).Info("Install service")
 
-				sm.launcher.InstallService(*service.serviceInfoFromCloud)
+				sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
 			} else if service.serviceInfo != nil {
 				// Remove
 				log.WithFields(log.Fields{
