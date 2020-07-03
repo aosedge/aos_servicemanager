@@ -47,6 +47,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
+	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
@@ -109,6 +110,9 @@ type testLayerProvider struct {
 type testDeviceManager struct {
 	sync.Mutex
 	isValid bool
+}
+
+type fakeFcrypt struct {
 }
 
 /*******************************************************************************
@@ -1445,7 +1449,7 @@ func TestServiceWithLayers(t *testing.T) {
 func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30},
+	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, new(fakeFcrypt),
 		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
 	if err != nil {
 		return nil, err
@@ -1669,6 +1673,14 @@ func (downloader ftpImage) downloadService(serviceInfo amqp.ServiceInfoFromCloud
 	}
 
 	return outputFile, nil
+}
+
+func (crypt fakeFcrypt) ImportSessionKey(keyInfo fcrypt.CryptoSessionKeyInfo) (fcrypt.SymmetricContextInterface, error) {
+	return nil, nil
+}
+
+func (crypt fakeFcrypt) CreateSignContext() (fcrypt.SignContextInterface, error) {
+	return nil, nil
 }
 
 func newTestMonitor() (monitor *testMonitor, err error) {

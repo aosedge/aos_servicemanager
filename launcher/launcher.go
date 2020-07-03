@@ -133,6 +133,7 @@ type Launcher struct {
 	// NewStateChannel used to notify about new service state
 	NewStateChannel chan NewState
 
+	crypt           utils.FcryptInterface
 	sender          Sender
 	serviceProvider ServiceProvider
 	monitor         ServiceMonitor
@@ -277,12 +278,13 @@ type layerProvider interface {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
+func New(config *config.Config, crypt utils.FcryptInterface, sender Sender, serviceProvider ServiceProvider,
 	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
 		config:          config,
+		crypt:           crypt,
 		sender:          sender,
 		serviceProvider: serviceProvider,
 		layerProvider:   layerProvider,
