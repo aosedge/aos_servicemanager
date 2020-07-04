@@ -99,9 +99,8 @@ type Storage interface {
  ******************************************************************************/
 
 // New creates new umclient
-func New(config *config.Config, crypt *fcrypt.CryptoContext, sender Sender, storage Storage) (um *Client, err error) {
+func New(config *config.Config, sender Sender, storage Storage) (um *Client, err error) {
 	um = &Client{
-		crypt:       crypt,
 		sender:      sender,
 		storage:     storage,
 		downloadDir: path.Join(config.UpgradeDir, "downloads"),
@@ -130,6 +129,11 @@ func New(config *config.Config, crypt *fcrypt.CryptoContext, sender Sender, stor
 	}
 
 	return um, nil
+}
+
+//SetCryptoContext set crypto conext for umclient
+func (um *Client) SetCryptoContext(crypt *fcrypt.CryptoContext) {
+	um.crypt = crypt
 }
 
 // Connect connects to UM server

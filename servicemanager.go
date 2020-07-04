@@ -18,6 +18,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -172,6 +173,25 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	// Create amqp
+	if sm.amqp, err = amqp.New(); err != nil {
+		return sm, err
+	}
+
+	// Create UM client
+	if cfg.UMServerURL == "" {
+		return sm, errors.New("No UMServerURL available")
+	}
+
+	if sm.um, err = umclient.New(cfg, sm.amqp, sm.db); err != nil {
+		return sm, err
+	}
+
+	if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
+		log.Errorf("Can't connect to UM: %s", err)
+		return sm, err
+	}
+
 	// Initialize fcrypt
 	if err = fcrypt.Init(cfg.Crypt); err != nil {
 		return sm, err
@@ -204,6 +224,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
+	sm.um.SetCryptoContext(sm.crypt)
+
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
@@ -227,11 +249,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	// Create amqp
-	if sm.amqp, err = amqp.New(); err != nil {
-		return sm, err
-	}
-
 	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.crypt, sm.db, sm.amqp); err != nil {
 		return sm, err
 	}
@@ -250,13 +267,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	// Use plugged in identifier
 	if sm.identifier, err = pluginprovider.GetIdentifier(cfg.Identifier.Type, cfg.Identifier.Config, sm.db); err != nil {
 		return sm, err
-	}
-
-	// Create UM client
-	if cfg.UMServerURL != "" {
-		if sm.um, err = umclient.New(cfg, sm.crypt, sm.amqp, sm.db); err != nil {
-			return sm, err
-		}
 	}
 
 	// Create logging
@@ -547,13 +557,6 @@ func (sm *serviceManager) run() {
 
 		if err = sm.launcher.SetUsers(users); err != nil {
 			log.Fatalf("Can't set users: %s", err)
-		}
-
-		if sm.um != nil {
-			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
-				log.Errorf("Can't connect to UM: %s", err)
-				goto reconnect
-			}
 		}
 
 		// Connect

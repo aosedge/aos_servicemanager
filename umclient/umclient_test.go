@@ -223,10 +223,12 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Cannot load offline key file: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, crypt, sender, &storage)
+	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, sender, &storage)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}
+
+	client.SetCryptoContext(crypt)
 
 	go func() {
 		<-client.ErrorChannel
