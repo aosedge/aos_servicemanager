@@ -20,18 +20,13 @@ package fcrypt
 
 import (
 	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"os"
 
 	log "github.com/sirupsen/logrus"
 
@@ -225,50 +220,6 @@ func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
 
 }
 
-func decrypt(fin *os.File, fout *os.File, key []byte, iv []byte,
-	cryptoAlg string, cryptoMode string) (err error) {
-
-	log.Debugf("IV: %v", iv)
-	log.Debugf("Key: %v", key)
-
-	var mode cipher.BlockMode
-	var block cipher.Block
-
-	switch cryptoAlg {
-	case "AES128", "AES192", "AES256":
-		block, err = aes.NewCipher(key)
-		if err != nil {
-			log.Errorf("Can't create cipher: %s", err)
-			return err
-		}
-	default:
-		return errors.New("unknown cryptographic algorithm: " + cryptoAlg)
-	}
-
-	switch cryptoMode {
-	case "CBC":
-		mode = cipher.NewCBCDecrypter(block, iv)
-	default:
-		return errors.New("unknown encryption mode: " + cryptoMode)
-	}
-
-	indata, err := ioutil.ReadAll(fin)
-	if err != nil {
-		log.Errorf("Can't read image file: %s", err)
-		return err
-	}
-
-	outdata := make([]byte, len(indata))
-	mode.CryptBlocks(outdata, indata)
-	outdata, err = removePkcs7Padding(outdata, mode.BlockSize())
-	if err != nil {
-		return err
-	}
-
-	fout.Write(outdata)
-	return nil
-}
-
 func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
 
 	for block, remainder := pem.Decode([]byte(pemData)); block != nil; block, remainder = pem.Decode(remainder) {
@@ -321,64 +272,6 @@ func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error
 	return signCertificate, nil
 }
 
-func checkSign(f *os.File, signatureAlg, hashAlg, signatureScheme string,
-	signature []byte, certificates string) error {
-
-	signCert, err := getAndVerifySignCert(certificates)
-	if err != nil {
-		return err
-	}
-	f.Seek(0, 0)
-
-	var hashFunc crypto.Hash
-	switch hashAlg {
-	case "SHA1":
-		hashFunc = crypto.SHA1
-	case "SHA224":
-		hashFunc = crypto.SHA224
-	case "SHA256":
-		hashFunc = crypto.SHA256
-	case "SHA384":
-		hashFunc = crypto.SHA384
-	case "SHA512":
-		hashFunc = crypto.SHA512
-	case "SHA512/224":
-		hashFunc = crypto.SHA512_224
-	case "SHA512/256":
-		hashFunc = crypto.SHA512_256
-	default:
-		return errors.New("unknown hashing algorithm: " + hashAlg)
-	}
-
-	hash := hashFunc.New()
-	_, err = io.Copy(hash, f)
-	if err != nil {
-		log.Errorf("Error hashing file: %s", err)
-		return err
-	}
-	h := hash.Sum(nil)
-
-	log.Debugf("Hash: %s", hex.EncodeToString(h))
-
-	switch signatureAlg {
-	case "RSA":
-		key, err := extractKeyFromCert(signCert)
-		if err != nil {
-			return err
-		}
-		switch signatureScheme {
-		case "PKCS1v1_5":
-			return rsa.VerifyPKCS1v15(key, hashFunc.HashFunc(), h, signature)
-		case "PSS":
-			return rsa.VerifyPSS(key, hashFunc.HashFunc(), h, signature, nil)
-		default:
-			return errors.New("unknown scheme for RSA signature: " + signatureScheme)
-		}
-	default:
-		return errors.New("unknown signature alg: " + signatureAlg)
-	}
-}
-
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
 	if l%blocklen != 0 {
@@ -418,42 +311,4 @@ func DecryptMetadata(der []byte) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("%T private key not yet supported", key)
 	}
-}
-
-//DecryptImage Decrypts given image into temporary file
-func DecryptImage(fname string, signature []byte, key []byte, iv []byte,
-	signatureAlg, hashAlg, signatureScheme,
-	cryptoAlg, cryptoMode, certificates string) (outfname string, err error) {
-
-	// Create tmp file with output data
-	fout, err := ioutil.TempFile("", "fcrypt")
-	if err != nil {
-		log.Errorf("Can't create temp file for image: %s", err)
-		return outfname, err
-	}
-	defer fout.Close()
-
-	log.Debugf("Temp file name: %s", fout.Name())
-
-	// Open file
-	f, err := os.Open(fname)
-	if err != nil {
-		log.Errorf("Error opening encrypted image:%s", err)
-		return outfname, err
-	}
-	defer f.Close()
-
-	// Decrypt file into fout
-	err = decrypt(f, fout, key, iv, cryptoAlg, cryptoMode)
-	if err != nil {
-		log.Errorf("Error decrypting file: %s", err)
-		return outfname, err
-	}
-
-	err = checkSign(fout, signatureAlg, hashAlg, signatureScheme, signature, certificates)
-	if err != nil {
-		log.Errorf("Signature verify error: %s", err)
-		return outfname, err
-	}
-	return fout.Name(), nil
 }
