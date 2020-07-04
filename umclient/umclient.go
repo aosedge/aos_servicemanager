@@ -20,6 +20,7 @@ package umclient
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -366,6 +367,37 @@ func (um *Client) IssuedUnitCertificates(certInfo []amqp.IssuedUnitCertificatesI
 	if err := um.sender.SendInstallCertificatesConfirmation(confirmations); err != nil {
 		log.Error("Can't send installUnitCertificatesConfirmation ", err)
 	}
+}
+
+//GetCertificateForSM get sertificate
+func (um *Client) GetCertificateForSM(request fcrypt.RetrieveCertificateRequest) (resp fcrypt.RetrieveCertificateResponse,
+	err error) {
+	requestUm := umprotocol.GetCertReq{
+		Type:   request.CertType,
+		Issuer: request.Issuer,
+		Serial: request.Serial,
+	}
+
+	responseUm := new(umprotocol.GetCertRsp)
+
+	if err := um.sendRequest(umprotocol.GetCertRequestType, umprotocol.GetCertResponseType,
+		&requestUm, responseUm); err != nil {
+		log.Error("Can't send getCertRequest to update manager ", err)
+		return resp, err
+	}
+
+	if responseUm.Error != "" {
+		return resp, errors.New(responseUm.Error)
+	}
+
+	if requestUm.Type != responseUm.Type {
+		return resp, fmt.Errorf("Cert types missmatch %s!=%s", requestUm.Type, responseUm.Type)
+	}
+
+	resp.CrtURI = responseUm.CrtURI
+	resp.KeyURI = responseUm.KeyURI
+
+	return resp, nil
 }
 
 // Close closes umclient

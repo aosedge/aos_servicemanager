@@ -47,6 +47,10 @@ const (
 	fileBlockSize = 64 * 1024
 )
 
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
 type CryptoSessionKeyInfo struct {
 	SessionKey        []byte `json:"sessionKey"`
 	SessionIV         []byte `json:"sessionIV"`
@@ -102,6 +106,23 @@ type SignContext struct {
 	signCertificates      []certificateInfo
 	signCertificateChains []certificateChainInfo
 }
+
+// RetrieveCertificateRequest request to retrieve certificate
+type RetrieveCertificateRequest struct {
+	CertType string
+	Issuer   []byte
+	Serial   string
+}
+
+// RetrieveCertificateResponse recponce with certificate
+type RetrieveCertificateResponse struct {
+	CrtURI string
+	KeyURI string
+}
+
+/*******************************************************************************
+ * Public
+ ******************************************************************************/
 
 func CreateContext(conf config.Crypt) (*CryptoContext, error) {
 	// Create context
