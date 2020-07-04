@@ -1406,7 +1406,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	sender := newTestSender()
 
-	digests := []digest.Digest{}
+	digests := []digest.Digest{digest.NewDigestFromBytes(digest.SHA256, []byte(testString))}
 
 	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil, networkProvider)
 	if err != nil {
