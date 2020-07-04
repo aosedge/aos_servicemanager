@@ -440,9 +440,10 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 		launcher.Close()
 	}()
 
-	// run stored service configuration only in case system resources are valid
-	if err = launcher.SetUsers([]string{"User1"}); err == nil {
-		t.Fatalf("SM can start services when device resources are invalid")
+	// run stored service configuration. In case if service is invalid we do not start services,
+	// but return no error.
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Error executing SetUsers command")
 	}
 }
 
