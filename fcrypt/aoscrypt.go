@@ -58,12 +58,18 @@ const (
  * Types
  ******************************************************************************/
 
+//ReceiverInfo info with  receiverInfo
+type ReceiverInfo struct {
+	Serial string
+	Issuer []byte
+}
+
 type CryptoSessionKeyInfo struct {
-	SessionKey        []byte `json:"sessionKey"`
-	SessionIV         []byte `json:"sessionIV"`
-	SymmetricAlgName  string `json:"symmetricAlgName"`
-	AsymmetricAlgName string `json:"asymmetricAlgName"`
-	RecipientInfo     string `json:"recipientInfo"`
+	SessionKey        []byte       `json:"sessionKey"`
+	SessionIV         []byte       `json:"sessionIV"`
+	SymmetricAlgName  string       `json:"symmetricAlgName"`
+	AsymmetricAlgName string       `json:"asymmetricAlgName"`
+	ReceiverInfo      ReceiverInfo `json:"recipientInfo"`
 }
 
 type CryptoContext struct {
