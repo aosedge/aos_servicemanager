@@ -98,7 +98,12 @@ func New(resourceConfigFile string, sender Sender) (resourcemanager *ResourceMan
 		log.Errorf("Can't parse resource configuration file: %s", resourceConfigFile)
 	}
 
-	resourcemanager.areResourcesValid = resourcemanager.validateDeviceResources()
+	// do validation only if non-zero amount of the devices was provided
+	if len(resourcemanager.availableResources.Devices) != 0 {
+		resourcemanager.areResourcesValid = resourcemanager.validateDeviceResources()
+	} else {
+		resourcemanager.areResourcesValid = nil
+	}
 
 	// init map with available device names
 	resourcemanager.deviceWithServices = make(map[string][]string)
@@ -364,15 +369,6 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 
 	log.Debugf("ResourceManager: validateDeviceResources()")
 
-	if !resourcemanager.isAvailableResourcesChecked() {
-		message := errors.New("resource configuration is not provided")
-
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendRequestResourceAlert("servicemanager", message.Error())
-		}
-		return message
-	}
-
 	deviceErrors := make(map[string][]error)
 
 	// compare available device names and additional groups with system ones
@@ -413,7 +409,7 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 }
 
 func (resourcemanager *ResourceManager) isAvailableResourcesChecked() (status bool) {
-	return len(resourcemanager.availableResources.Devices) != 0
+	return resourcemanager.areResourcesValid == nil
 }
 
 func (resourcemanager *ResourceManager) getAvailableDeviceByName(

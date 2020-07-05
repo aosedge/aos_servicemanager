@@ -33,7 +33,7 @@ import (
  ******************************************************************************/
 
 const DRI_DEV_PATH = "/dev/dri/by-path/"
-const STDIN_DEV_PATH = "/dev/stdout"
+const STDIN_DEV_PATH = "/dev/stdin"
 
 /*******************************************************************************
  * Types
@@ -148,6 +148,22 @@ func TestValidAvailableResources(t *testing.T) {
 	}
 }
 
+func TestEmptyResourcesConfig(t *testing.T) {
+	if err := createEmptyResourceConfigFile(); err != nil {
+		t.Errorf("Can't write invalid resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	err = rm.AreResourcesValid()
+	if err != nil {
+		t.Errorf("Resources are invalid. Error: %s", err)
+	}
+}
+
 func TestInValidAvailableResources(t *testing.T) {
 	if err := createInValidResourceConfigFile(); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
@@ -257,17 +273,17 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		t.Fatalf("deviceResource is not equal to inputResource")
 	}
 
-	deviceResource, err = rm.RequestDeviceResourceByName("stdout")
+	deviceResource, err = rm.RequestDeviceResourceByName("stdin")
 	if err != nil {
 		t.Fatalf("Can't request resource: %s", err)
 	}
 
-	linkName, err := filepath.EvalSymlinks("/dev/stdout")
+	linkName, err := filepath.EvalSymlinks("/dev/stdin")
 	if err != nil {
 		t.Fatalf("Can't read symlink with error: %s", err)
 	}
 
-	stdoutResource := DeviceResource{Name: "stdout", SharedCount: 2, Groups: nil,
+	stdoutResource := DeviceResource{Name: "stdin", SharedCount: 2, Groups: nil,
 		HostDevices: []string{linkName}}
 
 	if !reflect.DeepEqual(deviceResource, stdoutResource) {
@@ -493,10 +509,10 @@ func createTestResourceConfigFile() (err error) {
 			]
 		},
 		{
-			"name": "stdout",
+			"name": "stdin",
 			"sharedCount": 2,
 			"hostDevices": [
-				"/dev/stdout"
+				"/dev/stdin"
 			]
 		}
 	]
@@ -523,6 +539,18 @@ func createInValidResourceConfigFile() (err error) {
 			]
 		}
 	]
+}`
+
+	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createEmptyResourceConfigFile() (err error) {
+	configContent := `{
+	"devices": []
 }`
 
 	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
