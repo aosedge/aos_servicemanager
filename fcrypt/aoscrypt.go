@@ -130,8 +130,8 @@ type RetrieveCertificateRequest struct {
 
 // RetrieveCertificateResponse recponce with certificate
 type RetrieveCertificateResponse struct {
-	CrtURI string
-	KeyURI string
+	CrtURL string
+	KeyURL string
 }
 
 // CertificateProvider interface ti get certificate for SM
@@ -188,12 +188,12 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return cfg, err
 	}
 
-	certURI, err := url.Parse(resp.CrtURI)
+	certURL, err := url.Parse(resp.CrtURL)
 	if err != nil {
 		return cfg, err
 	}
 
-	if certURI.Scheme != "file" {
+	if certURL.Scheme != "file" {
 		return cfg, errors.New("Expect to have file for online cert")
 	}
 
@@ -202,21 +202,21 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return nil, err
 	}
 
-	keyURI, err := url.Parse(resp.KeyURI)
+	keyURL, err := url.Parse(resp.KeyURL)
 	if err != nil {
 		return cfg, err
 	}
 
-	switch keyURI.Scheme {
+	switch keyURL.Scheme {
 	case "tpm":
 		log.Debug("TLS config uses TPM engine")
 
-		clientCert, err := loadClientCertificate(certURI.Path)
+		clientCert, err := loadClientCertificate(certURL.Path)
 		if err != nil {
 			return cfg, err
 		}
 
-		onlinePrivate, err := ctx.loadPrivateKeyByURI(keyURI)
+		onlinePrivate, err := ctx.loadPrivateKeyByURL(keyURL)
 		if err != nil {
 			return cfg, err
 		}
@@ -231,14 +231,14 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 
 	case "file":
 		log.Debug("TLS config uses native crypto")
-		cert, err = tls.LoadX509KeyPair(certURI.Path, keyURI.Path)
+		cert, err = tls.LoadX509KeyPair(certURL.Path, keyURL.Path)
 		if err != nil {
 			return cfg, err
 		}
 
 	default:
 		log.Errorf("Receive unsupported ")
-		return cfg, fmt.Errorf("Receive unsupported schema = %s for private key", keyURI.Scheme)
+		return cfg, fmt.Errorf("Receive unsupported schema = %s for private key", keyURL.Scheme)
 	}
 
 	cfg.RootCAs = caCertPool
@@ -437,11 +437,11 @@ func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Ce
 	return nil
 }
 
-// LoadOfflineKey function loads offline from uri
-func (ctx *CryptoContext) loadPrivateKeyByURI(keyURI *url.URL) (privKey crypto.PrivateKey, err error) {
-	switch keyURI.Scheme {
+// LoadOfflineKey function loads offline from url
+func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.PrivateKey, err error) {
+	switch keyURL.Scheme {
 	case "file":
-		keyBytes, err := ioutil.ReadFile(keyURI.Path)
+		keyBytes, err := ioutil.ReadFile(keyURL.Path)
 		if err != nil {
 			return privKey, fmt.Errorf("error reading offline private key from file: %s", err)
 		}
@@ -459,7 +459,7 @@ func (ctx *CryptoContext) loadPrivateKeyByURI(keyURI *url.URL) (privKey crypto.P
 		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, handle)
 	}
 
-	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURI.Scheme)
+	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURL.Scheme)
 }
 
 // ImportSessionKey function retrieves a symmetric key from crypto context
@@ -475,12 +475,12 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		return nil, err
 	}
 
-	keyURI, err := url.Parse(resp.KeyURI)
+	keyURL, err := url.Parse(resp.KeyURL)
 	if err != nil {
 		return nil, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURI(keyURI)
+	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
 	if err != nil {
 		log.Error("Cant load private key ", err)
 		return symContext, err
@@ -500,7 +500,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 
 	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 	case "RSA/PKCS1V1_5":
-		if keyURI.Scheme != "tpm" {
+		if keyURL.Scheme != "tpm" {
 			clearKey := make([]byte, keySize)
 
 			err = rsa.DecryptPKCS1v15SessionKey(nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
@@ -527,7 +527,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		}
 
 	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
-		if keyURI.Scheme != "tpm" {
+		if keyURL.Scheme != "tpm" {
 			var hashFunc hash.Hash
 			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 			case "RSA/OAEP":
@@ -939,16 +939,16 @@ func GetCertificateOrganizations(provider CertificateProvider) (names []string, 
 		return names, err
 	}
 
-	certURI, err := url.Parse(resp.CrtURI)
+	certURL, err := url.Parse(resp.CrtURL)
 	if err != nil {
 		return names, err
 	}
 
-	if certURI.Scheme != "file" {
+	if certURL.Scheme != "file" {
 		return names, errors.New("Expect to have file for online cert")
 	}
 
-	certRaw, err := ioutil.ReadFile(certURI.Path)
+	certRaw, err := ioutil.ReadFile(certURL.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -982,12 +982,12 @@ func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key 
 		return key, err
 	}
 
-	keyURI, err := url.Parse(resp.KeyURI)
+	keyURL, err := url.Parse(resp.KeyURL)
 	if err != nil {
 		return key, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURI(keyURI)
+	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
 	if err != nil {
 		return key, err
 	}

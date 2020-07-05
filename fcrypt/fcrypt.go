@@ -74,7 +74,7 @@ func loadTpmPrivateKey(tpmInterface string, handel tpmHandle) (tpmPrivKey *tpmPr
 	return tpmPrivKey, nil
 }
 
-// GetCrtSerialByURL get cerificate  serial by URI
+// GetCrtSerialByURL get cerificate  serial by URL
 func GetCrtSerialByURL(crtURL string) (serial string, err error) {
 	urlVal, err := url.Parse(crtURL)
 	if err != nil {

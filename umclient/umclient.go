@@ -345,10 +345,10 @@ func (um *Client) IssuedUnitCertificates(certInfo []amqp.IssuedUnitCertificatesI
 			Status:      "installed",
 			Description: response.Error}
 
-		serial, err := fcrypt.GetCrtSerialByURL(response.CrtURI)
+		serial, err := fcrypt.GetCrtSerialByURL(response.CrtURL)
 		if err != nil {
 			certConfirmation.Description = err.Error()
-			log.Error("Can't get cert serial from ", response.CrtURI, err)
+			log.Error("Can't get cert serial from ", response.CrtURL, err)
 		}
 
 		certConfirmation.Serial = serial
@@ -394,8 +394,8 @@ func (um *Client) GetCertificateForSM(request fcrypt.RetrieveCertificateRequest)
 		return resp, fmt.Errorf("Cert types missmatch %s!=%s", requestUm.Type, responseUm.Type)
 	}
 
-	resp.CrtURI = responseUm.CrtURI
-	resp.KeyURI = responseUm.KeyURI
+	resp.CrtURL = responseUm.CrtURL
+	resp.KeyURL = responseUm.KeyURL
 
 	return resp, nil
 }
