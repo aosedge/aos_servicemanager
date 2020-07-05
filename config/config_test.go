@@ -37,17 +37,8 @@ import (
 func createConfigFile() (err error) {
 	configContent := `{
 	"fcrypt" : {
-		"TPMEngine": {
-            "enabled": true,
-            "interface": "/dev/tpmrm0",
-            "onlineHandle": "0x81000000",
-            "offlineHandle": "0x81000001"
-        },
 		"CACert" : "CACert",
-		"ClientCert" : "ClientCert",
-		"ClientKey" : "ClientKey",
-		"OfflinePrivKey" : "OfflinePrivKey",
-		"OfflineCert" : "OfflineCert"	
+		"tpmDevice": "/dev/tpmrm0"
 	},
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
@@ -149,40 +140,12 @@ func TestGetCrypt(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Crypt.TPMEngine.Enabled != true {
-		t.Errorf("Wrong TPMEngine Enabled value: %v", config.Crypt.TPMEngine.Enabled)
-	}
-
-	if config.Crypt.TPMEngine.Interface != "/dev/tpmrm0" {
-		t.Errorf("Wrong TPMEngine Interface value: %s", config.Crypt.TPMEngine.Interface)
-	}
-
-	if config.Crypt.TPMEngine.OnlineHandle != 0x81000000 {
-		t.Errorf("Wrong TPMEngine OnlineHandle value: 0x%x", config.Crypt.TPMEngine.OnlineHandle)
-	}
-
-	if config.Crypt.TPMEngine.OfflineHandle != 0x81000001 {
-		t.Errorf("Wrong TPMEngine OfflineHandle value: 0x%x", config.Crypt.TPMEngine.OfflineHandle)
+	if config.Crypt.TpmDevice != "/dev/tpmrm0" {
+		t.Errorf("Wrong TPMEngine Interface value: %s", config.Crypt.TpmDevice)
 	}
 
 	if config.Crypt.CACert != "CACert" {
 		t.Errorf("Wrong CACert value: %s", config.Crypt.CACert)
-	}
-
-	if config.Crypt.ClientCert != "ClientCert" {
-		t.Errorf("Wrong ClientCert value: %s", config.Crypt.ClientCert)
-	}
-
-	if config.Crypt.ClientKey != "ClientKey" {
-		t.Errorf("Wrong ClientKey value: %s", config.Crypt.ClientKey)
-	}
-
-	if config.Crypt.OfflinePrivKey != "OfflinePrivKey" {
-		t.Errorf("Wrong OfflinePrivKey value: %s", config.Crypt.OfflinePrivKey)
-	}
-
-	if config.Crypt.OfflineCert != "OfflineCert" {
-		t.Errorf("Wrong OfflineCert value: %s", config.Crypt.OfflineCert)
 	}
 }
 

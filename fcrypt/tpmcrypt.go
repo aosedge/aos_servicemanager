@@ -28,8 +28,6 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
 	log "github.com/sirupsen/logrus"
-
-	"aos_servicemanager/config"
 )
 
 /*******************************************************************************
@@ -95,7 +93,7 @@ func (tpm *TPMCrypto) Open(path string) (err error) {
 }
 
 // CreateRSAPrimaryKey generates a primary RSA key and makes it persistent under the given handle.
-func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle config.TPMHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (pubKey crypto.PublicKey, err error) {
+func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle tpmHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (pubKey crypto.PublicKey, err error) {
 	tpm.Lock()
 	defer tpm.Unlock()
 

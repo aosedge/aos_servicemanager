@@ -456,7 +456,7 @@ func (ctx *CryptoContext) loadPrivateKeyByURI(keyURI *url.URL) (privKey crypto.P
 
 		handle := tpmHandle(result)
 
-		return loadTpmPrivateKey(ctx.cryptConfig.TPMEngine.Interface, handle)
+		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, handle)
 	}
 
 	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURI.Scheme)
