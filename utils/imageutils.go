@@ -119,7 +119,11 @@ func DecryptImage(srcFileName, dstFileName string, crypt FcryptInterface, decryp
 		SymmetricAlgName:  decryptionInfo.BlockAlg,
 		SessionKey:        decryptionInfo.BlockKey,
 		SessionIV:         decryptionInfo.BlockIv,
-		AsymmetricAlgName: decryptionInfo.AsymAlg})
+		AsymmetricAlgName: decryptionInfo.AsymAlg,
+		ReceiverInfo: fcrypt.ReceiverInfo{
+			Issuer: decryptionInfo.ReceiverInfo.Issuer,
+			Serial: decryptionInfo.ReceiverInfo.Serial},
+	})
 	if err != nil {
 		return err
 	}

@@ -76,7 +76,6 @@ type CryptoContext struct {
 	cryptConfig  config.Crypt
 	rootCertPool *x509.CertPool
 
-	privateKey   crypto.PrivateKey
 	certProvider CertificateProvider
 }
 
@@ -406,42 +405,47 @@ func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Ce
 	return nil
 }
 
-// LoadOfflineKeyFile sets a new offline key file and load it
-func (ctx *CryptoContext) LoadOfflineKeyFile(filepath string) error {
-	ctx.cryptConfig.OfflinePrivKey = filepath
-	return ctx.LoadOfflineKey()
-}
-
-// LoadOfflineKey function loads offline key into context
-func (ctx *CryptoContext) LoadOfflineKey() error {
-	if !ctx.cryptConfig.TPMEngine.Enabled {
-		if ctx.cryptConfig.OfflinePrivKey == "" {
-			return errors.New("OfflinePrivKey not set")
-		}
-
-		keyBytes, err := ioutil.ReadFile(ctx.cryptConfig.OfflinePrivKey)
+// LoadOfflineKey function loads offline from uri
+func (ctx *CryptoContext) loadPrivateKeyByURI(keyURI *url.URL) (privKey crypto.PrivateKey, err error) {
+	switch keyURI.Scheme {
+	case "file":
+		keyBytes, err := ioutil.ReadFile(keyURI.Path)
 		if err != nil {
-			return fmt.Errorf("error reading offline private key from file: %s", err)
+			return privKey, fmt.Errorf("error reading offline private key from file: %s", err)
 		}
 
-		return ctx.LoadKeyFromBytes(keyBytes)
+		return loadKey(keyBytes)
+
+	case "tpm":
+		//TODO
+		return offlinePrivate, nil
 	}
 
-	ctx.privateKey = offlinePrivate
-
-	return nil
-}
-
-// LoadKeyFromBytes function loads online key which represents in a byte data into context
-func (ctx *CryptoContext) LoadKeyFromBytes(data []byte) (err error) {
-	ctx.privateKey, err = loadKey(data)
-	return err
+	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURI.Scheme)
 }
 
 // ImportSessionKey function retrieves a symmetric key from crypto context
 func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symContext SymmetricContextInterface, err error) {
-	if ctx == nil || ctx.privateKey == nil {
+	if ctx == nil {
 		return nil, errors.New("asymmetric context not initialized")
+	}
+
+	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: offlineCertificate,
+		Issuer: keyInfo.ReceiverInfo.Issuer,
+		Serial: keyInfo.ReceiverInfo.Serial})
+	if err != nil {
+		return nil, err
+	}
+
+	keyURI, err := url.Parse(resp.KeyURI)
+	if err != nil {
+		return nil, err
+	}
+
+	privKey, err := ctx.loadPrivateKeyByURI(keyURI)
+	if err != nil {
+		log.Error("Cant load private key ", err)
+		return symContext, err
 	}
 
 	algName, _, _ := decodeAlgNames(keyInfo.SymmetricAlgName)
@@ -458,10 +462,10 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 
 	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 	case "RSA/PKCS1V1_5":
-		if !ctx.cryptConfig.TPMEngine.Enabled {
+		if keyURI.Scheme != "tpm" {
 			clearKey := make([]byte, keySize)
 
-			err = rsa.DecryptPKCS1v15SessionKey(nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
+			err = rsa.DecryptPKCS1v15SessionKey(nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
 			if err != nil {
 				return nil, err
 			}
@@ -469,7 +473,8 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 				return nil, err
 			}
 		} else {
-			decryptor, ok := ctx.privateKey.(crypto.Decrypter)
+			//TODO implements tpm
+			decryptor, ok := privKey.(crypto.Decrypter)
 			if !ok {
 				return nil, errors.New("private key doesn't contain a Decryptor")
 			}
@@ -485,7 +490,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		}
 
 	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
-		if !ctx.cryptConfig.TPMEngine.Enabled {
+		if keyURI.Scheme != "tpm" {
 			var hashFunc hash.Hash
 			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 			case "RSA/OAEP":
@@ -498,7 +503,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 				hashFunc = sha512.New()
 			}
 
-			clearKey, err := rsa.DecryptOAEP(hashFunc, nil, ctx.privateKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
+			clearKey, err := rsa.DecryptOAEP(hashFunc, nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -507,9 +512,10 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 				return nil, err
 			}
 		} else {
+			//TODO tpm usage
 			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 			case "RSA/OAEP", "RSA/OAEP-256":
-				decryptor, ok := ctx.privateKey.(crypto.Decrypter)
+				decryptor, ok := privKey.(crypto.Decrypter)
 				if !ok {
 					return nil, errors.New("private key doesn't contain a Decryptor")
 				}

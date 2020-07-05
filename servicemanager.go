@@ -220,10 +220,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if err = sm.crypt.LoadOfflineKey(); err != nil {
-		return sm, err
-	}
-
 	sm.um.SetCryptoContext(sm.crypt)
 	sm.amqp.SetCryptoContext(sm.crypt)
 
