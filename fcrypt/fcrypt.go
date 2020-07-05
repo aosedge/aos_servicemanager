@@ -21,7 +21,6 @@ package fcrypt
 import (
 	"crypto"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -165,47 +164,6 @@ func loadClientCertificate(file string) (certificates [][]byte, err error) {
 	}
 
 	return certificates, nil
-}
-
-// GetTLSConfig Provides TLS configuration for HTTPS client
-func GetTLSConfig() (*tls.Config, error) {
-	cfg := &tls.Config{}
-	var cert tls.Certificate
-	var err error
-
-	ClientCert, err := loadClientCertificate(fcryptCfg.ClientCert)
-	if err != nil {
-		return cfg, err
-	}
-
-	caCertPool, err := getCaCertPool()
-	if err != nil {
-		return nil, err
-	}
-
-	if fcryptCfg.TPMEngine.Enabled {
-		log.Debug("TLS config uses TPM engine")
-		cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: ClientCert}
-
-		// Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
-		cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
-			tls.PKCS1WithSHA256,
-			tls.PKCS1WithSHA1,
-		}
-	} else {
-		log.Debug("TLS config uses native crypto")
-		cert, err = tls.LoadX509KeyPair(fcryptCfg.ClientCert, fcryptCfg.ClientKey)
-		if err != nil {
-			return cfg, err
-		}
-	}
-
-	cfg.RootCAs = caCertPool
-	cfg.Certificates = []tls.Certificate{cert}
-	cfg.VerifyPeerCertificate = verifyCert
-
-	cfg.BuildNameToCertificate()
-	return cfg, nil
 }
 
 func getPrivKey() (key crypto.PrivateKey, err error) {

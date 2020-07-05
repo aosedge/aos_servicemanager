@@ -103,7 +103,13 @@ type AmqpHandler struct {
 	sendConnection    *amqp.Connection
 	receiveConnection *amqp.Connection
 
+	cryptoContext amqpCryptoContext
+
 	systemID string
+}
+
+type amqpCryptoContext interface {
+	GetTLSConfig() (config *tls.Config, err error)
 }
 
 // MessageHeader message header
@@ -504,12 +510,17 @@ func New() (handler *AmqpHandler, err error) {
 	return handler, nil
 }
 
+// SetCryptoContext set cryptoContext fro amqp handler
+func (handler *AmqpHandler) SetCryptoContext(crypt amqpCryptoContext) {
+	handler.cryptoContext = crypt
+}
+
 // Connect connects to cloud
 func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []string) (err error) {
 	log.WithFields(log.Fields{"url": sdURL, "systemID": systemID, "users": users}).Debug("AMQP connect")
 	handler.systemID = systemID
 
-	tlsConfig, err := fcrypt.GetTLSConfig()
+	tlsConfig, err := handler.cryptoContext.GetTLSConfig()
 	if err != nil {
 		return err
 	}

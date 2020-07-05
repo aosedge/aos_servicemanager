@@ -216,7 +216,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create crypto context
-	if sm.crypt, err = fcrypt.CreateContext(cfg.Crypt); err != nil {
+	if sm.crypt, err = fcrypt.CreateContext(cfg.Crypt, sm.um); err != nil {
 		return sm, err
 	}
 
@@ -225,6 +225,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	sm.um.SetCryptoContext(sm.crypt)
+	sm.amqp.SetCryptoContext(sm.crypt)
 
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {

@@ -27,6 +27,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -69,7 +70,8 @@ type CryptoContext struct {
 	cryptConfig  config.Crypt
 	rootCertPool *x509.CertPool
 
-	privateKey crypto.PrivateKey
+	privateKey   crypto.PrivateKey
+	certProvider CertificateProvider
 }
 
 // SymmetricContextInterface interface for SymmetricCipherContext
@@ -135,10 +137,12 @@ type CertificateProvider interface {
  * Public
  ******************************************************************************/
 
-func CreateContext(conf config.Crypt) (*CryptoContext, error) {
+// CreateContext create context for crypto operations
+func CreateContext(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
 	// Create context
-	ctx := &CryptoContext{
-		cryptConfig: conf,
+	ctx = &CryptoContext{
+		cryptConfig:  conf,
+		certProvider: provider,
 	}
 
 	if conf.CACert != "" {
@@ -166,6 +170,73 @@ func (ctx *CryptoContext) CreateSignContext() (SignContextInterface, error) {
 	}
 
 	return &SignContext{cryptoContext: ctx}, nil
+}
+
+// GetTLSConfig Provides TLS configuration for HTTPS client
+func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
+	cfg = &tls.Config{}
+	var cert tls.Certificate
+
+	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
+	if err != nil {
+		return cfg, err
+	}
+
+	certURI, err := url.Parse(resp.CrtURI)
+	if err != nil {
+		return cfg, err
+	}
+
+	if certURI.Scheme != "file" {
+		return cfg, errors.New("Expect to have file for online cert")
+	}
+
+	caCertPool, err := getCaCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	keyURI, err := url.Parse(resp.KeyURI)
+	if err != nil {
+		return cfg, err
+	}
+
+	switch keyURI.Scheme {
+	case "tpm":
+		log.Debug("TLS config uses TPM engine")
+		// TODO add tpm support
+
+		// ClientCert, err := loadClientCertificate(certURI.Path)
+		// if err != nil {
+		// 	return cfg, err
+		// }
+		// cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: ClientCert}
+
+		// // Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
+		// cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
+		// 	tls.PKCS1WithSHA256,
+		// 	tls.PKCS1WithSHA1,
+		// }
+
+	case "file":
+		log.Debug("TLS config uses native crypto")
+		cert, err = tls.LoadX509KeyPair(certURI.Path, keyURI.Path)
+		if err != nil {
+			return cfg, err
+		}
+
+	default:
+		log.Errorf("Receive unsupported ")
+		return cfg, fmt.Errorf("Receive unsupported schema = %s for private key", keyURI.Scheme)
+	}
+
+	cfg.RootCAs = caCertPool
+	cfg.Certificates = []tls.Certificate{cert}
+	cfg.VerifyPeerCertificate = verifyCert
+
+	cfg.BuildNameToCertificate()
+
+	return cfg, nil
 }
 
 func (ctx *SignContext) AddCertificate(fingerprint string, asn1Bytes []byte) error {
