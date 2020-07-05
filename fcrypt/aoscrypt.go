@@ -210,19 +210,24 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 	switch keyURI.Scheme {
 	case "tpm":
 		log.Debug("TLS config uses TPM engine")
-		// TODO add tpm support
 
-		// ClientCert, err := loadClientCertificate(certURI.Path)
-		// if err != nil {
-		// 	return cfg, err
-		// }
-		// cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: ClientCert}
+		clientCert, err := loadClientCertificate(certURI.Path)
+		if err != nil {
+			return cfg, err
+		}
 
-		// // Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
-		// cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
-		// 	tls.PKCS1WithSHA256,
-		// 	tls.PKCS1WithSHA1,
-		// }
+		onlinePrivate, err := ctx.loadPrivateKeyByURI(keyURI)
+		if err != nil {
+			return cfg, err
+		}
+
+		cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: clientCert}
+
+		// Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
+		cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
+			tls.PKCS1WithSHA256,
+			tls.PKCS1WithSHA1,
+		}
 
 	case "file":
 		log.Debug("TLS config uses native crypto")
@@ -444,8 +449,14 @@ func (ctx *CryptoContext) loadPrivateKeyByURI(keyURI *url.URL) (privKey crypto.P
 		return loadKey(keyBytes)
 
 	case "tpm":
-		//TODO
-		return offlinePrivate, nil
+		result, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
+		if err != nil {
+			return nil, err
+		}
+
+		handle := tpmHandle(result)
+
+		return loadTpmPrivateKey(ctx.cryptConfig.TPMEngine.Interface, handle)
 	}
 
 	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURI.Scheme)
@@ -500,7 +511,6 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 				return nil, err
 			}
 		} else {
-			//TODO implements tpm
 			decryptor, ok := privKey.(crypto.Decrypter)
 			if !ok {
 				return nil, errors.New("private key doesn't contain a Decryptor")
@@ -539,7 +549,6 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 				return nil, err
 			}
 		} else {
-			//TODO tpm usage
 			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 			case "RSA/OAEP", "RSA/OAEP-256":
 				decryptor, ok := privKey.(crypto.Decrypter)

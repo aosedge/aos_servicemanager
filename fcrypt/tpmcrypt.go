@@ -49,12 +49,14 @@ var tpmSupportHashFunc = map[crypto.Hash]struct {
  * Types
  ******************************************************************************/
 
+type tpmHandle uint32
+
 // TPMHash based on crypto.Hash
 type tpmHash crypto.Hash
 
 // tpmPrivateKeyRSA provides a TPM crypto interface
 type tpmPrivateKeyRSA struct {
-	handle   config.TPMHandle
+	handle   tpmHandle
 	pub      crypto.PublicKey
 	crypt    *TPMCrypto
 	password string
@@ -70,7 +72,7 @@ type TPMCrypto struct {
 // tpmCryptoAccessor describes TPM crypto interface
 type tpmCryptoAccessor interface {
 	Open(path string) (err error)
-	CreateRSAPrimaryKey(handle config.TPMHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (crypto.PublicKey, error)
+	CreateRSAPrimaryKey(handle tpmHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (crypto.PublicKey, error)
 }
 
 /*******************************************************************************
@@ -122,7 +124,7 @@ func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle config.TPMHandle, parentPW, own
 }
 
 // ExternalLoadRSAPrivateKey uses only for testing handshake with TPM
-func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (config.TPMHandle, error) {
+func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (tpmHandle, error) {
 	tpm.Lock()
 	defer tpm.Unlock()
 
@@ -147,7 +149,7 @@ func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (config
 		return 0, err
 	}
 
-	return config.TPMHandle(h), nil
+	return tpmHandle(h), nil
 }
 
 // Public returns the public part of the key

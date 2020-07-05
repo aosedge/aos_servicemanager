@@ -46,51 +46,32 @@ const (
  ******************************************************************************/
 
 var fcryptCfg config.Crypt
-var onlinePrivate *tpmPrivateKeyRSA
-var offlinePrivate *tpmPrivateKeyRSA
 
 // Init initializes of fcrypt package
 func Init(conf config.Crypt) error {
-	var err error
 
 	fcryptCfg = conf
 
-	log.Debug("CAcert:         ", fcryptCfg.CACert)
-	log.Debug("ClientCert:     ", fcryptCfg.ClientCert)
-	log.Debug("ClientKey:      ", fcryptCfg.ClientKey)
-	log.Debug("OfflinePrivKey: ", fcryptCfg.OfflinePrivKey)
-	log.Debug("OfflineCert:    ", fcryptCfg.OfflineCert)
+	return nil
+}
 
-	if fcryptCfg.TPMEngine.Enabled {
-		log.Debugf("Open hardware crypto interface %s", fcryptCfg.TPMEngine.Interface)
+// LoadTpmPrivateKey load private tmp key
+func loadTpmPrivateKey(tpmInterface string, handel tpmHandle) (tpmPrivKey *tpmPrivateKeyRSA, err error) {
+	tpmCrypto := &TPMCrypto{}
 
-		tpmCrypto := &TPMCrypto{}
-
-		err = tpmCrypto.Open(fcryptCfg.TPMEngine.Interface)
-		if err != nil {
-			return err
-		}
-
-		onlinePrivate = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: fcryptCfg.TPMEngine.OnlineHandle, hashAlg: crypto.SHA256}
-
-		err = onlinePrivate.Create()
-		if err != nil {
-			return err
-		}
-
-		log.Debugf("TPM creates private online key object from 0x%X", uint32(fcryptCfg.TPMEngine.OnlineHandle))
-
-		offlinePrivate = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: fcryptCfg.TPMEngine.OfflineHandle, hashAlg: crypto.SHA256}
-
-		err = offlinePrivate.Create()
-		if err != nil {
-			return err
-		}
-
-		log.Debugf("TPM creates private offline key object from 0x%X", uint32(fcryptCfg.TPMEngine.OfflineHandle))
+	err = tpmCrypto.Open(tpmInterface)
+	if err != nil {
+		return tpmPrivKey, err
 	}
 
-	return nil
+	tpmPrivKey = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: handel, hashAlg: crypto.SHA256}
+
+	err = tpmPrivKey.Create()
+	if err != nil {
+		return nil, err
+	}
+
+	return tpmPrivKey, nil
 }
 
 // GetCrtSerialByURL get cerificate  serial by URI
@@ -164,39 +145,6 @@ func loadClientCertificate(file string) (certificates [][]byte, err error) {
 	}
 
 	return certificates, nil
-}
-
-func getPrivKey() (key crypto.PrivateKey, err error) {
-	if fcryptCfg.TPMEngine.Enabled {
-		key = offlinePrivate
-	} else {
-		keyBytes, err := ioutil.ReadFile(fcryptCfg.OfflinePrivKey)
-		if err != nil {
-			return nil, fmt.Errorf("error reading private key: %s", err)
-		}
-
-		if key, err = decodePrivateKey(keyBytes); err != nil {
-			return nil, err
-		}
-	}
-
-	return key, err
-}
-
-func getOfflineCert() (*x509.Certificate, error) {
-	pemCert, err := ioutil.ReadFile(fcryptCfg.OfflineCert)
-	if err != nil {
-		log.Errorf("Error reading offline certificate: %s", err)
-		return nil, err
-	}
-
-	var block *pem.Block
-	block, _ = pem.Decode(pemCert)
-	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-		return nil, errors.New("invalid PEM Block")
-	}
-
-	return x509.ParseCertificate(block.Bytes)
 }
 
 func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
