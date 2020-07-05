@@ -456,9 +456,13 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 			return err
 		}
 
-		//TODO decrypt data.UnitSecureData
+		passwd, err := sm.crypt.DecryptMetadata(data.UnitSecureData)
+		if err != nil {
+			log.Error("Can't decrypt UnitSecureData ", err)
+			return err
+		}
 
-		sm.um.RenewCertificatesNotification(systemID, "pwd", data.Certificates)
+		sm.um.RenewCertificatesNotification(systemID, string(passwd), data.Certificates)
 
 	case *amqp.IssuedUnitCertificates:
 		log.Info("IssuedUnitCertificates")
