@@ -29,6 +29,7 @@ import (
 	"crypto/sha512"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -242,6 +243,32 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 	cfg.BuildNameToCertificate()
 
 	return cfg, nil
+}
+
+// DecryptMetadata decrypt envelope
+func (ctx *CryptoContext) DecryptMetadata(input []byte) (output []byte, err error) {
+	ci, err := unmarshallCMS(input)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, recipient := range ci.EnvelopedData.RecipientInfos {
+		dkey, err := ctx.getKeyForEnvelope(recipient.(keyTransRecipientInfo))
+		if err != nil {
+			log.Warning("Can't get key for envelope")
+			continue
+		}
+
+		output, err = decryptMessage(&ci.EnvelopedData.EncryptedContentInfo, dkey)
+		if err != nil {
+			log.Warning("Can't decrypt message ", err)
+			continue
+		}
+
+		return output, nil
+	}
+
+	return output, errors.New("Can't decrypt metadata")
 }
 
 func (ctx *SignContext) AddCertificate(fingerprint string, asn1Bytes []byte) error {
@@ -928,4 +955,49 @@ func GetCertificateOrganizations(provider CertificateProvider) (names []string, 
 	}
 
 	return cert.Subject.Organization, nil
+}
+
+func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key []byte, err error) {
+	request := RetrieveCertificateRequest{
+		CertType: offlineCertificate,
+		Serial:   fmt.Sprintf("%X", keyInfo.Rid.SerialNumber),
+	}
+
+	request.Issuer, err = asn1.Marshal(keyInfo.Rid.Issuer)
+	if err != nil {
+		return key, err
+	}
+
+	resp, err := ctx.certProvider.GetCertificateForSM(request)
+	if err != nil {
+		return key, err
+	}
+
+	keyURI, err := url.Parse(resp.KeyURI)
+	if err != nil {
+		return key, err
+	}
+
+	privKey, err := ctx.loadPrivateKeyByURI(keyURI)
+	if err != nil {
+		return key, err
+	}
+
+	switch keyWithType := privKey.(type) {
+	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
+		decryptor, ok := keyWithType.(crypto.Decrypter)
+		if !ok {
+			return nil, errors.New("private key doesn't have a decryption suite")
+		}
+
+		key, err := decryptCMSKey(&keyInfo, decryptor)
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
+	default:
+		return nil, fmt.Errorf("%T private key not yet supported", keyWithType)
+	}
+
+	return key, errors.New("No private key found")
 }

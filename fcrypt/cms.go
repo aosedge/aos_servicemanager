@@ -21,7 +21,6 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
@@ -212,29 +211,3 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 	return getContentInfo(ci)
 }
 
-//DecryptMessage decrypt message
-func DecryptMessage(der []byte, key crypto.PrivateKey, cert *x509.Certificate) (plainKey []byte, err error) {
-	ci, err := unmarshallCMS(der)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, recipient := range ci.EnvelopedData.RecipientInfos {
-		r := recipient.(keyTransRecipientInfo)
-		if cert.SerialNumber.Cmp(r.Rid.SerialNumber) == 0 {
-			decryptor, ok := key.(crypto.Decrypter)
-			if !ok {
-				return nil, errors.New("private key doesn't have a decryption suite")
-			}
-
-			dkey, err := decryptCMSKey(&r, decryptor)
-			if err != nil {
-				return nil, err
-			}
-
-			return decryptMessage(&ci.EnvelopedData.EncryptedContentInfo, dkey)
-		}
-	}
-
-	return nil, errors.New("can't find suiteable recipient")
-}

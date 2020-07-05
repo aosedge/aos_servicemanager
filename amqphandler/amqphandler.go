@@ -32,7 +32,6 @@ import (
 	"github.com/streadway/amqp"
 
 	"aos_servicemanager/config"
-	"aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************
@@ -110,6 +109,7 @@ type AmqpHandler struct {
 
 type amqpCryptoContext interface {
 	GetTLSConfig() (config *tls.Config, err error)
+	DecryptMetadata(input []byte) (output []byte, err error)
 }
 
 // MessageHeader message header
@@ -1010,13 +1010,13 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 					continue
 				}
 
-				layersList, err := decodeLayers(encodedData.Layers)
+				layersList, err := handler.decodeLayers(encodedData.Layers)
 				if err != nil {
 					log.Errorf("Can't decode layers: %s", err)
 					continue
 				}
 
-				servicesList, err := decodeServices(encodedData.Services)
+				servicesList, err := handler.decodeServices(encodedData.Services)
 				if err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
@@ -1031,8 +1031,8 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 	}
 }
 
-func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
-	decryptData, err := fcrypt.DecryptMetadata(data)
+func (handler *AmqpHandler) decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
+	decryptData, err := handler.cryptoContext.DecryptMetadata(data)
 	if err != nil {
 		return nil, err
 	}
@@ -1046,12 +1046,12 @@ func decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
 	return services, nil
 }
 
-func decodeLayers(data []byte) (layers []LayerInfoFromCloud, err error) {
+func (handler *AmqpHandler) decodeLayers(data []byte) (layers []LayerInfoFromCloud, err error) {
 	if len(data) == 0 {
 		return layers, nil
 	}
 
-	decryptData, err := fcrypt.DecryptMetadata(data)
+	decryptData, err := handler.cryptoContext.DecryptMetadata(data)
 	if err != nil {
 		return nil, err
 	}
