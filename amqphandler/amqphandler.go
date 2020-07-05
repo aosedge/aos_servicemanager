@@ -158,7 +158,7 @@ type DecryptionInfo struct {
 	AsymAlg      string `json:"asymAlg"`
 	ReceiverInfo *struct {
 		Serial string `json:"serial"`
-		Issuer string `json:"issuer"`
+		Issuer []byte `json:"issuer"`
 	} `json:"receiverInfo"`
 }
 
