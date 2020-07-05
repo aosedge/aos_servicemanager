@@ -34,6 +34,7 @@ import (
 	"hash"
 	"io"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -45,6 +46,11 @@ import (
 
 const (
 	fileBlockSize = 64 * 1024
+)
+
+const (
+	onlineCertificate  = "online"
+	offlineCertificate = "offline"
 )
 
 /*******************************************************************************
@@ -118,6 +124,11 @@ type RetrieveCertificateRequest struct {
 type RetrieveCertificateResponse struct {
 	CrtURI string
 	KeyURI string
+}
+
+// CertificateProvider interface ti get certificate for SM
+type CertificateProvider interface {
+	GetCertificateForSM(request RetrieveCertificateRequest) (resp RetrieveCertificateResponse, err error)
 }
 
 /*******************************************************************************
@@ -803,8 +814,22 @@ func (ctx *SymmetricCipherContext) removePkcs7Padding(dataIn []byte, dataLen int
 }
 
 // GetCertificateOrganizations gives a list of certificate organizations
-func GetCertificateOrganizations(clientCertFile string) (names []string, err error) {
-	certRaw, err := ioutil.ReadFile(clientCertFile)
+func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
+	resp, err := provider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
+	if err != nil {
+		return names, err
+	}
+
+	certURI, err := url.Parse(resp.CrtURI)
+	if err != nil {
+		return names, err
+	}
+
+	if certURI.Scheme != "file" {
+		return names, errors.New("Expect to have file for online cert")
+	}
+
+	certRaw, err := ioutil.ReadFile(certURI.Path)
 	if err != nil {
 		return nil, err
 	}

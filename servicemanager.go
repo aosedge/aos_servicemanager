@@ -198,7 +198,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Get organization names from certificate and use it as discovery URL
-	names, err = fcrypt.GetCertificateOrganizations(cfg.Crypt.ClientCert)
+	names, err = fcrypt.GetCertificateOrganizations(sm.um)
 	if err != nil {
 		log.Warningf("Organization name will be taken from config file: %s", err)
 	} else {
