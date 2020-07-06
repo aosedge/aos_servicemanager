@@ -55,7 +55,7 @@ type EncryptedContentInfo struct {
 }
 
 type issuerAndSerialNumber struct {
-	Issuer       pkix.RDNSequence
+	Issuer       asn1.RawValue `asn1:"sequence"`
 	SerialNumber *big.Int
 }
 
@@ -210,4 +210,3 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 
 	return getContentInfo(ci)
 }
-
