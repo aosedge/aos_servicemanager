@@ -447,8 +447,8 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 		sm.um.SystemRevert(data.ImageVersion)
 
-	case *amqp.RenewCertificatesNotification:
-		log.Info("RenewCertificatesNotification")
+	case *amqp.RenewCertificatesNotificationWithPwd:
+		log.Info("RenewCertificatesNotificationWithPwd")
 
 		systemID, err := sm.identifier.GetSystemID()
 		if err != nil {
@@ -456,13 +456,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 			return err
 		}
 
-		passwd, err := sm.crypt.DecryptMetadata(data.UnitSecureData)
-		if err != nil {
-			log.Error("Can't decrypt UnitSecureData ", err)
-			return err
-		}
-
-		sm.um.RenewCertificatesNotification(systemID, string(passwd), data.Certificates)
+		sm.um.RenewCertificatesNotification(systemID, data.Password, data.Certificates)
 
 	case *amqp.IssuedUnitCertificates:
 		log.Info("IssuedUnitCertificates")

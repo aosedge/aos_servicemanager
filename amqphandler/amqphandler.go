@@ -87,6 +87,8 @@ const (
 	AlertTagAosCore     = "aosCore"
 )
 
+const unitSecureVersion = 1
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -443,6 +445,12 @@ type RenewCertificatesNotification struct {
 	UnitSecureData []byte                    `json:"unitSecureData"`
 }
 
+// RenewCertificatesNotificationWithPwd renew certificate notification from cloud with extracted pwd
+type RenewCertificatesNotificationWithPwd struct {
+	Certificates []CertificateNotification
+	Password     string
+}
+
 // CertificateRequest struct wit certificate request
 type CertificateRequest struct {
 	Type string `json:"type"`
@@ -476,6 +484,13 @@ type CertificateConfirmation struct {
 // InstallUnitCertificatesConfirmation response to cloud
 type InstallUnitCertificatesConfirmation struct {
 	Certificates []CertificateConfirmation `json:"certificates"`
+}
+
+type unitSecret struct {
+	Version int `json:"version"`
+	Data    struct {
+		OwnerPassword string `json:"ownerPassword"`
+	} `json:"data"`
 }
 
 /*******************************************************************************
@@ -1024,6 +1039,35 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 				data = DecodedDesiredStatus{Layers: layersList, Services: servicesList,
 					CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
+			}
+
+			if incomingMsg.Header.MessageType == RenewCertificatesNotificationType {
+				msg, ok := data.(*RenewCertificatesNotification)
+				if !ok {
+					log.Error("Wrong data type: expect RenewCertificatesNotificationType")
+					continue
+				}
+
+				rowSecret, err := handler.cryptoContext.DecryptMetadata(msg.UnitSecureData)
+				if err != nil {
+					log.Error("Can't decrypt UnitSecureData ", err)
+					continue
+				}
+
+				secret := new(unitSecret)
+
+				if err := json.Unmarshal(rowSecret, secret); err != nil {
+					log.Error("Can't unmarshal unitSecret ", err)
+					continue
+				}
+
+				if secret.Version != unitSecureVersion {
+					log.Error("unit secure version  missmatch ", secret.Version, " != ", unitSecureVersion)
+					continue
+				}
+
+				data = &RenewCertificatesNotificationWithPwd{Certificates: msg.Certificates,
+					Password: secret.Data.OwnerPassword}
 			}
 
 			handler.MessageChannel <- Message{delivery.CorrelationId, data}
