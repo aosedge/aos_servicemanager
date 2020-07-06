@@ -304,7 +304,7 @@ github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20200706165910-60f4c9bb318e
+# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20200706210250-5e988f5b52e1
 ## explicit
 gitpct.epam.com/epmd-aepr/aos_common/image
 gitpct.epam.com/epmd-aepr/aos_common/umprotocol
