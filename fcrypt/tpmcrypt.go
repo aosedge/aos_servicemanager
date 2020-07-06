@@ -24,11 +24,18 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
 	log "github.com/sirupsen/logrus"
 )
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const tpmOpenRetry = 3
 
 /*******************************************************************************
  * Variables
@@ -86,8 +93,15 @@ func (tpm *TPMCrypto) Open(path string) (err error) {
 		log.Warnf("TPM interface %s already opened", path)
 		return nil
 	}
+	for i := 0; i < tpmOpenRetry; i++ {
+		tpm.dev, err = tpm2.OpenTPM(path)
+		if err == nil {
+			return nil
+		}
 
-	tpm.dev, err = tpm2.OpenTPM(path)
+		log.Warning(err)
+		time.Sleep(1 * time.Second)
+	}
 
 	return err
 }
