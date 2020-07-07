@@ -189,17 +189,17 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 	verifier := digest.Verifier()
 
 	for {
-		count, err := file.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				return err
-			}
-
-			break
+		count, readErr := file.Read(buffer)
+		if readErr != nil && readErr != io.EOF {
+			return err
 		}
 
 		if _, err := verifier.Write(buffer[:count]); err != nil {
 			return err
+		}
+
+		if readErr != nil {
+			break
 		}
 	}
 
