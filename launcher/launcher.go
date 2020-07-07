@@ -962,7 +962,6 @@ func (launcher *Launcher) updateStorageFolder(spec *serviceSpec, service Service
 		if err = os.MkdirAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder), 0755); err != nil {
 			return err
 		}
-
 	} else {
 		spec.removeBindMount(serviceStorageFolder)
 		os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder))

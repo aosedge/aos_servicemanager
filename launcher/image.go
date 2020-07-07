@@ -136,12 +136,12 @@ func validateUnpackedImage(installDir string) (err error) {
 		return err
 	}
 
-	//validate image config
+	// validate image config
 	if err = validateDigest(installDir, manifest.Config.Digest); err != nil {
 		return err
 	}
 
-	//validate aos service config
+	// validate aos service config
 	if manifest.AosService != nil {
 		if err = validateDigest(installDir, manifest.AosService.Digest); err != nil {
 			return err
@@ -153,7 +153,7 @@ func validateUnpackedImage(installDir string) (err error) {
 		return errors.New("no layers in image")
 	}
 
-	//validate service rootfs layer
+	// validate service rootfs layer
 	if err = validateDigest(installDir, manifest.Layers[0].Digest); err != nil {
 		return err
 	}
