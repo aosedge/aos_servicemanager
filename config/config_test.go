@@ -53,7 +53,7 @@ func createConfigFile() (err error) {
 		"sendPeriod": "00:05:00",
 		"pollPeriod": "00:00:01",
 		"maxOfflineMessages": 25,
-		"netnsBridgeIP": "192.168.0.0/24",
+		"BridgeIP": "192.168.0.0/24",
 		"ram": {
 			"minTimeout": "00:00:10",
 			"minThreshold": 10,
