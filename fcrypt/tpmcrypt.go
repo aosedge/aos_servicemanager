@@ -338,7 +338,7 @@ func readPublicKey(dev io.ReadWriteCloser, handle tpmutil.Handle) (tpm2.Public, 
 	return pub, publicKey, err
 }
 
-// LoadTpmPrivateKey load private tmp key
+// loadTpmPrivateKey load private tmp key
 func loadTpmPrivateKey(tpmInterface string, handel tpmHandle) (tpmPrivKey *tpmPrivateKeyRSA, err error) {
 	tpmCrypto := &TPMCrypto{}
 

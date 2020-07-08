@@ -21,7 +21,6 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -30,7 +29,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"hash"
@@ -143,40 +141,6 @@ type CertificateProvider interface {
  * Public
  ******************************************************************************/
 
-// GetCertificateOrganizations gives a list of certificate organizations
-func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
-	resp, err := provider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
-	if err != nil {
-		return names, err
-	}
-
-	certURL, err := url.Parse(resp.CrtURL)
-	if err != nil {
-		return names, err
-	}
-
-	if certURL.Scheme != "file" {
-		return names, errors.New("Expect to have file for online cert")
-	}
-
-	certRaw, err := ioutil.ReadFile(certURL.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	certPemData, _ := pem.Decode(certRaw)
-	cert, err := x509.ParseCertificate(certPemData.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	if cert.Subject.Organization == nil {
-		return nil, errors.New("certificate does not have organizations")
-	}
-
-	return cert.Subject.Organization, nil
-}
-
 // CreateContext create context for crypto operations
 func CreateContext(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
 	// Create context
@@ -277,7 +241,9 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 
 	cfg.RootCAs = caCertPool
 	cfg.Certificates = []tls.Certificate{cert}
-	cfg.VerifyPeerCertificate = verifyCert
+	cfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) (err error) {
+		return nil
+	}
 
 	cfg.BuildNameToCertificate()
 
@@ -897,118 +863,4 @@ func (ctx *SymmetricCipherContext) loadKey() (err error) {
 	}
 
 	return nil
-}
-
-func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
-	// alg string example: AES128/CBC/PKCS7PADDING
-	algNamesSlice := strings.Split(algString, "/")
-	if len(algNamesSlice) >= 1 {
-		algName = algNamesSlice[0]
-	} else {
-		algName = ""
-	}
-	if len(algNamesSlice) >= 2 {
-		modeName = algNamesSlice[1]
-	} else {
-		modeName = "CBC"
-	}
-
-	if len(algNamesSlice) >= 3 {
-		paddingName = algNamesSlice[2]
-	} else {
-		paddingName = "PKCS7PADDING"
-	}
-
-	return algName, modeName, paddingName
-}
-
-func loadKey(keyBytes []byte) (crypto.PrivateKey, error) {
-	var err error
-	var key crypto.PrivateKey
-
-	if key, err = decodePrivateKey(keyBytes); err != nil {
-		return nil, err
-	}
-
-	switch key := key.(type) {
-	case *rsa.PrivateKey:
-		return key, nil
-	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
-		return nil, errors.New("ECDSA private key not yet supported")
-	}
-}
-
-func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
-	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
-	algNamesSlice := strings.Split(algString, "/")
-	if len(algNamesSlice) >= 1 {
-		algName = algNamesSlice[0]
-	} else {
-		algName = ""
-	}
-	if len(algNamesSlice) >= 2 {
-		hashName = algNamesSlice[1]
-	} else {
-		hashName = "SHA256"
-	}
-
-	if len(algNamesSlice) >= 3 {
-		paddingName = algNamesSlice[2]
-	} else {
-		paddingName = "PKCS1v1_5"
-	}
-
-	return algName, hashName, paddingName
-}
-
-func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
-	var der []byte
-
-	// Try to parse data as PEM. Ignore the rest of the data
-	// ToDo: add support private key and certificate in the same file
-	block, _ := pem.Decode(bytes)
-
-	if block != nil {
-		// bytes is PEM
-		der = block.Bytes
-	} else {
-		der = bytes
-	}
-
-	// Try to load key as PKCS1 container
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// Try to load key as PKCS8 container
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey:
-			return key, nil
-		default:
-			return nil, errors.New("found unsupported private key type in PKCS8 container")
-		}
-	}
-
-	// Try to parse as PCKS8 EC private key
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// This is not a private key
-	return nil, errors.New("failed to parse private key")
-}
-
-func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
-	switch strings.ToUpper(algName) {
-	case "AES128":
-		return 16, 16, nil
-	case "AES192":
-		return 24, 16, nil
-	case "AES256":
-		return 32, 16, nil
-
-	default:
-		return 0, 0, errors.New("unsupported symmetric algorithm")
-	}
 }
