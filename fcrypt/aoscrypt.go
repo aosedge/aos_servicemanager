@@ -143,6 +143,40 @@ type CertificateProvider interface {
  * Public
  ******************************************************************************/
 
+// GetCertificateOrganizations gives a list of certificate organizations
+func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
+	resp, err := provider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
+	if err != nil {
+		return names, err
+	}
+
+	certURL, err := url.Parse(resp.CrtURL)
+	if err != nil {
+		return names, err
+	}
+
+	if certURL.Scheme != "file" {
+		return names, errors.New("Expect to have file for online cert")
+	}
+
+	certRaw, err := ioutil.ReadFile(certURL.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	certPemData, _ := pem.Decode(certRaw)
+	cert, err := x509.ParseCertificate(certPemData.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	if cert.Subject.Organization == nil {
+		return nil, errors.New("certificate does not have organizations")
+	}
+
+	return cert.Subject.Organization, nil
+}
+
 // CreateContext create context for crypto operations
 func CreateContext(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
 	// Create context
@@ -274,6 +308,121 @@ func (ctx *CryptoContext) DecryptMetadata(input []byte) (output []byte, err erro
 	}
 
 	return output, errors.New("Can't decrypt metadata")
+}
+
+// ImportSessionKey function retrieves a symmetric key from crypto context
+func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symContext SymmetricContextInterface, err error) {
+	if ctx == nil {
+		return nil, errors.New("asymmetric context not initialized")
+	}
+
+	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: offlineCertificate,
+		Issuer: keyInfo.ReceiverInfo.Issuer,
+		Serial: keyInfo.ReceiverInfo.Serial})
+	if err != nil {
+		return nil, err
+	}
+
+	keyURL, err := url.Parse(resp.KeyURL)
+	if err != nil {
+		return nil, err
+	}
+
+	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
+	if err != nil {
+		log.Error("Cant load private key ", err)
+		return symContext, err
+	}
+
+	algName, _, _ := decodeAlgNames(keyInfo.SymmetricAlgName)
+	keySize, ivSize, err := getSymmetricAlgInfo(algName)
+	if err != nil {
+		return nil, err
+	}
+
+	if ivSize != len(keyInfo.SessionIV) {
+		return nil, errors.New("invalid IV length")
+	}
+
+	ctxSym := CreateSymmetricCipherContext()
+
+	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
+	case "RSA/PKCS1V1_5":
+		if keyURL.Scheme != "tpm" {
+			clearKey := make([]byte, keySize)
+
+			err = rsa.DecryptPKCS1v15SessionKey(nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
+			if err != nil {
+				return nil, err
+			}
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
+		} else {
+			decryptor, ok := privKey.(crypto.Decrypter)
+			if !ok {
+				return nil, errors.New("private key doesn't contain a Decryptor")
+			}
+
+			plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
+		}
+
+	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
+		if keyURL.Scheme != "tpm" {
+			var hashFunc hash.Hash
+			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
+			case "RSA/OAEP":
+				hashFunc = sha1.New()
+
+			case "RSA/OAEP-256":
+				hashFunc = sha256.New()
+
+			case "RSA/OAEP-512":
+				hashFunc = sha512.New()
+			}
+
+			clearKey, err := rsa.DecryptOAEP(hashFunc, nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
+				return nil, err
+			}
+		} else {
+			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
+			case "RSA/OAEP", "RSA/OAEP-256":
+				decryptor, ok := privKey.(crypto.Decrypter)
+				if !ok {
+					return nil, errors.New("private key doesn't contain a Decryptor")
+				}
+
+				plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, &rsa.OAEPOptions{})
+				if err != nil {
+					return nil, err
+				}
+
+				if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
+					return nil, err
+				}
+
+			default:
+				return nil, errors.New("unsupported OAEP scheme")
+			}
+		}
+
+	default:
+		return nil, errors.New("unsupported asymmetric alg in import key")
+	}
+
+	return ctxSym, nil
 }
 
 func (ctx *SignContext) AddCertificate(fingerprint string, asn1Bytes []byte) error {
@@ -427,172 +576,6 @@ func (ctx *SignContext) VerifySign(f *os.File, chainName string, algName string,
 	return nil
 }
 
-func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Certificate {
-	// Find certificate in the chain
-	for _, certTmp := range ctx.signCertificates {
-		if certTmp.fingerprint == fingerprint {
-			return certTmp.certificate
-		}
-	}
-	return nil
-}
-
-// LoadOfflineKey function loads offline from url
-func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.PrivateKey, err error) {
-	switch keyURL.Scheme {
-	case "file":
-		keyBytes, err := ioutil.ReadFile(keyURL.Path)
-		if err != nil {
-			return privKey, fmt.Errorf("error reading offline private key from file: %s", err)
-		}
-
-		return loadKey(keyBytes)
-
-	case "tpm":
-		result, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
-		if err != nil {
-			return nil, err
-		}
-
-		handle := tpmHandle(result)
-
-		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, handle)
-	}
-
-	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURL.Scheme)
-}
-
-// ImportSessionKey function retrieves a symmetric key from crypto context
-func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symContext SymmetricContextInterface, err error) {
-	if ctx == nil {
-		return nil, errors.New("asymmetric context not initialized")
-	}
-
-	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: offlineCertificate,
-		Issuer: keyInfo.ReceiverInfo.Issuer,
-		Serial: keyInfo.ReceiverInfo.Serial})
-	if err != nil {
-		return nil, err
-	}
-
-	keyURL, err := url.Parse(resp.KeyURL)
-	if err != nil {
-		return nil, err
-	}
-
-	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
-	if err != nil {
-		log.Error("Cant load private key ", err)
-		return symContext, err
-	}
-
-	algName, _, _ := decodeAlgNames(keyInfo.SymmetricAlgName)
-	keySize, ivSize, err := getSymmetricAlgInfo(algName)
-	if err != nil {
-		return nil, err
-	}
-
-	if ivSize != len(keyInfo.SessionIV) {
-		return nil, errors.New("invalid IV length")
-	}
-
-	ctxSym := CreateSymmetricCipherContext()
-
-	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
-	case "RSA/PKCS1V1_5":
-		if keyURL.Scheme != "tpm" {
-			clearKey := make([]byte, keySize)
-
-			err = rsa.DecryptPKCS1v15SessionKey(nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, clearKey)
-			if err != nil {
-				return nil, err
-			}
-			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
-				return nil, err
-			}
-		} else {
-			decryptor, ok := privKey.(crypto.Decrypter)
-			if !ok {
-				return nil, errors.New("private key doesn't contain a Decryptor")
-			}
-
-			plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
-				return nil, err
-			}
-		}
-
-	case "RSA/OAEP-256", "RSA/OAEP-512", "RSA/OAEP":
-		if keyURL.Scheme != "tpm" {
-			var hashFunc hash.Hash
-			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
-			case "RSA/OAEP":
-				hashFunc = sha1.New()
-
-			case "RSA/OAEP-256":
-				hashFunc = sha256.New()
-
-			case "RSA/OAEP-512":
-				hashFunc = sha512.New()
-			}
-
-			clearKey, err := rsa.DecryptOAEP(hashFunc, nil, privKey.(*rsa.PrivateKey), keyInfo.SessionKey, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			if err = ctxSym.set(keyInfo.SymmetricAlgName, clearKey, keyInfo.SessionIV); err != nil {
-				return nil, err
-			}
-		} else {
-			switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
-			case "RSA/OAEP", "RSA/OAEP-256":
-				decryptor, ok := privKey.(crypto.Decrypter)
-				if !ok {
-					return nil, errors.New("private key doesn't contain a Decryptor")
-				}
-
-				plainText, err := decryptor.Decrypt(rand.Reader, keyInfo.SessionKey, &rsa.OAEPOptions{})
-				if err != nil {
-					return nil, err
-				}
-
-				if err = ctxSym.set(keyInfo.SymmetricAlgName, plainText, keyInfo.SessionIV); err != nil {
-					return nil, err
-				}
-
-			default:
-				return nil, errors.New("unsupported OAEP scheme")
-			}
-		}
-
-	default:
-		return nil, errors.New("unsupported asymmetric alg in import key")
-	}
-
-	return ctxSym, nil
-}
-
-func loadKey(keyBytes []byte) (crypto.PrivateKey, error) {
-	var err error
-	var key crypto.PrivateKey
-
-	if key, err = decodePrivateKey(keyBytes); err != nil {
-		return nil, err
-	}
-
-	switch key := key.(type) {
-	case *rsa.PrivateKey:
-		return key, nil
-	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
-		return nil, errors.New("ECDSA private key not yet supported")
-	}
-}
-
 func CreateSymmetricCipherContext() *SymmetricCipherContext {
 	return &SymmetricCipherContext{}
 }
@@ -620,69 +603,6 @@ func (ctx *SymmetricCipherContext) GenerateKeyAndIV(algString string) error {
 
 	// Check and set values
 	return ctx.set(algString, key, iv)
-}
-
-func (ctx *SymmetricCipherContext) set(algString string, key []byte, iv []byte) error {
-	if algString == "" {
-		return errors.New("construct symmetric alg context: empty conf string")
-	}
-
-	ctx.key = key
-	ctx.iv = iv
-
-	ctx.setAlg(algString)
-
-	return ctx.loadKey()
-}
-
-func (ctx *SymmetricCipherContext) setAlg(algString string) {
-	ctx.algName, ctx.modeName, ctx.paddingName = decodeAlgNames(algString)
-}
-
-func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
-	// alg string example: AES128/CBC/PKCS7PADDING
-	algNamesSlice := strings.Split(algString, "/")
-	if len(algNamesSlice) >= 1 {
-		algName = algNamesSlice[0]
-	} else {
-		algName = ""
-	}
-	if len(algNamesSlice) >= 2 {
-		modeName = algNamesSlice[1]
-	} else {
-		modeName = "CBC"
-	}
-
-	if len(algNamesSlice) >= 3 {
-		paddingName = algNamesSlice[2]
-	} else {
-		paddingName = "PKCS7PADDING"
-	}
-
-	return algName, modeName, paddingName
-}
-
-func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
-	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
-	algNamesSlice := strings.Split(algString, "/")
-	if len(algNamesSlice) >= 1 {
-		algName = algNamesSlice[0]
-	} else {
-		algName = ""
-	}
-	if len(algNamesSlice) >= 2 {
-		hashName = algNamesSlice[1]
-	} else {
-		hashName = "SHA256"
-	}
-
-	if len(algNamesSlice) >= 3 {
-		paddingName = algNamesSlice[2]
-	} else {
-		paddingName = "PKCS1v1_5"
-	}
-
-	return algName, hashName, paddingName
 }
 
 func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File) error {
@@ -788,95 +708,103 @@ func (ctx *SymmetricCipherContext) IsReady() bool {
 	return ctx.encrypter != nil || ctx.decrypter != nil
 }
 
-func (ctx *SymmetricCipherContext) loadKey() (err error) {
-	var block cipher.Block
-	keySizeBits := 0
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
 
-	switch strings.ToUpper(ctx.algName) {
-	case "AES128", "AES192", "AES256":
-		if keySizeBits, err = strconv.Atoi(ctx.algName[3:]); err != nil {
-			return err
-		}
-		if keySizeBits/8 != len(ctx.key) {
-			return errors.New("invalid symmetric key size")
-		}
-		block, err = aes.NewCipher(ctx.key)
+// LoadOfflineKey function loads offline from url
+func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.PrivateKey, err error) {
+	switch keyURL.Scheme {
+	case "file":
+		keyBytes, err := ioutil.ReadFile(keyURL.Path)
 		if err != nil {
-			log.Errorf("can't create cipher: %s", err)
-			return err
+			return privKey, fmt.Errorf("error reading offline private key from file: %s", err)
 		}
 
+		return loadKey(keyBytes)
+
+	case "tpm":
+		result, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
+		if err != nil {
+			return nil, err
+		}
+
+		handle := tpmHandle(result)
+
+		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, handle)
+	}
+
+	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURL.Scheme)
+}
+
+func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key []byte, err error) {
+	request := RetrieveCertificateRequest{
+		CertType: offlineCertificate,
+		Serial:   fmt.Sprintf("%X", keyInfo.Rid.SerialNumber),
+	}
+
+	request.Issuer, err = asn1.Marshal(keyInfo.Rid.Issuer)
+	if err != nil {
+		return key, err
+	}
+
+	resp, err := ctx.certProvider.GetCertificateForSM(request)
+	if err != nil {
+		return key, err
+	}
+
+	keyURL, err := url.Parse(resp.KeyURL)
+	if err != nil {
+		return key, err
+	}
+
+	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
+	if err != nil {
+		return key, err
+	}
+
+	switch keyWithType := privKey.(type) {
+	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
+		decryptor, ok := keyWithType.(crypto.Decrypter)
+		if !ok {
+			return nil, errors.New("private key doesn't have a decryption suite")
+		}
+
+		key, err := decryptCMSKey(&keyInfo, decryptor)
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
 	default:
-		err = errors.New("unsupported cryptographic algorithm: " + ctx.algName)
-		return err
+		return nil, fmt.Errorf("%T private key not yet supported", keyWithType)
 	}
+}
 
-	if len(ctx.iv) != block.BlockSize() {
-		return errors.New("invalid IV size")
+func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Certificate {
+	// Find certificate in the chain
+	for _, certTmp := range ctx.signCertificates {
+		if certTmp.fingerprint == fingerprint {
+			return certTmp.certificate
+		}
 	}
-
-	switch ctx.modeName {
-	case "CBC":
-		ctx.decrypter = cipher.NewCBCDecrypter(block, ctx.iv)
-		ctx.encrypter = cipher.NewCBCEncrypter(block, ctx.iv)
-	default:
-		err = errors.New("unsupported encryption mode: " + ctx.modeName)
-		return err
-	}
-
 	return nil
 }
 
-func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
-	var der []byte
-
-	// Try to parse data as PEM. Ignore the rest of the data
-	// ToDo: add support private key and certificate in the same file
-	block, _ := pem.Decode(bytes)
-
-	if block != nil {
-		// bytes is PEM
-		der = block.Bytes
-	} else {
-		der = bytes
+func (ctx *SymmetricCipherContext) set(algString string, key []byte, iv []byte) error {
+	if algString == "" {
+		return errors.New("construct symmetric alg context: empty conf string")
 	}
 
-	// Try to load key as PKCS1 container
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return key, nil
-	}
+	ctx.key = key
+	ctx.iv = iv
 
-	// Try to load key as PKCS8 container
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey:
-			return key, nil
-		default:
-			return nil, errors.New("found unsupported private key type in PKCS8 container")
-		}
-	}
+	ctx.setAlg(algString)
 
-	// Try to parse as PCKS8 EC private key
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// This is not a private key
-	return nil, errors.New("failed to parse private key")
+	return ctx.loadKey()
 }
 
-func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
-	switch strings.ToUpper(algName) {
-	case "AES128":
-		return 16, 16, nil
-	case "AES192":
-		return 24, 16, nil
-	case "AES256":
-		return 32, 16, nil
-
-	default:
-		return 0, 0, errors.New("unsupported symmetric algorithm")
-	}
+func (ctx *SymmetricCipherContext) setAlg(algString string) {
+	ctx.algName, ctx.modeName, ctx.paddingName = decodeAlgNames(algString)
 }
 
 func (ctx *SymmetricCipherContext) appendPadding(dataIn []byte, dataLen int) (fullSize int, err error) {
@@ -932,81 +860,155 @@ func (ctx *SymmetricCipherContext) removePkcs7Padding(dataIn []byte, dataLen int
 	return removedSize, nil
 }
 
-// GetCertificateOrganizations gives a list of certificate organizations
-func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
-	resp, err := provider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
-	if err != nil {
-		return names, err
+func (ctx *SymmetricCipherContext) loadKey() (err error) {
+	var block cipher.Block
+	keySizeBits := 0
+
+	switch strings.ToUpper(ctx.algName) {
+	case "AES128", "AES192", "AES256":
+		if keySizeBits, err = strconv.Atoi(ctx.algName[3:]); err != nil {
+			return err
+		}
+		if keySizeBits/8 != len(ctx.key) {
+			return errors.New("invalid symmetric key size")
+		}
+		block, err = aes.NewCipher(ctx.key)
+		if err != nil {
+			log.Errorf("can't create cipher: %s", err)
+			return err
+		}
+
+	default:
+		err = errors.New("unsupported cryptographic algorithm: " + ctx.algName)
+		return err
 	}
 
-	certURL, err := url.Parse(resp.CrtURL)
-	if err != nil {
-		return names, err
+	if len(ctx.iv) != block.BlockSize() {
+		return errors.New("invalid IV size")
 	}
 
-	if certURL.Scheme != "file" {
-		return names, errors.New("Expect to have file for online cert")
+	switch ctx.modeName {
+	case "CBC":
+		ctx.decrypter = cipher.NewCBCDecrypter(block, ctx.iv)
+		ctx.encrypter = cipher.NewCBCEncrypter(block, ctx.iv)
+	default:
+		err = errors.New("unsupported encryption mode: " + ctx.modeName)
+		return err
 	}
 
-	certRaw, err := ioutil.ReadFile(certURL.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	certPemData, _ := pem.Decode(certRaw)
-	cert, err := x509.ParseCertificate(certPemData.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	if cert.Subject.Organization == nil {
-		return nil, errors.New("certificate does not have organizations")
-	}
-
-	return cert.Subject.Organization, nil
+	return nil
 }
 
-func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key []byte, err error) {
-	request := RetrieveCertificateRequest{
-		CertType: offlineCertificate,
-		Serial:   fmt.Sprintf("%X", keyInfo.Rid.SerialNumber),
+func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
+	// alg string example: AES128/CBC/PKCS7PADDING
+	algNamesSlice := strings.Split(algString, "/")
+	if len(algNamesSlice) >= 1 {
+		algName = algNamesSlice[0]
+	} else {
+		algName = ""
+	}
+	if len(algNamesSlice) >= 2 {
+		modeName = algNamesSlice[1]
+	} else {
+		modeName = "CBC"
 	}
 
-	request.Issuer, err = asn1.Marshal(keyInfo.Rid.Issuer)
-	if err != nil {
-		return key, err
+	if len(algNamesSlice) >= 3 {
+		paddingName = algNamesSlice[2]
+	} else {
+		paddingName = "PKCS7PADDING"
 	}
 
-	resp, err := ctx.certProvider.GetCertificateForSM(request)
-	if err != nil {
-		return key, err
+	return algName, modeName, paddingName
+}
+
+func loadKey(keyBytes []byte) (crypto.PrivateKey, error) {
+	var err error
+	var key crypto.PrivateKey
+
+	if key, err = decodePrivateKey(keyBytes); err != nil {
+		return nil, err
 	}
 
-	keyURL, err := url.Parse(resp.KeyURL)
-	if err != nil {
-		return key, err
-	}
-
-	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
-	if err != nil {
-		return key, err
-	}
-
-	switch keyWithType := privKey.(type) {
-	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
-		decryptor, ok := keyWithType.(crypto.Decrypter)
-		if !ok {
-			return nil, errors.New("private key doesn't have a decryption suite")
-		}
-
-		key, err := decryptCMSKey(&keyInfo, decryptor)
-		if err != nil {
-			return nil, err
-		}
+	switch key := key.(type) {
+	case *rsa.PrivateKey:
 		return key, nil
-	default:
-		return nil, fmt.Errorf("%T private key not yet supported", keyWithType)
+	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
+		return nil, errors.New("ECDSA private key not yet supported")
+	}
+}
+
+func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
+	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
+	algNamesSlice := strings.Split(algString, "/")
+	if len(algNamesSlice) >= 1 {
+		algName = algNamesSlice[0]
+	} else {
+		algName = ""
+	}
+	if len(algNamesSlice) >= 2 {
+		hashName = algNamesSlice[1]
+	} else {
+		hashName = "SHA256"
 	}
 
-	return key, errors.New("No private key found")
+	if len(algNamesSlice) >= 3 {
+		paddingName = algNamesSlice[2]
+	} else {
+		paddingName = "PKCS1v1_5"
+	}
+
+	return algName, hashName, paddingName
+}
+
+func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
+	var der []byte
+
+	// Try to parse data as PEM. Ignore the rest of the data
+	// ToDo: add support private key and certificate in the same file
+	block, _ := pem.Decode(bytes)
+
+	if block != nil {
+		// bytes is PEM
+		der = block.Bytes
+	} else {
+		der = bytes
+	}
+
+	// Try to load key as PKCS1 container
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+
+	// Try to load key as PKCS8 container
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		switch key := key.(type) {
+		case *rsa.PrivateKey, *ecdsa.PrivateKey:
+			return key, nil
+		default:
+			return nil, errors.New("found unsupported private key type in PKCS8 container")
+		}
+	}
+
+	// Try to parse as PCKS8 EC private key
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+
+	// This is not a private key
+	return nil, errors.New("failed to parse private key")
+}
+
+func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
+	switch strings.ToUpper(algName) {
+	case "AES128":
+		return 16, 16, nil
+	case "AES192":
+		return 24, 16, nil
+	case "AES256":
+		return 32, 16, nil
+
+	default:
+		return 0, 0, errors.New("unsupported symmetric algorithm")
+	}
 }
