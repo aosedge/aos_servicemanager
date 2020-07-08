@@ -138,68 +138,6 @@ func loadClientCertificate(file string) (certificates [][]byte, err error) {
 	return certificates, nil
 }
 
-func extractKeyFromCert(cert *x509.Certificate) (*rsa.PublicKey, error) {
-	switch pub := cert.PublicKey.(type) {
-	case *rsa.PublicKey:
-		return pub, nil
-	default:
-		return nil, errors.New("unknown public key type")
-	}
-
-}
-
-func parseCertificates(pemData string) (ret []*x509.Certificate, err error) {
-	for block, remainder := pem.Decode([]byte(pemData)); block != nil; block, remainder = pem.Decode(remainder) {
-		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			return nil, errors.New("invalid PEM Block")
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			log.Errorf("Error parsing certificate: %s", err)
-			return nil, err
-		}
-		ret = append(ret, cert)
-	}
-	return
-}
-
-func getAndVerifySignCert(certificates string) (ret *x509.Certificate, err error) {
-	certs, err := parseCertificates(certificates)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(certs) == 0 {
-		return nil, errors.New("no certificates found in certificate chain")
-	}
-
-	signCertificate := certs[0]
-
-	intermediatePool := x509.NewCertPool()
-	for _, cert := range certs[1:] {
-		intermediatePool.AddCert(cert)
-	}
-
-	caCertPool, err := getCaCertPool()
-	if err != nil {
-		return
-	}
-
-	verifyOptions := x509.VerifyOptions{
-		Intermediates: intermediatePool,
-		Roots:         caCertPool,
-		// TODO: Use more sensible ExtKeyUsage
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}
-	_, err = signCertificate.Verify(verifyOptions)
-	if err != nil {
-		log.Error("Error verifying certificate chain")
-		return
-	}
-
-	return signCertificate, nil
-}
-
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
 	if l%blocklen != 0 {
