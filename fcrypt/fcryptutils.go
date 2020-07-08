@@ -272,9 +272,9 @@ func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
 	}
 }
 
-func getCaCertPool() (*x509.CertPool, error) {
+func getCaCertPool(rootCaFilePath string) (*x509.CertPool, error) {
 	// Load CA cert
-	caCert, err := ioutil.ReadFile(fcryptCfg.CACert)
+	caCert, err := ioutil.ReadFile(rootCaFilePath)
 	if err != nil {
 		log.Errorf("Error reading CA certificate: %s", err)
 		return nil, err

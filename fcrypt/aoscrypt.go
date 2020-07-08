@@ -141,8 +141,8 @@ type CertificateProvider interface {
  * Public
  ******************************************************************************/
 
-// CreateContext create context for crypto operations
-func CreateContext(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
+// New create context for crypto operations
+func New(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
 	// Create context
 	ctx = &CryptoContext{
 		cryptConfig:  conf,
@@ -195,7 +195,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return cfg, errors.New("Expect to have file for online cert")
 	}
 
-	caCertPool, err := getCaCertPool()
+	caCertPool, err := getCaCertPool(ctx.cryptConfig.CACert)
 	if err != nil {
 		return nil, err
 	}
