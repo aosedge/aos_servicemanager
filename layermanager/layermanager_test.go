@@ -348,14 +348,23 @@ func generateLayrFromCloud(layerFile, layerID, digest string) (layerInfo amqp.La
 		return layerInfo
 	}
 
+	recInfo := struct {
+		Serial string `json:"serial"`
+		Issuer []byte `json:"issuer"`
+	}{
+		Serial: "string",
+		Issuer: []byte("issuer"),
+	}
+
 	layerInfo.Sha256 = imageFileInfo.Sha256
 	layerInfo.Sha512 = imageFileInfo.Sha512
 	layerInfo.Size = imageFileInfo.Size
 	layerInfo.DecryptionInfo = &amqp.DecryptionInfo{
-		BlockAlg: "AES256/CBC/pkcs7",
-		BlockIv:  []byte{},
-		BlockKey: []byte{},
-		AsymAlg:  "RSA/PKCS1v1_5",
+		BlockAlg:     "AES256/CBC/pkcs7",
+		BlockIv:      []byte{},
+		BlockKey:     []byte{},
+		AsymAlg:      "RSA/PKCS1v1_5",
+		ReceiverInfo: &recInfo,
 	}
 	layerInfo.Signs = new(amqp.Signs)
 
