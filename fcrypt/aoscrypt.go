@@ -80,10 +80,7 @@ type CryptoContext struct {
 
 // SymmetricContextInterface interface for SymmetricCipherContext
 type SymmetricContextInterface interface {
-	GenerateKeyAndIV(algString string) (err error)
 	DecryptFile(encryptedFile, clearFile *os.File) (err error)
-	EncryptFile(clearFile, encryptedFile *os.File) (err error)
-	IsReady() (ready bool)
 }
 
 type SymmetricCipherContext struct {
@@ -546,33 +543,8 @@ func CreateSymmetricCipherContext() *SymmetricCipherContext {
 	return &SymmetricCipherContext{}
 }
 
-func (ctx *SymmetricCipherContext) GenerateKeyAndIV(algString string) error {
-	// Get alg name
-	algName, _, _ := decodeAlgNames(algString)
-
-	// Get alg key and IV size in bytes
-	keySize, ivSize, err := getSymmetricAlgInfo(algName)
-	if err != nil {
-		return err
-	}
-
-	// Allocate memory and generate cryptographically resistant random values
-	key := make([]byte, keySize)
-	iv := make([]byte, ivSize)
-
-	if _, err := rand.Read(key); err != nil {
-		return err
-	}
-	if _, err := rand.Read(iv); err != nil {
-		return err
-	}
-
-	// Check and set values
-	return ctx.set(algString, key, iv)
-}
-
 func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File) error {
-	if !ctx.IsReady() {
+	if !ctx.isReady() {
 		return errors.New("symmetric key is not ready")
 	}
 	// Get file stat (we need to know file size)
@@ -619,59 +591,6 @@ func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File
 	}
 
 	return nil
-}
-
-func (ctx *SymmetricCipherContext) EncryptFile(clearFile, encryptedFile *os.File) error {
-	if !ctx.IsReady() {
-		return errors.New("symmetric key is not ready")
-	}
-
-	// Get file stat (we need to know file size)
-	inputFileStat, err := clearFile.Stat()
-	if err != nil {
-		return err
-	}
-	fileSize := inputFileStat.Size()
-	writtenSize := int64(0)
-	readSize := 0
-	if _, err = clearFile.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	// We need more space if the input file size proportional to the fileBlockSize
-	chunkEncrypted := make([]byte, fileBlockSize+128)
-	chunkClear := make([]byte, fileBlockSize+128)
-
-	for i := 0; i <= int(fileSize/fileBlockSize); i++ {
-		currentChunkSize := fileBlockSize
-		if writtenSize+int64(currentChunkSize) > fileSize {
-			// The last block may need a padding appending
-			currentChunkSize = int(fileSize - writtenSize)
-			if _, err = clearFile.Read(chunkClear[:currentChunkSize]); err != nil {
-				return err
-			}
-			readSize, err = ctx.appendPadding(chunkClear, currentChunkSize)
-			if err != nil {
-				return err
-			}
-		} else {
-			if readSize, err = clearFile.Read(chunkClear[:fileBlockSize]); err != nil {
-				return err
-			}
-		}
-		ctx.encrypter.CryptBlocks(chunkEncrypted, chunkClear[:readSize])
-		if _, err = encryptedFile.Write(chunkEncrypted[:readSize]); err != nil {
-			return err
-		}
-		writtenSize += int64(readSize)
-	}
-	err = encryptedFile.Sync()
-
-	return nil
-}
-
-func (ctx *SymmetricCipherContext) IsReady() bool {
-	return ctx.encrypter != nil || ctx.decrypter != nil
 }
 
 /*******************************************************************************
@@ -746,6 +665,31 @@ func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key 
 	}
 }
 
+func (ctx *SymmetricCipherContext) generateKeyAndIV(algString string) error {
+	// Get alg name
+	algName, _, _ := decodeAlgNames(algString)
+
+	// Get alg key and IV size in bytes
+	keySize, ivSize, err := getSymmetricAlgInfo(algName)
+	if err != nil {
+		return err
+	}
+
+	// Allocate memory and generate cryptographically resistant random values
+	key := make([]byte, keySize)
+	iv := make([]byte, ivSize)
+
+	if _, err := rand.Read(key); err != nil {
+		return err
+	}
+	if _, err := rand.Read(iv); err != nil {
+		return err
+	}
+
+	// Check and set values
+	return ctx.set(algString, key, iv)
+}
+
 func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Certificate {
 	// Find certificate in the chain
 	for _, certTmp := range ctx.signCertificates {
@@ -753,6 +697,55 @@ func (ctx *SignContext) getCertificateByFingerprint(fingerprint string) *x509.Ce
 			return certTmp.certificate
 		}
 	}
+	return nil
+}
+
+func (ctx *SymmetricCipherContext) encryptFile(clearFile, encryptedFile *os.File) error {
+	if !ctx.isReady() {
+		return errors.New("symmetric key is not ready")
+	}
+
+	// Get file stat (we need to know file size)
+	inputFileStat, err := clearFile.Stat()
+	if err != nil {
+		return err
+	}
+	fileSize := inputFileStat.Size()
+	writtenSize := int64(0)
+	readSize := 0
+	if _, err = clearFile.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	// We need more space if the input file size proportional to the fileBlockSize
+	chunkEncrypted := make([]byte, fileBlockSize+128)
+	chunkClear := make([]byte, fileBlockSize+128)
+
+	for i := 0; i <= int(fileSize/fileBlockSize); i++ {
+		currentChunkSize := fileBlockSize
+		if writtenSize+int64(currentChunkSize) > fileSize {
+			// The last block may need a padding appending
+			currentChunkSize = int(fileSize - writtenSize)
+			if _, err = clearFile.Read(chunkClear[:currentChunkSize]); err != nil {
+				return err
+			}
+			readSize, err = ctx.appendPadding(chunkClear, currentChunkSize)
+			if err != nil {
+				return err
+			}
+		} else {
+			if readSize, err = clearFile.Read(chunkClear[:fileBlockSize]); err != nil {
+				return err
+			}
+		}
+		ctx.encrypter.CryptBlocks(chunkEncrypted, chunkClear[:readSize])
+		if _, err = encryptedFile.Write(chunkEncrypted[:readSize]); err != nil {
+			return err
+		}
+		writtenSize += int64(readSize)
+	}
+	err = encryptedFile.Sync()
+
 	return nil
 }
 
@@ -863,4 +856,8 @@ func (ctx *SymmetricCipherContext) loadKey() (err error) {
 	}
 
 	return nil
+}
+
+func (ctx *SymmetricCipherContext) isReady() bool {
+	return ctx.encrypter != nil || ctx.decrypter != nil
 }

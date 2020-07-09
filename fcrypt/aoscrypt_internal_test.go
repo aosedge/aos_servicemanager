@@ -595,7 +595,7 @@ func TestSymmetricCipherContext_EncryptFile(t *testing.T) {
 
 	for _, testItem := range testSizes {
 		ctx := CreateSymmetricCipherContext()
-		err := ctx.GenerateKeyAndIV("AES128/CBC")
+		err := ctx.generateKeyAndIV("AES128/CBC")
 		if err != nil {
 			t.Fatalf("Error creating context: '%v'", err)
 		}
@@ -620,7 +620,7 @@ func TestSymmetricCipherContext_EncryptFile(t *testing.T) {
 			t.Fatalf("Error creating file: '%v'", err)
 		}
 
-		if err = ctx.EncryptFile(clearFile, encFile); err != nil {
+		if err = ctx.encryptFile(clearFile, encFile); err != nil {
 			t.Errorf("Error encrypting file: %v", err)
 		}
 
@@ -671,7 +671,7 @@ func TestSymmetricCipherContext_EncryptFile(t *testing.T) {
 
 func TestSymmetricCipherContext_appendPadding(t *testing.T) {
 	ctx := CreateSymmetricCipherContext()
-	err := ctx.GenerateKeyAndIV("AES128/CBC")
+	err := ctx.generateKeyAndIV("AES128/CBC")
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
 	}
@@ -702,7 +702,7 @@ func TestSymmetricCipherContext_appendPadding(t *testing.T) {
 
 func TestSymmetricCipherContext_getPaddingSize(t *testing.T) {
 	ctx := CreateSymmetricCipherContext()
-	err := ctx.GenerateKeyAndIV("AES128/CBC")
+	err := ctx.generateKeyAndIV("AES128/CBC")
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
 	}

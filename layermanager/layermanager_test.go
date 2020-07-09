@@ -174,10 +174,6 @@ func (crypt fakeFcrypt) CreateSignContext() (fcrypt.SignContextInterface, error)
 	return new(fakeSignContext), nil
 }
 
-func (symCont fakeSymmetricContext) GenerateKeyAndIV(algString string) (err error) {
-	return nil
-}
-
 func (symCont fakeSymmetricContext) DecryptFile(encryptedFile, clearFile *os.File) (err error) {
 	data, err := ioutil.ReadFile(encryptedFile.Name())
 	if err != nil {
@@ -189,14 +185,6 @@ func (symCont fakeSymmetricContext) DecryptFile(encryptedFile, clearFile *os.Fil
 	}
 
 	return nil
-}
-
-func (symCont fakeSymmetricContext) EncryptFile(clearFile, encryptedFile *os.File) (err error) {
-	return nil
-}
-
-func (symCont fakeSymmetricContext) IsReady() (ready bool) {
-	return true
 }
 
 func (sigCont fakeSignContext) AddCertificate(fingerprint string, asn1Bytes []byte) (err error) {
