@@ -7,7 +7,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/boltdb/bolt v1.3.1 // indirect
-	github.com/cavaliercoder/grab v2.0.0+incompatible
+	github.com/cavaliercoder/grab v2.0.0+incompatible // indirect
 	github.com/coreos/etcd v3.3.22+incompatible // indirect
 	github.com/coreos/go-iptables v0.4.5
 	github.com/coreos/go-semver v0.3.0 // indirect
@@ -22,7 +22,7 @@ require (
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/godbus/dbus v4.1.0+incompatible
 	github.com/google/go-tpm v0.2.1-0.20191106030929-f0607eac7f8a
-	github.com/google/go-tpm-tools v0.1.2 // indirect
+	github.com/google/go-tpm-tools v0.1.2
 	github.com/google/uuid v1.1.1
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/consul/api v1.4.0 // indirect
