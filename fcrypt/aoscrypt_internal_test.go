@@ -19,7 +19,6 @@ package fcrypt
 
 import (
 	"bytes"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"io"
@@ -93,6 +92,11 @@ type certData struct {
 	Data []byte
 }
 
+type testCertificateProvider struct {
+	certPath string
+	keyPath  string
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -120,7 +124,7 @@ YvghkaCW2FrFXMeEnaT9b+YRPi8RTFeg8HAJ8IzLx20dGMA6eAqFI9q0ksIV+6tZwKDAeEM6ywpH
 Iq3bNnYQNNVLgB3mwpvhHtxxSHZYLapa59zMPh2zACA5aqZWoA9NfLCZejUPgd9PnyOhhYmKy55S
 VYKOdXQNBJuSOUQKQyBX8hByK4gyukpQlRIgqw==`
 
-	Vehicle1OfflineKey = []byte(`
+	vehicle1OfflineKeyData = []byte(`
 -----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDIBQTx5E8YLrzj
 RtSjmY3Luay+bFuP8A+tTsYpiIXs8sVO4D0xYD2OkwKbBEZTVXXKI2FODroasWEI
@@ -221,7 +225,7 @@ G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
 rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
 -----END CERTIFICATE-----
 `)
-	Vehicle2OfflineKey = []byte(`
+	vehicle2OfflineKeyData = []byte(`
 -----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDG74i+FYJ1gQmi
 87uUSlidBtC1nxXAlkLMXc6vR+8a19IIUH7lgHdOUx/qb7jaqIr4GGtBZeYOaqYL
@@ -251,7 +255,7 @@ AvS7I2T7ylvu5BOOKIPdT05es22VZtYQm0qIvkjOsDAe4wB9lQDz8Wnwqmiazyls
 1c3b7h7B5HOH9/fkzHVE8+M=
 -----END PRIVATE KEY-----
 `)
-	Vehicle2OfflineCert = []byte(`
+	vehicle2OfflineCertData = []byte(`
 -----BEGIN CERTIFICATE-----
 MIIDzDCCArSgAwIBAgIIXK89XQALv5IwDQYJKoZIhvcNAQELBQAwcDElMCMGA1UE
 AwwcQU9TIHZlaGljbGVzIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEc
@@ -322,7 +326,7 @@ G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
 rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
 -----END CERTIFICATE-----
 `)
-	RootCert = []byte(`
+	rootCertData = []byte(`
 -----BEGIN CERTIFICATE-----
 MIIEAjCCAuqgAwIBAgIJAPwk2NFfSDPjMA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
 VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
@@ -514,6 +518,12 @@ var pkcs7PaddingTests = []pkcs7PaddingCase{
 	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 1, false, true, false},
 }
 
+var (
+	vehicle1OfflineKeyPath = path.Join(tmpDir, "vehicle1OfflineKey")
+	vehicle2OfflineKeyPath = path.Join(tmpDir, "vehicle2OfflineKey")
+	rootCertPath           = path.Join(tmpDir, "rootCA")
+)
+
 /*******************************************************************************
  * Init
  ******************************************************************************/
@@ -542,6 +552,18 @@ func TestMain(m *testing.M) {
 		if err := ioutil.WriteFile(path.Join(tmpDir, certificates[i].Name), certificates[i].Data, 0644); err != nil {
 			log.Fatalf("Can't write test file: %s", err)
 		}
+	}
+
+	if err := ioutil.WriteFile(vehicle1OfflineKeyPath, vehicle1OfflineKeyData, 0644); err != nil {
+		log.Fatalf("Can't write vehicle1OfflineKey file: %s", err)
+	}
+
+	if err := ioutil.WriteFile(vehicle2OfflineKeyPath, vehicle2OfflineKeyData, 0644); err != nil {
+		log.Fatalf("Can't write vehicle1OfflineKey file: %s", err)
+	}
+
+	if err := ioutil.WriteFile(rootCertPath, rootCertData, 0644); err != nil {
+		log.Fatalf("Can't write vehicle1OfflineKey file: %s", err)
 	}
 
 	ret := m.Run()
@@ -717,7 +739,9 @@ func TestInvalidParams(t *testing.T) {
 
 	// Create or use context
 	conf := config.Crypt{}
-	ctx, err := CreateContext(conf)
+	certProvider := testCertificateProvider{keyPath: vehicle1OfflineKeyPath}
+
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
 	}
@@ -727,11 +751,6 @@ func TestInvalidParams(t *testing.T) {
 	_, err = ctx.ImportSessionKey(keyInfo)
 	if err == nil {
 		t.Fatalf("Import session key not failed")
-	}
-
-	err = ctx.LoadKeyFromBytes(Vehicle1OfflineKey)
-	if err != nil {
-		t.Fatalf("Error loading key: '%v'", err)
 	}
 
 	keyInfo.SessionKey = encryptedKey
@@ -751,10 +770,12 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error decode IV: '%v'", err)
 	}
+
 	clearAesKey, err := hex.DecodeString(ClearAesKey)
 	if err != nil {
 		t.Fatalf("Error decode ClearKey: '%v'", err)
 	}
+
 	encryptedKey, err := base64.StdEncoding.DecodeString(EncryptedKeyPkcs)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
@@ -763,16 +784,11 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 
 	// Create or use context
 	conf := config.Crypt{}
+	certProvider := testCertificateProvider{keyPath: vehicle1OfflineKeyPath}
 
-	ctx, err := CreateContext(conf)
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
-	}
-
-	// Can be replaced with LoadOfflineKey
-	err = ctx.LoadKeyFromBytes(Vehicle1OfflineKey)
-	if err != nil {
-		t.Fatalf("Error loading key: '%v'", err)
 	}
 
 	var keyInfo CryptoSessionKeyInfo
@@ -781,15 +797,20 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
 	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
 
-	ctxSym, err := ctx.ImportSessionKey(keyInfo)
+	sessionKey, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
-		t.Fatalf("Error decode key: '%v'", err)
+		t.Errorf("Error decode key: '%v'", err)
 	}
 
-	if len(ctxSym.key) != len(clearAesKey) {
+	chipperContex, ok := sessionKey.(*SymmetricCipherContext)
+	if !ok {
+		t.Errorf("Can't cast to SymmetricCipherContext")
+	}
+
+	if len(chipperContex.key) != len(clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key len")
 	}
-	if !bytes.Equal(ctxSym.key, clearAesKey) {
+	if !bytes.Equal(chipperContex.key, clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key")
 	}
 }
@@ -801,10 +822,12 @@ func TestDecryptSessionKeyOAEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error decode IV: '%v'", err)
 	}
+
 	clearAesKey, err := hex.DecodeString(ClearAesKey)
 	if err != nil {
 		t.Fatalf("Error decode ClearKey: '%v'", err)
 	}
+
 	encryptedKey, err := base64.StdEncoding.DecodeString(EncryptedKeyOaep)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
@@ -813,16 +836,11 @@ func TestDecryptSessionKeyOAEP(t *testing.T) {
 
 	// Create or use context
 	conf := config.Crypt{}
+	certProvider := testCertificateProvider{keyPath: vehicle1OfflineKeyPath}
 
-	ctx, err := CreateContext(conf)
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
-	}
-
-	// Can be replaced with LoadOfflineKey
-	err = ctx.LoadKeyFromBytes(Vehicle1OfflineKey)
-	if err != nil {
-		t.Fatalf("Error loading key: '%v'", err)
 	}
 
 	var keyInfo CryptoSessionKeyInfo
@@ -836,10 +854,15 @@ func TestDecryptSessionKeyOAEP(t *testing.T) {
 		t.Fatalf("Error decode key: '%v'", err)
 	}
 
-	if len(ctxSym.key) != len(clearAesKey) {
+	chipperContex, ok := ctxSym.(*SymmetricCipherContext)
+	if !ok {
+		t.Errorf("Can't cast to SymmetricCipherContext")
+	}
+
+	if len(chipperContex.key) != len(clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key len")
 	}
-	if !bytes.Equal(ctxSym.key, clearAesKey) {
+	if !bytes.Equal(chipperContex.key, clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key")
 	}
 }
@@ -850,10 +873,12 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error decode IV: '%v'", err)
 	}
+
 	clearAesKey, err := hex.DecodeString(ClearAesKey)
 	if err != nil {
 		t.Fatalf("Error decode ClearKey: '%v'", err)
 	}
+
 	encryptedKey, err := base64.StdEncoding.DecodeString(EncryptedKeyPkcs)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
@@ -862,16 +887,11 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 
 	// Create or use context
 	conf := config.Crypt{}
+	certProvider := testCertificateProvider{keyPath: vehicle2OfflineKeyPath}
 
-	ctx, err := CreateContext(conf)
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
-	}
-
-	// Can be replaced with LoadOfflineKey
-	err = ctx.LoadKeyFromBytes(Vehicle2OfflineKey)
-	if err != nil {
-		t.Fatalf("Error loading key: '%v'", err)
 	}
 
 	var keyInfo CryptoSessionKeyInfo
@@ -879,16 +899,22 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 	keyInfo.SessionIV = iv
 	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
 	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
+
 	ctxSym, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
 	}
 
-	if len(ctxSym.key) != len(clearAesKey) {
+	chipperContex, ok := ctxSym.(*SymmetricCipherContext)
+	if !ok {
+		t.Errorf("Can't cast to SymmetricCipherContext")
+	}
+
+	if len(chipperContex.key) != len(clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key len")
 	}
 	// Key should be different
-	if bytes.Equal(ctxSym.key, clearAesKey) {
+	if bytes.Equal(chipperContex.key, clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key")
 	}
 }
@@ -907,16 +933,11 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 
 	// Create or use context
 	conf := config.Crypt{}
+	certProvider := testCertificateProvider{keyPath: vehicle2OfflineKeyPath}
 
-	ctx, err := CreateContext(conf)
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
-	}
-
-	// Can be replaced with LoadOfflineKey
-	err = ctx.LoadKeyFromBytes(Vehicle2OfflineKey)
-	if err != nil {
-		t.Fatalf("Error loading key: '%v'", err)
 	}
 
 	var keyInfo CryptoSessionKeyInfo
@@ -935,7 +956,7 @@ func TestVerifySignOfComponent(t *testing.T) {
 	cert2, _ := base64.StdEncoding.DecodeString("MIIDrjCCApagAwIBAgIJAO2BVuwqJLb6MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNVBAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0FvUzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjM2WhcNMjUwMzE5MTMyMjM2WjBbMSAwHgYDVQQDDBdBT1MgT0VNIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQU9TMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJpf1Zj3yNj/Gl7PRPevf7PYpvMZVgwZRLEuwqfXxvDHYhfb/Kp7xAH7QeZVfB8rINSpJbv1+KcqiCzCZig32H+Iv5cGlyn1xmXCihHySH4/XRyduHGue385dNDyXRExpFGXAru/AhgXGKVaxbfDwE9lnz8yWRFvhNrdPO8/nRNZf1ZOqRaq7YNYC7kRQLgp76Da64/H7OWWy9B82r+fgEKc63ixDWSqaLGcNgIBqHU+Rky/SX/gPUtaCIqJb+CpWZZQlJ2wQ+dv+s+K2AG7O0HSHQkh2BbMcjVDeCcdu477+Mal8+MhhjYzkQmAi1tVOYAzX2H/StCGSYohtpxqT5ECAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQUcaisr2u/QD37OLHIgPZLu9/HJ+AwHwYDVR0jBBgwFoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAM+yZJvfkSQmXYt554Zsy2Wqm1w/ixUV55T3r0JFRFbf5AQ7RNBp7t2dn1cEUA6O4wSK3U1Y7eyrPn/ECNmbZ5QUlHUAN/QUnuJUIe0UEd9k+lO2VLbLK+XamzDlOxPBn94s9C1jeXrwGdeTRVcq73rH1CvIOMhD7rp/syQKFuBfQBwCgfH0CbSRsHRm9xQii/HQYMfD8TMyqrjMKF7s68r7shQG2OGo1HJqfA6f9Cb+i4A1BfeP97lFeyr3OjQtLcQJ/a6nPdGs1Cg94Zl2PBEPFH9ecuYpKt0UqK8x8HRsYru7Wp8wkzMbvlYShI5mwdIpvksg5aqnIhWWGqhDRqg==")
 	cert3, _ := base64.StdEncoding.DecodeString("MIID4TCCAsmgAwIBAgIJAO2BVuwqJLb4MA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYDVQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2JhYmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9yZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE5MDMyMTEzMTQyNVoXDTI1MDMxOTEzMTQyNVowVDEZMBcGA1UEAwwQQW9TIFNlY29uZGFyeSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQW9TMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALyDuKMpBZN/kQFHzKo8N8y1EoPgG5sazSRe0O5xL7lm78hBmp4Vpsm/BYSI8NElkxdOTjqQG6KK0HAyCCfQJ7MnI3G/KnJ9wxD/SWjye0/Wr5ggo1H3kFhSd9HKtuRsZJY6E4BSz4yzburCIILC4ZvS/755OAAFX7g1IEsPeKh8sww1oGLL0xeg8W0CWmWO9PRno5Dl7P5QHR02BKrEwZ/DrpSpsE+ftTczxaPp/tzqp2CDGWYT5NoBfxP3W7zjKmTCECVgM/c29P2/AL4J8xXydDlSujvE9QG5g5UUz/dlBbVXFv0cK0oneADe0D4aRK5sMH2ZsVFaaZAd2laa7+MCAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQUNrDxTEYV6uDVs6xHNU77q9zVmMowHwYDVR0jBBgwFoAUdEoYczrjPeQYQ9JlsQtY/iqxOlIwCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAe1IT/RhZ690PIBlkzLDutf0zfs2Ei6jxTyCYxiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq/5nZBl7P+56h5DcuLJsUb3tCC5pIkV9FYeVCg+Ub5c59b3hlFpqCmxSvDzNnRZZcr+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQrbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==")
 
-	sign_value, _ := base64.StdEncoding.DecodeString("UX+xLpoUDUROtuER/YU1mFRpXx5SD9AVgHT1SRRNadxqtJVz/S0xJcdJw6A8KRmUms7wl4TLe8z0utESJMUZPhgQY06ERSlX3yuBain26qKPDZaMielogQKW5oYgAI9TdGQdTNtHsB0AT4cHVz+E+GKPMjuc3tkc2fsQwWPZPl0mukcjpm6tsUwwX+3WSJfMGQ0P6itgDBLvSxaWZWuS0fZlZ8FSXd8NQjlWWCNf8goQWknxkVptPefORwg5DRb6lGF/dVWGa1miguiHerZVSJfykhEQUK/6zIWFpaGuxm5DG6DjeaRM3V1jbriEV+w1SZR+sCj9BECm5BPVYx5e/w==")
+	signValue, _ := base64.StdEncoding.DecodeString("UX+xLpoUDUROtuER/YU1mFRpXx5SD9AVgHT1SRRNadxqtJVz/S0xJcdJw6A8KRmUms7wl4TLe8z0utESJMUZPhgQY06ERSlX3yuBain26qKPDZaMielogQKW5oYgAI9TdGQdTNtHsB0AT4cHVz+E+GKPMjuc3tkc2fsQwWPZPl0mukcjpm6tsUwwX+3WSJfMGQ0P6itgDBLvSxaWZWuS0fZlZ8FSXd8NQjlWWCNf8goQWknxkVptPefORwg5DRb6lGF/dVWGa1miguiHerZVSJfykhEQUK/6zIWFpaGuxm5DG6DjeaRM3V1jbriEV+w1SZR+sCj9BECm5BPVYx5e/w==")
 
 	upgradeMetadata := testUpgradeMetadata{
 		Data: []testUpgradeFileInfo{
@@ -944,7 +965,7 @@ func TestVerifySignOfComponent(t *testing.T) {
 				Signs: &testUpgradeSigns{
 					ChainName:        "8D28D60220B8D08826E283B531A0B1D75359C5EE",
 					Alg:              "RSA/SHA256",
-					Value:            sign_value,
+					Value:            signValue,
 					TrustedTimestamp: "",
 				},
 			},
@@ -976,18 +997,15 @@ func TestVerifySignOfComponent(t *testing.T) {
 	}
 
 	// Create or use context
-	conf := config.Crypt{}
+	conf := config.Crypt{CACert: rootCertPath}
+	certProvider := testCertificateProvider{}
 
-	mainCtx, err := CreateContext(conf)
+	ctx, err := New(conf, &certProvider)
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
 	}
 
-	// Add root cert
-	mainCtx.rootCertPool = x509.NewCertPool()
-	mainCtx.rootCertPool.AppendCertsFromPEM(RootCert)
-
-	signCtx, err := mainCtx.CreateSignContext()
+	signCtx, err := ctx.CreateSignContext()
 	if err != nil {
 		t.Fatalf("Error creating sign context: '%v'", err)
 	}
@@ -1033,17 +1051,33 @@ func TestGetCertificateOrganizations(t *testing.T) {
 	var names []string
 	var err error
 
-	if _, err = GetCertificateOrganizations(path.Join(tmpDir, certificates[0].Name)); err == nil {
+	certProvider := testCertificateProvider{certPath: path.Join(tmpDir, certificates[0].Name)}
+
+	if _, err = GetCertificateOrganizations(&certProvider); err == nil {
 		log.Error("Expected error because the certificate doesn't have organizations")
 	}
 
-	if names, err = GetCertificateOrganizations(path.Join(tmpDir, certificates[1].Name)); err != nil {
+	certProvider = testCertificateProvider{certPath: path.Join(tmpDir, certificates[1].Name)}
+	if names, err = GetCertificateOrganizations(&certProvider); err != nil {
 		log.Fatalf("Get organization name error: %s", err)
 	}
+
 	if len(names) != 1 {
 		log.Error("Number of organizations doesn't equal one")
 	}
 	if names[0] == "" {
 		log.Error("Organization name is empty")
 	}
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (provider *testCertificateProvider) GetCertificateForSM(request RetrieveCertificateRequest) (
+	resp RetrieveCertificateResponse, err error) {
+	resp.CrtURL = "file://" + provider.certPath
+	resp.KeyURL = "file://" + provider.keyPath
+
+	return resp, err
 }
