@@ -33,9 +33,69 @@ import (
 	"aos_servicemanager/config"
 )
 
-const (
-	tmpDir = `/tmp/aos`
-)
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const tmpDir = `/tmp/aos`
+
+/*******************************************************************************
+ * Types
+ ******************************************************************************/
+
+type structSymmetricCipherContextSet struct {
+	algName string
+	key     []byte
+	iv      []byte
+	ok      bool
+}
+
+type pkcs7PaddingCase struct {
+	unpadded, padded []byte
+	unpaddedLen      int
+	ok               bool
+	skipAddPadding   bool
+	skipRemPadding   bool
+}
+
+type testUpgradeCertificateChain struct {
+	Name         string   `json:"name"`
+	Fingerprints []string `json:"fingerprints"`
+}
+
+type testUpgradeCertificate struct {
+	Fingerprint string `json:"fingerprint"`
+	Certificate []byte `json:"certificate"`
+}
+
+type testUpgradeSigns struct {
+	ChainName        string   `json:"chainName"`
+	Alg              string   `json:"alg"`
+	Value            []byte   `json:"value"`
+	TrustedTimestamp string   `json:"trustedTimestamp"`
+	OcspValues       []string `json:"ocspValues"`
+}
+
+type testUpgradeFileInfo struct {
+	FileData []byte
+	Signs    *testUpgradeSigns
+}
+
+// UpgradeMetadata upgrade metadata
+type testUpgradeMetadata struct {
+	Data              []testUpgradeFileInfo         `json:"data"`
+	CertificateChains []testUpgradeCertificateChain `json:"certificateChains,omitempty"`
+	Certificates      []testUpgradeCertificate      `json:"certificates,omitempty"`
+}
+
+type certData struct {
+	Name string
+	Data []byte
+}
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
 
 var (
 	// Symmetric encryption done with
@@ -290,13 +350,6 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 `)
 )
 
-type structSymmetricCipherContextSet struct {
-	algName string
-	key     []byte
-	iv      []byte
-	ok      bool
-}
-
 var key128bit = []byte{
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
@@ -336,6 +389,173 @@ var structSymmetricCipherContextSetTests = []structSymmetricCipherContextSet{
 	{"AES128/CBC/PKCS7Padding", key128bit, iv128bit, true},
 	{"AES128/ECB/PKCS7Padding", key128bit, iv128bit, false},
 }
+
+var certificates = []certData{
+	// This certificate does not include organization name
+	{
+		Data: []byte(`-----BEGIN CERTIFICATE-----
+MIIDJTCCAg2gAwIBAgIUBiw13Q4f7BUUA0HnHGgIzm2IJp0wDQYJKoZIhvcNAQEL
+BQAwIjELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUwHhcNMjAwMzEw
+MTEwODAyWhcNMjIxMjI5MTEwODAyWjAiMQswCQYDVQQGEwJBVTETMBEGA1UECAwK
+U29tZS1TdGF0ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJh4v4V6
+UIpeM157kefN3wwzVTn1VJGXwN+UQlNUB/CYnRarQEM4CfrVNJnneQK4VldIQJ51
+DbNAvIjVqrQMUkZZgfACwkZlRxSnJUAca5greDFeQCu5hUNrS8oKo3eqJJs9/kML
+vP5LkqB7XA1ac246fMwYIEhTnn2ZeQTWA6iUUjpPT5IAU3av0+Ky8/vmj5/RoExL
+TezNEILHZ4xFGC25OZcQ2e1G5AtcUEnJNilnQ/xDNLNXeKK7SoPn7FDZirGPi09O
+Z9gbZFm84UgaShLt/nquvDDb5n5GNmEMTGpZP4ijVHIH4iQph1R0/QAtLHs0plci
+fW7J41GZ78UUDMUCAwEAAaNTMFEwHQYDVR0OBBYEFEqklIcL5Mj4r4QrEylJokIR
+ERrDMB8GA1UdIwQYMBaAFEqklIcL5Mj4r4QrEylJokIRERrDMA8GA1UdEwEB/wQF
+MAMBAf8wDQYJKoZIhvcNAQELBQADggEBAIHDzZxnPVN8Rxzslkndyikb245F37ad
+K1dAcsx0LmRjMDJn+TWfqBd2jmQYXZXhLEN6yCpaJmts/BBooLYI89JWnUBzB4DM
+DlOBEFoEUkjOLv0gwwgSukEG+NTu3nsHfpBopCkSrPuA0II2qOpdc/HVxhDiIfp2
+Fx3nae59Yjfsh0BTaU/Ap90IIP2uebZZxV+t3a3CH9o5oCKdYvbLqG+TRGfhJ8oV
+fBUDOWm1hT9Ej+djyE8lnOSL713t9KM+m8zMZHDuTTPwlpXnkeq2qtHP/fkfGUTZ
+1TpDv5rAdzNoOiK+cscLYRht2wkMcVmde8GuEJnflZDLeg/k2yI8CkA=
+-----END CERTIFICATE-----`),
+		Name: `certificate1.pem`,
+	},
+	// This certificate includes organization name
+	{
+		Data: []byte(`-----BEGIN CERTIFICATE-----
+MIIEDTCCAvWgAwIBAgIIXmI8ZAAO3zcwDQYJKoZIhvcNAQELBQAwcDElMCMGA1UE
+AwwcQU9TIHZlaGljbGVzIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEc
+MBoGA1UECwwTTm92dXMgT3JkbyBTZWNsb3J1bTENMAsGA1UEBwwES3lpdjELMAkG
+A1UEBhMCVUEwHhcNMjAwMzA2MTIwNDUyWhcNMzAwMzA0MTIwNDUyWjCBnjE0MDIG
+A1UEAwwrYzE4M2RlNjMtZTJiNy00Nzc2LTkwZTAtYjdjOWI4Zjc0MGU4LW9ubGlu
+ZTE1MDMGA1UECgwsc3RhZ2luZy1mdXNpb24ud2VzdGV1cm9wZS5jbG91ZGFwcC5h
+enVyZS5jb20xLzAtBgNVBAsMJk9FTSBrb3N0eWFudHluX2lnbmF0b3YgVGVzdCB1
+bml0IG1vZGVsMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA22up8faZ
+cb7KMjCqf/HWRLZHN6wsyhTQPL0+/HVlnAz1URtRp+EhtuUXlzIrO+XACHKW0qDG
+aus77Vsmf65asuBojlbLRfl5bofqvT7hnY94NFPhHAl0r9iONT5HlsGJfy+2KJy8
+9dU7cIJrwBxvO2T1UEQ8jBNPu0kJMLvz3o+kQv//8OhG1Z8ykxDyRyXMMjYl/WRO
+nTIyZ8qTNrElitTUA7WrQVDoX1TXXYYkSR9mBG6uK5jsEzazSgcZYfzgmANwLMCX
+mQAlorvlxu3iBUHwPYaPVoTutQ7yqeC4irbTrULvjR7KjmlaFxK162p1crZXauy+
+cSiSb3wi5uMN7wIDAQABo3wwejAMBgNVHRMBAf8EAjAAMAsGA1UdDwQEAwIFoDAd
+BgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUHAwEwHQYDVR0OBBYEFMJRHgqJpOpq
+5wjM+dhPdwS/QIhOMB8GA1UdIwQYMBaAFMyIR9SjshF4Z5rxI9KyZhD6CjjCMA0G
+CSqGSIb3DQEBCwUAA4IBAQAYBWnHljDu19TUDKeU6cRv2k5sowrVpn/HaneJ9PAu
+pmHZtjDWOYMKCYGpWfscCyhkLaek3AgH22fzj0P2bWuGQE5ORdQ912u3HiVaF9bE
+A7HobN2J0/CC3soKuM8pQDk9DfWDGy500v4dQiPFVG4h+WJp82VWSAdu7chFydKP
+LKsOnzTfW1+DUyoYBztZp06sudkh8M/aIaGfU1f/79AYumAVBhOTwoEVQ4P8K7QE
+0c1Vc5G/2X4Mweu8LBrf2kpdy5aqFYwTldcqE+el9KfvnssiDC3B1LCLW2JqV2RX
+iWCeajoiW4IqzTHL0DvrqnFdoHYN2XqYYdpQldfPkTpn
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIDwzCCAqugAwIBAgIJAO2BVuwqJLb8MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNV
+BAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0Fv
+UzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjQwWhcN
+MjUwMzE5MTMyMjQwWjBwMSUwIwYDVQQDDBxBT1MgdmVoaWNsZXMgSW50ZXJtZWRp
+YXRlIENBMQ0wCwYDVQQKDARFUEFNMRwwGgYDVQQLDBNOb3Z1cyBPcmRvIFNlY2xv
+cnVtMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEB
+BQADggEPADCCAQoCggEBAKs2DANC2BAGU/rzUpOy3HpcShNdC7+vjcZ2fX6kFF9k
+RZumS58dHQjj+UW6VQXFd5QS1Bb6lL/psc7svYEE4c212fWkkw84Un+ZibbIQvsF
+LfAz9lqYLtzJPY3bjHRwe9bZUjO1YNxjxupB6o0R7yRGiFVA7ajrSkpNG8xrCVg6
+OkN/B6hGXfv1Vn+t7lo3+JAGhEJ+/3sQ6lmyLBTtnr+qMUDwWDqKarqY9gBZbGyY
+K+Jj1M0axtUtO2wNFa0UCK36aFaA/0DdoltpnenCyIngKmDBYJPwKQiqOoKEtKan
+tTIa5uM6PJgrhDPjfquODfbxqxZBYnY4+WUTWNpwa7sCAwEAAaN8MHowDAYDVR0T
+BAUwAwEB/zAdBgNVHQ4EFgQUzIhH1KOyEXhnmvEj0rJmEPoKOMIwHwYDVR0jBBgw
+FoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQG
+CCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAF3YtoIs6HrcC
+XXJH//FGm4SlWGfhQ7l4k2PbC4RqrZvkMMIci7oT2xfdIAzbPUBiaVXMEw7HR7eI
+iOqRzjR2ZUqIz3VD6fGVyw5Y3JLqMuT7DuirQ9BWeBTf+BXm40cvLsnWbQD7r6RD
+x1a8E9uOLdt7/9C2utoQVdAZLu7UgUqRyFVeF8zHT98INDtYi8bp8nZ/de64fZbN
+5pmBi2OdQGcvXUj/SRt/4OCmRqBqrYjgSl7TaAlyvf4/xk2uBG4AaKFZWWlth244
+KgfaSRGKUZuvyQwTKerc8AwUFu5r3tZwAlwT9dyRM1fg+EGbmKaadyegb3AtItyN
+d2r/FFIYWg==
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIID4TCCAsmgAwIBAgIJAO2BVuwqJLb4MA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
+VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
+YmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9y
+ZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE5MDMy
+MTEzMTQyNVoXDTI1MDMxOTEzMTQyNVowVDEZMBcGA1UEAwwQQW9TIFNlY29uZGFy
+eSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQW9TMQ0wCwYDVQQHDARLeWl2
+MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALyD
+uKMpBZN/kQFHzKo8N8y1EoPgG5sazSRe0O5xL7lm78hBmp4Vpsm/BYSI8NElkxdO
+TjqQG6KK0HAyCCfQJ7MnI3G/KnJ9wxD/SWjye0/Wr5ggo1H3kFhSd9HKtuRsZJY6
+E4BSz4yzburCIILC4ZvS/755OAAFX7g1IEsPeKh8sww1oGLL0xeg8W0CWmWO9PRn
+o5Dl7P5QHR02BKrEwZ/DrpSpsE+ftTczxaPp/tzqp2CDGWYT5NoBfxP3W7zjKmTC
+ECVgM/c29P2/AL4J8xXydDlSujvE9QG5g5UUz/dlBbVXFv0cK0oneADe0D4aRK5s
+MH2ZsVFaaZAd2laa7+MCAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQU
+NrDxTEYV6uDVs6xHNU77q9zVmMowHwYDVR0jBBgwFoAUdEoYczrjPeQYQ9JlsQtY
+/iqxOlIwCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcD
+AjANBgkqhkiG9w0BAQsFAAOCAQEAe1IT/RhZ690PIBlkzLDutf0zfs2Ei6jxTyCY
+xiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq
+/5nZBl7P+56h5DcuLJsUb3tCC5pIkV9FYeVCg+Ub5c59b3hlFpqCmxSvDzNnRZZc
+r+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+
+G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
+rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
+-----END CERTIFICATE-----`),
+		Name: `certificate2.pem`,
+	},
+}
+
+var pkcs7PaddingTests = []pkcs7PaddingCase{
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, 0, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15}, 1, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14}, 2, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13}, 3, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12}, 4, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11}, 5, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10}, 6, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9, 9}, 7, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8}, 8, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7}, 9, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 6, 6}, 10, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5}, 11, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4}, 12, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3}, 13, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2}, 14, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 15, true, false, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 15, false, false, true},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{11, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, 0, false, true, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}, 1, false, true, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}, 1, false, true, false},
+	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 1, false, true, false},
+}
+
+/*******************************************************************************
+ * Init
+ ******************************************************************************/
+
+func init() {
+	log.SetFormatter(&log.TextFormatter{
+		DisableTimestamp: false,
+		TimestampFormat:  "2006-01-02 15:04:05.000",
+		FullTimestamp:    true})
+	log.SetLevel(log.DebugLevel)
+	log.SetOutput(os.Stdout)
+}
+
+/*******************************************************************************
+ * Main
+ ******************************************************************************/
+
+func TestMain(m *testing.M) {
+	var err error
+
+	if err = os.MkdirAll(tmpDir, 0755); err != nil {
+		log.Fatalf("Error creating tmp dir: %s", err)
+	}
+
+	for i := range certificates {
+		if err := ioutil.WriteFile(path.Join(tmpDir, certificates[i].Name), certificates[i].Data, 0644); err != nil {
+			log.Fatalf("Can't write test file: %s", err)
+		}
+	}
+
+	ret := m.Run()
+
+	if err = os.RemoveAll(tmpDir); err != nil {
+		log.Fatalf("Error removing tmp dir: %s", err)
+	}
+
+	os.Exit(ret)
+}
+
+/*******************************************************************************
+ * Tests
+ ******************************************************************************/
 
 func TestSymmetricCipherContext_Set(t *testing.T) {
 	for _, testItem := range structSymmetricCipherContextSetTests {
@@ -425,38 +645,6 @@ func TestSymmetricCipherContext_EncryptFile(t *testing.T) {
 		os.Remove(encFile.Name())
 		os.Remove(decFile.Name())
 	}
-}
-
-type pkcs7PaddingCase struct {
-	unpadded, padded []byte
-	unpaddedLen      int
-	ok               bool
-	skipAddPadding   bool
-	skipRemPadding   bool
-}
-
-var pkcs7PaddingTests = []pkcs7PaddingCase{
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, 0, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15}, 1, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14}, 2, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13}, 3, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12}, 4, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11}, 5, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10}, 6, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9, 9}, 7, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8}, 8, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7}, 9, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 6, 6}, 10, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5}, 11, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4}, 12, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3}, 13, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2}, 14, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 15, true, false, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, 15, false, false, true},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{11, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, 0, false, true, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}, 1, false, true, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2}, 1, false, true, false},
-	{[]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 1, false, true, false},
 }
 
 func TestSymmetricCipherContext_appendPadding(t *testing.T) {
@@ -742,36 +930,6 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 	}
 }
 
-type testUpgradeCertificateChain struct {
-	Name         string   `json:"name"`
-	Fingerprints []string `json:"fingerprints"`
-}
-
-type testUpgradeCertificate struct {
-	Fingerprint string `json:"fingerprint"`
-	Certificate []byte `json:"certificate"`
-}
-
-type testUpgradeSigns struct {
-	ChainName        string   `json:"chainName"`
-	Alg              string   `json:"alg"`
-	Value            []byte   `json:"value"`
-	TrustedTimestamp string   `json:"trustedTimestamp"`
-	OcspValues       []string `json:"ocspValues"`
-}
-
-type testUpgradeFileInfo struct {
-	FileData []byte
-	Signs    *testUpgradeSigns
-}
-
-// UpgradeMetadata upgrade metadata
-type testUpgradeMetadata struct {
-	Data              []testUpgradeFileInfo         `json:"data"`
-	CertificateChains []testUpgradeCertificateChain `json:"certificateChains,omitempty"`
-	Certificates      []testUpgradeCertificate      `json:"certificates,omitempty"`
-}
-
 func TestVerifySignOfComponent(t *testing.T) {
 	cert1, _ := base64.StdEncoding.DecodeString("MIIDmTCCAoGgAwIBAgIUPQwLpw4adg7kY7MUGg3/SkGgAbEwDQYJKoZIhvcNAQELBQAwWzEgMB4GA1UEAwwXQU9TIE9FTSBJbnRlcm1lZGlhdGUgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0FPUzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwNzMxMDg0MzU5WhcNMjIwNzMwMDg0MzU5WjBBMSIwIAYDVQQDDBlBb1MgVGFyZ2V0IFVwZGF0ZXMgU2lnbmVyMQ0wCwYDVQQKDARFUEFNMQwwCgYDVQQLDANBb1MwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDJlnvb/zEu1N9C3xRnEjLivUr/1LeLeBNgFtb9BTk7SJXDkWFzoTryhzeKhTF0EhoFx5qLbxSpwhcoKHi9ds0AngP2amQ7AhWHRgWIwX/phZVHY+rh3iTTYDsdorReUAVDCPEYpus+XfaZfH9/0E/byNq3kIzyL4u7YvZS2+F+LTV/7nvh8U5d9RCPoUfnfGj7InZF7adVLzh32KlBeDkVLJWGdfWQ6lTdk6uoRgsXtT944Q01TGJfUhbgr9MUeyi4k3L0vfXM7wMEIrzf7horhNcT/UyU5Ftc2BI3FQv+zy3LrbnwFZdJ+0gKV7Ibp9LbVSBJb+fBc4U047EGX117AgMBAAGjbzBtMAkGA1UdEwQCMAAwHQYDVR0OBBYEFNGkZujhIhZqnHHAdptjquk1k2uVMB8GA1UdIwQYMBaAFHGorK9rv0A9+zixyID2S7vfxyfgMAsGA1UdDwQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDAzANBgkqhkiG9w0BAQsFAAOCAQEAKjS2CTWEvck1ZFVpNL81Er9MzVvnMNmHDXmkBPO+WcIcQ4RnOZGKfe9z0UX3/bVoAVyBPpVHAkczmxJQTijGC5c6anhXt06uGXyutArlrNFD75ToQOi8JBdBNvB9QfnoYqZ9CHgyYN4sKXGluyGwKMjtwADBBGkV+PR/1KqI+qHvP831Ujylb7WeSOH5RBC6jYB34Mmp5AcnIX4B7HHKFb8NitxX7Kxynua2sUgs5D1eJeOx4v6hTnP8Hto7bBkU9qYaOyJD7H9V6lfyQvxkA8iva5zYvNoQ2zWLnnSK78yrVRphW0J1gB1FW4ZsKvfsbk9fyxpCARyRXhjU8H7SDg==")
 	cert2, _ := base64.StdEncoding.DecodeString("MIIDrjCCApagAwIBAgIJAO2BVuwqJLb6MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNVBAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0FvUzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjM2WhcNMjUwMzE5MTMyMjM2WjBbMSAwHgYDVQQDDBdBT1MgT0VNIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQU9TMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJpf1Zj3yNj/Gl7PRPevf7PYpvMZVgwZRLEuwqfXxvDHYhfb/Kp7xAH7QeZVfB8rINSpJbv1+KcqiCzCZig32H+Iv5cGlyn1xmXCihHySH4/XRyduHGue385dNDyXRExpFGXAru/AhgXGKVaxbfDwE9lnz8yWRFvhNrdPO8/nRNZf1ZOqRaq7YNYC7kRQLgp76Da64/H7OWWy9B82r+fgEKc63ixDWSqaLGcNgIBqHU+Rky/SX/gPUtaCIqJb+CpWZZQlJ2wQ+dv+s+K2AG7O0HSHQkh2BbMcjVDeCcdu477+Mal8+MhhjYzkQmAi1tVOYAzX2H/StCGSYohtpxqT5ECAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQUcaisr2u/QD37OLHIgPZLu9/HJ+AwHwYDVR0jBBgwFoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAM+yZJvfkSQmXYt554Zsy2Wqm1w/ixUV55T3r0JFRFbf5AQ7RNBp7t2dn1cEUA6O4wSK3U1Y7eyrPn/ECNmbZ5QUlHUAN/QUnuJUIe0UEd9k+lO2VLbLK+XamzDlOxPBn94s9C1jeXrwGdeTRVcq73rH1CvIOMhD7rp/syQKFuBfQBwCgfH0CbSRsHRm9xQii/HQYMfD8TMyqrjMKF7s68r7shQG2OGo1HJqfA6f9Cb+i4A1BfeP97lFeyr3OjQtLcQJ/a6nPdGs1Cg94Zl2PBEPFH9ecuYpKt0UqK8x8HRsYru7Wp8wkzMbvlYShI5mwdIpvksg5aqnIhWWGqhDRqg==")
@@ -871,111 +1029,6 @@ func TestVerifySignOfComponent(t *testing.T) {
 	}
 }
 
-type certData struct {
-	Name string
-	Data []byte
-}
-
-var certificates = []certData{
-	// This certificate does not include organization name
-	{
-		Data: []byte(`-----BEGIN CERTIFICATE-----
-MIIDJTCCAg2gAwIBAgIUBiw13Q4f7BUUA0HnHGgIzm2IJp0wDQYJKoZIhvcNAQEL
-BQAwIjELMAkGA1UEBhMCQVUxEzARBgNVBAgMClNvbWUtU3RhdGUwHhcNMjAwMzEw
-MTEwODAyWhcNMjIxMjI5MTEwODAyWjAiMQswCQYDVQQGEwJBVTETMBEGA1UECAwK
-U29tZS1TdGF0ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJh4v4V6
-UIpeM157kefN3wwzVTn1VJGXwN+UQlNUB/CYnRarQEM4CfrVNJnneQK4VldIQJ51
-DbNAvIjVqrQMUkZZgfACwkZlRxSnJUAca5greDFeQCu5hUNrS8oKo3eqJJs9/kML
-vP5LkqB7XA1ac246fMwYIEhTnn2ZeQTWA6iUUjpPT5IAU3av0+Ky8/vmj5/RoExL
-TezNEILHZ4xFGC25OZcQ2e1G5AtcUEnJNilnQ/xDNLNXeKK7SoPn7FDZirGPi09O
-Z9gbZFm84UgaShLt/nquvDDb5n5GNmEMTGpZP4ijVHIH4iQph1R0/QAtLHs0plci
-fW7J41GZ78UUDMUCAwEAAaNTMFEwHQYDVR0OBBYEFEqklIcL5Mj4r4QrEylJokIR
-ERrDMB8GA1UdIwQYMBaAFEqklIcL5Mj4r4QrEylJokIRERrDMA8GA1UdEwEB/wQF
-MAMBAf8wDQYJKoZIhvcNAQELBQADggEBAIHDzZxnPVN8Rxzslkndyikb245F37ad
-K1dAcsx0LmRjMDJn+TWfqBd2jmQYXZXhLEN6yCpaJmts/BBooLYI89JWnUBzB4DM
-DlOBEFoEUkjOLv0gwwgSukEG+NTu3nsHfpBopCkSrPuA0II2qOpdc/HVxhDiIfp2
-Fx3nae59Yjfsh0BTaU/Ap90IIP2uebZZxV+t3a3CH9o5oCKdYvbLqG+TRGfhJ8oV
-fBUDOWm1hT9Ej+djyE8lnOSL713t9KM+m8zMZHDuTTPwlpXnkeq2qtHP/fkfGUTZ
-1TpDv5rAdzNoOiK+cscLYRht2wkMcVmde8GuEJnflZDLeg/k2yI8CkA=
------END CERTIFICATE-----`),
-		Name: `certificate1.pem`,
-	},
-	// This certificate includes organization name
-	{
-		Data: []byte(`-----BEGIN CERTIFICATE-----
-MIIEDTCCAvWgAwIBAgIIXmI8ZAAO3zcwDQYJKoZIhvcNAQELBQAwcDElMCMGA1UE
-AwwcQU9TIHZlaGljbGVzIEludGVybWVkaWF0ZSBDQTENMAsGA1UECgwERVBBTTEc
-MBoGA1UECwwTTm92dXMgT3JkbyBTZWNsb3J1bTENMAsGA1UEBwwES3lpdjELMAkG
-A1UEBhMCVUEwHhcNMjAwMzA2MTIwNDUyWhcNMzAwMzA0MTIwNDUyWjCBnjE0MDIG
-A1UEAwwrYzE4M2RlNjMtZTJiNy00Nzc2LTkwZTAtYjdjOWI4Zjc0MGU4LW9ubGlu
-ZTE1MDMGA1UECgwsc3RhZ2luZy1mdXNpb24ud2VzdGV1cm9wZS5jbG91ZGFwcC5h
-enVyZS5jb20xLzAtBgNVBAsMJk9FTSBrb3N0eWFudHluX2lnbmF0b3YgVGVzdCB1
-bml0IG1vZGVsMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA22up8faZ
-cb7KMjCqf/HWRLZHN6wsyhTQPL0+/HVlnAz1URtRp+EhtuUXlzIrO+XACHKW0qDG
-aus77Vsmf65asuBojlbLRfl5bofqvT7hnY94NFPhHAl0r9iONT5HlsGJfy+2KJy8
-9dU7cIJrwBxvO2T1UEQ8jBNPu0kJMLvz3o+kQv//8OhG1Z8ykxDyRyXMMjYl/WRO
-nTIyZ8qTNrElitTUA7WrQVDoX1TXXYYkSR9mBG6uK5jsEzazSgcZYfzgmANwLMCX
-mQAlorvlxu3iBUHwPYaPVoTutQ7yqeC4irbTrULvjR7KjmlaFxK162p1crZXauy+
-cSiSb3wi5uMN7wIDAQABo3wwejAMBgNVHRMBAf8EAjAAMAsGA1UdDwQEAwIFoDAd
-BgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUHAwEwHQYDVR0OBBYEFMJRHgqJpOpq
-5wjM+dhPdwS/QIhOMB8GA1UdIwQYMBaAFMyIR9SjshF4Z5rxI9KyZhD6CjjCMA0G
-CSqGSIb3DQEBCwUAA4IBAQAYBWnHljDu19TUDKeU6cRv2k5sowrVpn/HaneJ9PAu
-pmHZtjDWOYMKCYGpWfscCyhkLaek3AgH22fzj0P2bWuGQE5ORdQ912u3HiVaF9bE
-A7HobN2J0/CC3soKuM8pQDk9DfWDGy500v4dQiPFVG4h+WJp82VWSAdu7chFydKP
-LKsOnzTfW1+DUyoYBztZp06sudkh8M/aIaGfU1f/79AYumAVBhOTwoEVQ4P8K7QE
-0c1Vc5G/2X4Mweu8LBrf2kpdy5aqFYwTldcqE+el9KfvnssiDC3B1LCLW2JqV2RX
-iWCeajoiW4IqzTHL0DvrqnFdoHYN2XqYYdpQldfPkTpn
------END CERTIFICATE-----
------BEGIN CERTIFICATE-----
-MIIDwzCCAqugAwIBAgIJAO2BVuwqJLb8MA0GCSqGSIb3DQEBCwUAMFQxGTAXBgNV
-BAMMEEFvUyBTZWNvbmRhcnkgQ0ExDTALBgNVBAoMBEVQQU0xDDAKBgNVBAsMA0Fv
-UzENMAsGA1UEBwwES3lpdjELMAkGA1UEBhMCVUEwHhcNMTkwMzIxMTMyMjQwWhcN
-MjUwMzE5MTMyMjQwWjBwMSUwIwYDVQQDDBxBT1MgdmVoaWNsZXMgSW50ZXJtZWRp
-YXRlIENBMQ0wCwYDVQQKDARFUEFNMRwwGgYDVQQLDBNOb3Z1cyBPcmRvIFNlY2xv
-cnVtMQ0wCwYDVQQHDARLeWl2MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEB
-BQADggEPADCCAQoCggEBAKs2DANC2BAGU/rzUpOy3HpcShNdC7+vjcZ2fX6kFF9k
-RZumS58dHQjj+UW6VQXFd5QS1Bb6lL/psc7svYEE4c212fWkkw84Un+ZibbIQvsF
-LfAz9lqYLtzJPY3bjHRwe9bZUjO1YNxjxupB6o0R7yRGiFVA7ajrSkpNG8xrCVg6
-OkN/B6hGXfv1Vn+t7lo3+JAGhEJ+/3sQ6lmyLBTtnr+qMUDwWDqKarqY9gBZbGyY
-K+Jj1M0axtUtO2wNFa0UCK36aFaA/0DdoltpnenCyIngKmDBYJPwKQiqOoKEtKan
-tTIa5uM6PJgrhDPjfquODfbxqxZBYnY4+WUTWNpwa7sCAwEAAaN8MHowDAYDVR0T
-BAUwAwEB/zAdBgNVHQ4EFgQUzIhH1KOyEXhnmvEj0rJmEPoKOMIwHwYDVR0jBBgw
-FoAUNrDxTEYV6uDVs6xHNU77q9zVmMowCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQG
-CCsGAQUFBwMBBggrBgEFBQcDAjANBgkqhkiG9w0BAQsFAAOCAQEAF3YtoIs6HrcC
-XXJH//FGm4SlWGfhQ7l4k2PbC4RqrZvkMMIci7oT2xfdIAzbPUBiaVXMEw7HR7eI
-iOqRzjR2ZUqIz3VD6fGVyw5Y3JLqMuT7DuirQ9BWeBTf+BXm40cvLsnWbQD7r6RD
-x1a8E9uOLdt7/9C2utoQVdAZLu7UgUqRyFVeF8zHT98INDtYi8bp8nZ/de64fZbN
-5pmBi2OdQGcvXUj/SRt/4OCmRqBqrYjgSl7TaAlyvf4/xk2uBG4AaKFZWWlth244
-KgfaSRGKUZuvyQwTKerc8AwUFu5r3tZwAlwT9dyRM1fg+EGbmKaadyegb3AtItyN
-d2r/FFIYWg==
------END CERTIFICATE-----
------BEGIN CERTIFICATE-----
-MIID4TCCAsmgAwIBAgIJAO2BVuwqJLb4MA0GCSqGSIb3DQEBCwUAMIGNMRcwFQYD
-VQQDDA5GdXNpb24gUm9vdCBDQTEpMCcGCSqGSIb3DQEJARYadm9sb2R5bXlyX2Jh
-YmNodWtAZXBhbS5jb20xDTALBgNVBAoMBEVQQU0xHDAaBgNVBAsME05vdnVzIE9y
-ZG8gU2VjbG9ydW0xDTALBgNVBAcMBEt5aXYxCzAJBgNVBAYTAlVBMB4XDTE5MDMy
-MTEzMTQyNVoXDTI1MDMxOTEzMTQyNVowVDEZMBcGA1UEAwwQQW9TIFNlY29uZGFy
-eSBDQTENMAsGA1UECgwERVBBTTEMMAoGA1UECwwDQW9TMQ0wCwYDVQQHDARLeWl2
-MQswCQYDVQQGEwJVQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALyD
-uKMpBZN/kQFHzKo8N8y1EoPgG5sazSRe0O5xL7lm78hBmp4Vpsm/BYSI8NElkxdO
-TjqQG6KK0HAyCCfQJ7MnI3G/KnJ9wxD/SWjye0/Wr5ggo1H3kFhSd9HKtuRsZJY6
-E4BSz4yzburCIILC4ZvS/755OAAFX7g1IEsPeKh8sww1oGLL0xeg8W0CWmWO9PRn
-o5Dl7P5QHR02BKrEwZ/DrpSpsE+ftTczxaPp/tzqp2CDGWYT5NoBfxP3W7zjKmTC
-ECVgM/c29P2/AL4J8xXydDlSujvE9QG5g5UUz/dlBbVXFv0cK0oneADe0D4aRK5s
-MH2ZsVFaaZAd2laa7+MCAwEAAaN8MHowDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQU
-NrDxTEYV6uDVs6xHNU77q9zVmMowHwYDVR0jBBgwFoAUdEoYczrjPeQYQ9JlsQtY
-/iqxOlIwCwYDVR0PBAQDAgGmMB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcD
-AjANBgkqhkiG9w0BAQsFAAOCAQEAe1IT/RhZ690PIBlkzLDutf0zfs2Ei6jxTyCY
-xiEmTExrU0qCZECxu/8Up6jpgqHN5upEdL/kDWwtogn0K0NGBqMNiDyc7f18rVvq
-/5nZBl7P+56h5DcuLJsUb3tCC5pIkV9FYeVCg+Ub5c59b3hlFpqCmxSvDzNnRZZc
-r+dInAdjcVZWmAisIpoBPrtCrqGydBtP9wy5PPxUW2bwhov4FV58C+WZ7GOLMqF+
-G0wAlE7RUWvuUcKYVukkDjAg0g2qE01LnPBtpJ4dsYtEJnQknJR4swtnWfCcmlHQ
-rbDoi3MoksAeGSFZePQKpht0vWiimHFQCHV2RS9P8oMqFhZN0g==
------END CERTIFICATE-----`),
-		Name: `certificate2.pem`,
-	},
-}
-
 func TestGetCertificateOrganizations(t *testing.T) {
 	var names []string
 	var err error
@@ -993,26 +1046,4 @@ func TestGetCertificateOrganizations(t *testing.T) {
 	if names[0] == "" {
 		log.Error("Organization name is empty")
 	}
-}
-
-func TestMain(m *testing.M) {
-	var err error
-
-	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		log.Fatalf("Error creating tmp dir: %s", err)
-	}
-
-	for i := range certificates {
-		if err := ioutil.WriteFile(path.Join(tmpDir, certificates[i].Name), certificates[i].Data, 0644); err != nil {
-			log.Fatalf("Can't write test file: %s", err)
-		}
-	}
-
-	ret := m.Run()
-
-	if err = os.RemoveAll(tmpDir); err != nil {
-		log.Fatalf("Error removing tmp dir: %s", err)
-	}
-
-	os.Exit(ret)
 }
