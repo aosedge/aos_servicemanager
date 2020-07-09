@@ -115,6 +115,10 @@ func DecryptImage(srcFileName, dstFileName string, crypt FcryptInterface, decryp
 		return errors.New("FcryptInterface = nil")
 	}
 
+	if decryptionInfo.ReceiverInfo == nil {
+		return errors.New("ReceiverInfo dinecryptionInfo = nil")
+	}
+
 	context, err := crypt.ImportSessionKey(fcrypt.CryptoSessionKeyInfo{
 		SymmetricAlgName:  decryptionInfo.BlockAlg,
 		SessionKey:        decryptionInfo.BlockKey,

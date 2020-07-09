@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -86,6 +87,10 @@ type testStorage struct {
 }
 
 type clientHandler struct {
+}
+
+type testCertProvider struct {
+	keyPath string
 }
 
 /*******************************************************************************
@@ -158,7 +163,7 @@ func TestMain(m *testing.M) {
 	}
 
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", http.FileServer(http.Dir(path.Join(tmpDir, "fileServer")))))
+		log.Fatal(http.ListenAndServe(":8081", http.FileServer(http.Dir(path.Join(tmpDir, "fileServer")))))
 	}()
 
 	url, err := url.Parse(serverURL)
@@ -210,17 +215,15 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Cannot create root cert: %s", err)
 	}
 
-	crypt, err := fcrypt.CreateContext(config.Crypt{CACert: path.Join(tmpDir, "rootCert.pem")})
-	if err != nil {
-		log.Fatalf("Cannot create crypto context: %s", err)
-	}
-
 	if err := ioutil.WriteFile(path.Join(tmpDir, "offline.key.pem"), OfflinePrivKeyPem, 0644); err != nil {
 		log.Fatalf("Cannot create root cert: %s", err)
 	}
 
-	if err = crypt.LoadOfflineKeyFile(path.Join(tmpDir, "offline.key.pem")); err != nil {
-		log.Fatalf("Cannot load offline key file: %s", err)
+	certProvider := testCertProvider{keyPath: path.Join(tmpDir, "offline.key.pem")}
+
+	crypt, err := fcrypt.New(config.Crypt{CACert: path.Join(tmpDir, "rootCert.pem")}, certProvider)
+	if err != nil {
+		log.Fatalf("Cannot create crypto context: %s", err)
 	}
 
 	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, sender, &storage)
@@ -540,7 +543,7 @@ func createUpgradeData(version uint64, fileName string, content []byte) (data am
 	}
 
 	data.ImageVersion = version
-	data.URLs = []string{"http://localhost:8080/" + fileName}
+	data.URLs = []string{"http://localhost:8081/" + fileName}
 
 	imageFileInfo, err := image.CreateFileInfo(filePath)
 	if err != nil {
@@ -605,12 +608,30 @@ func createUpgradeData(version uint64, fileName string, content []byte) (data am
 		return data, err
 	}
 
+	recInfo := struct {
+		Serial string `json:"serial"`
+		Issuer []byte `json:"issuer"`
+	}{
+		Serial: "string",
+		Issuer: []byte("issuer"),
+	}
+
 	data.DecryptionInfo = &amqp.DecryptionInfo{
-		BlockAlg: "AES256/CBC/pkcs7",
-		BlockIv:  []byte(imageAes256IV),
-		BlockKey: encryptedAesKey,
-		AsymAlg:  "RSA/PKCS1v1_5",
+		BlockAlg:     "AES256/CBC/pkcs7",
+		BlockIv:      []byte(imageAes256IV),
+		BlockKey:     encryptedAesKey,
+		AsymAlg:      "RSA/PKCS1v1_5",
+		ReceiverInfo: &recInfo,
 	}
 
 	return data, nil
+}
+
+func (provider testCertProvider) GetCertificateForSM(request fcrypt.RetrieveCertificateRequest) (
+	resp fcrypt.RetrieveCertificateResponse, err error) {
+
+	absPath, _ := filepath.Abs(provider.keyPath)
+	resp.KeyURL = "file://" + absPath
+
+	return resp, err
 }
