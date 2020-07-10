@@ -1204,7 +1204,7 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 		}
 	}
 
-	return nil
+	return retErr
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
