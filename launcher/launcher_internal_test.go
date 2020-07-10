@@ -129,6 +129,8 @@ var deviceManager = testDeviceManager{isValid: true}
 var chains []amqp.CertificateChain
 var certs []amqp.Certificate
 
+var tmpDir string
+
 /*******************************************************************************
  * Init
  ******************************************************************************/
@@ -1208,11 +1210,11 @@ func TestTmpDir(t *testing.T) {
 }
 
 func TestSpec(t *testing.T) {
-	if err := generateConfig("tmp"); err != nil {
+	if err := generateConfig(tmpDir); err != nil {
 		t.Fatalf("Can't generate service spec: %s", err)
 	}
 
-	spec, err := loadServiceSpec(path.Join("tmp", ocConfigFile))
+	spec, err := loadServiceSpec(path.Join(tmpDir, ocConfigFile))
 	if err != nil {
 		t.Fatalf("Can't load service spec: %s", err)
 	}
@@ -1323,7 +1325,8 @@ func TestSpec(t *testing.T) {
 }
 
 func TestSpecFromImageConfig(t *testing.T) {
-	_, err := generateSpecFromImageConfig("no_file", "tmp/config.json")
+	configFilePath := path.Join(tmpDir, "config.json")
+	_, err := generateSpecFromImageConfig("no_file", configFilePath)
 	if err == nil {
 		t.Errorf("Should be error no such file or director")
 	}
@@ -1334,23 +1337,23 @@ func TestSpecFromImageConfig(t *testing.T) {
 	}
 
 	imgConfig.OS = "Windows"
-	configFile, err := saveImageConfig("tmp", imgConfig)
+	configFile, err := saveImageConfig(tmpDir, imgConfig)
 	if err != nil {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	_, err = generateSpecFromImageConfig(configFile, "tmp/config.json")
+	_, err = generateSpecFromImageConfig(configFile, configFilePath)
 	if err == nil {
 		t.Errorf("Should be error unsupported OS in image config")
 	}
 
 	imgConfig.OS = "linux"
-	configFile, err = saveImageConfig("tmp", imgConfig)
+	configFile, err = saveImageConfig(tmpDir, imgConfig)
 	if err != nil {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	runtimeSpec, err := generateSpecFromImageConfig(configFile, "tmp/config.json")
+	runtimeSpec, err := generateSpecFromImageConfig(configFile, configFilePath)
 	if err != nil {
 		t.Errorf("Error generating OCI runtime spec %s", err)
 	}
@@ -1367,7 +1370,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 }
 
 func TestValidateUnpackedImage(t *testing.T) {
-	fakeImageFolder := path.Join("tmp", "fakeImage")
+	fakeImageFolder := path.Join(tmpDir, "fakeImage")
 	if err := os.MkdirAll(fakeImageFolder, 0755); err != nil {
 		log.Fatalf("Can't create fakeImage Folder %s", err)
 	}
@@ -1387,7 +1390,7 @@ func TestServiceWithLayers(t *testing.T) {
 		return
 	}
 
-	layerDir := path.Join("tmp", "layerStorage", "layer1")
+	layerDir := path.Join(tmpDir, "layerStorage", "layer1")
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		t.Fatalf("Can't create layer dir: %s", err)
 	}
@@ -1453,7 +1456,8 @@ func TestServiceWithLayers(t *testing.T) {
 func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: "tmp", StorageDir: "tmp/storage", DefaultServiceTTL: 30}, new(fakeFcrypt),
+	launcher, err = New(&config.Config{WorkingDir: tmpDir, StorageDir: path.Join(tmpDir, "storage"),
+		DefaultServiceTTL: 30}, new(fakeFcrypt),
 		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
 	if err != nil {
 		return nil, err
@@ -2026,7 +2030,7 @@ func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string
 }
 
 func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
-	return path.Join("tmp", "layerStorage"), nil
+	return path.Join(tmpDir, "layerStorage"), nil
 }
 
 func (layerProvider *testLayerProvider) DeleteUnneededLayers() (err error) {
@@ -2084,15 +2088,15 @@ func (deviceManager *testDeviceManager) ReleaseDevice(device string, serviceID s
  ******************************************************************************/
 
 func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
+	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
 		return err
 	}
 
-	if err := createStoragePartition("tmp/storage", "ext4", 16); err != nil {
+	if err := createStoragePartition(path.Join(tmpDir, "storage"), "ext4", 16); err != nil {
 		return err
 	}
 
-	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: "tmp"}); err != nil {
+	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}); err != nil {
 		return err
 	}
 
@@ -2121,11 +2125,11 @@ func cleanup() (err error) {
 		log.Errorf("Can't close network provider: %s", err)
 	}
 
-	if err := deleteStoragePartition("tmp/storage"); err != nil {
+	if err := deleteStoragePartition(path.Join(tmpDir, "storage")); err != nil {
 		log.Errorf("Can't remove storage partition: %s", err)
 	}
 
-	if err := os.RemoveAll("tmp"); err != nil {
+	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp folder: %s", err)
 	}
 
@@ -2145,13 +2149,14 @@ func createStoragePartition(mountPoint string, fsType string, size uint64) (err 
 	}()
 
 	var output []byte
+	imagePath := path.Join(tmpDir, "storage.img")
 
-	if output, err = exec.Command("dd", "if=/dev/zero", "of=tmp/storage.img", "bs=1M",
+	if output, err = exec.Command("dd", "if=/dev/zero", "of="+imagePath, "bs=1M",
 		"count="+strconv.FormatUint(size, 10)).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
-	if output, err = exec.Command("mkfs."+fsType, "tmp/storage.img").CombinedOutput(); err != nil {
+	if output, err = exec.Command("mkfs."+fsType, imagePath).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
@@ -2159,7 +2164,7 @@ func createStoragePartition(mountPoint string, fsType string, size uint64) (err 
 		return err
 	}
 
-	if output, err = exec.Command("mount", "-o,usrjquota=aquota.user,jqfmt=vfsv0", "tmp/storage.img", mountPoint).CombinedOutput(); err != nil {
+	if output, err = exec.Command("mount", "-o,usrjquota=aquota.user,jqfmt=vfsv0", imagePath, mountPoint).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
