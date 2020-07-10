@@ -1048,22 +1048,26 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 					continue
 				}
 
-				rowSecret, err := handler.cryptoContext.DecryptMetadata(msg.UnitSecureData)
-				if err != nil {
-					log.Error("Can't decrypt UnitSecureData ", err)
-					continue
-				}
-
 				secret := new(unitSecret)
 
-				if err := json.Unmarshal(rowSecret, secret); err != nil {
-					log.Error("Can't unmarshal unitSecret ", err)
-					continue
-				}
+				if len(msg.UnitSecureData) > 0 {
+					rowSecret, err := handler.cryptoContext.DecryptMetadata(msg.UnitSecureData)
+					if err != nil {
+						log.Error("Can't decrypt UnitSecureData ", err)
+						continue
+					}
 
-				if secret.Version != unitSecureVersion {
-					log.Error("unit secure version  missmatch ", secret.Version, " != ", unitSecureVersion)
-					continue
+					secret := new(unitSecret)
+
+					if err := json.Unmarshal(rowSecret, secret); err != nil {
+						log.Error("Can't unmarshal unitSecret ", err)
+						continue
+					}
+
+					if secret.Version != unitSecureVersion {
+						log.Error("unit secure version  missmatch ", secret.Version, " != ", unitSecureVersion)
+						continue
+					}
 				}
 
 				data = &RenewCertificatesNotificationWithPwd{Certificates: msg.Certificates,
