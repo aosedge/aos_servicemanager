@@ -488,6 +488,10 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	if status = <-sender.statusChannel; status.Error == "" {
 		t.Fatalf("SM can remove service when device resource is not released")
 	}
+
+	if err := launcher.removeAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
 }
 
 func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
@@ -499,8 +503,11 @@ func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
 	}
 
 	defer func() {
-		launcher.Close()
 		deviceManager.isValid = true
+		if err := launcher.removeAllServices(); err != nil {
+			t.Errorf("Can't cleanup all services: %s", err)
+		}
+		launcher.Close()
 	}()
 
 	// run stored service configuration only in case system resources are valid
