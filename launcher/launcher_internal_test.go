@@ -130,6 +130,7 @@ var chains []amqp.CertificateChain
 var certs []amqp.Certificate
 
 var tmpDir string
+var testDir string
 
 /*******************************************************************************
  * Init
@@ -1210,11 +1211,11 @@ func TestTmpDir(t *testing.T) {
 }
 
 func TestSpec(t *testing.T) {
-	if err := generateConfig(tmpDir); err != nil {
+	if err := generateConfig(testDir); err != nil {
 		t.Fatalf("Can't generate service spec: %s", err)
 	}
 
-	spec, err := loadServiceSpec(path.Join(tmpDir, ocConfigFile))
+	spec, err := loadServiceSpec(path.Join(testDir, ocConfigFile))
 	if err != nil {
 		t.Fatalf("Can't load service spec: %s", err)
 	}
@@ -1325,7 +1326,7 @@ func TestSpec(t *testing.T) {
 }
 
 func TestSpecFromImageConfig(t *testing.T) {
-	configFilePath := path.Join(tmpDir, "config.json")
+	configFilePath := path.Join(testDir, "config.json")
 	_, err := generateSpecFromImageConfig("no_file", configFilePath)
 	if err == nil {
 		t.Errorf("Should be error no such file or director")
@@ -1337,7 +1338,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 	}
 
 	imgConfig.OS = "Windows"
-	configFile, err := saveImageConfig(tmpDir, imgConfig)
+	configFile, err := saveImageConfig(testDir, imgConfig)
 	if err != nil {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
@@ -1348,7 +1349,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 	}
 
 	imgConfig.OS = "linux"
-	configFile, err = saveImageConfig(tmpDir, imgConfig)
+	configFile, err = saveImageConfig(testDir, imgConfig)
 	if err != nil {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
@@ -1370,7 +1371,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 }
 
 func TestValidateUnpackedImage(t *testing.T) {
-	fakeImageFolder := path.Join(tmpDir, "fakeImage")
+	fakeImageFolder := path.Join(testDir, "fakeImage")
 	if err := os.MkdirAll(fakeImageFolder, 0755); err != nil {
 		log.Fatalf("Can't create fakeImage Folder %s", err)
 	}
@@ -1390,7 +1391,7 @@ func TestServiceWithLayers(t *testing.T) {
 		return
 	}
 
-	layerDir := path.Join(tmpDir, "layerStorage", "layer1")
+	layerDir := path.Join(testDir, "layerStorage", "layer1")
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		t.Fatalf("Can't create layer dir: %s", err)
 	}
@@ -1456,7 +1457,7 @@ func TestServiceWithLayers(t *testing.T) {
 func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: tmpDir, StorageDir: path.Join(tmpDir, "storage"),
+	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
 		DefaultServiceTTL: 30}, new(fakeFcrypt),
 		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
 	if err != nil {
@@ -2030,7 +2031,7 @@ func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string
 }
 
 func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
-	return path.Join(tmpDir, "layerStorage"), nil
+	return path.Join(testDir, "layerStorage"), nil
 }
 
 func (layerProvider *testLayerProvider) DeleteUnneededLayers() (err error) {
@@ -2092,11 +2093,17 @@ func setup() (err error) {
 		return err
 	}
 
-	if err := createStoragePartition(path.Join(tmpDir, "storage"), "ext4", 16); err != nil {
+	testDir = path.Join(tmpDir, testDir)
+
+	if err := createTestPartition(testDir, "ext4", 16); err != nil {
 		return err
 	}
 
-	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}); err != nil {
+	if err = os.MkdirAll(path.Join(testDir, "storage"), 0755); err != nil {
+		return err
+	}
+
+	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: testDir}); err != nil {
 		return err
 	}
 
@@ -2125,7 +2132,7 @@ func cleanup() (err error) {
 		log.Errorf("Can't close network provider: %s", err)
 	}
 
-	if err := deleteStoragePartition(path.Join(tmpDir, "storage")); err != nil {
+	if err := deleteTestPartition(testDir); err != nil {
 		log.Errorf("Can't remove storage partition: %s", err)
 	}
 
@@ -2136,15 +2143,10 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createStoragePartition(mountPoint string, fsType string, size uint64) (err error) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip creating storage partition")
-		return nil
-	}
-
+func createTestPartition(mountPoint string, fsType string, size uint64) (err error) {
 	defer func() {
 		if err != nil {
-			deleteStoragePartition(mountPoint)
+			deleteTestPartition(mountPoint)
 		}
 	}()
 
@@ -2179,12 +2181,7 @@ func createStoragePartition(mountPoint string, fsType string, size uint64) (err 
 	return nil
 }
 
-func deleteStoragePartition(mountPoint string) (err error) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip deleting storage partition")
-		return nil
-	}
-
+func deleteTestPartition(mountPoint string) (err error) {
 	var output []byte
 
 	if output, err = exec.Command("umount", mountPoint).CombinedOutput(); err != nil {
