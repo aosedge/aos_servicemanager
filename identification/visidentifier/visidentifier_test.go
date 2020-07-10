@@ -34,10 +34,10 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/visprotocol"
 	"gitpct.epam.com/epmd-aepr/aos_common/wsserver"
 
-	"aos_servicemanager/database"
 	"aos_servicemanager/identification/visidentifier"
 	"aos_servicemanager/identification/visidentifier/dbushandler"
 	"aos_servicemanager/launcher"
+	"aos_servicemanager/pluginprovider"
 )
 
 /*******************************************************************************
@@ -54,17 +54,19 @@ type testServiceProvider struct {
 	services map[string]*launcher.Service
 }
 
-type messageProcessor struct {
-	sendMessage wsserver.SendMessage
+type renewCertificatesNotification struct {
+	services map[string]*launcher.Service
+}
+
+type clientHandler struct {
 }
 
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var vis *visidentifier.Instance
+var vis pluginprovider.Identifier
 var server *wsserver.Server
-var clientProcessor *messageProcessor
 
 var subscriptionID = "test_subscription"
 
@@ -101,7 +103,7 @@ func setup() (err error) {
 
 	if server, err = wsserver.New("TestServer", url.Host,
 		"../../ci/crt.pem",
-		"../../ci/key.pem", processMessages); err != nil {
+		"../../ci/key.pem", new(clientHandler)); err != nil {
 		return err
 	}
 
@@ -266,22 +268,7 @@ func (serviceProvider *testServiceProvider) GetService(serviceID string) (servic
 	return *s, nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func generateRandomString(size uint) (result string) {
-	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-	tmp := make([]rune, size)
-	for i := range tmp {
-		tmp[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-
-	return string(tmp)
-}
-
-func processMessages(messageType int, message []byte) (response []byte, err error) {
+func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType int, message []byte) (response []byte, err error) {
 	var header visprotocol.MessageHeader
 
 	if err = json.Unmarshal(message, &header); err != nil {
@@ -325,4 +312,27 @@ func processMessages(messageType int, message []byte) (response []byte, err erro
 	}
 
 	return response, nil
+}
+
+func (handler clientHandler) ClientConnected(client *wsserver.Client) {
+
+}
+
+func (handler clientHandler) ClientDisconnected(client *wsserver.Client) {
+
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func generateRandomString(size uint) (result string) {
+	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+	tmp := make([]rune, size)
+	for i := range tmp {
+		tmp[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+
+	return string(tmp)
 }
