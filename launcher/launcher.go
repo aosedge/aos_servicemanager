@@ -553,6 +553,10 @@ func Cleanup(cfg *config.Config) (err error) {
 		log.Fatalf("Can't remove upgrade folder: %s", err)
 	}
 
+	if err := os.RemoveAll(path.Join(cfg.WorkingDir, serviceTemplateFile)); err != nil {
+		log.Fatalf("Can't remove service template file: %s", err)
+	}
+
 	return nil
 }
 
