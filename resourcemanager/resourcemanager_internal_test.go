@@ -100,19 +100,22 @@ func TestProcessHostDevice(t *testing.T) {
 		t.Errorf("Detect unavailable device. Error: %s", err)
 	}
 
-	//Test directory with symlinks
-	hs, err := rm.processHostDevice(DRI_DEV_PATH)
-	if err != nil {
-		t.Errorf("Can't process device directory. Error: %s", err)
-	}
+	var hs []string
+	if _, exist := os.Stat(DRI_DEV_PATH); exist == nil || os.IsExist(exist) {
+		//Test directory with symlinks
+		hs, err = rm.processHostDevice(DRI_DEV_PATH)
+		if err != nil {
+			t.Errorf("Can't process device directory. Error: %s", err)
+		}
 
-	originalHs, err := getDevicePathContents(DRI_DEV_PATH)
-	if err != nil {
-		t.Errorf("Can't process device directory. Error: %s", err)
-	}
+		originalHs, err := getDevicePathContents(DRI_DEV_PATH)
+		if err != nil {
+			t.Errorf("Can't process device directory. Error: %s", err)
+		}
 
-	if !reflect.DeepEqual(hs, originalHs) {
-		t.Errorf("Device path contents are not equal. Error: %s", err)
+		if !reflect.DeepEqual(hs, originalHs) {
+			t.Errorf("Device path contents are not equal. Error: %s", err)
+		}
 	}
 
 	//Test symlink
@@ -264,7 +267,7 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 	inputResource := DeviceResource{Name: "input", SharedCount: 2, Groups: nil,
 		HostDevices: []string{}}
 
-	inputResource.HostDevices, err = getDevicePathContents("/dev/input/by-id")
+	inputResource.HostDevices, err = getDevicePathContents("/dev/input/by-path")
 	if err != nil {
 		t.Fatalf("Can't request process pts dir: %s", err)
 	}
@@ -505,7 +508,7 @@ func createTestResourceConfigFile() (err error) {
 			"name": "input",
 			"sharedCount": 2,
 			"hostDevices": [
-				"/dev/input/by-id"
+				"/dev/input/by-path"
 			]
 		},
 		{
