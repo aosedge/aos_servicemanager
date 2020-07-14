@@ -102,9 +102,14 @@ SM needs aos_vis to be running and configured (see aos_vis [readme](https://gitp
 
 SM requires following applications to be available in the system or placed in SM working directory:
 * [runc](https://github.com/opencontainers/runc) - launch service containers
-* [netns](https://github.com/genuinetools/netns) - set containers network bridge
 * [wondershaper](https://github.com/magnific0/wondershaper) - set network UL/DL speed limit
 * [iperf](https://sourceforge.net/projects/iperf2/) - a network traffic tool for measuring TCP and UDP performance. 
+
+## Test required packages
+
+* [libssl-dev]  - headers for TPM simulator
+* [rabbitmq-server] - AMQP server 
+* [pyftpdlib] - light python ftp server
 
 ## Required Python3 packages
 
