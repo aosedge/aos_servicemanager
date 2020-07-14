@@ -168,7 +168,7 @@ github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/protoc-gen-gogo/descriptor
 # github.com/google/btree v0.0.0-20180813153112-4030bb1f1f0c
 github.com/google/btree
-# github.com/google/go-tpm v0.2.1-0.20191106030929-f0607eac7f8a
+# github.com/google/go-tpm v0.2.1-0.20191118184001-a2abb88b0a52
 ## explicit
 github.com/google/go-tpm/tpm2
 github.com/google/go-tpm/tpmutil

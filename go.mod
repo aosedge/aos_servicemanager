@@ -21,7 +21,7 @@ require (
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/godbus/dbus v4.1.0+incompatible
-	github.com/google/go-tpm v0.2.1-0.20191106030929-f0607eac7f8a
+	github.com/google/go-tpm v0.2.1-0.20191118184001-a2abb88b0a52
 	github.com/google/go-tpm-tools v0.1.2
 	github.com/google/uuid v1.1.1
 	github.com/gorilla/websocket v1.4.2
