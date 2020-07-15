@@ -393,11 +393,6 @@ func TestServices(t *testing.T) {
 }
 
 func TestTrafficLimit(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestTrafficLimit")
-		return
-	}
-
 	sendDuration := 2 * time.Second
 
 	monitor, err := New(

@@ -275,11 +275,6 @@ func TestGetSystemVersion(t *testing.T) {
 }
 
 func TestSystemUpgrade(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceStorage")
-		return
-	}
-
 	if err := client.Connect(serverURL); err != nil {
 		log.Fatalf("Error connecting to UM server: %s", err)
 	}

@@ -887,11 +887,6 @@ func TestServiceMonitoring(t *testing.T) {
 }
 
 func TestServiceStorage(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceStorage")
-		return
-	}
-
 	sender := newTestSender()
 
 	// Set limit for 2 files 8192 bytes length + 1 folder 4k
@@ -964,11 +959,6 @@ func TestServiceStorage(t *testing.T) {
 }
 
 func TestServiceState(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceStorage")
-		return
-	}
-
 	sender := newTestSender()
 
 	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0, nil}, sender, nil, networkProvider)
@@ -1116,11 +1106,6 @@ func TestServiceState(t *testing.T) {
 }
 
 func TestTmpDir(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceStorage")
-		return
-	}
-
 	sender := newTestSender()
 
 	// Test no tmp limit
@@ -1393,11 +1378,6 @@ func TestValidateUnpackedImage(t *testing.T) {
 }
 
 func TestServiceWithLayers(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		log.Debug("Skip TestServiceStorage")
-		return
-	}
-
 	layerDir := path.Join(testDir, "layerStorage", "layer1")
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		t.Fatalf("Can't create layer dir: %s", err)
