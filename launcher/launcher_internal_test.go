@@ -2145,7 +2145,7 @@ func createTestPartition(mountPoint string, fsType string, size uint64) (err err
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
-	if output, err = exec.Command("mkfs."+fsType, imagePath).CombinedOutput(); err != nil {
+	if output, err = exec.Command("mkfs."+fsType, "-b", "4096", imagePath).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
