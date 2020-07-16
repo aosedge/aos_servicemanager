@@ -1049,6 +1049,9 @@ func TestServiceState(t *testing.T) {
 		t.Error("No state request event")
 	}
 
+	// Wait ftp server ready
+	time.Sleep(5 * time.Second)
+
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
@@ -1078,7 +1081,7 @@ func TestServiceState(t *testing.T) {
 	}
 
 	// Wait ftp server ready
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
