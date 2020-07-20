@@ -549,6 +549,15 @@ func (sm *serviceManager) run() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
+		if sm.um != nil {
+			if !sm.um.IsConnected() {
+				if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
+					log.Errorf("Can't connect to UM: %s", err)
+					goto reconnect
+				}
+			}
+		}
+
 		// Connect
 		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, systemID, users); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
