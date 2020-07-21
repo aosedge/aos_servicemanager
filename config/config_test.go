@@ -82,7 +82,16 @@ func createConfigFile() (err error) {
 				"param2": 123
 		  }
 	},
-	"hostBinds": ["dir0", "dir1", "dir2"]
+	"hostBinds": ["dir0", "dir1", "dir2"],
+	"hosts": [{
+			"ip": "127.0.0.1",
+			"hostName" : "wwwivi"
+		},
+		{
+			"ip": "127.0.0.1",
+			"hostName" : "wwwaosum"
+		}
+	]
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -368,5 +377,24 @@ func TestHostBinds(t *testing.T) {
 
 	if !reflect.DeepEqual(config.HostBinds, dirs) {
 		t.Errorf("Wrong hostDirs value: %v", config.HostBinds)
+	}
+}
+
+func TestHosts(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if len(config.Hosts) != 2 {
+		t.Errorf("Wrong count of hosts entry: 2!= %d", len(config.Hosts))
+	}
+
+	if config.Hosts[0].IP != "127.0.0.1" {
+		t.Errorf("Incorrect ip")
+	}
+
+	if config.Hosts[1].Hostname != "wwwaosum" {
+		t.Errorf("Incorrect hostname")
 	}
 }

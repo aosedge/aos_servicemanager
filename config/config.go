@@ -77,6 +77,12 @@ type Alerts struct {
 	Filter             []string `json:"filter"`
 }
 
+// Host strunct represent entry in /etc/hosts
+type Host struct {
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname"`
+}
+
 // Config instance
 type Config struct {
 	Crypt               Crypt      `json:"fcrypt"`
@@ -97,6 +103,7 @@ type Config struct {
 		Config json.RawMessage `json:"config"`
 	} `json:"identifier"`
 	HostBinds []string `json:"hostBinds"`
+	Hosts     []Host   `json:"hosts,omitempty"`
 }
 
 /*******************************************************************************
