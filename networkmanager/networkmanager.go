@@ -53,6 +53,7 @@ const (
 // NetworkManager network manager instance
 type NetworkManager struct {
 	controller libnetwork.NetworkController
+	hosts      []config.Host
 }
 
 // NetworkParams network parameters set for service
@@ -69,7 +70,7 @@ type NetworkParams struct {
 func New(cfg *config.Config) (manager *NetworkManager, err error) {
 	log.Debug("Create network manager")
 
-	manager = &NetworkManager{}
+	manager = &NetworkManager{hosts: cfg.Hosts}
 
 	manager.controller, err = libnetwork.New(
 		netconfig.OptionDriverConfig(
@@ -209,6 +210,10 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath 
 		options := []libnetwork.SandboxOption{
 			libnetwork.OptionHostsPath(path.Join(servicePath, serviceHostsPath)),
 			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath)),
+		}
+
+		for _, host := range manager.hosts {
+			options = append(options, libnetwork.OptionExtraHost(host.Hostname, host.IP))
 		}
 
 		if params.Hostname != "" {
