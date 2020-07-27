@@ -287,6 +287,20 @@ func (sm *serviceManager) close() {
 }
 
 func (sm *serviceManager) sendInitialSetup() (err error) {
+	if sm.launcher.CheckServicesConsistency() != nil || sm.layerMgr.CheckLayersConsistency() != nil {
+		if err := launcher.Cleanup(sm.cfg); err != nil {
+			log.Errorf("Can't cleanup launcher: %s", err)
+		}
+
+		if err := sm.launcher.RemoveAllServices(); err != nil {
+			log.Errorf("Can't cleanup launcher: %s", err)
+		}
+
+		if err := sm.layerMgr.Cleanup(); err != nil {
+			log.Errorf("Can't cleanup layermanager: %s", err)
+		}
+	}
+
 	initialList, err := sm.launcher.GetServicesInfo()
 	if err != nil {
 		log.Fatalf("Can't get services: %s", err)

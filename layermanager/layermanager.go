@@ -160,9 +160,49 @@ func (layermanager *LayerManager) DeleteUnneededLayers() (err error) {
 	return err
 }
 
-// GetLayersInfo provied list of already installed fs layers
-func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err error) {
+// CheckLayersConsistency checks layers data to be consistent
+func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
+	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
+	if err != nil {
+		log.Error("Can't get layers info")
+		return err
+	}
 
+	for _, layer := range layers {
+		// Checking if Layer path exists
+		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
+		if err != nil {
+			return err
+		}
+
+		if fi, err := os.Stat(layerPath); err != nil || !fi.Mode().IsDir() {
+			log.Error("Can't find layer data on storage, or data is corrupted")
+			return err
+		}
+	}
+
+	return nil
+}
+
+//Clear all Layers
+func (layermanager *LayerManager) Cleanup() (err error) {
+	//Look like it works, double check with files
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+	layerList := []amqp.LayerInfoFromCloud{}
+	if err := layermanager.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
+		return err
+	}
+
+	if err = layermanager.DeleteUnneededLayers(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// GetLayersInfo provided list of already installed fs layers
+func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err error) {
 	return layermanager.layerInfoProvider.GetLayersInfo()
 }
 

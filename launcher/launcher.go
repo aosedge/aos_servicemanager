@@ -405,6 +405,29 @@ func (launcher *Launcher) FinishProcessingLayers() {
 	launcher.actionHandler.PutInQueue(serviceAction{"", nil, launcher.doFinishProcessingLayers})
 }
 
+func (launcher *Launcher) CheckServicesConsistency() (err error) {
+	//Check for storage folder
+	if _, err = os.Stat(launcher.config.StorageDir); err != nil {
+		log.Error("Can't find storagedir")
+		return err
+	}
+
+	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		// Checking if Service path exists
+		if fi, err := os.Stat(service.Path); err != nil || !fi.Mode().IsDir() {
+			log.Errorf("Unable to get access to Service data on storage: %s", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
 // GetServicesInfo returns information about all installed services
 func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error) {
 	log.Debug("Get services info")
@@ -460,6 +483,46 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 	}
 
 	return nil
+}
+
+// RemoveAllServices removing all services
+func (launcher *Launcher) RemoveAllServices() (err error) {
+	services, err := launcher.serviceProvider.GetServices()
+	if err != nil {
+		return err
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	for _, service := range services {
+		go func(service Service) {
+			err := launcher.removeService(service)
+			if err != nil {
+				log.Errorf("Can't remove service %s: %s", service.ID, err)
+			}
+			statusChannel <- err
+		}(service)
+	}
+
+	// Wait all services are deleted
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
+
+	err = launcher.systemd.Reload()
+	if err != nil {
+		return err
+	}
+
+	services, err = launcher.serviceProvider.GetServices()
+	if err != nil {
+		return err
+	}
+	if len(services) != 0 {
+		return errors.New("can't remove all services")
+	}
+
+	return err
 }
 
 // StateAcceptance notifies launcher about new state acceptance
@@ -757,10 +820,21 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 		return err
 	}
 
+	servicePath := path.Join(launcher.config.WorkingDir, serviceDir)
+	// Create services dir if needed
+	if err = os.MkdirAll(servicePath, 0755); err != nil {
+		return err
+	}
+
+	// Create storage dir if needed
+	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
+		return err
+	}
+
 	// We need to install or update the service
 
 	// create install dir
-	installDir, err := ioutil.TempDir(path.Join(launcher.config.WorkingDir, serviceDir), "")
+	installDir, err := ioutil.TempDir(servicePath, "")
 	if err != nil {
 		return err
 	}
