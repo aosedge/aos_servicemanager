@@ -105,7 +105,7 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestInstalRemovelLayer(t *testing.T) {
+func TestInstallRemovelLayer(t *testing.T) {
 	layerDir := path.Join(tmpDir, "layerdir1")
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		log.Fatalf("Can't create folder: %s", err)
@@ -119,7 +119,7 @@ func TestInstalRemovelLayer(t *testing.T) {
 
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{generateLayrFromCloud(layerFile, "LayerId1", digest)}
+	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest)}
 
 	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
 		t.Errorf("Can't process layer list %s", err)
@@ -160,6 +160,69 @@ func TestInstalRemovelLayer(t *testing.T) {
 		t.Error("Count of layers should be 0")
 	}
 
+}
+
+func TestLayerConsistencyCheck(t *testing.T) {
+	layerDir := path.Join(tmpDir, "layerdir1")
+	if err := os.MkdirAll(layerDir, 0755); err != nil {
+		log.Fatalf("Can't create folder: %s", err)
+	}
+	defer os.RemoveAll(layerDir)
+
+	layerDir2 := path.Join(tmpDir, "layerdir2")
+	if err := os.MkdirAll(layerDir2, 0755); err != nil {
+		log.Fatalf("Can't create folder: %s", err)
+	}
+	defer func() {
+		if _, err := os.Stat(layerDir2); !os.IsNotExist(err) {
+			os.RemoveAll(layerDir2)
+		}
+	}()
+
+	layerFile, digest, err := createLayer(layerDir)
+	if err != nil {
+		log.Fatalf("Can't layer: %s", err)
+	}
+
+	layerFile2, digest2, err := createLayer(layerDir2)
+	if err != nil {
+		log.Fatalf("Can't layer: %s", err)
+	}
+
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest),
+		generateLayerFromCloud(layerFile2, "LayerId2", digest2)}
+
+	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
+		t.Errorf("Can't process layer list %s", err)
+	}
+
+	list, err := layerMgr.GetLayersInfo()
+	if err != nil {
+		t.Errorf("Can't get layer list %s", err)
+	}
+
+	if len(list) != 2 {
+		t.Error("Count of layers should be 2")
+	}
+
+	if err = layerMgr.CheckLayersConsistency(); err != nil {
+		t.Errorf("Layer configuration expected to be consistent. Err: %s", err)
+	}
+
+	layer2path, err := layerMgr.layerInfoProvider.GetLayerPathByDigest(digest2)
+	if err != nil {
+		t.Errorf("Can't get layer path. Err: %s", err)
+	}
+
+	if err = os.RemoveAll(layer2path); err != nil {
+		t.Errorf("Can't remove dir: %s", err)
+	}
+
+	if err = layerMgr.CheckLayersConsistency(); err == nil {
+		t.Error("Consistency check error is expected")
+	}
 }
 
 /*******************************************************************************
@@ -225,7 +288,7 @@ func setup() (err error) {
 		log.Fatalf("Can't create database: %s", err)
 	}
 
-	layerMgr, err = New(path.Join(tmpDir, "layrStorage"), new(fakeFcrypt), db, new(fakeLayerSender))
+	layerMgr, err = New(path.Join(tmpDir, "layerStorage"), new(fakeFcrypt), db, new(fakeLayerSender))
 	if err != nil {
 		log.Fatalf("Can't layer manager: %s", err)
 	}
@@ -245,7 +308,7 @@ func createLayer(dir string) (layerFile string, digest string, err error) {
 		log.Fatalf("Can't create folder: %s", err)
 	}
 
-	data := []byte("this is layer data")
+	data := []byte("this is layer data in layer " + dir)
 	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0644); err != nil {
 		return "", layerFile, err
 	}
@@ -324,7 +387,7 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	return retDigest, nil
 }
 
-func generateLayrFromCloud(layerFile, layerID, digest string) (layerInfo amqp.LayerInfoFromCloud) {
+func generateLayerFromCloud(layerFile, layerID, digest string) (layerInfo amqp.LayerInfoFromCloud) {
 	layerInfo.LayerID = layerID
 	layerInfo.URLs = []string{"http://localhost:8080/" + layerFile}
 	layerInfo.Digest = digest
