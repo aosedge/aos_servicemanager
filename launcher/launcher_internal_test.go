@@ -236,7 +236,109 @@ func TestInstallRemove(t *testing.T) {
 		t.Errorf("Wrong service quantity")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
+func TestRemoveAllServices(t *testing.T) {
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	numInstallServices := 10
+
+	// install services
+	for i := 0; i < numInstallServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)}, chains, certs)
+	}
+
+	for i := 0; i < numInstallServices; i++ {
+		if status := <-sender.statusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s", status.Error, status.ID)
+		}
+	}
+
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+
+	if len(services) != numInstallServices {
+		t.Errorf("Wrong service quantity. Actual %d, Expected %d", len(services), numInstallServices)
+	}
+
+	if err := launcher.RemoveAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+
+	services, err = launcher.GetServicesInfo()
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+
+	if len(services) != 0 {
+		t.Errorf("Wrong service quantity. Actual: %d, Expected 0", len(services))
+	}
+}
+
+func TestCheckServicesConsistency(t *testing.T) {
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	numInstallServices := 10
+
+	// install services
+	for i := 0; i < numInstallServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)}, chains, certs)
+	}
+
+	for i := 0; i < numInstallServices; i++ {
+		if status := <-sender.statusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s", status.Error, status.ID)
+		}
+	}
+
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+
+	if len(services) != numInstallServices {
+		t.Errorf("Wrong service quantity. Actual %d, Expected %d", len(services), numInstallServices)
+	}
+
+	if err = launcher.CheckServicesConsistency(); err != nil {
+		t.Error("Expected services to be consistent")
+	}
+
+	cmd := exec.Command("rm", "-rf", path.Join(tmpDir, "storage"))
+	if res, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Can't remove services dir contents: %s %s", err, res)
+	}
+
+	if err = launcher.CheckServicesConsistency(); err == nil {
+		t.Error("Expected services to be inconsistent")
+	}
+
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -314,7 +416,7 @@ func TestAutoStart(t *testing.T) {
 		t.Errorf("Wrong service quantity")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -360,7 +462,7 @@ func TestErrors(t *testing.T) {
 		t.Errorf("Wrong service version")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -429,7 +531,7 @@ func TestUpdate(t *testing.T) {
 		}
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -489,7 +591,7 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 		t.Fatalf("SM can remove service when device resource is not released")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -504,7 +606,7 @@ func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
 
 	defer func() {
 		deviceManager.isValid = true
-		if err := launcher.removeAllServices(); err != nil {
+		if err := launcher.RemoveAllServices(); err != nil {
 			t.Errorf("Can't cleanup all services: %s", err)
 		}
 		launcher.Close()
@@ -618,7 +720,7 @@ func TestNetworkSpeed(t *testing.T) {
 		}
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -651,7 +753,7 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Permissions mismatch")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -756,7 +858,7 @@ func TestUsersServices(t *testing.T) {
 		}
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -881,7 +983,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -953,7 +1055,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Unexpected nil error")
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -1103,7 +1205,7 @@ func TestServiceState(t *testing.T) {
 		response.Close()
 	}
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
@@ -1198,7 +1300,7 @@ func TestTmpDir(t *testing.T) {
 
 	ftp.Quit()
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 
@@ -1433,7 +1535,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	ftp.Quit()
 
-	if err := launcher.removeAllServices(); err != nil {
+	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 
@@ -1725,49 +1827,6 @@ func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) 
 	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
 
 	return nil
-}
-
-func (launcher *Launcher) removeAllServices() (err error) {
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return err
-	}
-
-	statusChannel := make(chan error, len(services))
-
-	for _, service := range services {
-		go func(service Service) {
-			err := launcher.removeService(service)
-			if err != nil {
-				log.Errorf("Can't remove service %s: %s", service.ID, err)
-			}
-			statusChannel <- err
-		}(service)
-	}
-
-	// Wait all services are deleted
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-
-	err = launcher.systemd.Reload()
-	if err != nil {
-		return err
-	}
-
-	services, err = launcher.serviceProvider.GetServices()
-	if err != nil {
-		return err
-	}
-	if len(services) != 0 {
-		return errors.New("can't remove all services")
-	}
-
-	if len(serviceProvider.usersServices) != 0 {
-		return errors.New("can't remove all users")
-	}
-
-	return err
 }
 
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
@@ -2107,7 +2166,7 @@ func cleanup() (err error) {
 	}
 
 	if launcher != nil {
-		if err := launcher.removeAllServices(); err != nil {
+		if err := launcher.RemoveAllServices(); err != nil {
 			log.Errorf("Can't remove all services: %s", err)
 		}
 
