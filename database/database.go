@@ -258,7 +258,7 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText, &service.Devices)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
 		if err != nil {
 			return services, err
 		}
@@ -567,7 +567,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.StorageLimit, &service.StateLimit, &service.UploadSpeed, &service.DownloadSpeed, &layerListText, &service.Devices)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
 		if err != nil {
 			return usersServices, err
 		}
