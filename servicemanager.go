@@ -18,7 +18,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -140,7 +139,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}()
 
-	var names []string
 	sm = &serviceManager{cfg: cfg}
 
 	// Create DB
@@ -178,36 +176,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	// Create UM client
-	if cfg.UMServerURL == "" {
-		return sm, errors.New("No UMServerURL available")
-	}
-
 	if sm.um, err = umclient.New(cfg, sm.amqp, sm.db); err != nil {
 		return sm, err
-	}
-
-	if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
-		log.Errorf("Can't connect to UM: %s", err)
-		return sm, err
-	}
-
-	// Get organization names from certificate and use it as discovery URL
-	names, err = fcrypt.GetCertificateOrganizations(sm.um)
-	if err != nil {
-		log.Warningf("Organization name will be taken from config file: %s", err)
-	} else {
-		// We use the first member of organization list
-		// The certificate should contain only one organization
-		if len(names) == 1 && names[0] != "" {
-			url := url.URL{
-				Scheme: "https",
-				Host:   names[0],
-			}
-			cfg.ServiceDiscoveryURL = url.String() + ":9000"
-		} else {
-			log.Error("Certificate organization name is empty or organization is not a single")
-		}
 	}
 
 	// Create crypto context
@@ -478,9 +448,7 @@ func (sm *serviceManager) handleChannels() (err error) {
 		alertsChannel = sm.alerts.AlertsChannel
 	}
 
-	if sm.um != nil {
-		umErrChannel = sm.um.ErrorChannel
-	}
+	umErrChannel = sm.um.ErrorChannel
 
 	for {
 		select {
@@ -531,6 +499,8 @@ func (sm *serviceManager) run() {
 	for {
 		var users []string
 		var systemID string
+		var systemVersion uint64
+		var orgNames []string
 		var err error
 
 		// Get system id
@@ -549,12 +519,27 @@ func (sm *serviceManager) run() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
-		if sm.um != nil {
-			if !sm.um.IsConnected() {
-				if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
-					log.Errorf("Can't connect to UM: %s", err)
-					goto reconnect
+		if !sm.um.IsConnected() {
+			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
+				log.Errorf("Can't connect to UM: %s", err)
+				goto reconnect
+			}
+		}
+
+		// Get organization names from certificate and use it as discovery URL
+		if orgNames, err = fcrypt.GetCertificateOrganizations(sm.um); err != nil {
+			log.Warningf("Organization name will be taken from config file: %s", err)
+		} else {
+			// We use the first member of organization list
+			// The certificate should contain only one organization
+			if len(orgNames) == 1 && orgNames[0] != "" {
+				url := url.URL{
+					Scheme: "https",
+					Host:   orgNames[0],
 				}
+				sm.cfg.ServiceDiscoveryURL = url.String() + ":9000"
+			} else {
+				log.Error("Certificate organization name is empty or organization is not a single")
 			}
 		}
 
@@ -564,17 +549,14 @@ func (sm *serviceManager) run() {
 			goto reconnect
 		}
 
-		if sm.um != nil {
-			version, err := sm.um.GetSystemVersion()
-			if err != nil {
-				log.Errorf("Can't get system version: %s", err)
-				goto reconnect
-			}
+		if systemVersion, err = sm.um.GetSystemVersion(); err != nil {
+			log.Errorf("Can't get system version: %s", err)
+			goto reconnect
+		}
 
-			if err = sm.amqp.SendSystemVersion(version); err != nil {
-				log.Errorf("Can't send system version: %s", err)
-				goto reconnect
-			}
+		if err = sm.amqp.SendSystemVersion(systemVersion); err != nil {
+			log.Errorf("Can't send system version: %s", err)
+			goto reconnect
 		}
 
 		if err = sm.sendInitialSetup(); err != nil {
@@ -588,9 +570,7 @@ func (sm *serviceManager) run() {
 
 	reconnect:
 		sm.amqp.Disconnect()
-		if sm.um != nil {
-			sm.um.Disconnect()
-		}
+		sm.um.Disconnect()
 
 		<-time.After(reconnectTimeout)
 
