@@ -876,8 +876,8 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 
 	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.serviceDetails.ID}).Debug("Create install dir")
 
-	var newService Service
-	if newService, err = launcher.prepareService(unpackDir, installDir, serviceInfo.serviceDetails); err != nil {
+	newService, err := launcher.prepareService(unpackDir, installDir, serviceInfo.serviceDetails)
+	if err != nil {
 		return err
 	}
 
@@ -1013,6 +1013,18 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 		return err
 	}
 
+	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
+	if err != nil {
+		return err
+	}
+
+	upperDir, workDir := "", ""
+
+	if storageFolder != "" {
+		upperDir = path.Join(storageFolder, upperDirName)
+		workDir = path.Join(storageFolder, workDirName)
+	}
+
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
 
 	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir), path.Join(service.Path, serviceRootfsDir)}
@@ -1020,7 +1032,7 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 	layerDirs = append(layerDirs, path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir))
 	layerDirs = append(layerDirs, string("/"))
 
-	if err = overlayMount(mergedDir, layerDirs, "", ""); err != nil {
+	if err = overlayMount(mergedDir, layerDirs, workDir, upperDir); err != nil {
 		return err
 	}
 
@@ -1034,28 +1046,6 @@ func (launcher *Launcher) umountLayers(service Service) (err error) {
 
 	if err = umountWithRetry(mergedDir, 0); err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) updateStorageFolder(spec *serviceSpec, service Service) (err error) {
-	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
-	if err != nil {
-		return err
-	}
-
-	if storageFolder != "" {
-		if err = spec.addBindMount(storageFolder, serviceStorageFolder, "rw"); err != nil {
-			return err
-		}
-
-		if err = os.MkdirAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder), 0755); err != nil {
-			return err
-		}
-	} else {
-		spec.removeBindMount(serviceStorageFolder)
-		os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, serviceStorageFolder))
 	}
 
 	return nil
@@ -1132,10 +1122,6 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 	//Update Devices in spec
 	_, err = launcher.setDevices(spec, devices)
 	if err != nil {
-		return err
-	}
-
-	if err = launcher.updateStorageFolder(spec, service); err != nil {
 		return err
 	}
 
@@ -1525,8 +1511,26 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	//unpack rootfs layer
-	if err := utils.UnpackTarImage(imageParts.serviceFSLayerPath, path.Join(installDir, serviceRootfsDir)); err != nil {
+	rootfsDir := path.Join(installDir, serviceRootfsDir)
+
+	// unpack rootfs layer
+	if err = utils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
+		return service, err
+	}
+
+	// set service rootfs owner
+	uid, gid, err := platform.GetUserUIDGID(userName)
+	if err != nil {
+		return service, err
+	}
+
+	if err = filepath.Walk(rootfsDir, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		return os.Chown(name, int(uid), int(gid))
+	}); err != nil {
 		return service, err
 	}
 

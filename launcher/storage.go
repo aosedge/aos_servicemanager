@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -43,6 +44,9 @@ import (
 
 const (
 	stateFile = "state.dat" // state file name
+
+	upperDirName = "upperdir"
+	workDirName  = "workdir"
 
 	stateChangeTimeout    = 1 * time.Second
 	acceptanceWaitTimeout = 10 * time.Second
@@ -478,6 +482,26 @@ func createStorageFolder(path, userName string) (folderName string, err error) {
 	}
 
 	if err = os.Chown(folderName, int(uid), int(gid)); err != nil {
+		return "", err
+	}
+
+	upperDir := filepath.Join(folderName, upperDirName)
+
+	if err = os.MkdirAll(upperDir, 0755); err != nil {
+		return "", err
+	}
+
+	if err = os.Chown(upperDir, int(uid), int(gid)); err != nil {
+		return "", err
+	}
+
+	workDir := filepath.Join(folderName, workDirName)
+
+	if err = os.MkdirAll(workDir, 0755); err != nil {
+		return "", err
+	}
+
+	if err = os.Chown(workDir, int(uid), int(gid)); err != nil {
 		return "", err
 	}
 

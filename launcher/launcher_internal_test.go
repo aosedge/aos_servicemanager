@@ -996,8 +996,8 @@ func TestServiceMonitoring(t *testing.T) {
 func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
 
-	// Set limit for 2 files 8192 bytes length + 1 folder 4k
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 4096, 0, 0, nil}, sender, nil, networkProvider)
+	// Set limit for 2 files + some buffer
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}, sender, nil, networkProvider)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1037,8 +1037,8 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't get disk usage: %s", err)
 	}
 
-	// file size + 1 block 4k for dir
-	if diskUsage != (8192 + 4096) {
+	// file size + storage folders and workdir
+	if diskUsage != (8192 + 4096 + 8192*5) {
 		t.Errorf("Wrong disk usage value: %d", diskUsage)
 	}
 
@@ -1051,12 +1051,13 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't get disk usage: %s", err)
 	}
 
-	// 2 files size + 1 block 4k for dir
-	if diskUsage != (8192*2 + 4096) {
+	// 2 files size + storage folders and workdir
+	if diskUsage != (8192*2 + 4096 + 8192*5) {
 		t.Errorf("Wrong disk usage value: %d", diskUsage)
 	}
 
-	if err := ftp.Stor("test3.dat", bytes.NewReader(testData)); err == nil {
+	bigTestData := make([]byte, 8192*20)
+	if err := ftp.Stor("test3.dat", bytes.NewReader(bigTestData)); err == nil {
 		t.Errorf("Unexpected nil error")
 	}
 
@@ -1603,6 +1604,7 @@ func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 
 	ociImgSpec := imagespec.Image{}
 	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", downloader.serviceID,
 		fmt.Sprintf("%d", downloader.version)}
 
@@ -1752,6 +1754,7 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 
 	ociImgSpec := imagespec.Image{}
 	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py"}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
@@ -2282,6 +2285,10 @@ func generateFtpContent(imagePath string, ftpDir string) (err error) {
 from pyftpdlib.authorizers import DummyAuthorizer
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
+from pathlib import Path
+import os
+
+Path("%s").mkdir(parents=True, exist_ok=True)
 
 authorizer = DummyAuthorizer()
 authorizer.add_anonymous("%s", perm="elradfmw")
@@ -2294,7 +2301,7 @@ server.serve_forever()`
 
 	if err := ioutil.WriteFile(
 		path.Join(imagePath, "rootfs", "home", "service.py"),
-		[]byte(fmt.Sprintf(serviceContent, ftpDir)), 0644); err != nil {
+		[]byte(fmt.Sprintf(serviceContent, ftpDir, ftpDir)), 0644); err != nil {
 		return err
 	}
 

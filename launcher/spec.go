@@ -45,7 +45,6 @@ import (
  * Consts
  ******************************************************************************/
 
-const serviceStorageFolder = "/home/service/storage"
 const defaultCPUPeriod uint64 = 100000
 
 /*******************************************************************************
@@ -546,7 +545,7 @@ func (spec *serviceSpec) clearAdditionalGroup() (err error) {
 func (spec *serviceSpec) setRootfs(rootfsPath string) (err error) {
 	log.WithFields(log.Fields{"rootfs": rootfsPath}).Debug("Add rootfs to spec")
 
-	spec.ocSpec.Root = &runtimespec.Root{Path: rootfsPath, Readonly: true}
+	spec.ocSpec.Root = &runtimespec.Root{Path: rootfsPath, Readonly: false}
 
 	return nil
 }
