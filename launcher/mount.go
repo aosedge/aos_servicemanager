@@ -27,6 +27,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/fs"
 	"golang.org/x/sys/unix"
 )
 
@@ -100,7 +101,7 @@ func overlayMount(mountPoint string, lowerDirs []string, workDir, upperDir strin
 		opts = opts + ",workdir=" + workDir + ",upperdir=" + upperDir
 	}
 
-	if err = syscall.Mount("overlay", mountPoint, "overlay", 0, opts); err != nil {
+	if err = fs.Mount("overlay", mountPoint, "overlay", 0, opts); err != nil {
 		return err
 	}
 
@@ -119,17 +120,5 @@ func umountWithRetry(mountPoint string, flags int) (err error) {
 		return nil
 	}
 
-	for i := 0; i < umountRetry; i++ {
-		if err = syscall.Unmount(mountPoint, flags); err == nil {
-			return nil
-		}
-
-		log.Warnf("Can't umount %s: %s. Retry...", mountPoint, err)
-
-		time.Sleep(umountDelay)
-
-		syscall.Sync()
-	}
-
-	return err
+	return fs.Umount(mountPoint)
 }
