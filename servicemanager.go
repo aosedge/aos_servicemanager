@@ -516,6 +516,7 @@ func (sm *serviceManager) run() {
 		var systemVersion uint64
 		var orgNames []string
 		var err error
+		var resourceVersion uint64
 
 		// Get system id
 		if systemID, err = sm.identifier.GetSystemID(); err != nil {
@@ -557,6 +558,8 @@ func (sm *serviceManager) run() {
 			}
 		}
 
+		resourceVersion = sm.resourcemanager.GetResourceConfigVersion()
+
 		// Connect
 		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, systemID, users); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
@@ -568,7 +571,7 @@ func (sm *serviceManager) run() {
 			goto reconnect
 		}
 
-		if err = sm.amqp.SendSystemVersion(systemVersion); err != nil {
+		if err = sm.amqp.SendSystemVersion(systemVersion, resourceVersion); err != nil {
 			log.Errorf("Can't send system version: %s", err)
 			goto reconnect
 		}

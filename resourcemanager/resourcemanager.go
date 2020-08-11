@@ -73,6 +73,7 @@ type DeviceResource struct {
 
 // AvailableResources resources that are proviced by Cloud for using at AOS services
 type AvailableResources struct {
+	Version uint64           `json:"version,omitempty"`
 	Devices []DeviceResource `json:"devices"`
 }
 
@@ -245,6 +246,11 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 	}
 
 	return nil
+}
+
+// GetResourceConfigVersion get current version of configuration file
+func (resourcemanager *ResourceManager) GetResourceConfigVersion() (version uint64) {
+	return resourcemanager.availableResources.Version
 }
 
 /*******************************************************************************

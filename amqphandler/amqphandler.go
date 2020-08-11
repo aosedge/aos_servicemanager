@@ -316,7 +316,8 @@ type SystemUpgradeStatus struct {
 
 // SystemVersion system version structure
 type SystemVersion struct {
-	ImageVersion uint64 `json:"imageVersion"`
+	ImageVersion           uint64 `json:"imageVersion"`
+	ResourcesConfigVersion uint64 `json:"resourcesConfigVersion"`
 }
 
 // UnitStatus untit status structure
@@ -708,8 +709,9 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 }
 
 // SendSystemVersion sends system version
-func (handler *AmqpHandler) SendSystemVersion(imageVersion uint64) (err error) {
-	systemVersionMsg := handler.createAosMessage(SystemVersionType, SystemVersion{ImageVersion: imageVersion})
+func (handler *AmqpHandler) SendSystemVersion(imageVersion, resourceVersion uint64) (err error) {
+	systemVersionMsg := handler.createAosMessage(SystemVersionType,
+		SystemVersion{ImageVersion: imageVersion, ResourcesConfigVersion: resourceVersion})
 
 	handler.sendChannel <- Message{"", systemVersionMsg}
 

@@ -441,11 +441,11 @@ func TestReceiveMessages(t *testing.T) {
 
 		messageDesc{
 			call: func() error {
-				return amqpHandler.SendSystemVersion(5)
+				return amqpHandler.SendSystemVersion(5, 1)
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemVersionType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.SystemVersion{ImageVersion: 5}},
+				Data:   &amqphandler.SystemVersion{ImageVersion: 5, ResourcesConfigVersion: 1}},
 			getDataType: func() interface{} {
 				return &amqphandler.SystemVersion{}
 			},
