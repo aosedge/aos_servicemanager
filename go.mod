@@ -7,7 +7,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/boltdb/bolt v1.3.1 // indirect
-	github.com/cavaliercoder/grab v2.0.0+incompatible // indirect
+	github.com/cavaliercoder/grab v2.0.0+incompatible
 	github.com/coreos/etcd v3.3.22+incompatible // indirect
 	github.com/coreos/go-iptables v0.4.5
 	github.com/coreos/go-semver v0.3.0 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/streadway/amqp v1.0.0
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20200706210250-5e988f5b52e1
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20200813134846-9d2c3f377457
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 	golang.org/x/sys v0.0.0-20200327173247-9dae0f8f5775
 )
