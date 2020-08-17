@@ -52,7 +52,6 @@ import (
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
 	"aos_servicemanager/resourcemanager"
-	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -61,6 +60,8 @@ import (
 
 // Generates test image with python script
 type pythonImage struct {
+	serviceID string
+	version   int
 }
 
 // Generates test image with iperf server
@@ -469,8 +470,9 @@ func TestErrors(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	sender := newTestSender()
+	imageDownloader := new(pythonImage)
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, networkProvider)
+	launcher, err := newTestLauncher(imageDownloader, sender, nil, networkProvider)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -491,6 +493,8 @@ func TestUpdate(t *testing.T) {
 	}
 	defer serverConn.Close()
 
+	imageDownloader.version = 0
+	imageDownloader.serviceID = "service0"
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
 
 	if status := <-sender.statusChannel; status.Error != "" {
@@ -514,6 +518,7 @@ func TestUpdate(t *testing.T) {
 		}
 	}
 
+	imageDownloader.version = 1
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1}, chains, certs)
 
 	if status := <-sender.statusChannel; status.Error != "" {
@@ -1550,18 +1555,17 @@ func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTL: 30}, new(fakeFcrypt),
+		DefaultServiceTTL: 30}, downloader,
 		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
 	if err != nil {
 		return nil, err
 	}
 
-	launcher.downloader = downloader
-
 	return launcher, err
 }
 
-func (downloader pythonImage) downloadService(serviceInfo serviceInfoToInstall, crypt utils.FcryptInterface) (outputFile string, err error) {
+func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -1599,8 +1603,8 @@ func (downloader pythonImage) downloadService(serviceInfo serviceInfoToInstall, 
 
 	ociImgSpec := imagespec.Image{}
 	ociImgSpec.OS = "Linux"
-	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", serviceInfo.serviceDetails.ID,
-		fmt.Sprintf("%d", serviceInfo.serviceDetails.Version)}
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", downloader.serviceID,
+		fmt.Sprintf("%d", downloader.version)}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
@@ -1630,7 +1634,8 @@ func (downloader pythonImage) downloadService(serviceInfo serviceInfoToInstall, 
 	return outputFile, nil
 }
 
-func (downloader iperfImage) downloadService(serviceInfo serviceInfoToInstall, crypt utils.FcryptInterface) (outputFile string, err error) {
+func (downloader iperfImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -1698,7 +1703,8 @@ func (downloader iperfImage) downloadService(serviceInfo serviceInfoToInstall, c
 	return outputFile, nil
 }
 
-func (downloader ftpImage) downloadService(serviceInfo serviceInfoToInstall, crypt utils.FcryptInterface) (outputFile string, err error) {
+func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -1746,8 +1752,7 @@ func (downloader ftpImage) downloadService(serviceInfo serviceInfoToInstall, cry
 
 	ociImgSpec := imagespec.Image{}
 	ociImgSpec.OS = "Linux"
-	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", serviceInfo.serviceDetails.ID,
-		fmt.Sprintf("%d", serviceInfo.serviceDetails.Version)}
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py"}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {

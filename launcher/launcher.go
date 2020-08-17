@@ -133,7 +133,6 @@ type Launcher struct {
 	// NewStateChannel used to notify about new service state
 	NewStateChannel chan NewState
 
-	crypt           utils.FcryptInterface
 	sender          Sender
 	serviceProvider ServiceProvider
 	monitor         ServiceMonitor
@@ -260,7 +259,8 @@ type ServiceState int
 type actionType int
 
 type downloader interface {
-	downloadService(serviceInfo serviceInfoToInstall, crypt utils.FcryptInterface) (outputFile string, err error)
+	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
 }
 
 type stateAcceptance struct {
@@ -284,13 +284,13 @@ type serviceInfoToInstall struct {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, crypt utils.FcryptInterface, sender Sender, serviceProvider ServiceProvider,
+func New(config *config.Config, downloader downloader, sender Sender, serviceProvider ServiceProvider,
 	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
 		config:          config,
-		crypt:           crypt,
+		downloader:      downloader,
 		sender:          sender,
 		serviceProvider: serviceProvider,
 		layerProvider:   layerProvider,
@@ -309,8 +309,6 @@ func New(config *config.Config, crypt utils.FcryptInterface, sender Sender, serv
 		launcher.NewStateChannel, sender); err != nil {
 		return nil, err
 	}
-
-	launcher.downloader = &imageHandler{}
 
 	// Check and create service dir
 	dir := path.Join(config.WorkingDir, serviceDir)
@@ -811,8 +809,23 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 	unpackDir, err := ioutil.TempDir("", "aos_")
 	defer os.RemoveAll(unpackDir)
 
+	decryptData := amqp.DecryptDataStruct{URLs: serviceInfo.serviceDetails.URLs,
+		Sha256:         serviceInfo.serviceDetails.Sha256,
+		Sha512:         serviceInfo.serviceDetails.Sha512,
+		Size:           serviceInfo.serviceDetails.Size,
+		DecryptionInfo: serviceInfo.serviceDetails.DecryptionInfo,
+		Signs:          serviceInfo.serviceDetails.Signs}
+
 	// download and unpack
-	if err = downloadAndUnpackImage(launcher.downloader, serviceInfo, unpackDir, launcher.crypt); err != nil {
+	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, serviceInfo.chains, serviceInfo.certs, "")
+	if image != "" {
+		defer os.Remove(image)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err = utils.UnpackTarImage(image, unpackDir); err != nil {
 		return err
 	}
 

@@ -35,6 +35,7 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
+	"aos_servicemanager/downloader"
 	"aos_servicemanager/fcrypt"
 	_ "aos_servicemanager/identification"
 	"aos_servicemanager/launcher"
@@ -70,6 +71,7 @@ type serviceManager struct {
 	cfg             *config.Config
 	crypt           *fcrypt.CryptoContext
 	db              *database.Database
+	downloader      *downloader.Downloader
 	identifier      pluginprovider.Identifier
 	launcher        *launcher.Launcher
 	resourcemanager *resource.ResourceManager
@@ -188,6 +190,10 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	sm.um.SetCryptoContext(sm.crypt)
 	sm.amqp.SetCryptoContext(sm.crypt)
 
+	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt); err != nil {
+		return sm, err
+	}
+
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
@@ -221,7 +227,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.crypt, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager); err != nil {
 		return sm, err
 	}
 
@@ -283,6 +289,10 @@ func (sm *serviceManager) close() {
 	// Close DB
 	if sm.db != nil {
 		sm.db.Close()
+	}
+
+	if sm.downloader != nil {
+		sm.downloader.Close()
 	}
 }
 

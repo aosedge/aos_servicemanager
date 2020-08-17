@@ -111,25 +111,6 @@ func (handler *imageHandler) downloadService(serviceInfo serviceInfoToInstall,
 	return outputFile, nil
 }
 
-func downloadAndUnpackImage(downloader downloader, serviceInfo serviceInfoToInstall,
-	installDir string, crypt utils.FcryptInterface) (err error) {
-	// download image
-	image, err := downloader.downloadService(serviceInfo, crypt)
-	if image != "" {
-		defer os.Remove(image)
-	}
-	if err != nil {
-		return err
-	}
-
-	// unpack image there
-	if err = utils.UnpackTarImage(image, installDir); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func validateUnpackedImage(installDir string) (err error) {
 	manifest, err := getImageManifest(installDir)
 	if err != nil {
