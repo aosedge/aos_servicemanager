@@ -217,7 +217,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.crypt, sm.db, sm.amqp); err != nil {
+	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.downloader, sm.db, sm.amqp); err != nil {
 		return sm, err
 	}
 

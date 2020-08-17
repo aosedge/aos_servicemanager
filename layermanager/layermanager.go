@@ -37,9 +37,7 @@ import (
  * Consts
  ******************************************************************************/
 const (
-	decryptDirName     = "decrypt"
 	extractDirName     = "extract"
-	downloadDirName    = "download"
 	layerOCIDescriptor = "layer.json"
 )
 
@@ -50,9 +48,9 @@ const (
 // LayerManager instance
 type LayerManager struct {
 	layersDir         string
-	crypt             utils.FcryptInterface
 	layerInfoProvider LayerInfoProvider
-	downloadDir       string
+	extractDir        string
+	downloader        downloader
 	layersToRemove    []amqp.LayerInfo
 	statusSender      LayerStatusSender
 }
@@ -70,17 +68,26 @@ type LayerStatusSender interface {
 	SendLayerStatus(serviceStatus amqp.LayerInfo) (err error)
 }
 
+type downloader interface {
+	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new launcher object
-func New(layersStorageDir string, fcrypt utils.FcryptInterface, infoProvider LayerInfoProvider,
+func New(layersStorageDir string, downloader downloader, infoProvider LayerInfoProvider,
 	sender LayerStatusSender) (layermanager *LayerManager, err error) {
-	layermanager = &LayerManager{layersDir: layersStorageDir, crypt: fcrypt, layerInfoProvider: infoProvider,
-		downloadDir: path.Join(layersStorageDir, downloadDirName), statusSender: sender}
+	layermanager = &LayerManager{
+		layersDir:         layersStorageDir,
+		downloader:        downloader,
+		layerInfoProvider: infoProvider,
+		extractDir:        path.Join(layersStorageDir, extractDirName),
+		statusSender:      sender}
 
-	if err := os.MkdirAll(layermanager.downloadDir, 0755); err != nil {
+	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
 		return nil, err
 	}
 
@@ -228,40 +235,13 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 
 	layerInfo := amqp.LayerInfo{Digest: desiredLayer.Digest, LayerID: desiredLayer.LayerID, Status: "error"}
 
-	fileName, err := utils.DownloadImage(decryptData, layermanager.downloadDir)
+	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
 	if err != nil {
-		err = fmt.Errorf("can't download layer: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
-	}
-	defer os.RemoveAll(fileName)
-
-	if err = utils.CheckFile(fileName, decryptData); err != nil {
-		err = fmt.Errorf("check layer checksums error: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
-	}
-
-	decryptDir := path.Join(layermanager.downloadDir, decryptDirName)
-	if err := os.MkdirAll(decryptDir, 0755); err != nil {
-		return layerInfo, err
-	}
-
-	destinationFile := path.Join(decryptDir, filepath.Base(fileName))
-	if err = utils.DecryptImage(fileName, destinationFile, layermanager.crypt, decryptData.DecryptionInfo); err != nil {
-		err = fmt.Errorf("decrypt layer error: %s", err.Error())
-		layerInfo.Error = err.Error()
 		return layerInfo, err
 	}
 	defer os.RemoveAll(destinationFile)
 
-	if err = utils.CheckSigns(destinationFile, layermanager.crypt, decryptData.Signs, chains, certs); err != nil {
-		err = fmt.Errorf("check layer signature error: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
-	}
-
-	unpackDir := path.Join(layermanager.downloadDir, extractDirName, filepath.Base(fileName))
+	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
 	if err = utils.UnpackTarImage(destinationFile, unpackDir); err != nil {
 		err = fmt.Errorf("extract layer package from archive error: %s", err.Error())
 		layerInfo.Error = err.Error()

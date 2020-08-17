@@ -22,10 +22,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -35,7 +35,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/database"
-	"aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************
@@ -48,17 +47,10 @@ const tmpServerDir = "/tmp/aos/layerserver"
 /*******************************************************************************
  * Types
  ******************************************************************************/
-
-type fakeFcrypt struct {
-}
-
-type fakeSymmetricContext struct {
-}
-
-type fakeSignContext struct {
-}
-
 type fakeLayerSender struct {
+}
+
+type layerDownloader struct {
 }
 
 /*******************************************************************************
@@ -105,7 +97,7 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestInstallRemovelLayer(t *testing.T) {
+func TestInstallRemoveLayer(t *testing.T) {
 	layerDir := path.Join(tmpDir, "layerdir1")
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		log.Fatalf("Can't create folder: %s", err)
@@ -228,42 +220,18 @@ func TestLayerConsistencyCheck(t *testing.T) {
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-
-func (crypt fakeFcrypt) ImportSessionKey(keyInfo fcrypt.CryptoSessionKeyInfo) (fcrypt.SymmetricContextInterface, error) {
-	return new(fakeSymmetricContext), nil
-}
-
-func (crypt fakeFcrypt) CreateSignContext() (fcrypt.SignContextInterface, error) {
-	return new(fakeSignContext), nil
-}
-
-func (symCont fakeSymmetricContext) DecryptFile(encryptedFile, clearFile *os.File) (err error) {
-	data, err := ioutil.ReadFile(encryptedFile.Name())
-	if err != nil {
-		return err
-	}
-
-	if _, err = clearFile.Write(data); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (sigCont fakeSignContext) AddCertificate(fingerprint string, asn1Bytes []byte) (err error) {
-	return nil
-}
-
-func (sigCont fakeSignContext) AddCertificateChain(name string, fingerprints []string) (err error) {
-	return nil
-}
-
-func (sigCont fakeSignContext) VerifySign(f *os.File, chainName string, algName string, signValue []byte) (err error) {
-	return nil
-}
-
 func (sender fakeLayerSender) SendLayerStatus(serviceStatus amqp.LayerInfo) (err error) {
 	return nil
+}
+
+func (downloader *layerDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
+	srcFile := packageInfo.URLs[0]
+
+	cpCmd := exec.Command("cp", srcFile, tmpDir)
+	err = cpCmd.Run()
+
+	return path.Join(tmpDir, filepath.Base(srcFile)), err
 }
 
 /*******************************************************************************
@@ -275,10 +243,6 @@ func setup() (err error) {
 		return err
 	}
 
-	go func() {
-		log.Fatal(http.ListenAndServe(":8080", http.FileServer(http.Dir(tmpServerDir))))
-	}()
-
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return err
 	}
@@ -288,7 +252,7 @@ func setup() (err error) {
 		log.Fatalf("Can't create database: %s", err)
 	}
 
-	layerMgr, err = New(path.Join(tmpDir, "layerStorage"), new(fakeFcrypt), db, new(fakeLayerSender))
+	layerMgr, err = New(path.Join(tmpDir, "layerStorage"), new(layerDownloader), db, new(fakeLayerSender))
 	if err != nil {
 		log.Fatalf("Can't layer manager: %s", err)
 	}
@@ -389,10 +353,11 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 
 func generateLayerFromCloud(layerFile, layerID, digest string) (layerInfo amqp.LayerInfoFromCloud) {
 	layerInfo.LayerID = layerID
-	layerInfo.URLs = []string{"http://localhost:8080/" + layerFile}
 	layerInfo.Digest = digest
 
 	filePath := path.Join(tmpServerDir, layerFile)
+	layerInfo.URLs = []string{filePath}
+
 	imageFileInfo, err := image.CreateFileInfo(filePath)
 	if err != nil {
 		log.Error("error CreateFileInfo", err)
