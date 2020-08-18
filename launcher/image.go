@@ -22,7 +22,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -32,9 +31,6 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
-
-	amqp "aos_servicemanager/amqphandler"
-	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -61,55 +57,6 @@ type imageParts struct {
 /*******************************************************************************
  * Private
  ******************************************************************************/
-
-func (handler *imageHandler) downloadService(serviceInfo serviceInfoToInstall,
-	crypt utils.FcryptInterface) (outputFile string, err error) {
-	decryptData := amqp.DecryptDataStruct{URLs: serviceInfo.serviceDetails.URLs,
-		Sha256:         serviceInfo.serviceDetails.Sha256,
-		Sha512:         serviceInfo.serviceDetails.Sha512,
-		Size:           serviceInfo.serviceDetails.Size,
-		DecryptionInfo: serviceInfo.serviceDetails.DecryptionInfo,
-		Signs:          serviceInfo.serviceDetails.Signs}
-
-	destDir, err := ioutil.TempDir("", "aos_")
-	if err != nil {
-		log.Error("Can't create tmp dir : ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(destDir)
-
-	fileName, err := utils.DownloadImage(decryptData, destDir)
-	if err != nil {
-		log.Error("Can't download package: ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(fileName)
-
-	if err = utils.CheckFile(fileName, decryptData); err != nil {
-		err = fmt.Errorf("check service checksums error: %s", err.Error())
-		return outputFile, err
-	}
-
-	if err := os.MkdirAll(decryptDir, 0755); err != nil {
-		log.Error("Can't create tmp dir : ", err)
-		return outputFile, err
-	}
-
-	outputFile = path.Join(decryptDir, filepath.Base(fileName))
-	if err = utils.DecryptImage(fileName, outputFile, crypt, decryptData.DecryptionInfo); err != nil {
-		err = fmt.Errorf("decrypt service error: %s", err.Error())
-		return outputFile, err
-	}
-
-	if err = utils.CheckSigns(outputFile, crypt, decryptData.Signs, serviceInfo.chains, serviceInfo.certs); err != nil {
-		err = fmt.Errorf("check service signature error: %s", err.Error())
-		return outputFile, err
-	}
-
-	log.WithField("filename", outputFile).Debug("Decrypt image")
-
-	return outputFile, nil
-}
 
 func validateUnpackedImage(installDir string) (err error) {
 	manifest, err := getImageManifest(installDir)
