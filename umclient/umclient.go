@@ -35,7 +35,6 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/fcrypt"
-	"aos_servicemanager/utils"
 )
 
 /*******************************************************************************
@@ -63,13 +62,13 @@ type Client struct {
 	ErrorChannel chan error
 
 	sync.Mutex
-	crypt    *fcrypt.CryptoContext
-	sender   Sender
-	storage  Storage
-	wsClient *wsclient.Client
+	crypt      *fcrypt.CryptoContext
+	sender     Sender
+	storage    Storage
+	wsClient   *wsclient.Client
+	downloader downloader
 
-	downloadDir string
-	upgradeDir  string
+	upgradeDir string
 
 	imageVersion   uint64
 	upgradeState   int
@@ -95,6 +94,11 @@ type Storage interface {
 	GetUpgradeVersion() (version uint64, err error)
 }
 
+type downloader interface {
+	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -102,10 +106,13 @@ type Storage interface {
 // New creates new umclient
 func New(config *config.Config, sender Sender, storage Storage) (um *Client, err error) {
 	um = &Client{
-		sender:      sender,
-		storage:     storage,
-		downloadDir: path.Join(config.UpgradeDir, "downloads"),
-		upgradeDir:  config.UpgradeDir}
+		sender:     sender,
+		storage:    storage,
+		upgradeDir: config.UpgradeDir}
+
+	if err = os.MkdirAll(config.UpgradeDir, 0755); err != nil {
+		return nil, err
+	}
 
 	if um.wsClient, err = wsclient.New("UM", um.messageHandler); err != nil {
 		return nil, err
@@ -132,9 +139,9 @@ func New(config *config.Config, sender Sender, storage Storage) (um *Client, err
 	return um, nil
 }
 
-//SetCryptoContext set crypto conext for umclient
-func (um *Client) SetCryptoContext(crypt *fcrypt.CryptoContext) {
-	um.crypt = crypt
+//SetDownloader set downloader for umclient
+func (um *Client) SetDownloader(downloader downloader) {
+	um.downloader = downloader
 }
 
 // Connect connects to UM server
@@ -543,49 +550,28 @@ func (um *Client) downloadImage() {
 		DecryptionInfo: um.upgradeData.DecryptionInfo,
 		Signs:          um.upgradeData.Signs}
 
-	fileName, err := utils.DownloadImage(decryptData, um.downloadDir)
+	um.Unlock()
+	destinationFile, err := um.downloader.DownloadAndDecrypt(decryptData, um.upgradeData.CertificateChains,
+		um.upgradeData.Certificates, um.upgradeDir)
+	um.Lock()
 	if err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 
-	um.Unlock()
-	if err = utils.CheckFile(fileName, decryptData); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
-	um.Lock()
-
-	if um.upgradeData.DecryptionInfo == nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "no decryption info provided")
-		return
-	}
-
-	destinationFile := path.Join(um.upgradeDir, filepath.Base(fileName))
-	if err = utils.DecryptImage(fileName, destinationFile, um.crypt, um.upgradeData.DecryptionInfo); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
-
-	um.upgradeData.URLs = []string{filepath.Base(fileName)}
+	um.upgradeData.URLs = []string{filepath.Base(destinationFile)}
 
 	if err = um.storage.SetUpgradeData(um.upgradeData); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
 
-	if err = utils.CheckSigns(destinationFile,
-		um.crypt, um.upgradeData.Signs, um.upgradeData.CertificateChains, um.upgradeData.Certificates); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
+	um.upgradeState = stateUpgrading
 
 	if err = um.sendUpgradeRequest(); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
 		return
 	}
-
-	um.upgradeState = stateUpgrading
 
 	if err = um.storage.SetUpgradeState(um.upgradeState); err != nil {
 		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
@@ -598,7 +584,7 @@ func (um *Client) clearDirs() (err error) {
 		return err
 	}
 
-	if err = os.MkdirAll(um.downloadDir, 0755); err != nil {
+	if err = os.MkdirAll(um.upgradeDir, 0755); err != nil {
 		return err
 	}
 

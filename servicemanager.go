@@ -187,12 +187,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	sm.um.SetCryptoContext(sm.crypt)
-	sm.amqp.SetCryptoContext(sm.crypt)
-
 	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt); err != nil {
 		return sm, err
 	}
+
+	sm.um.SetDownloader(sm.downloader)
+	sm.amqp.SetCryptoContext(sm.crypt)
 
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
@@ -202,6 +202,14 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 			return sm, err
 		}
 	}
+
+	sm.amqp.SetCryptoContext(sm.crypt)
+
+	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt, sm.alerts); err != nil {
+		return sm, err
+	}
+
+	sm.um.SetDownloader(sm.downloader)
 
 	// Create network
 	if sm.network, err = networkmanager.New(cfg); err != nil {
