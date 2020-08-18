@@ -187,13 +187,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt); err != nil {
-		return sm, err
-	}
-
-	sm.um.SetDownloader(sm.downloader)
-	sm.amqp.SetCryptoContext(sm.crypt)
-
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
