@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"code.cloudfoundry.org/bytefmt"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
 
@@ -81,6 +82,15 @@ type Alerts struct {
 	cursor       string
 	ticker       *time.Ticker
 	closeChannel chan bool
+}
+
+// DownloadAlertStatus instance
+type DownloadAlertStatus struct {
+	Source          string
+	URL             string
+	Progress        int
+	DownloadedBytes uint64
+	TotalBytes      uint64
 }
 
 /*******************************************************************************
@@ -252,9 +262,79 @@ func (instance *Alerts) Fire(entry *log.Entry) (err error) {
 	return nil
 }
 
+// SendDownloadStartedStatusAlert sends download started status alert
+func (instance *Alerts) SendDownloadStartedStatusAlert(downloadStatus DownloadAlertStatus) {
+	message := "Download started"
+	payload := instance.prepareDownloadAlert(downloadStatus, message)
+
+	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+}
+
+// SendDownloadFinishedStatusAlert sends download finished status alert
+func (instance *Alerts) SendDownloadFinishedStatusAlert(downloadStatus DownloadAlertStatus, code int) {
+	message := "Download finished code: " + strconv.Itoa(code)
+	payload := instance.prepareDownloadAlert(downloadStatus, message)
+
+	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+}
+
+// SendDownloadInterruptedStatusAlert sends download interrupted status alert
+func (instance *Alerts) SendDownloadInterruptedStatusAlert(downloadStatus DownloadAlertStatus, reason string) {
+	message := "Download interrupted reason: " + reason
+	payload := instance.prepareDownloadAlert(downloadStatus, message)
+
+	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+}
+
+// SendDownloadResumedStatusAlert sends download resumed status alert
+func (instance *Alerts) SendDownloadResumedStatusAlert(downloadStatus DownloadAlertStatus, reason string) {
+	message := "Download resumed reason: " + reason
+	payload := instance.prepareDownloadAlert(downloadStatus, message)
+
+	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+}
+
+// SendDownloadStatusAlert sends download status alert
+func (instance *Alerts) SendDownloadStatusAlert(downloadStatus DownloadAlertStatus) {
+	message := "Download status"
+	payload := instance.prepareDownloadAlert(downloadStatus, message)
+
+	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (instance *Alerts) prepareDownloadAlert(downloadStatus DownloadAlertStatus, message string) amqp.DownloadAlert {
+	payload := amqp.DownloadAlert{
+		Message:         message,
+		Progress:        strconv.Itoa(downloadStatus.Progress) + "%",
+		URL:             downloadStatus.URL,
+		DownloadedBytes: bytefmt.ByteSize(downloadStatus.DownloadedBytes),
+		TotalBytes:      bytefmt.ByteSize(downloadStatus.TotalBytes)}
+
+	return payload
+}
+
+func (instance *Alerts) sendDownloadStatusAlertMessage(source string, payload amqp.DownloadAlert) {
+	time := time.Now()
+
+	log.WithFields(log.Fields{
+		"timestamp":       time,
+		"source":          source,
+		"download status": payload.Message,
+		"progress":        payload.Progress,
+		"url":             payload.URL,
+		"downloadedBytes": payload.DownloadedBytes,
+		"totalBytes":      payload.TotalBytes}).Debug(payload.Message)
+
+	instance.addAlert(amqp.AlertItem{
+		Timestamp: time,
+		Tag:       amqp.AlertTagAosCore,
+		Source:    source,
+		Payload:   payload})
+}
 
 func (instance *Alerts) setupJournal() (err error) {
 	if instance.journal, err = sdjournal.NewJournal(); err != nil {

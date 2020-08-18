@@ -225,6 +225,15 @@ type SystemAlert struct {
 	Message string `json:"message"`
 }
 
+// DownloadAlert download alert structure
+type DownloadAlert struct {
+	Message         string `json:"message"`
+	Progress        string `json:"progress"`
+	URL             string `json:"url"`
+	DownloadedBytes string `json:"downloadedBytes"`
+	TotalBytes      string `json:"totalBytes"`
+}
+
 // ResourceAlert resource alert structure
 type ResourceAlert struct {
 	Parameter string `json:"parameter"`
