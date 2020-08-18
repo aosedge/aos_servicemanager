@@ -20,15 +20,19 @@
 package downloader_test
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
+	"aos_servicemanager/alerts"
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/downloader"
@@ -51,6 +55,24 @@ type fakeSignContext struct {
 type fakeLayerSender struct {
 }
 
+//TestSender instance
+type TestSender struct {
+}
+
+type alertsCounter struct {
+	alertStarted     int
+	alertFinished    int
+	alertInterrupted int
+	alertResumed     int
+	alertStatus      int
+}
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const pythonServerScript = "start.py"
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -58,6 +80,8 @@ type fakeLayerSender struct {
 var downloaderObj *downloader.Downloader
 var serverDir string
 var workingDir string
+var testSender *TestSender
+var alertsCnt alertsCounter
 
 /*******************************************************************************
  * Init
@@ -84,7 +108,7 @@ func TestMain(m *testing.M) {
 
 	conf := config.Config{WorkingDir: workingDir}
 
-	downloaderObj, err = downloader.New(&conf, new(fakeFcrypt))
+	downloaderObj, err = downloader.New(&conf, new(fakeFcrypt), testSender)
 	if err != nil {
 		log.Fatalf("Error creation downloader: %s", err)
 	}
@@ -99,6 +123,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestDownload(t *testing.T) {
+	//Define alertsCnt with 0
+	alertsCnt = alertsCounter{}
 	sentData := []byte("Hello downloader\n")
 	fileName := "package.txt"
 
@@ -115,6 +141,71 @@ func TestDownload(t *testing.T) {
 		t.Errorf("Can't DownloadAndDecrypt %s", err)
 	}
 
+	if alertsCnt.alertStarted != 1 {
+		t.Error("DownloadStartedAlert was not received")
+	}
+
+	if alertsCnt.alertFinished != 1 {
+		t.Error("DownloadFinishedAlert was not received")
+	}
+}
+
+func TestInterruptResumeDownload(t *testing.T) {
+	//Define alertsCnt with 0
+	alertsCnt = alertsCounter{}
+	fileName := "bigPackage.txt"
+	filePath := path.Join(serverDir, fileName)
+	// Generate file with size 1Mb
+	if err := generateBigPackage(filePath, "1"); err != nil {
+		t.Errorf("Can't generate big file")
+	}
+	defer os.RemoveAll(filePath)
+
+	//Kill connection after 32 secs to receive status alert
+	go func() {
+		time.Sleep(32 * time.Second)
+		log.Debug("Kill connection")
+
+		if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
+			t.Errorf("Can't stop http server: %s", err)
+		}
+	}()
+
+	packageInfo := preparePackageInfo(fileName)
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+
+	_, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, "")
+	if err == nil {
+		t.Errorf("Error was expected DownloadAndDecrypt %s", err)
+	}
+
+	if alertsCnt.alertStarted != 1 {
+		t.Error("DownloadStartedAlert was not received")
+	}
+
+	if alertsCnt.alertStatus == 0 {
+		t.Error("DownloadStatusAlert was not received")
+	}
+
+	if alertsCnt.alertInterrupted != 1 {
+		t.Error("DownloadInterruptedAlert was not received")
+	}
+
+	time.Sleep(1 * time.Second)
+
+	_, err = downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, "")
+	if err != nil {
+		t.Errorf("Can't DownloadAndDecrypt %s", err)
+	}
+
+	if alertsCnt.alertResumed != 1 {
+		t.Error("DownloadResumedAlert was not received")
+	}
+
+	if alertsCnt.alertFinished != 1 {
+		t.Error("DownloadFinishedAlert was not received")
+	}
 }
 
 /*******************************************************************************
@@ -154,6 +245,42 @@ func (sigCont fakeSignContext) VerifySign(f *os.File, chainName string, algName 
 	return nil
 }
 
+func (instance *TestSender) SendDownloadStartedStatusAlert(downloadStatus alerts.DownloadAlertStatus) {
+	log.Debug("DownloadStartedAlert")
+	printDownloadAlertStatus(downloadStatus)
+	alertsCnt.alertStarted++
+}
+
+func (instance *TestSender) SendDownloadFinishedStatusAlert(downloadStatus alerts.DownloadAlertStatus, code int) {
+	log.Debugf("DownloadFinishedStatusAlert. code = %d", code)
+	printDownloadAlertStatus(downloadStatus)
+	alertsCnt.alertFinished++
+}
+
+func (instance *TestSender) SendDownloadInterruptedStatusAlert(downloadStatus alerts.DownloadAlertStatus, reason string) {
+	log.Debugf("DowloadInterruptedStatusAlert. reason = %s", reason)
+	printDownloadAlertStatus(downloadStatus)
+	alertsCnt.alertInterrupted++
+}
+
+func (instance *TestSender) SendDownloadResumedStatusAlert(downloadStatus alerts.DownloadAlertStatus, reason string) {
+	log.Debugf("DownloadResumedStatusAlert. reason = %s", reason)
+	printDownloadAlertStatus(downloadStatus)
+	alertsCnt.alertResumed++
+}
+
+func (instance *TestSender) SendDownloadStatusAlert(downloadStatus alerts.DownloadAlertStatus) {
+	log.Debug("DownloadStatusAlert")
+	printDownloadAlertStatus(downloadStatus)
+	alertsCnt.alertStatus++
+}
+
+func printDownloadAlertStatus(downloadStatus alerts.DownloadAlertStatus) {
+	log.Debugf("DownloadAlertStatus: source = %s, url = %s, progress = %d, downloadedBytes = %d, totalBytes = %d",
+		downloadStatus.Source, downloadStatus.URL, downloadStatus.Progress, downloadStatus.DownloadedBytes,
+		downloadStatus.TotalBytes)
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -164,19 +291,24 @@ func setup() (err error) {
 		return err
 	}
 
-	go func() {
-		log.Fatal(http.ListenAndServe(":8001", http.FileServer(http.Dir(serverDir))))
-	}()
-
 	workingDir, err = ioutil.TempDir("", "wd_")
 	if err != nil {
 		return err
 	}
 
+	if err = setWondershaperLimit("lo", "128"); err != nil {
+		return err
+	}
+
+	go func() {
+		log.Fatal(http.ListenAndServe(":8001", http.FileServer(http.Dir(serverDir))))
+	}()
+
 	return nil
 }
 
 func cleanup() (err error) {
+	clearWondershaperLimit("lo")
 	os.RemoveAll(workingDir)
 	os.RemoveAll(serverDir)
 
@@ -214,4 +346,30 @@ func preparePackageInfo(fileName string) (packageInfo amqp.DecryptDataStruct) {
 	packageInfo.Signs = new(amqp.Signs)
 
 	return packageInfo
+}
+
+func generateBigPackage(fileName string, sizeMb string) (err error) {
+	if output, err := exec.Command("dd", "if=/dev/zero", "of="+fileName, "bs=1M",
+		"count="+sizeMb).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
+}
+
+//Set traffic limit for interface
+func setWondershaperLimit(iface string, limit string) (err error) {
+	if output, err := exec.Command("wondershaper", "-a", iface, "-d", limit).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
+}
+
+func clearWondershaperLimit(iface string) (err error) {
+	if output, err := exec.Command("wondershaper", "-ca", iface).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
 }
