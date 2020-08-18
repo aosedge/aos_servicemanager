@@ -26,6 +26,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -482,6 +483,160 @@ func TestGetRequestResourceAlerts(t *testing.T) {
 
 			return false, nil
 		}); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+}
+
+func TestGetDowloadsStatusAlerts(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     2048,
+		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	type downloadAlert struct {
+		source          string
+		message         string
+		progress        string
+		url             string
+		downloadedBytes string
+		totalBytes      string
+	}
+
+	downloadStatus := alerts.DownloadAlertStatus{
+		Source:     "downloader",
+		URL:        "https://testurl",
+		TotalBytes: 157_286_400} // 150 MB in binary format
+
+	// send download started alert status
+	originAlert := downloadAlert{
+		source:          "downloader",
+		message:         "Download started",
+		progress:        "0%",
+		url:             downloadStatus.URL,
+		downloadedBytes: "0B",
+		totalBytes:      "150M"}
+
+	proccessAlertFunc := func(alert amqp.AlertItem) (success bool, err error) {
+		if alert.Tag != amqp.AlertTagAosCore {
+			return false, nil
+		}
+
+		receivedAlert, ok := (alert.Payload.(amqp.DownloadAlert))
+		if !ok {
+			return false, errors.New("wrong alert type")
+		}
+
+		receivedItem := downloadAlert{
+			source:          alert.Source,
+			message:         receivedAlert.Message,
+			progress:        receivedAlert.Progress,
+			url:             receivedAlert.URL,
+			downloadedBytes: receivedAlert.DownloadedBytes,
+			totalBytes:      receivedAlert.TotalBytes}
+
+		if receivedItem == originAlert {
+			return true, nil
+		}
+		return false, nil
+	}
+
+	alertsHandler.SendDownloadStartedStatusAlert(downloadStatus)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// send download interrupted alert status
+	reason := "problem with Internet connection"
+	downloadStatus.DownloadedBytes = 15_728_640 // 15 MB
+	downloadStatus.Progress = 10
+
+	originAlert = downloadAlert{
+		source:          "downloader",
+		message:         "Download interrupted reason: " + reason,
+		progress:        strconv.Itoa(downloadStatus.Progress) + "%",
+		url:             downloadStatus.URL,
+		downloadedBytes: "15M",
+		totalBytes:      "150M"}
+
+	alertsHandler.SendDownloadInterruptedStatusAlert(downloadStatus, reason)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// send download resume alert status
+	reason = "Internet connection has been fixed"
+	originAlert.message = "Download resumed reason: " + reason
+	alertsHandler.SendDownloadResumedStatusAlert(downloadStatus, reason)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// send status download alert
+	downloadStatus.DownloadedBytes = 31_457_280 // 30 MB
+	downloadStatus.Progress = 20
+
+	originAlert = downloadAlert{
+		source:          "downloader",
+		message:         "Download status",
+		progress:        strconv.Itoa(downloadStatus.Progress) + "%",
+		url:             downloadStatus.URL,
+		downloadedBytes: "30M",
+		totalBytes:      "150M"}
+
+	alertsHandler.SendDownloadStatusAlert(downloadStatus)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// send success download finished alert status
+	downloadCode := 200
+	downloadStatus.DownloadedBytes = 157_286_400 // 150 MB
+	downloadStatus.Progress = 100
+
+	originAlert = downloadAlert{
+		source:          "downloader",
+		message:         "Download finished code: " + strconv.Itoa(downloadCode),
+		progress:        strconv.Itoa(downloadStatus.Progress) + "%",
+		url:             downloadStatus.URL,
+		downloadedBytes: "150M",
+		totalBytes:      "150M"}
+
+	alertsHandler.SendDownloadFinishedStatusAlert(downloadStatus, downloadCode)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
+		t.Errorf("Result failed: %s", err)
+	}
+
+	// send failed download finished alert status
+	downloadCode = 301
+	downloadStatus.DownloadedBytes = 52_428_800 // 50 MB
+	downloadStatus.Progress = 50
+
+	originAlert = downloadAlert{
+		source:          "downloader",
+		message:         "Download finished code: " + strconv.Itoa(downloadCode),
+		progress:        strconv.Itoa(downloadStatus.Progress) + "%",
+		url:             downloadStatus.URL,
+		downloadedBytes: "50M",
+		totalBytes:      "150M"}
+
+	alertsHandler.SendDownloadFinishedStatusAlert(downloadStatus, downloadCode)
+
+	if err = waitResult(alertsHandler.AlertsChannel, 5*time.Second,
+		proccessAlertFunc); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
