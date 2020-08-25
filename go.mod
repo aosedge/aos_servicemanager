@@ -3,11 +3,13 @@ module aos_servicemanager
 go 1.14
 
 require (
+	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/Microsoft/hcsshim v0.8.9 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/cavaliercoder/grab v2.0.0+incompatible
+	github.com/cloudfoundry/bytefmt v0.0.0-20200131002437-cf55d5288a48 // indirect
 	github.com/coreos/etcd v3.3.22+incompatible // indirect
 	github.com/coreos/go-iptables v0.4.5
 	github.com/coreos/go-semver v0.3.0 // indirect
