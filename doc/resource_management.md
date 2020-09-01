@@ -142,74 +142,32 @@ Example:
 
 ### Network
 
-There is no mechanism to limit network usage. Network limits implemented on device side with different mechanisms. Limit values should be set under `annotations` item:
-* `com.epam.aos.network.uploadSpeed` - limits service upload speed in kbps
-* `com.epam.aos.network.downloadSpeed` - limits service download speed in kbps
-* `com.epam.aos.network.uploadLimit` - number of upload bytes per day
-* `com.epam.aos.network.downloadLimit` - number of download bytes per day
-
-For example:
-
+There is no mechanism to limit network usage. Network limits implemented on device side with different mechanisms. Limit values set in aos_service_config.json:
 ```json
-"annotations": {
-    "com.epam.aos.network.uploadSpeed": "2048",
-    "com.epam.aos.network.downloadSpeed": "2048",
-    "com.epam.aos.network.uploadLimit": "65536",
-    "com.epam.aos.network.downloadLimit": "65536",
+"quotas": {
+    ...       
+        "uploadSpeed": 2048,    // limits service upload speed in kbps
+        "downloadSpeed": 2048,  // limits service download speed in kbps
+        "uploadLimit": 65536,   // number of upload bytes per day
+        "downloadLimit": 65536, // number of download bytes per day
+    ...
 }
 ```
 
 ### Service disk size
 
-Service manager provides RW folder (local storage) to the service in order to store any persistent data. Each users on service has its own local storage. To limit maximum size of local storage allocated for all users, following parameter in `annotations`  section should be set:
-* `com.epam.aos.storage.limit` - maximum size of users local storages. If 0 or not present, then service has no local storage
+Service manager provides RW folder (local storage) to the service in order to store any persistent data. Each users on service has its own local storage. To limit maximum size of local storage allocated for all users, following parameter in aos_service_config.json `quotas`  section should be set:
+* `stateLimit` - maximum size of users local storages. If 0 or not present, then service has no local storage
   
-Also service manager provides special file with state info which is also stored inside local storage. The size of this file could be limited with following parameter in `annotaions`:
-* `com.epam.aos.state.limit` - maximum size of the state file. If 0 or not present, then service has no state file
+Also service manager provides special file with state info which is also stored inside local storage. The size of this file could be limited with following parameter in aos_service_config.json `quotas`:
+* `stateLimit` - maximum size of the state file. If 0 or not present, then service has no state file
 
 For example:
 
 ```json
-"annotations": {
-    "com.epam.aos.storage.limit": "65536",
-    "com.epam.aos.state.limit": "8192"
+ "quotas": {
+        "stateLimit": 65536,
+        "storageLimit": 1234,
+        "tmpLimit" : 1234
  }
 ```
-
-### System folders mount
-
-Service manager adds mounting of system folder and some system files during service install. The list of mounting system folders and files:
-
-| Dir                |Mode| Comments |
-|--------------------|----|-|
-| /bin               | RO | |
-| /sbin              | RO | |
-| /lib               | RO | |
-| /lib64             | RO | |
-| /usr               | RO | |
-| /tmp               | RW | |
-| /etc/ssl           | RO | |
-|                    |    | |
-| /etc/hosts         | RO | /etc/hosts will be mounted only if this file is missing in <working dir>/etc/hosts. It allows to have service configuration different from system.|
-| /etc/resolv.conf   | RO | Same as above |
-| /etc/nsswitch.conf | RO | Same as above |
-
-### /tmp folder
-
-Currently all services share host `tmp` folder. But it is not the right solution because some services may have same files in the `tmp`. To resolve this issue each service should have `tmp` folder allocated in the memory. We should specify default size (TBD) and set mount accordingly:
-
-```json
-"mounts": [
-    {
-        "destination": "/tmp",
-        "type": "tmpfs",
-        "source": "tmpfs",
-        "options": ["nosuid","strictatime","mode=755","size=65536k"]
-    }
-]
-```
-
-### /etc/ssl
-
-Currently we mount host’s `/etc/ssl` folder. But each service which requires this folder should have its own certificates (TBD).
-

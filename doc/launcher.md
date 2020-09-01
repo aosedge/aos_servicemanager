@@ -9,10 +9,10 @@ Launcher stands for following functionality:
 It uses external tools to manage AOS services:
 * `systemd` - start, stop, automatic restart of AOS services
 * `runc` - run services in separate containers
-* `netns` - provide network connection for service containers
+* `CNI` - provide network connection for service containers
 * `wondershaper` - limit service in/out traffic speed
 
-![](images/launcher.svg)
+![](images/launcher.png)
 
 ## User claim
 
@@ -24,16 +24,17 @@ All time consuming actions (currently install and remove service) are performed 
 
 Install service flowchart:
 
-![](images/install_service.svg)
+![](images/install_service.png)
 
 Do install actions:
 * create unique folder name in service directory (service folder)
 * download and unpack service image into service folder
 * create system service user (do not mixup with user claim)
-* update config.json
+* generate config.json
     * set UID, GUI of service user
     * mount system files and folders (see [resource management](doc/resource_management.md))
-    * set `netns` to the prestart hook (setup network)
+    * mount layer as overlayfs
+    * set `CNI` to the prestart hook (setup network)
     * create systemd service file
     * set disk user quota
     * start systemd service
