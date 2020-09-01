@@ -78,8 +78,42 @@ Resource configuration should be provided to **Unit** on [provisioning state](ht
 
 4. Update **Resource Configuration**
 
-This file should have update mechanism the same as certificates. It means that it should not involve update all *rootfs* but only one file.
-After updating of this *configuration* AOS services manager should be restarted for being able to process *all available resources* on startup and stop or remove incompatible services.
+Update of resource configuration file is done using SOTA/FOTA mechanism. After uploading updated configuration to cloud, the backend generates next update bundle:
+
+```text
+update_bundle.tar.gz
+├── metadata.json
+└── resource_config_update
+    ├── metadata.json
+    └── device_config.gz
+```
+
+Where top metadata.json
+
+```json
+{
+    "platformId": "AOS",
+    "bundleDescription": "Device resource configuration update",
+    "updateItems": [{
+        "type": "resourceconfig",
+        "path": "./resource_config_update"
+    }]
+}
+```
+
+Where top metadata.json inside resource_config_update:
+
+```json
+{
+    "componentType": "resourceconfig",
+    "resources": [{
+        "id": "deviceconfig",
+        "resource": "deviceConfig.gz"
+    }]
+}
+```
+
+After updating the configuration AOS services manager should be restarted for being able to process all available resources on startup and stop or remove incompatible services.
 
 ## Device Management
 
