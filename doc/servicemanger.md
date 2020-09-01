@@ -2,6 +2,7 @@
 
 AOS Service Manager contains following packages:
 * [config](doc/config.md) - provides configuration for all SM packages
+* [downloader](doc/downloader.md) - perform download of the aos services, layers, update packages
 * fcrypt - used by other packages to encrypt/decrypt data
 * [database](doc/database.md) - stores local services configuration description
 * [amqphandler](doc/amqphandler.md) - handles communication with IoT Gateway
