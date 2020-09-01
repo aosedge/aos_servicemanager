@@ -16,7 +16,7 @@ It uses external tools to manage AOS services:
 
 ## User claim
 
-On initialization, launcher gets current user claim from VIS and start all services connected with this claim. If user claim is changed during operation, launcher stops current claim services and starts services connected to new claim. For all user claims required the service, there is only one service instance in the system. If the backend installs service which already exists in the system but for new user claim, the service will not be installed but existing one will be started. When the backend removes service for current claim, it is not removed but stopped and disconnected from this claim.
+On initialization, launcher gets current user claim from Identifier plugin and start all services connected with this claim. If user claim is changed during operation, launcher stops current claim services and starts services connected to new claim. For all user claims required the service, there is only one service instance in the system. If the backend installs service which already exists in the system but for new user claim, the service will not be installed but existing one will be started. When the backend removes service for current claim, it is not removed but stopped and disconnected from this claim.
 
 ## Install service
 

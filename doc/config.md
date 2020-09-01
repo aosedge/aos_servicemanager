@@ -122,7 +122,7 @@ The configuration file has JSON format. Following is JSON schema:
                     "default": "00:00:10"
                 },
                 "maxOfflineMessages": {
-                    "description": "Indicates how many monitoring messages to keep when vehicle in offline",
+                    "description": "Indicates how many monitoring messages to keep when device in offline",
                     "type": "integer",
                     "minimum": 0,
                     "default": 25
@@ -193,7 +193,7 @@ The configuration file has JSON format. Following is JSON schema:
                     "default": 65536
                 },
                 "maxOfflineMessages": {
-                    "description": "Indicates how many alert messages to keep when vehicle in offline",
+                    "description": "Indicates how many alert messages to keep when device in offline",
                     "type": "integer",
                     "minimum": 0,
                     "default": 25

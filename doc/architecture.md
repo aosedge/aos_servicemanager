@@ -2,22 +2,19 @@
 
 ## Block diagram
 
-![](images/architecture.svg)
+![](images/architecture.png)
 
-Vehicle contains following AOS components:
+Devise contains following AOS components:
 * AOS Service Manager (SM):
     * communicate with cloud
     * handle services life cycle
-    * provides VIS permissions for VIS clients
     * downloads and validates system update image
-* AOS VIS (VIS):
-    * provides access to the vehicle data
 * AOS Update Manager (UM):
     * applies updates for different system components
 
-See [SM architecture](doc/servicemanager.md), [VIS architecture](), [UM architecture]() documents for more details. 
+See [SM architecture](doc/servicemanager.md), [UM architecture]() documents for more details. 
 
-On the vehicle side, SM interacts with VIS in order to get vehicle VIN and current Users. This is done through WSS protocol. SM receives notification from VIS when Users changed. When it happens SM reconnects to the cloud with new parameters. VIS is connected with SM through D-Bus to get VIS permissions for VIS clients.
+On the unit side, SM interacts with the Identifier plugin in order to get unit systemID and current Users.  SM receives notification from identifier when Users changed. When it happens SM reconnects to the cloud with new parameters.
 
 On the cloud side, SM communicates with:
 * Service Discovery - to get Getaway connection info
@@ -30,15 +27,15 @@ Startup sequence shows basic communication between different AOS parts:
 
 ```mermaid
 sequenceDiagram
-    participant VIS
+    participant Identifier
     participant SM as Service Manager
     participant Systemd
     participant SD as Service Discovery
     participant GW as Gateway
     participant CDN as Services CDN
 
-    SM ->>+ VIS: Get VIN, Users
-    VIS -->>- SM: VIN, Users
+    SM ->>+ Identifier: Get System ID, Users
+    Identifier -->>- SM: System ID, Users
     SM ->>+ SD: Discovery
     SD -->>- SM: IoT Gateway info
     SM ->>+ GW: Current service list

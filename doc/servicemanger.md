@@ -9,8 +9,6 @@ AOS Service Manager contains following packages:
 * [monitoring](doc/monitoring.md) - monitors system and AOS services resource usage
 * [alerts](doc/alerts.md) - sends different kind of alerts to the cloud
 * [logging](doc/logging.md) - provides systemd and services log to the cloud
-* [dbushandler](doc/dbushandler.md) - provides VIS client permissions
-* [visclient](doc/visclient.md) - provides access to VIS in order to get user claim and VIN
 * [umclient](doc/umclient.md) - downloads and validates the update image and communicates with the update manager (UM)
 
 ![](images/servicemanager.svg)
