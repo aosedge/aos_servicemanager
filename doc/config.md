@@ -36,39 +36,24 @@ The configuration file has JSON format. Following is JSON schema:
     "required": [
         "fcrypt",
         "serviceDiscovery",
-        "workingDir"
+        "workingDir",
+        "resourceConfigFile"
     ],
     "properties": {
         "fcrypt": {
             "description": "AOS Service manager crypt configuration",
             "type": "object",
             "required": [
-                "CACert",
-                "ClientCert",
-                "ClientKey",
-                "OfflinePrivKey",
-                "OfflineCert"
+                "CACert"
             ],
             "properties": {
                 "CACert": {
                     "description": "CA certificate",
                     "type": "string"
                 },
-                "ClientCert": {
+                "tpmDevice": {
                     "type": "string",
-                    "description": "Client certificate"
-                },
-                "ClientKey": {
-                    "type": "string",
-                    "description": "Client key"
-                },
-                "OfflinePrivKey": {
-                    "type": "string",
-                    "description": "Offline private key"
-                },
-                "OfflineCert": {
-                    "type": "string",
-                    "description": "Offline certificate"
+                    "description": " Path to TPM device on the system"
                 }
             }
         },
