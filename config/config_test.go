@@ -48,7 +48,7 @@ func createConfigFile() (err error) {
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"visServer" : "wss://localhost:8088",
 	"umServer" : "wss://localhost:8089",
-	"cmServer" : "wss://localhost:8090",
+	"cmServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
 		"sendPeriod": "00:05:00",
@@ -246,7 +246,7 @@ func TestGetCMServerURL(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.CMServerURL != "wss://localhost:8090" {
+	if config.CMServerURL != "localhost:8090" {
 		t.Errorf("Wrong CM server value: %s", config.CMServerURL)
 	}
 }
