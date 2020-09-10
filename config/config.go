@@ -95,6 +95,7 @@ type Config struct {
 	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
 	VISServerURL        string     `json:"visServer"`
 	UMServerURL         string     `json:"umServer"`
+	CMServerURL         string     `json:"cmServer"`
 	WorkingDir          string     `json:"workingDir"`
 	UpdateDir           string     `json:"updateDir"`
 	StorageDir          string     `json:"storageDir"`

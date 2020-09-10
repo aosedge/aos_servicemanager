@@ -35,6 +35,7 @@ The configuration file has JSON format. Following is JSON schema:
     "type": "object",
     "required": [
         "fcrypt",
+        "cmServer",
         "serviceDiscovery",
         "workingDir",
         "boardConfigFile"
@@ -86,6 +87,10 @@ The configuration file has JSON format. Following is JSON schema:
             "type": "integer",
             "minimum": 0,
             "default": 30
+        },
+        "cmServer": {
+            "description": "Host and port where CM is located",
+            "type": "string"
         },
         "monitoring": {
             "description": "Resource monitoring parameters",
