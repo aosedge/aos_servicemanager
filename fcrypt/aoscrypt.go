@@ -129,9 +129,9 @@ type RetrieveCertificateResponse struct {
 	KeyURL string
 }
 
-// CertificateProvider interface ti get certificate for SM
+// CertificateProvider interface to get certificate
 type CertificateProvider interface {
-	GetCertificateForSM(request RetrieveCertificateRequest) (resp RetrieveCertificateResponse, err error)
+	GetCertificate(certType string, issuer []byte, serial string) (certURL, ketURL string, err error)
 }
 
 /*******************************************************************************
@@ -178,12 +178,12 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 	cfg = &tls.Config{}
 	var cert tls.Certificate
 
-	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
+	certURLStr, keyURLStr, err := ctx.certProvider.GetCertificate(onlineCertificate, nil, "")
 	if err != nil {
 		return cfg, err
 	}
 
-	certURL, err := url.Parse(resp.CrtURL)
+	certURL, err := url.Parse(certURLStr)
 	if err != nil {
 		return cfg, err
 	}
@@ -197,7 +197,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return nil, err
 	}
 
-	keyURL, err := url.Parse(resp.KeyURL)
+	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
 		return cfg, err
 	}
@@ -279,14 +279,12 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		return nil, errors.New("asymmetric context not initialized")
 	}
 
-	resp, err := ctx.certProvider.GetCertificateForSM(RetrieveCertificateRequest{CertType: offlineCertificate,
-		Issuer: keyInfo.ReceiverInfo.Issuer,
-		Serial: keyInfo.ReceiverInfo.Serial})
+	_, keyURLStr, err := ctx.certProvider.GetCertificate(offlineCertificate, keyInfo.ReceiverInfo.Issuer, keyInfo.ReceiverInfo.Serial)
 	if err != nil {
 		return nil, err
 	}
 
-	keyURL, err := url.Parse(resp.KeyURL)
+	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
 		return nil, err
 	}
@@ -623,22 +621,17 @@ func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.P
 }
 
 func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key []byte, err error) {
-	request := RetrieveCertificateRequest{
-		CertType: offlineCertificate,
-		Serial:   fmt.Sprintf("%X", keyInfo.Rid.SerialNumber),
-	}
-
-	request.Issuer, err = asn1.Marshal(keyInfo.Rid.Issuer)
+	issuer, err := asn1.Marshal(keyInfo.Rid.Issuer)
 	if err != nil {
 		return key, err
 	}
 
-	resp, err := ctx.certProvider.GetCertificateForSM(request)
+	_, keyURLStr, err := ctx.certProvider.GetCertificate(offlineCertificate, issuer, fmt.Sprintf("%X", keyInfo.Rid.SerialNumber))
 	if err != nil {
 		return key, err
 	}
 
-	keyURL, err := url.Parse(resp.KeyURL)
+	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
 		return key, err
 	}

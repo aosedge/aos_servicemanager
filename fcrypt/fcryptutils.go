@@ -46,12 +46,12 @@ const (
 
 // GetCertificateOrganizations gives a list of certificate organizations
 func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
-	resp, err := provider.GetCertificateForSM(RetrieveCertificateRequest{CertType: onlineCertificate})
+	certURLStr, _, err := provider.GetCertificate(onlineCertificate, nil, "")
 	if err != nil {
 		return names, err
 	}
 
-	certURL, err := url.Parse(resp.CrtURL)
+	certURL, err := url.Parse(certURLStr)
 	if err != nil {
 		return names, err
 	}

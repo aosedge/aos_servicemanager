@@ -1074,10 +1074,6 @@ func TestGetCertificateOrganizations(t *testing.T) {
  * Private
  ******************************************************************************/
 
-func (provider *testCertificateProvider) GetCertificateForSM(request RetrieveCertificateRequest) (
-	resp RetrieveCertificateResponse, err error) {
-	resp.CrtURL = "file://" + provider.certPath
-	resp.KeyURL = "file://" + provider.keyPath
-
-	return resp, err
+func (provider *testCertificateProvider) GetCertificate(certType string, issuer []byte, serial string) (certURL, ketURL string, err error) {
+	return "file://" + provider.certPath, "file://" + provider.keyPath, nil
 }

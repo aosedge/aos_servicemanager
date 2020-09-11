@@ -34,6 +34,7 @@ import (
 
 	"aos_servicemanager/alerts"
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/cmclient"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/downloader"
@@ -75,6 +76,7 @@ type serviceManager struct {
 	monitor         *monitoring.Monitor
 	network         *networkmanager.NetworkManager
 	um              *umclient.Client
+	cm              *cmclient.Client
 	layerMgr        *layermanager.LayerManager
 
 	isDesiredStatusInProcessing bool
@@ -183,8 +185,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
+	if sm.cm, err = cmclient.New(cfg, sm.amqp, true); err != nil {
+		return sm, err
+	}
+
 	// Create crypto context
-	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.um); err != nil {
+	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.cm); err != nil {
 		return sm, err
 	}
 
@@ -369,7 +375,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 		sm.logging.GetServiceCrashLog(*data)
 
 	case *amqp.RenewCertificatesNotificationWithPwd:
-		log.Info("RenewCertificatesNotificationWithPwd")
+		log.Info("Receive renew certificates notification")
 
 		systemID, err := sm.identifier.GetSystemID()
 		if err != nil {
@@ -377,12 +383,16 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 			return err
 		}
 
-		sm.um.RenewCertificatesNotification(systemID, data.Password, data.Certificates)
+		if err = sm.cm.RenewCertificatesNotification(systemID, data.Password, data.Certificates); err != nil {
+			log.Errorf("Can't process renew certificates notification: %s", err)
+		}
 
 	case *amqp.IssuedUnitCertificates:
-		log.Info("IssuedUnitCertificates")
+		log.Info("Receive issued unit certificates")
 
-		sm.um.IssuedUnitCertificates(data.Certificates)
+		if err = sm.cm.InstallCertificates(data.Certificates); err != nil {
+			log.Errorf("Can't install certificates: %s", err)
+		}
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
@@ -569,7 +579,7 @@ func (sm *serviceManager) run() {
 		}
 
 		// Get organization names from certificate and use it as discovery URL
-		if orgNames, err = fcrypt.GetCertificateOrganizations(sm.um); err != nil {
+		if orgNames, err = fcrypt.GetCertificateOrganizations(sm.cm); err != nil {
 			log.Warningf("Organization name will be taken from config file: %s", err)
 		} else {
 			// We use the first member of organization list
