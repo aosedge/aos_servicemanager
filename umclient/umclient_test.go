@@ -37,7 +37,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/umclient"
 )
 
@@ -476,13 +475,4 @@ func createUpdateData(fileName string, content []byte) (data amqp.ComponentInfoF
 	}
 
 	return data, nil
-}
-
-func (provider testCertProvider) GetCertificateForSM(request fcrypt.RetrieveCertificateRequest) (
-	resp fcrypt.RetrieveCertificateResponse, err error) {
-
-	absPath, _ := filepath.Abs(provider.keyPath)
-	resp.KeyURL = "file://" + absPath
-
-	return resp, err
 }

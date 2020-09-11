@@ -116,19 +116,6 @@ type SignContext struct {
 	signCertificateChains []certificateChainInfo
 }
 
-// RetrieveCertificateRequest request to retrieve certificate
-type RetrieveCertificateRequest struct {
-	CertType string
-	Issuer   []byte
-	Serial   string
-}
-
-// RetrieveCertificateResponse recponce with certificate
-type RetrieveCertificateResponse struct {
-	CrtURL string
-	KeyURL string
-}
-
 // CertificateProvider interface to get certificate
 type CertificateProvider interface {
 	GetCertificate(certType string, issuer []byte, serial string) (certURL, ketURL string, err error)
