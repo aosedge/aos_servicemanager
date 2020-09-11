@@ -24,12 +24,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/docker/docker/pkg/reexec"
-	"github.com/docker/docker/pkg/stringid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
@@ -83,10 +80,6 @@ var tmpDir string
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	if reexec.Init() {
-		return
-	}
-
 	if err := setup(); err != nil {
 		log.Fatalf("Error setting up: %s", err)
 	}
@@ -537,10 +530,6 @@ func setup() (err error) {
 		return err
 	}
 
-	if err = networkManager.CreateNetwork("default"); err != nil {
-		return err
-	}
-
 	if err = createOCIContainer(path.Join(tmpDir, "service1"), "service1", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
 		return err
 	}
@@ -581,6 +570,10 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		return err
 	}
 
+	if err := addHostResolvFiles(imagePath); err != nil {
+		return err
+	}
+
 	var spec runtimespec.Spec
 
 	if err = json.Unmarshal(specJSON, &spec); err != nil {
@@ -591,6 +584,13 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	spec.Process.Args = args
 
+	for i, ns := range spec.Linux.Namespaces {
+		switch ns.Type {
+		case runtimespec.NetworkNamespace:
+			spec.Linux.Namespaces[i].Path = networkmanager.GetNetNsPathByName(containerID)
+		}
+	}
+
 	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
 		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
 			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
@@ -600,17 +600,6 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
 			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
 	}
-
-	spec.Hooks = new(runtimespec.Hooks)
-
-	spec.Hooks.Prestart = append(spec.Hooks.Poststart, runtimespec.Hook{
-		Path: path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"),
-		Args: []string{
-			"libnetwork-setkey",
-			"-exec-root=/run/aos",
-			containerID,
-			stringid.TruncateID(networkManager.GetID()),
-		}})
 
 	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
 	spec.Process.Capabilities.Effective = append(spec.Process.Capabilities.Effective, "CAP_NET_RAW")
@@ -629,9 +618,27 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	return nil
 }
 
+func addHostResolvFiles(pathToContainer string) (err error) {
+	etcPath := path.Join(pathToContainer, "etc")
+	if err := os.MkdirAll(etcPath, 0755); err != nil {
+		return err
+	}
+
+	hostsFilePath := path.Join(etcPath, "hosts")
+	if _, err := os.Create(hostsFilePath); err != nil {
+		return err
+	}
+
+	if err := networkManager.WriteResolveConfFile(path.Join(etcPath, "resolv.conf")); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func runContainerCmd(imagePath string, containerID string) (cmd *exec.Cmd, err error) {
-	if err = networkManager.AddServiceToNetwork(containerID, "default", imagePath,
-		networkmanager.NetworkParams{}); err != nil {
+
+	if err = networkManager.AddServiceToNetwork(containerID, "default"); err != nil {
 		return nil, err
 	}
 
