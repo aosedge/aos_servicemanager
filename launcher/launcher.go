@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
-	"github.com/docker/docker/pkg/stringid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -240,13 +239,12 @@ type Sender interface {
 
 // NetworkProvider provides network interface
 type NetworkProvider interface {
-	GetID() (id string)
-	CreateNetwork(spID string) (err error)
-	NetworkExists(spID string) (err error)
-	DeleteNetwork(spID string) (err error)
-	AddServiceToNetwork(serviceID, spID, servicePath string, params networkmanager.NetworkParams) (err error)
+	AddServiceToNetwork(serviceID, spID string) (err error)
 	RemoveServiceFromNetwork(serviceID, spID string) (err error)
 	GetServiceIP(serviceID, spID string) (ip string, err error)
+	DeleteNetwork(spID string) (err error)
+	WriteHostToHostsFile(pathToEtc string, extraHost config.Host) (err error)
+	WriteResolveConfFile(resolvCongPath string) (err error)
 }
 
 // DeviceManagement provides API to validate, request and release devices
@@ -1145,18 +1143,18 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 	}
 
 	if launcher.network != nil {
-		params := networkmanager.NetworkParams{Hostname: service.HostName}
-
-		if params.Hostname != "" {
-			params.Aliases = append(params.Aliases, params.Hostname)
-		}
-
-		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, service.Path, params); err != nil {
+		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider); err != nil {
 			return err
 		}
 
+		defer func() {
+			if err != nil {
+				launcher.network.RemoveServiceFromNetwork(service.ID, service.ServiceProvider)
+			}
+		}()
+
 		for _, networkFile := range networkFiles {
-			if err = spec.addBindMount(path.Join(service.Path, networkFile), networkFile, "ro"); err != nil {
+			if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
 				return err
 			}
 
@@ -1167,16 +1165,30 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 			file.Close()
 		}
 
-		if err = spec.createPrestartHook(path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"), []string{
-			"libnetwork-setkey",
-			"-exec-root=/run/aos",
-			service.ID,
-			stringid.TruncateID(launcher.network.GetID())}); err != nil {
+		if err := launcher.fillHostsFile(networkFiles[0], service); err != nil {
+			return err
+		}
+
+		pathToResolveConfFile := path.Join(service.Path, serviceMountPointsDir, networkFiles[1])
+		if err := launcher.network.WriteResolveConfFile(pathToResolveConfFile); err != nil {
 			return err
 		}
 
 		// TODO: set traffic speed
+	}
 
+	return nil
+}
+
+func (launcher *Launcher) fillHostsFile(pathHosts string, service Service) error {
+	ip, err := launcher.network.GetServiceIP(service.ID, service.ServiceProvider)
+	if err != nil {
+		return err
+	}
+	pathToEtcHost := path.Join(service.Path, serviceMountPointsDir, pathHosts)
+	serviceHost := config.Host{IP: ip, Hostname: service.HostName}
+	if err = launcher.network.WriteHostToHostsFile(pathToEtcHost, serviceHost); err != nil {
+		return err
 	}
 
 	return nil
@@ -1697,14 +1709,6 @@ func (launcher *Launcher) addService(service Service) (err error) {
 			launcher.removeService(service)
 		}
 	}()
-
-	if launcher.network != nil {
-		if err = launcher.network.NetworkExists(service.ServiceProvider); err != nil {
-			if err = launcher.network.CreateNetwork(service.ServiceProvider); err != nil {
-				return err
-			}
-		}
-	}
 
 	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
 		return err
