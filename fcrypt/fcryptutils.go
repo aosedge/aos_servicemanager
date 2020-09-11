@@ -96,7 +96,7 @@ func GetCrtSerialByURL(crtURL string) (serial string, err error) {
 
 	block, _ := pem.Decode(pemCrt)
 
-	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+	if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
 		return "", errors.New("invalid PEM Block")
 	}
 
