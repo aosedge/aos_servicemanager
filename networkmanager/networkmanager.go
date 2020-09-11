@@ -15,20 +15,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package launcher provides set of API to controls services lifecycle
+// Package networkmanager provides set of API to configure network
 
 package networkmanager
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net"
+	"os"
 	"path"
+	"sync"
 
-	"github.com/docker/libnetwork"
-	netconfig "github.com/docker/libnetwork/config"
-	"github.com/docker/libnetwork/netlabel"
-	"github.com/docker/libnetwork/options"
-	"github.com/docker/libnetwork/types"
+	cni "github.com/containernetworking/cni/libcni"
+	"github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/types/current"
+	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/allocator"
 	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netns"
 
 	"aos_servicemanager/config"
 )
@@ -38,12 +45,12 @@ import (
  ******************************************************************************/
 
 const (
-	typeBridge = "bridge"
-)
-
-const (
-	serviceHostsPath       = "/etc/hosts"
-	serviceResolveConfPath = "/etc/resolv.conf"
+	bridgePrefix     = "br-"
+	containerIfName  = "eth0"
+	pathToNetNs      = "/run/netns"
+	cniBinPath       = "/opt/cni/bin"
+	pathToCNINetwork = "/var/lib/cni/networks/"
+	cniVersion       = "0.4.0"
 )
 
 /*******************************************************************************
@@ -52,14 +59,43 @@ const (
 
 // NetworkManager network manager instance
 type NetworkManager struct {
-	controller libnetwork.NetworkController
-	hosts      []config.Host
+	cniConfig      *cni.CNIConfig
+	ipamSubnetwork *ipSubnetwork
+	hosts          []config.Host
+	sync.Mutex
 }
 
 // NetworkParams network parameters set for service
 type NetworkParams struct {
 	Hostname string
 	Aliases  []string
+}
+
+type cniPlugins struct {
+	Name       string        `json:"name"`
+	CNIVersion string        `json:"cniVersion"`
+	Plugins    []interface{} `json:"plugins"`
+}
+
+type bridgeNetConf struct {
+	Type         string               `json:"type"`
+	BrName       string               `json:"bridge"`
+	IsGW         bool                 `json:"isGateway"`
+	IsDefaultGW  bool                 `json:"isDefaultGateway,omitempty"`
+	ForceAddress bool                 `json:"forceAddress,omitempty"`
+	IPMasq       bool                 `json:"ipMasq"`
+	MTU          int                  `json:"mtu,omitempty"`
+	HairpinMode  bool                 `json:"hairpinMode"`
+	PromiscMode  bool                 `json:"promiscMode,omitempty"`
+	Vlan         int                  `json:"vlan,omitempty"`
+	IPAM         allocator.IPAMConfig `json:"ipam"`
+}
+
+type firewallNetConf struct {
+	Type                   string `json:"type"`
+	Backend                string `json:"backend"`
+	IptablesAdminChainName string `json:"iptablesAdminChainName,omitempty"`
+	FirewalldZone          string `json:"firewalldZone,omitempty"`
 }
 
 /*******************************************************************************
@@ -72,17 +108,8 @@ func New(cfg *config.Config) (manager *NetworkManager, err error) {
 
 	manager = &NetworkManager{hosts: cfg.Hosts}
 
-	manager.controller, err = libnetwork.New(
-		netconfig.OptionDriverConfig(
-			typeBridge, map[string]interface{}{
-				netlabel.GenericData: options.Generic{
-					"EnableIPForwarding": true,
-					"EnableIPTables":     true},
-			}),
-		netconfig.OptionDataDir(cfg.WorkingDir),
-		netconfig.OptionExecRoot("/run/aos"),
-	)
-	if err != nil {
+	manager.cniConfig = cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cfg.WorkingDir, nil)
+	if manager.ipamSubnetwork, err = newIPam(); err != nil {
 		return nil, err
 	}
 
@@ -96,194 +123,143 @@ func (manager *NetworkManager) Close() (err error) {
 	return nil
 }
 
-// GetID returns libnetwork controller id
-func (manager *NetworkManager) GetID() (id string) {
-	return manager.controller.ID()
-}
-
-// CreateNetwork creates SP network
-func (manager *NetworkManager) CreateNetwork(spID string) (err error) {
-	log.WithFields(log.Fields{"spID": spID}).Debug("Create network")
-
-	if err = manager.NetworkExists(spID); err == nil {
-		return fmt.Errorf("network %s exists", spID)
-	}
-
-	if _, err = manager.controller.NewNetwork(typeBridge, spID, ""); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// NetworkExists returns true if network exists
-func (manager *NetworkManager) NetworkExists(spID string) (err error) {
-	// Check if network exists
-	if _, err = manager.controller.NetworkByName(spID); err != nil {
-		return err
-	}
-
-	return nil
+// GetNetNsPathByName get path to service network namespace
+func GetNetNsPathByName(serviceID string) (pathToNetNS string) {
+	return path.Join(pathToNetNs, serviceID)
 }
 
 // DeleteNetwork deletes SP network
 func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 	log.WithFields(log.Fields{"spID": spID}).Debug("Delete network")
 
-	network, err := manager.controller.NetworkByName(spID)
-	if err != nil {
-		return err
-	}
-
-	for _, ep := range network.Endpoints() {
-		sandbox := ep.Info().Sandbox()
-
-		if sandbox != nil {
-			log.WithFields(log.Fields{"serviceID": sandbox.ContainerID(), "spID": network.Name()}).Debug("Service removed from network")
-
-			if leaveErr := ep.Leave(sandbox); leaveErr != nil {
-				if err == nil {
-					err = leaveErr
-				}
-			}
-		}
-
-		if len(sandbox.Endpoints()) == 0 {
-			if sandboxErr := sandbox.Delete(); sandboxErr != nil {
-				if err == nil {
-					err = sandboxErr
-				}
-			}
-		}
-
-		if epErr := ep.Delete(true); epErr != nil {
-			if err == nil {
-				err = epErr
-			}
-		}
-	}
-
-	if netErr := network.Delete(); netErr != nil {
-		if err == nil {
+	filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spID))
+	for _, serviceIDFile := range filesServiceID {
+		if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spID); netErr != nil {
 			err = netErr
 		}
 	}
 
-	return nil
+	if clearErr := manager.postSPNetworkClear(spID); clearErr != nil {
+		err = clearErr
+	}
+
+	return err
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID, servicePath string, params NetworkParams) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string) (err error) {
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
-	log.WithFields(log.Fields{"hostname": params.Hostname, "aliases": params.Aliases}).Debug("Network params")
 
-	network, err := manager.controller.NetworkByName(spID)
-	if err != nil {
+	manager.Lock()
+	defer manager.Unlock()
+
+	ipSubnet, exist := manager.ipamSubnetwork.tryToGetExistIPNetFromPool(spID)
+	if !exist {
+		if ipSubnet, err = checkExistNetInterface(bridgePrefix + spID); err != nil {
+			if ipSubnet, _, err = manager.ipamSubnetwork.requestIPNetPool(spID); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err = createNetNS(serviceID); err != nil {
 		return err
 	}
 
-	endpoint, err := network.EndpointByName(serviceID)
+	defer func() {
+		if err != nil && !exist {
+			manager.ipamSubnetwork.releaseIPNetPool(spID)
+		}
+	}()
+
+	netConfig := prepareNetworkConfigList(spID, ipSubnet)
+
+	runtimeConfig := &cni.RuntimeConf{
+		ContainerID: serviceID,
+		NetNS:       path.Join(pathToNetNs, serviceID),
+		IfName:      containerIfName,
+	}
+
+	ctx := context.Background()
+	err = manager.cniConfig.CheckNetworkList(ctx, netConfig, runtimeConfig)
 	if err == nil {
 		return fmt.Errorf("service %s already in SP network %s", serviceID, spID)
 	}
 
-	if _, ok := err.(types.NotFoundError); !ok {
-		return err
-	}
-
-	var endpointOptions []libnetwork.EndpointOption
-
-	for _, alias := range params.Aliases {
-		endpointOptions = append(endpointOptions, libnetwork.CreateOptionMyAlias(alias))
-	}
-
-	if endpoint, err = network.CreateEndpoint(serviceID, endpointOptions...); err != nil {
-		return err
-	}
-
-	sandbox, err := manager.controller.SandboxByID(serviceID)
+	resAdd, err := manager.cniConfig.AddNetworkList(ctx, netConfig, runtimeConfig)
 	if err != nil {
-		if _, ok := err.(types.NotFoundError); !ok {
-			return err
-		}
-
-		options := []libnetwork.SandboxOption{
-			libnetwork.OptionHostsPath(path.Join(servicePath, serviceHostsPath)),
-			libnetwork.OptionResolvConfPath(path.Join(servicePath, serviceResolveConfPath)),
-		}
-
-		for _, host := range manager.hosts {
-			options = append(options, libnetwork.OptionExtraHost(host.Hostname, host.IP))
-		}
-
-		if params.Hostname != "" {
-			options = append(options, libnetwork.OptionHostname(params.Hostname))
-		}
-
-		if sandbox, err = manager.controller.NewSandbox(serviceID, options...); err != nil {
-			return err
-		}
-	}
-
-	if err = endpoint.Join(sandbox); err != nil {
 		return err
 	}
+
+	result, _ := current.GetResult(resAdd)
+
+	if len(result.IPs) == 0 {
+		return fmt.Errorf("error getting IP address for service %s", serviceID)
+	}
+
+	log.WithFields(log.Fields{"serviceID": serviceID, "IP": result.IPs[0].Address.IP.String()}).Debug("The service has been added to the network")
 
 	return nil
 }
 
 // RemoveServiceFromNetwork removes service from network
 func (manager *NetworkManager) RemoveServiceFromNetwork(serviceID, spID string) (err error) {
-	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Remove service from network")
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service from network")
 
-	network, err := manager.controller.NetworkByName(spID)
+	defer netns.DeleteNamed(serviceID)
+
+	if result, _ := manager.IsServiceInNetwork(serviceID, spID); !result {
+		log.Warnf("Service %s is not in network %s", serviceID, spID)
+		return nil
+	}
+
+	manager.Lock()
+	defer manager.Unlock()
+
+	netConfigByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
 	if err != nil {
 		return err
 	}
 
-	endpoint, err := network.EndpointByName(serviceID)
+	netConfig, err := cni.ConfListFromBytes(netConfigByte)
 	if err != nil {
 		return err
 	}
 
-	sandbox := endpoint.Info().Sandbox()
+	ctx := context.Background()
 
-	if sandbox != nil {
-		if err = endpoint.Leave(sandbox); err != nil {
-			return err
-		}
-	}
-
-	if len(sandbox.Endpoints()) == 0 {
-		if err = sandbox.Delete(); err != nil {
-			return err
-		}
-	}
-
-	if err = endpoint.Delete(true); err != nil {
+	if err = manager.cniConfig.DelNetworkList(ctx, netConfig, runtimeConfig); err != nil {
 		return err
 	}
+
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Service successfully removed from network")
 
 	return nil
 }
 
 // IsServiceInNetwork returns true if service belongs to network
 func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (result bool, err error) {
-	network, err := manager.controller.NetworkByName(spID)
-	if err != nil {
-		if _, ok := err.(types.NotFoundError); !ok {
-			return false, err
-		}
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Check present service in network")
 
-		return false, nil
+	manager.Lock()
+	defer manager.Unlock()
+
+	resByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
+	if err != nil {
+		return false, err
 	}
 
-	if _, err = network.EndpointByName(serviceID); err != nil {
-		if _, ok := err.(types.NotFoundError); !ok {
-			return false, err
-		}
+	if resByte == nil {
+		return false, fmt.Errorf("Service is not in network")
+	}
 
-		return false, nil
+	netConfig, err := cni.ConfListFromBytes(resByte)
+
+	ctx := context.Background()
+	err = manager.cniConfig.CheckNetworkList(ctx, netConfig, runtimeConfig)
+
+	if err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -291,19 +267,31 @@ func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (resul
 
 // GetServiceIP return service IP address
 func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, err error) {
-	network, err := manager.controller.NetworkByName(spID)
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Get service IP")
+
+	manager.Lock()
+	defer manager.Unlock()
+
+	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
+
+	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(netConfig, runtimeConfig)
+
+	if err != nil || cachedResult == nil {
+		return "", err
+	}
+
+	result, err := current.GetResult(cachedResult)
 	if err != nil {
 		return "", err
 	}
 
-	endpoint, err := network.EndpointByName(serviceID)
-	if err != nil {
-		return "", err
+	if len(result.IPs) == 0 {
+		return "", fmt.Errorf("Error in getting the IP address for the service: %s", serviceID)
 	}
 
-	ip = endpoint.Info().Iface().Address().IP.String()
+	ip = result.IPs[0].Address.IP.String()
 
-	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID, "ip": ip}).Debug("Get service IP")
+	log.Debugf("IP address %s for service %s", ip, serviceID)
 
 	return ip, nil
 }
@@ -312,25 +300,169 @@ func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, 
 func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 	log.Debug("Delete all networks")
 
-	for _, network := range manager.controller.Networks() {
-		if netErr := manager.DeleteNetwork(network.Name()); netErr != nil {
-			log.Errorf("Can't delete %s network: %s", network.Name(), netErr)
+	filesSpID, _ := ioutil.ReadDir(pathToCNINetwork)
 
-			if err == nil {
+	for _, spIDFile := range filesSpID {
+		filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spIDFile.Name()))
+		for _, serviceIDFile := range filesServiceID {
+			if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spIDFile.Name()); netErr != nil {
 				err = netErr
 			}
 		}
+		if clearErr := manager.postSPNetworkClear(spIDFile.Name()); clearErr != nil {
+			err = clearErr
+		}
+	}
+	os.RemoveAll(pathToCNINetwork)
+
+	return err
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (manager *NetworkManager) postSPNetworkClear(spID string) (err error) {
+	manager.ipamSubnetwork.releaseIPNetPool(spID)
+
+	if err = removeBridgeInterface(spID); err != nil {
+		return err
 	}
 
-	for _, sandbox := range manager.controller.Sandboxes() {
-		if sandboxErr := sandbox.Delete(); sandboxErr != nil {
-			log.Errorf("Can't delete %s sandbox: %s", sandbox.ContainerID(), sandboxErr)
+	return nil
+}
 
-			if err == nil {
-				err = sandboxErr
-			}
+func (manager *NetworkManager) getCNICachedResult(serviceID, spID string) (cachedConfig []byte, runtimeConfig *cni.RuntimeConf, err error) {
+	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
+	cachedConfig, _, err = manager.cniConfig.GetNetworkListCachedConfig(netConfig, runtimeConfig)
+
+	return cachedConfig, runtimeConfig, err
+}
+
+func getRuntimeNetConfig(serviceID, spID string) (*cni.RuntimeConf, *cni.NetworkConfigList) {
+	runtimeConfig := &cni.RuntimeConf{
+		ContainerID: serviceID,
+		NetNS:       path.Join(pathToNetNs, serviceID),
+		IfName:      containerIfName,
+	}
+
+	networkingConfig := &cni.NetworkConfigList{
+		Name:       spID,
+		CNIVersion: cniVersion,
+	}
+
+	return runtimeConfig, networkingConfig
+}
+
+func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, spIDFileName string) error {
+	// skipped files
+	lockFileName := "lock"
+	reservedFileName := "last_reserved_ip.0"
+
+	if serviceIDFileName == reservedFileName || serviceIDFileName == lockFileName {
+		return nil
+	}
+
+	serviceID, err := readServiceIDFromFile(path.Join(pathToCNINetwork, spIDFileName, serviceIDFileName))
+	if err != nil {
+		return nil
+	}
+
+	if result, _ := manager.IsServiceInNetwork(serviceID, spIDFileName); result {
+		if netErr := manager.RemoveServiceFromNetwork(serviceID, spIDFileName); netErr != nil {
+			return netErr
 		}
 	}
 
-	return err
+	return nil
+}
+
+func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error) {
+	f, err := os.Open(pathToServiceID)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	var cniServiceInfo []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != containerIfName {
+			cniServiceInfo = append(cniServiceInfo, line)
+		}
+	}
+	if len(cniServiceInfo) != 1 {
+		return "", fmt.Errorf("incorrect file content. There should be a container ID and a network interface name")
+	}
+
+	return cniServiceInfo[0], nil
+}
+
+func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet) (cniNetworkConfig *cni.NetworkConfigList) {
+	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
+	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
+
+	configBridge := bridgeNetConf{
+		Type:        "bridge",
+		BrName:      bridgePrefix + nameService,
+		IsGW:        true,
+		IPMasq:      true,
+		HairpinMode: true,
+		IPAM: allocator.IPAMConfig{
+			Type: "host-local",
+			Range: &allocator.Range{
+				RangeStart: minIPRange,
+				RangeEnd:   maxIPRange,
+				Subnet:     types.IPNet(*subnetwork),
+			},
+			Routes: []*types.Route{
+				{
+					Dst: *defaultRoute,
+				},
+			},
+		},
+	}
+
+	firewall := firewallNetConf{
+		Type:    "firewall",
+		Backend: "iptables",
+	}
+
+	dataBridge, _ := json.Marshal(configBridge)
+	dataFirewall, _ := json.Marshal(firewall)
+
+	plugins := []*cni.NetworkConfig{
+		{
+			Network: &types.NetConf{
+				Type: configBridge.Type,
+				IPAM: types.IPAM{Type: configBridge.IPAM.Type},
+			},
+			Bytes: []byte(dataBridge),
+		},
+		{
+			Network: &types.NetConf{
+				Type: firewall.Type,
+			},
+			Bytes: []byte(dataFirewall),
+		},
+	}
+
+	networkPlugin := cniPlugins{
+		Name:       nameService,
+		CNIVersion: cniVersion,
+		Plugins: []interface{}{
+			configBridge,
+			firewall,
+		},
+	}
+
+	dataNetwork, _ := json.Marshal(networkPlugin)
+
+	return &cni.NetworkConfigList{
+		Name:       networkPlugin.Name,
+		CNIVersion: networkPlugin.CNIVersion,
+		Plugins:    plugins,
+		Bytes:      []byte(dataNetwork),
+	}
 }
