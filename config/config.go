@@ -36,6 +36,23 @@ type Crypt struct {
 	TpmDevice string `json:"tpmDevice,omitempty"`
 }
 
+// UmController configuration for update controller
+type UmController struct {
+	ServerURL     string           `json:"serverUrl"`
+	Cert          string           `json:"cert"`
+	Key           string           `json:"key"`
+	FileServerURL string           `json:"fileServerUrl,omitempty"`
+	UmClients     []UmClientConfig `json:"umClients"`
+	UpdateDir     string           `json:"updateDir"`
+}
+
+// UmClientConfig update manager config
+type UmClientConfig struct {
+	UmID     string `json:"umId"`
+	Priority uint32 `json:"priority"`
+	IsLocal  bool   `json:"isLocal,omitempty"`
+}
+
 // Duration represents duration in format "00:00:00"
 type Duration struct {
 	time.Duration
@@ -91,21 +108,22 @@ type Migration struct {
 
 // Config instance
 type Config struct {
-	Crypt               Crypt      `json:"fcrypt"`
-	ServiceDiscoveryURL string     `json:"serviceDiscovery"`
-	VISServerURL        string     `json:"visServer"`
-	UMServerURL         string     `json:"umServer"`
-	CMServerURL         string     `json:"cmServer"`
-	WorkingDir          string     `json:"workingDir"`
-	UpdateDir           string     `json:"updateDir"`
-	StorageDir          string     `json:"storageDir"`
-	LayersDir           string     `json:"layersDir"`
-	BoardConfigFile     string     `json:"boardConfigFile"`
-	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
-	UnitStatusTimeout   uint64     `json:"unitStatusTimeout"`
-	Monitoring          Monitoring `json:"monitoring"`
-	Logging             Logging    `json:"logging"`
-	Alerts              Alerts     `json:"alerts"`
+	Crypt               Crypt        `json:"fcrypt"`
+	ServiceDiscoveryURL string       `json:"serviceDiscovery"`
+	UmController        UmController `json:"umController"`
+	VISServerURL        string       `json:"visServer"`
+	UMServerURL         string       `json:"umServer"`
+	CMServerURL         string       `json:"cmServer"`
+	WorkingDir          string       `json:"workingDir"`
+	UpdateDir           string       `json:"updateDir"`
+	StorageDir          string       `json:"storageDir"`
+	LayersDir           string       `json:"layersDir"`
+	BoardConfigFile     string       `json:"boardConfigFile"`
+	DefaultServiceTTL   uint64       `json:"defaultServiceTTLDays"`
+	UnitStatusTimeout   uint64       `json:"unitStatusTimeout"`
+	Monitoring          Monitoring   `json:"monitoring"`
+	Logging             Logging      `json:"logging"`
+	Alerts              Alerts       `json:"alerts"`
 	Identifier          struct {
 		Type   string          `json:"type"`
 		Config json.RawMessage `json:"config"`
@@ -168,6 +186,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.Migration.MergedMigrationPath == "" {
 		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
+	}
+
+	if config.UmController.UpdateDir == "" {
+		config.UmController.UpdateDir = path.Join(config.WorkingDir, "update")
 	}
 
 	return config, nil

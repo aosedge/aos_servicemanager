@@ -47,6 +47,18 @@ func createConfigFile() (err error) {
 	"UpdateDir" : "/var/aos/update",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"visServer" : "wss://localhost:8088",
+	"umController": {
+        "serverUrl": "localhost:8091",
+        "cert": "/var/aos/crypt/sm/cert.pem",
+		"key": "/var/aos/crypt/sm/key.pem",
+		"fileServerUrl": "localhost:8092",
+		"umClients": [{
+			"umId": "um",
+			"priority": 0,
+			"isLocal": true
+		}],
+		"updateDir": "/var/aos/update"
+	},
 	"umServer" : "wss://localhost:8089",
 	"cmServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
@@ -415,15 +427,24 @@ func TestHosts(t *testing.T) {
 	}
 }
 
-func TestUnitStatusTimeout(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-
+func TestUmControllerConfig(t *testing.T) {
+	configObj, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.UnitStatusTimeout != 30 {
-		t.Errorf("Wrong UnitStatusTimeout 30!= %d", config.UnitStatusTimeout)
+	umClient := config.UmClientConfig{UmID: "um", Priority: 0, IsLocal: true}
+
+	originalConfig := config.UmController{ServerURL: "localhost:8091",
+		Cert:          "/var/aos/crypt/sm/cert.pem",
+		Key:           "/var/aos/crypt/sm/key.pem",
+		FileServerURL: "localhost:8092",
+		UmClients:     []config.UmClientConfig{umClient},
+		UpdateDir:     "/var/aos/update",
+	}
+
+	if !reflect.DeepEqual(originalConfig, configObj.UmController) {
+		t.Errorf("Wrong UmController configuration ")
 	}
 }
 
