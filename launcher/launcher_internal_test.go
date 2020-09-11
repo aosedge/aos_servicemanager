@@ -37,7 +37,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/pkg/reexec"
 	"github.com/jlaffaye/ftp"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -152,10 +151,6 @@ func init() {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	if reexec.Init() {
-		return
-	}
-
 	if err := setup(); err != nil {
 		log.Fatalf("Error setting up: %s", err)
 	}
@@ -1401,7 +1396,7 @@ func TestSpec(t *testing.T) {
 
 func TestSpecFromImageConfig(t *testing.T) {
 	configFilePath := path.Join(testDir, "config.json")
-	_, err := generateSpecFromImageConfig("no_file", configFilePath)
+	_, err := generateSpecFromImageConfig("no_file", configFilePath, "")
 	if err == nil {
 		t.Errorf("Should be error no such file or director")
 	}
@@ -1417,7 +1412,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	_, err = generateSpecFromImageConfig(configFile, configFilePath)
+	_, err = generateSpecFromImageConfig(configFile, configFilePath, "")
 	if err == nil {
 		t.Errorf("Should be error unsupported OS in image config")
 	}
@@ -1428,7 +1423,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	runtimeSpec, err := generateSpecFromImageConfig(configFile, configFilePath)
+	runtimeSpec, err := generateSpecFromImageConfig(configFile, configFilePath, "")
 	if err != nil {
 		t.Errorf("Error generating OCI runtime spec %s", err)
 	}
