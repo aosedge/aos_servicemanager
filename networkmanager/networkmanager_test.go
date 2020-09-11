@@ -25,12 +25,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 	"sync"
 	"testing"
 
-	"github.com/docker/docker/pkg/reexec"
-	"github.com/docker/docker/pkg/stringid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
@@ -63,10 +60,6 @@ func init() {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	if reexec.Init() {
-		return
-	}
-
 	if err := setup(); err != nil {
 		log.Fatalf("Error setting up: %s", err)
 	}
@@ -82,35 +75,14 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestCreateDeleteNetwork(t *testing.T) {
-	if err := manager.CreateNetwork("network0"); err != nil {
-		t.Fatalf("Can't create network: %s", err)
-	}
-
-	if err := manager.NetworkExists("network0"); err != nil {
-		t.Errorf("Network should exist: %s", err)
-	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
-
-	if err := manager.NetworkExists("network0"); err == nil {
-		t.Errorf("Network should not exist: %s", err)
-	}
-}
-
 func TestAddRemoveService(t *testing.T) {
-	if err := manager.CreateNetwork("network0"); err != nil {
-		t.Fatalf("Can't create network: %s", err)
-	}
-
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", tmpDir, networkmanager.NetworkParams{}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm0", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	if result, _ := manager.IsServiceInNetwork("servicenm0", "network0"); !result {
-		t.Error("Service should be in network")
+	result, err := manager.IsServiceInNetwork("servicenm0", "network0")
+	if err != nil && !result {
+		t.Errorf("Service should be in network %s", err)
 	}
 
 	if _, err := manager.GetServiceIP("servicenm0", "network0"); err != nil {
@@ -118,7 +90,7 @@ func TestAddRemoveService(t *testing.T) {
 	}
 
 	if err := manager.RemoveServiceFromNetwork("servicenm0", "network0"); err != nil {
-		t.Fatalf("Can't add service to network: %s", err)
+		t.Fatalf("Can't remove service from network: %s", err)
 	}
 
 	if result, _ := manager.IsServiceInNetwork("servicenm0", "network0"); result {
@@ -131,21 +103,17 @@ func TestAddRemoveService(t *testing.T) {
 }
 
 func TestInternet(t *testing.T) {
-	if err := manager.CreateNetwork("network0"); err != nil {
-		t.Fatalf("Can't create network: %s", err)
-	}
+	containerPath := path.Join(tmpDir, "servicenm1")
 
-	containerPath := path.Join(tmpDir, "servicenm0")
-
-	if err := createOCIContainer(containerPath, "servicenm0", []string{"ping", "google.com", "-c10", "-w10"}); err != nil {
+	if err := createOCIContainer(containerPath, "servicenm1", []string{"ping", "google.com", "-c10", "-w15"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", containerPath, networkmanager.NetworkParams{}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm1", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	if err := runOCIContainer(containerPath, "servicenm0"); err != nil {
+	if err := runOCIContainer(containerPath, "servicenm1"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
 
@@ -155,18 +123,13 @@ func TestInternet(t *testing.T) {
 }
 
 func TestInterServiceConnection(t *testing.T) {
-	if err := manager.CreateNetwork("network0"); err != nil {
-		t.Fatalf("Can't create network: %s", err)
-	}
+	container0Path := path.Join(tmpDir, "servicenm2")
 
-	container0Path := path.Join(tmpDir, "servicenm0")
-
-	if err := createOCIContainer(container0Path, "servicenm0", []string{"sleep", "12"}); err != nil {
+	if err := createOCIContainer(container0Path, "servicenm2", []string{"sleep", "12"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", container0Path,
-		networkmanager.NetworkParams{Aliases: []string{"myservicenm0"}}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm2", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -177,23 +140,33 @@ func TestInterServiceConnection(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		if err := runOCIContainer(container0Path, "servicenm0"); err != nil {
+		if err := runOCIContainer(container0Path, "servicenm2"); err != nil {
 			t.Errorf("Error: %s", err)
 		}
 	}()
 
-	container1Path := path.Join(tmpDir, "servicenm1")
+	container1Path := path.Join(tmpDir, "servicenm3")
 
-	if err := createOCIContainer(container1Path, "servicenm1", []string{"ping", "myservicenm0", "-c10", "-w10"}); err != nil {
+	if err := createOCIContainer(container1Path, "servicenm3", []string{"ping", "myservicenm0", "-c10", "-w15"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm1", "network0", container1Path,
-		networkmanager.NetworkParams{Aliases: []string{"myservicenm1"}}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm3", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	if err := runOCIContainer(container1Path, "servicenm1"); err != nil {
+	ip, err := manager.GetServiceIP("servicenm3", "network0")
+	if err != nil {
+		t.Fatalf("Can't get ip address from service: %s", err)
+	}
+
+	hostsFilePath := path.Join(container1Path, "etc", "hosts")
+	serviceHost := config.Host{IP: ip, Hostname: "myservicenm0"}
+	if err := manager.WriteHostToHostsFile(hostsFilePath, serviceHost); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	if err := runOCIContainer(container1Path, "servicenm3"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
 
@@ -205,22 +178,28 @@ func TestInterServiceConnection(t *testing.T) {
 }
 
 func TestHostName(t *testing.T) {
-	if err := manager.CreateNetwork("network0"); err != nil {
-		t.Fatalf("Can't create network: %s", err)
-	}
+	container0Path := path.Join(tmpDir, "servicenm4")
 
-	container0Path := path.Join(tmpDir, "servicenm0")
-
-	if err := createOCIContainer(container0Path, "servicenm0", []string{"ping", "myhost", "-c10", "-w10"}); err != nil {
+	if err := createOCIContainer(container0Path, "servicenm4", []string{"ping", "myhost", "-c10", "-w15"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", container0Path,
-		networkmanager.NetworkParams{Hostname: "myhost"}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm4", "network0"); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	if err := runOCIContainer(container0Path, "servicenm0"); err != nil {
+	ip, err := manager.GetServiceIP("servicenm4", "network0")
+	if err != nil {
+		t.Fatalf("Can't get ip address from service: %s", err)
+	}
+
+	hostsFilePath := path.Join(container0Path, "etc", "hosts")
+	serviceHost := config.Host{IP: ip, Hostname: "myhost"}
+	if err := manager.WriteHostToHostsFile(hostsFilePath, serviceHost); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	if err := runOCIContainer(container0Path, "servicenm4"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
 
@@ -275,6 +254,10 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		return errors.New(string(out))
 	}
 
+	if err := addHostResolvFiles(imagePath); err != nil {
+		return err
+	}
+
 	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
 	if err != nil {
 		return err
@@ -290,6 +273,13 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	spec.Process.Args = args
 
+	for i, ns := range spec.Linux.Namespaces {
+		switch ns.Type {
+		case runtimespec.NetworkNamespace:
+			spec.Linux.Namespaces[i].Path = networkmanager.GetNetNsPathByName(containerID)
+		}
+	}
+
 	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc/nsswitch.conf"} {
 		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
 			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
@@ -299,17 +289,6 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
 			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
 	}
-
-	spec.Hooks = new(runtimespec.Hooks)
-
-	spec.Hooks.Prestart = append(spec.Hooks.Poststart, runtimespec.Hook{
-		Path: path.Join("/proc", strconv.Itoa(os.Getpid()), "exe"),
-		Args: []string{
-			"libnetwork-setkey",
-			"-exec-root=/run/aos",
-			containerID,
-			stringid.TruncateID(manager.GetID()),
-		}})
 
 	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
 	spec.Process.Capabilities.Effective = append(spec.Process.Capabilities.Effective, "CAP_NET_RAW")
@@ -332,6 +311,24 @@ func runOCIContainer(imagePath string, containerID string) (err error) {
 	output, err := exec.Command("runc", "run", "-b", imagePath, containerID).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("message: %s, err: %s", string(output), err)
+	}
+
+	return nil
+}
+
+func addHostResolvFiles(pathToContainer string) (err error) {
+	etcPath := path.Join(pathToContainer, "etc")
+	if err = os.MkdirAll(etcPath, 0755); err != nil {
+		return err
+	}
+
+	hostsFilePath := path.Join(etcPath, "hosts")
+	if _, err := os.Create(hostsFilePath); err != nil {
+		return err
+	}
+
+	if err = manager.WriteResolveConfFile(path.Join(etcPath, "resolv.conf")); err != nil {
+		return err
 	}
 
 	return nil
