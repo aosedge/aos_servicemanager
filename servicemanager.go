@@ -30,7 +30,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/pkg/reexec"
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/alerts"
@@ -634,11 +633,6 @@ func (sm *serviceManager) run() {
  ******************************************************************************/
 
 func main() {
-	// This is network manager reexec initialization
-	if reexec.Init() {
-		return
-	}
-
 	// Initialize command line flags
 	configFile := flag.String("c", "aos_servicemanager.cfg", "path to config file")
 	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
