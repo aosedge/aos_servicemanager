@@ -132,7 +132,7 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 	return spec, nil
 }
 
-func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string) (spec *serviceSpec, err error) {
+func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec, netNsPath string) (spec *serviceSpec, err error) {
 	var imageConfig imagespec.Image
 
 	if err = getJSONFromFile(fileImagConfigPath, &imageConfig); err != nil {
@@ -157,6 +157,15 @@ func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec string)
 	spec.ocSpec.Process.Cwd = imageConfig.Config.WorkingDir
 	if spec.ocSpec.Process.Cwd == "" {
 		spec.ocSpec.Process.Cwd = "/"
+	}
+
+	if netNsPath != "" {
+		for i, ns := range spec.ocSpec.Linux.Namespaces {
+			switch ns.Type {
+			case runtimespec.NetworkNamespace:
+				spec.ocSpec.Linux.Namespaces[i].Path = netNsPath
+			}
+		}
 	}
 
 	return spec, nil

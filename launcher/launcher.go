@@ -1585,7 +1585,8 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	// generate config.json
-	spec, err := generateSpecFromImageConfig(imageParts.imageConfigPath, path.Join(installDir, ocConfigFile))
+	pathToNetNS := networkmanager.GetNetNsPathByName(serviceInfo.ID)
+	spec, err := generateSpecFromImageConfig(imageParts.imageConfigPath, path.Join(installDir, ocConfigFile), pathToNetNS)
 	if err != nil {
 		return service, err
 	}
