@@ -38,6 +38,7 @@ type ServerConn struct {
 	features      map[string]string
 	skipEPSV      bool
 	mlstSupported bool
+	usePRET       bool
 }
 
 // DialOption represents an option to start a new connection with Dial
@@ -53,6 +54,8 @@ type dialOptions struct {
 	explicitTLS bool
 	conn        net.Conn
 	disableEPSV bool
+	disableUTF8 bool
+	disableMLSD bool
 	location    *time.Location
 	debugOutput io.Writer
 	dialFunc    func(network, address string) (net.Conn, error)
@@ -134,16 +137,6 @@ func Dial(addr string, options ...DialOption) (*ServerConn, error) {
 		c.conn = textproto.NewConn(do.wrapConn(tconn))
 	}
 
-	err = c.feat()
-	if err != nil {
-		c.Quit()
-		return nil, err
-	}
-
-	if _, mlstSupported := c.features["MLST"]; mlstSupported {
-		c.mlstSupported = true
-	}
-
 	return c, nil
 }
 
@@ -173,6 +166,23 @@ func DialWithNetConn(conn net.Conn) DialOption {
 func DialWithDisabledEPSV(disabled bool) DialOption {
 	return DialOption{func(do *dialOptions) {
 		do.disableEPSV = disabled
+	}}
+}
+
+// DialWithDisabledUTF8 returns a DialOption that configures the ServerConn with UTF8 option disabled
+func DialWithDisabledUTF8(disabled bool) DialOption {
+	return DialOption{func(do *dialOptions) {
+		do.disableUTF8 = disabled
+	}}
+}
+
+// DialWithDisabledMLSD returns a DialOption that configures the ServerConn with MLSD option disabled
+//
+// This is useful for servers which advertise MLSD (eg some versions
+// of Serv-U) but don't support it properly.
+func DialWithDisabledMLSD(disabled bool) DialOption {
+	return DialOption{func(do *dialOptions) {
+		do.disableMLSD = disabled
 	}}
 }
 
@@ -274,13 +284,27 @@ func (c *ServerConn) Login(user, password string) error {
 		return errors.New(message)
 	}
 
+	// Probe features
+	err = c.feat()
+	if err != nil {
+		return err
+	}
+	if _, mlstSupported := c.features["MLST"]; mlstSupported && !c.options.disableMLSD {
+		c.mlstSupported = true
+	}
+	if _, usePRET := c.features["PRET"]; usePRET {
+		c.usePRET = true
+	}
+
 	// Switch to binary mode
 	if _, _, err = c.cmd(StatusCommandOK, "TYPE I"); err != nil {
 		return err
 	}
 
 	// Switch to UTF-8
-	err = c.setUTF8()
+	if !c.options.disableUTF8 {
+		err = c.setUTF8()
+	}
 
 	// If using implicit TLS, make data connections also use TLS
 	if c.options.tlsConfig != nil {
@@ -346,7 +370,7 @@ func (c *ServerConn) setUTF8() error {
 	}
 
 	// Workaround for FTP servers, that does not support this option.
-	if code == StatusBadArguments {
+	if code == StatusBadArguments || code == StatusNotImplementedParameter {
 		return nil
 	}
 
@@ -368,53 +392,48 @@ func (c *ServerConn) setUTF8() error {
 func (c *ServerConn) epsv() (port int, err error) {
 	_, line, err := c.cmd(StatusExtendedPassiveMode, "EPSV")
 	if err != nil {
-		return
+		return 0, err
 	}
 
 	start := strings.Index(line, "|||")
 	end := strings.LastIndex(line, "|")
 	if start == -1 || end == -1 {
-		err = errors.New("invalid EPSV response format")
-		return
+		return 0, errors.New("invalid EPSV response format")
 	}
 	port, err = strconv.Atoi(line[start+3 : end])
-	return
+	return port, err
 }
 
 // pasv issues a "PASV" command to get a port number for a data connection.
 func (c *ServerConn) pasv() (host string, port int, err error) {
 	_, line, err := c.cmd(StatusPassiveMode, "PASV")
 	if err != nil {
-		return
+		return "", 0, err
 	}
 
 	// PASV response format : 227 Entering Passive Mode (h1,h2,h3,h4,p1,p2).
 	start := strings.Index(line, "(")
 	end := strings.LastIndex(line, ")")
 	if start == -1 || end == -1 {
-		err = errors.New("invalid PASV response format")
-		return
+		return "", 0, errors.New("invalid PASV response format")
 	}
 
 	// We have to split the response string
 	pasvData := strings.Split(line[start+1:end], ",")
 
 	if len(pasvData) < 6 {
-		err = errors.New("invalid PASV response format")
-		return
+		return "", 0, errors.New("invalid PASV response format")
 	}
 
 	// Let's compute the port number
-	portPart1, err1 := strconv.Atoi(pasvData[4])
-	if err1 != nil {
-		err = err1
-		return
+	portPart1, err := strconv.Atoi(pasvData[4])
+	if err != nil {
+		return "", 0, err
 	}
 
-	portPart2, err2 := strconv.Atoi(pasvData[5])
-	if err2 != nil {
-		err = err2
-		return
+	portPart2, err := strconv.Atoi(pasvData[5])
+	if err != nil {
+		return "", 0, err
 	}
 
 	// Recompose port
@@ -422,7 +441,7 @@ func (c *ServerConn) pasv() (host string, port int, err error) {
 
 	// Make the IP address to connect to
 	host = strings.Join(pasvData[0:4], ".")
-	return
+	return host, port, nil
 }
 
 // getDataConnPort returns a host, port for a new data connection
@@ -477,6 +496,15 @@ func (c *ServerConn) cmd(expected int, format string, args ...interface{}) (int,
 // cmdDataConnFrom executes a command which require a FTP data connection.
 // Issues a REST FTP command to specify the number of bytes to skip for the transfer.
 func (c *ServerConn) cmdDataConnFrom(offset uint64, format string, args ...interface{}) (net.Conn, error) {
+	// If server requires PRET send the PRET command to warm it up
+	// See: https://tools.ietf.org/html/draft-dd-pret-00
+	if c.usePRET {
+		_, _, err := c.cmd(-1, "PRET "+format, args...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	conn, err := c.openDataConn()
 	if err != nil {
 		return nil, err
@@ -513,7 +541,7 @@ func (c *ServerConn) cmdDataConnFrom(offset uint64, format string, args ...inter
 func (c *ServerConn) NameList(path string) (entries []string, err error) {
 	conn, err := c.cmdDataConnFrom(0, "NLST %s", path)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	r := &Response{conn: conn, c: c}
@@ -526,7 +554,7 @@ func (c *ServerConn) NameList(path string) (entries []string, err error) {
 	if err = scanner.Err(); err != nil {
 		return entries, err
 	}
-	return
+	return entries, nil
 }
 
 // List issues a LIST FTP command.
@@ -544,7 +572,7 @@ func (c *ServerConn) List(path string) (entries []*Entry, err error) {
 
 	conn, err := c.cmdDataConnFrom(0, "%s %s", cmd, path)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	r := &Response{conn: conn, c: c}
@@ -561,7 +589,7 @@ func (c *ServerConn) List(path string) (entries []*Entry, err error) {
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return
+	return entries, nil
 }
 
 // ChangeDir issues a CWD FTP command, which changes the current directory to
@@ -647,13 +675,19 @@ func (c *ServerConn) StorFrom(path string, r io.Reader, offset uint64) error {
 		return err
 	}
 
+	// if the upload fails we still need to try to read the server
+	// response otherwise if the failure is not due to a connection problem,
+	// for example the server denied the upload for quota limits, we miss
+	// the response and we cannot use the connection to send other commands.
+	// So we don't check io.Copy error and we return the error from
+	// ReadResponse so the user can see the real error
 	_, err = io.Copy(conn, r)
 	conn.Close()
-	if err != nil {
-		return err
-	}
 
-	_, _, err = c.conn.ReadResponse(StatusClosingDataConnection)
+	_, _, respErr := c.conn.ReadResponse(StatusClosingDataConnection)
+	if respErr != nil {
+		err = respErr
+	}
 	return err
 }
 
@@ -668,13 +702,14 @@ func (c *ServerConn) Append(path string, r io.Reader) error {
 		return err
 	}
 
+	// see the comment for StorFrom above
 	_, err = io.Copy(conn, r)
 	conn.Close()
-	if err != nil {
-		return err
-	}
 
-	_, _, err = c.conn.ReadResponse(StatusClosingDataConnection)
+	_, _, respErr := c.conn.ReadResponse(StatusClosingDataConnection)
+	if respErr != nil {
+		err = respErr
+	}
 	return err
 }
 
@@ -809,4 +844,9 @@ func (r *Response) Close() error {
 // SetDeadline sets the deadlines associated with the connection.
 func (r *Response) SetDeadline(t time.Time) error {
 	return r.conn.SetDeadline(t)
+}
+
+// String returns the string representation of EntryType t.
+func (t EntryType) String() string {
+	return [...]string{"file", "folder", "link"}[t]
 }
