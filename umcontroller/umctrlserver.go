@@ -111,7 +111,7 @@ func (server *umCtrlServer) RegisterUM(stream pb.UpdateController_RegisterUMServ
 
 	log.Debugf("Register UM id %s status %s", statusMsg.GetUmId(), statusMsg.GetUmState().String())
 
-	handler, ch, err := newUmHandler(statusMsg.GetUmId(), stream, server.controllerCh)
+	handler, ch, err := newUmHandler(statusMsg.GetUmId(), stream, server.controllerCh, statusMsg.GetUmState())
 	if err != nil {
 		err = errors.New("can't create handler")
 		return err

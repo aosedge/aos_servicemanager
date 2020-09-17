@@ -65,6 +65,17 @@ type systemComponentStatus struct {
 	err           string
 }
 
+type systemComponent struct {
+	id            string
+	vendorVersion string
+	aosVersion    uint64
+	annotations   string
+	url           string
+	sha256        []byte
+	sha512        []byte
+	size          uint64
+}
+
 /*******************************************************************************
  * Consts
  ******************************************************************************/
@@ -72,6 +83,7 @@ type systemComponentStatus struct {
 const (
 	openConnection = iota
 	closeConnection
+	umStatusUpdate
 )
 
 /*******************************************************************************
@@ -123,6 +135,9 @@ func (umCtrl *UmController) processInternallMessages() {
 
 			case closeConnection:
 				umCtrl.handleCloseConnection(internalMsg.umID)
+
+			case umStatusUpdate:
+				umCtrl.umHandlerStatusUpdate(internalMsg.umID, internalMsg.status)
 
 			default:
 				log.Error("Unsupported internal message ", internalMsg.requestType)
@@ -189,4 +204,8 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 			umCtrl.connections[i].handler = nil
 		}
 	}
+}
+
+func (umCtrl *UmController) umHandlerStatusUpdate(umID string, status umStatus) {
+	log.Debugf("Status um = %s changed to %s", umID, status.umState)
 }
