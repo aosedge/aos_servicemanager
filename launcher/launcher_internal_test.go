@@ -604,8 +604,6 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 }
 
 func TestNetworkSpeed(t *testing.T) {
-	t.Skip("Skip due to functionality not temporary implemented")
-
 	sender := newTestSender()
 
 	launcher, err := newTestLauncher(new(iperfImage), sender, nil, networkProvider)
@@ -664,14 +662,14 @@ func TestNetworkSpeed(t *testing.T) {
 						t.Errorf("Can't parse ul speed: %s", err)
 						continue
 					}
-					ulSpeed = int(value) / 1000
+					dlSpeed = int(value) / 1000
 				} else {
 					value, err := strconv.ParseUint(result[8], 10, 64)
 					if err != nil {
 						t.Errorf("Can't parse ul speed: %s", err)
 						continue
 					}
-					dlSpeed = int(value) / 1000
+					ulSpeed = int(value) / 1000
 				}
 			}
 		}
@@ -680,7 +678,10 @@ func TestNetworkSpeed(t *testing.T) {
 			t.Error("Can't determine ul/dl speed")
 		}
 
-		if ulSpeed > 4096*1.5 || dlSpeed > 8192*1.5 {
+		deltaDownload := (8192 * 0.2) / 10 // 2%
+		deltaUpload := (4096 * 0.2) / 10   // 2%
+
+		if ulSpeed > int(4096+deltaUpload) || dlSpeed > int(8192+deltaDownload) {
 			t.Errorf("Speed limit exceeds: dl %d, ul %d", dlSpeed, ulSpeed)
 		}
 	}
@@ -1762,8 +1763,8 @@ func (downloader iperfImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStru
 		return outputFile, err
 	}
 
-	var uploadSpeed uint64 = 4096 * 1024
-	var downloadSpeed uint64 = 8192 * 1024
+	var uploadSpeed uint64 = 4096
+	var downloadSpeed uint64 = 8192
 
 	aosSrvConfig := generateAosSrvConfig()
 	aosSrvConfig.Quotas.UploadSpeed = &uploadSpeed
