@@ -98,6 +98,15 @@ type firewallNetConf struct {
 	FirewalldZone          string `json:"firewalldZone,omitempty"`
 }
 
+type bandwidthNetConf struct {
+	Type         string `json:"type,omitempty"`
+	IngressRate  uint64 `json:"ingressRate,omitempty"`
+	IngressBurst uint64 `json:"ingressBurst,omitempty"`
+
+	EgressRate  uint64 `json:"egressRate,omitempty"`
+	EgressBurst uint64 `json:"egressBurst,omitempty"`
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -147,7 +156,7 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingressKbit, egressKbit uint64) (err error) {
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
 	manager.Lock()
@@ -172,7 +181,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string) (err 
 		}
 	}()
 
-	netConfig := prepareNetworkConfigList(spID, ipSubnet)
+	netConfig := prepareNetworkConfigList(spID, ipSubnet, ingressKbit, egressKbit)
 
 	runtimeConfig := &cni.RuntimeConf{
 		ContainerID: serviceID,
@@ -399,7 +408,7 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	return cniServiceInfo[0], nil
 }
 
-func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet) (cniNetworkConfig *cni.NetworkConfigList) {
+func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet, ingressKbit, egressKbit uint64) (cniNetworkConfig *cni.NetworkConfigList) {
 	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
@@ -457,6 +466,21 @@ func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet) (cniNet
 		},
 	}
 
+	if ingressKbit > 0 || egressKbit > 0 {
+		bandwith := prepareTrafficControlPlugin(ingressKbit, egressKbit)
+		if bandwith != nil {
+			networkPlugin.Plugins = append(networkPlugin.Plugins, bandwith)
+			dataBandwith, _ := json.Marshal(bandwith)
+			tc := &cni.NetworkConfig{
+				Network: &types.NetConf{
+					Type: bandwith.Type,
+				},
+				Bytes: []byte(dataBandwith),
+			}
+			plugins = append(plugins, tc)
+		}
+
+	}
 	dataNetwork, _ := json.Marshal(networkPlugin)
 
 	return &cni.NetworkConfigList{
@@ -465,4 +489,29 @@ func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet) (cniNet
 		Plugins:    plugins,
 		Bytes:      []byte(dataNetwork),
 	}
+}
+
+func prepareTrafficControlPlugin(ingressKbit, egressKbit uint64) (bandwidth *bandwidthNetConf) {
+	if ingressKbit == 0 && egressKbit == 0 {
+		return nil
+	}
+
+	bandwidth = &bandwidthNetConf{
+		Type: "bandwidth",
+	}
+
+	// the burst argument was selected relative to the mtu network interface
+	burst := uint64(12800) // bits == 1600 byte
+
+	if ingressKbit > 0 {
+		bandwidth.IngressRate = ingressKbit * 1000
+		bandwidth.IngressBurst = burst
+	}
+
+	if egressKbit > 0 {
+		bandwidth.EgressRate = egressKbit * 1000
+		bandwidth.EgressBurst = burst
+	}
+
+	return bandwidth
 }
