@@ -76,8 +76,7 @@ const (
 const (
 	serviceDir = "services" // services directory
 
-	runcName         = "runc"         // runc file name
-	wonderShaperName = "wondershaper" // wondershaper name
+	runcName = "runc" // runc file name
 
 	ocConfigFile = "config.json"
 )
@@ -161,9 +160,8 @@ type Launcher struct {
 
 	services sync.Map
 
-	serviceTemplate  string
-	runcPath         string
-	wonderShaperPath string
+	serviceTemplate string
+	runcPath        string
 }
 
 // Service describes service structure
@@ -350,16 +348,6 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 	launcher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
 		return nil, err
-	}
-
-	// Retrieve wondershaper abs path
-	launcher.wonderShaperPath, _ = filepath.Abs(path.Join(config.WorkingDir, wonderShaperName))
-	if _, err := os.Stat(launcher.wonderShaperPath); err != nil {
-		// check system PATH
-		launcher.wonderShaperPath, err = exec.LookPath(wonderShaperName)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	if err = launcher.prepareHostfsDir(); err != nil {
