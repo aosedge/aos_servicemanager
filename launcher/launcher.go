@@ -1006,7 +1006,7 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 	return nil
 }
 
-func (launcher *Launcher) mountLayers(service Service) (err error) {
+func (launcher *Launcher) mountRootfs(service Service) (err error) {
 	mergedDir := path.Join(service.Path, serviceMergedDir)
 
 	// create merged dir
@@ -1026,7 +1026,7 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 		workDir = path.Join(storageFolder, workDirName)
 	}
 
-	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service layers")
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service rootfs")
 
 	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir), path.Join(service.Path, serviceRootfsDir)}
 	layerDirs = append(layerDirs, service.Layers...)
@@ -1040,10 +1040,10 @@ func (launcher *Launcher) mountLayers(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) umountLayers(service Service) (err error) {
+func (launcher *Launcher) umountRootfs(service Service) (err error) {
 	mergedDir := path.Join(service.Path, serviceMergedDir)
 
-	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service layers")
+	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service rootfs")
 
 	if err = umountWithRetry(mergedDir, 0); err != nil {
 		return err
@@ -1130,7 +1130,7 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
-	if err = launcher.mountLayers(service); err != nil {
+	if err = launcher.mountRootfs(service); err != nil {
 		return err
 	}
 
@@ -1251,9 +1251,9 @@ func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
 }
 
 func (launcher *Launcher) poststopService(service Service) (retErr error) {
-	if err := launcher.umountLayers(service); err != nil {
+	if err := launcher.umountRootfs(service); err != nil {
 		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't umount layers: %s", err)
+			log.WithField("id", service.ID).Errorf("Can't umount rootfs: %s", err)
 			retErr = err
 		}
 	}
