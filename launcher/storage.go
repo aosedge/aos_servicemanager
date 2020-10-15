@@ -180,6 +180,10 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	}
 
 	if service.StateLimit > 0 {
+		if err = createStateFile(path.Join(usersService.StorageFolder, stateFile), service.UserName); err != nil {
+			return "", err
+		}
+
 		if err = handler.startStateWatching(users, service); err != nil {
 			return "", err
 		}
@@ -509,9 +513,11 @@ func createStorageFolder(path, userName string) (folderName string, err error) {
 }
 
 func createStateFile(path, userName string) (err error) {
-	if _, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666); err != nil {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
 		return err
 	}
+	defer file.Close()
 
 	uid, gid, err := platform.GetUserUIDGID(userName)
 	if err != nil {

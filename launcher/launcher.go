@@ -1006,16 +1006,11 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 	return nil
 }
 
-func (launcher *Launcher) mountRootfs(service Service) (err error) {
+func (launcher *Launcher) mountRootfs(service Service, storageFolder string) (err error) {
 	mergedDir := path.Join(service.Path, serviceMergedDir)
 
 	// create merged dir
 	if err = os.MkdirAll(mergedDir, 0755); err != nil {
-		return err
-	}
-
-	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
-	if err != nil {
 		return err
 	}
 
@@ -1130,7 +1125,18 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
-	if err = launcher.mountRootfs(service); err != nil {
+	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
+	if err != nil {
+		return err
+	}
+
+	if service.StateLimit > 0 {
+		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
+			return err
+		}
+	}
+
+	if err = launcher.mountRootfs(service, storageFolder); err != nil {
 		return err
 	}
 
