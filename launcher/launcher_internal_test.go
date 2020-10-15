@@ -1069,7 +1069,7 @@ func TestServiceStorage(t *testing.T) {
 func TestServiceState(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 1024 * 12, 256, 0, nil}, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(&ftpImage{"/", 1024 * 24, 256, 0, nil}, sender, nil, networkProvider)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
