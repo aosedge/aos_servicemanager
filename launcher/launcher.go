@@ -403,6 +403,7 @@ func (launcher *Launcher) FinishProcessingLayers() {
 	launcher.actionHandler.PutInQueue(serviceAction{"", nil, launcher.doFinishProcessingLayers})
 }
 
+// CheckServicesConsistency checks if service folders exist
 func (launcher *Launcher) CheckServicesConsistency() (err error) {
 	//Check for storage folder
 	if _, err = os.Stat(launcher.config.StorageDir); err != nil {
