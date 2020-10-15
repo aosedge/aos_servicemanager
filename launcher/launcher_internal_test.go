@@ -330,7 +330,7 @@ func TestCheckServicesConsistency(t *testing.T) {
 		t.Error("Expected services to be consistent")
 	}
 
-	cmd := exec.Command("rm", "-rf", path.Join(tmpDir, "storage"))
+	cmd := exec.Command("rm", "-rf", path.Join(testDir, "storage"))
 	if res, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Can't remove services dir contents: %s %s", err, res)
 	}
@@ -2150,7 +2150,7 @@ func setup() (err error) {
 		return err
 	}
 
-	testDir = path.Join(tmpDir, testDir)
+	testDir = path.Join(tmpDir, "testDir")
 
 	if err := createTestPartition(testDir, "ext4", 16); err != nil {
 		return err
