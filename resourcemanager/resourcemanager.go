@@ -63,6 +63,14 @@ type Sender interface {
 	SendRequestResourceAlert(source string, message string)
 }
 
+// FileSystemMount specifies a mount instructions.
+type FileSystemMount struct {
+	Destination string   `json:"destination"`
+	Type        string   `json:"type,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Options     []string `json:"options,omitempty"`
+}
+
 // DeviceResource describes Device available resource
 type DeviceResource struct {
 	Name        string   `json:"name"`
@@ -71,10 +79,19 @@ type DeviceResource struct {
 	HostDevices []string `json:"hostDevices"`
 }
 
+// BoardResource describes other board resource
+type BoardResource struct {
+	Name   string            `json:"name"`
+	Groups []string          `json:"groups,omitempty"`
+	Mounts []FileSystemMount `json:"mounts,omitempty"`
+	Env    []string          `json:"env,omitempty"`
+}
+
 // BoardConfiguration resources that are proviced by Cloud for using at AOS services
 type BoardConfiguration struct {
-	Version uint64           `json:"version,omitempty"`
-	Devices []DeviceResource `json:"devices"`
+	Version   uint64           `json:"version,omitempty"`
+	Devices   []DeviceResource `json:"devices"`
+	Resources []BoardResource  `json:"resources"`
 }
 
 /*******************************************************************************
@@ -199,6 +216,22 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 	}
 
 	return nil
+}
+
+// RequestBoardResourceByName requests configuration by name
+func (resourcemanager *ResourceManager) RequestBoardResourceByName(name string) (boardResource BoardResource, err error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	log.Debugf("ResourceManager: RequestBoardResourceByName(%s)", name)
+
+	for _, resource := range resourcemanager.boardConfiguration.Resources {
+		if resource.Name == name {
+			return resource, nil
+		}
+	}
+
+	return boardResource, fmt.Errorf("resource is not present in board configuration")
 }
 
 // ReleaseDevice request to release device for service id

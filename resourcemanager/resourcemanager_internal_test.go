@@ -300,6 +300,40 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 	}
 }
 
+func TestRequestBoardConfigByName(t *testing.T) {
+	if err := createTestBoardConfigFile(); err != nil {
+		t.Error("Can't write resource configuration: ", err)
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	// request incorrect resource
+	_, err = rm.RequestBoardResourceByName("invalid_id")
+	if err == nil {
+		t.Errorf("Should be error: resource is not present in board configuration")
+	}
+
+	originalConfig := BoardResource{Name: "system-dbus",
+		Mounts: []FileSystemMount{FileSystemMount{Destination: "/var/run/dbus/system_bus_socket",
+			Options: []string{"rw", "bind"},
+			Source:  "/var/run/dbus/system_bus_socket",
+			Type:    "bind"}},
+		Env: []string{"DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"},
+	}
+
+	boardResource, err := rm.RequestBoardResourceByName("system-dbus")
+	if err != nil {
+		t.Error("Can't get board config file: ", err)
+	}
+
+	if !reflect.DeepEqual(originalConfig, boardResource) {
+		t.Error("boardConfg in not equal to original one")
+	}
+}
+
 func TestRequestLimitDeviceResources(t *testing.T) {
 	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
@@ -517,6 +551,26 @@ func createTestBoardConfigFile() (err error) {
 			"hostDevices": [
 				"/dev/stdin"
 			]
+		}
+	],
+	"resources": [
+		{
+			"name": "bluetooth",
+			"groups": ["bluetooth"]
+		},
+		{
+			"name": "wifi",
+			"groups": ["wifi-group"]
+		},
+		{
+			"name": "system-dbus",
+			"mounts": [{
+				"destination": "/var/run/dbus/system_bus_socket",
+				"type": "bind",
+				"source": "/var/run/dbus/system_bus_socket",
+				"options": ["rw", "bind"]
+			}],
+			"env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
 		}
 	]
 }`
