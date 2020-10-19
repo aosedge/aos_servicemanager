@@ -37,7 +37,7 @@ The configuration file has JSON format. Following is JSON schema:
         "fcrypt",
         "serviceDiscovery",
         "workingDir",
-        "resourceConfigFile"
+        "boardConfigFile"
     ],
     "properties": {
         "fcrypt": {
@@ -77,7 +77,7 @@ The configuration file has JSON format. Following is JSON schema:
             "description": "Directory where service layers are stored",
             "type": "string"
         },
-        "resourceConfigFile": {
+        "boardConfigFile": {
             "description": "Resource configuration file that contains available system resources for AOS",
             "type": "string"
         },

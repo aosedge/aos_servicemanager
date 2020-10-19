@@ -50,8 +50,8 @@ type ResourceManager struct {
 	deviceWithServices map[string][]string // [device_name]:[serviceIDs,...]
 	hostDevices        []string
 	hostGroups         []string
-	resourceConfigFile string
-	availableResources AvailableResources
+	boardConfigFile    string
+	boardConfiguration BoardConfiguration
 	areResourcesValid  error
 	sync.Mutex
 	sender Sender
@@ -71,8 +71,8 @@ type DeviceResource struct {
 	HostDevices []string `json:"hostDevices"`
 }
 
-// AvailableResources resources that are proviced by Cloud for using at AOS services
-type AvailableResources struct {
+// BoardConfiguration resources that are proviced by Cloud for using at AOS services
+type BoardConfiguration struct {
 	Version uint64           `json:"version,omitempty"`
 	Devices []DeviceResource `json:"devices"`
 }
@@ -82,10 +82,10 @@ type AvailableResources struct {
  ******************************************************************************/
 
 // New creates new resource manager object
-func New(resourceConfigFile string, sender Sender) (resourcemanager *ResourceManager, err error) {
+func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New ResourceManager")
 
-	resourcemanager = &ResourceManager{resourceConfigFile: resourceConfigFile, sender: sender}
+	resourcemanager = &ResourceManager{boardConfigFile: boardConfigFile, sender: sender}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
 		return nil, err
@@ -95,12 +95,12 @@ func New(resourceConfigFile string, sender Sender) (resourcemanager *ResourceMan
 		return nil, err
 	}
 
-	if resourcemanager.availableResources, err = resourcemanager.parseResourceConfiguration(resourceConfigFile); err != nil {
-		log.Errorf("Can't parse resource configuration file: %s", resourceConfigFile)
+	if resourcemanager.boardConfiguration, err = resourcemanager.parseBoardConfiguration(boardConfigFile); err != nil {
+		log.Errorf("Can't parse resource configuration file: %s", boardConfigFile)
 	}
 
 	// do validation only if non-zero amount of the devices was provided
-	if len(resourcemanager.availableResources.Devices) != 0 {
+	if len(resourcemanager.boardConfiguration.Devices) != 0 {
 		resourcemanager.areResourcesValid = resourcemanager.validateDeviceResources()
 	} else {
 		resourcemanager.areResourcesValid = nil
@@ -157,7 +157,7 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 
 	// check that Unit has restriction on devices
 	// if not sent alert to cloud and error as return
-	if !resourcemanager.isAvailableResourcesChecked() {
+	if !resourcemanager.isboardConfigurationChecked() {
 		message := errors.New("resource configuration is not provided")
 
 		if resourcemanager.sender != nil {
@@ -210,7 +210,7 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 
 	// check that Unit has restriction on devices
 	// if not sent alert to cloud and error as return
-	if !resourcemanager.isAvailableResourcesChecked() {
+	if !resourcemanager.isboardConfigurationChecked() {
 		message := errors.New("resource configuration is not provided")
 
 		if resourcemanager.sender != nil {
@@ -248,9 +248,9 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 	return nil
 }
 
-// GetResourceConfigVersion get current version of configuration file
-func (resourcemanager *ResourceManager) GetResourceConfigVersion() (version uint64) {
-	return resourcemanager.availableResources.Version
+// GetBoardConfigVersion get current version of configuration file
+func (resourcemanager *ResourceManager) GetBoardConfigVersion() (version uint64) {
+	return resourcemanager.boardConfiguration.Version
 }
 
 /*******************************************************************************
@@ -348,12 +348,12 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 	return hostGroups, nil
 }
 
-func (resourcemanager *ResourceManager) parseResourceConfiguration(resourceConfigFile string) (
-	availableResources AvailableResources,
+func (resourcemanager *ResourceManager) parseBoardConfiguration(boardConfigFile string) (
+	boardConfiguration BoardConfiguration,
 	err error) {
-	resources := AvailableResources{}
+	resources := BoardConfiguration{}
 
-	byteValue, err := ioutil.ReadFile(resourceConfigFile)
+	byteValue, err := ioutil.ReadFile(boardConfigFile)
 	if err != nil {
 		return resources, err
 	}
@@ -378,7 +378,7 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 	deviceErrors := make(map[string][]error)
 
 	// compare available device names and additional groups with system ones
-	for _, avaliableDevice := range resourcemanager.availableResources.Devices {
+	for _, avaliableDevice := range resourcemanager.boardConfiguration.Devices {
 		// check devices
 		for _, availableHostDevice := range avaliableDevice.HostDevices {
 			if contains(resourcemanager.hostDevices, availableHostDevice) != true {
@@ -414,13 +414,13 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 	return nil
 }
 
-func (resourcemanager *ResourceManager) isAvailableResourcesChecked() (status bool) {
+func (resourcemanager *ResourceManager) isboardConfigurationChecked() (status bool) {
 	return resourcemanager.areResourcesValid == nil
 }
 
 func (resourcemanager *ResourceManager) getAvailableDeviceByName(
 	name string) (deviceResource DeviceResource, err error) {
-	for _, deviceResource = range resourcemanager.availableResources.Devices {
+	for _, deviceResource = range resourcemanager.boardConfiguration.Devices {
 		if strings.Contains(name, deviceResource.Name) {
 			return deviceResource, nil
 		}

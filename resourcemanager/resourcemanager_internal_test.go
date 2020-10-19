@@ -86,11 +86,11 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestProcessHostDevice(t *testing.T) {
-	if err := createRealResourceConfigFile(); err != nil {
+	if err := createRealBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -135,12 +135,12 @@ func TestProcessHostDevice(t *testing.T) {
 
 }
 
-func TestValidAvailableResources(t *testing.T) {
-	if err := createRealResourceConfigFile(); err != nil {
+func TestValidBoardConfiguration(t *testing.T) {
+	if err := createRealBoardConfigFile(); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -152,11 +152,11 @@ func TestValidAvailableResources(t *testing.T) {
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
-	if err := createEmptyResourceConfigFile(); err != nil {
+	if err := createEmptyBoardConfigFile(); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -167,12 +167,12 @@ func TestEmptyResourcesConfig(t *testing.T) {
 	}
 }
 
-func TestInValidAvailableResources(t *testing.T) {
-	if err := createInValidResourceConfigFile(); err != nil {
+func TestInValidBoardConfiguration(t *testing.T) {
+	if err := createInValidBoardConfigFile(); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -184,7 +184,7 @@ func TestInValidAvailableResources(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -206,11 +206,11 @@ func TestUnavailableResources(t *testing.T) {
 }
 
 func TestRequestAndReleaseDeviceResources(t *testing.T) {
-	if err := createTestResourceConfigFile(); err != nil {
+	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -237,11 +237,11 @@ func TestRequestAndReleaseDeviceResources(t *testing.T) {
 }
 
 func TestRequestDeviceResourceByName(t *testing.T) {
-	if err := createTestResourceConfigFile(); err != nil {
+	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -301,11 +301,11 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 }
 
 func TestRequestLimitDeviceResources(t *testing.T) {
-	if err := createTestResourceConfigFile(); err != nil {
+	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -346,11 +346,11 @@ func TestRequestLimitDeviceResources(t *testing.T) {
 }
 
 func TestReleaseNotRequestedDeviceResources(t *testing.T) {
-	if err := createTestResourceConfigFile(); err != nil {
+	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -384,11 +384,11 @@ func TestReleaseNotRequestedDeviceResources(t *testing.T) {
 }
 
 func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
-	if err := createTestResourceConfigFile(); err != nil {
+	if err := createTestBoardConfigFile(); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "available_configuration.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -454,7 +454,7 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createRealResourceConfigFile() (err error) {
+func createRealBoardConfigFile() (err error) {
 	configContent := `{
 	"devices": [
 		{
@@ -477,14 +477,14 @@ func createRealResourceConfigFile() (err error) {
 	]
 }`
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func createTestResourceConfigFile() (err error) {
+func createTestBoardConfigFile() (err error) {
 	configContent := `{
 	"devices": [
 		{
@@ -521,14 +521,14 @@ func createTestResourceConfigFile() (err error) {
 	]
 }`
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func createInValidResourceConfigFile() (err error) {
+func createInValidBoardConfigFile() (err error) {
 	configContent := `{
 	"devices": [
 		{
@@ -544,19 +544,19 @@ func createInValidResourceConfigFile() (err error) {
 	]
 }`
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func createEmptyResourceConfigFile() (err error) {
+func createEmptyBoardConfigFile() (err error) {
 	configContent := `{
 	"devices": []
 }`
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "available_configuration.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
 		return err
 	}
 

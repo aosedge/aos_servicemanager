@@ -95,8 +95,8 @@ Where top metadata.json
     "platformId": "AOS",
     "bundleDescription": "Device resource configuration update",
     "updateItems": [{
-        "type": "resourceconfig",
-        "path": "./resource_config_update"
+        "type": "boardconfig",
+        "path": "./board_config_update"
     }]
 }
 ```
@@ -105,7 +105,7 @@ Where top metadata.json inside resource_config_update:
 
 ```json
 {
-    "componentType": "resourceconfig",
+    "componentType": "boardconfig",
     "resources": [{
         "id": "deviceconfig",
         "resource": "deviceConfig.gz"
