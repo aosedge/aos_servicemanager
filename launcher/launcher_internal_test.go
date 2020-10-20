@@ -41,6 +41,7 @@ import (
 	"github.com/jlaffaye/ftp"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -1548,6 +1549,49 @@ func TestServiceWithLayers(t *testing.T) {
 	launcher.Close()
 }
 
+func TestSetServiceResources(t *testing.T) {
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create test launcher: %s", err)
+	}
+
+	spec := &serviceSpec{runtimeFileName: "fileName", ocSpec: *specconv.Example()}
+
+	spec.ocSpec.Process.Env = []string{"ENV1", "ENV2=HELLO"}
+	spec.ocSpec.Mounts = []runtimespec.Mount{runtimespec.Mount{Destination: "/orig1",
+		Source: "/orig2"},
+	}
+	spec.ocSpec.Process.User.AdditionalGids = []uint32{1000}
+
+	if err := launcher.setServiceResources(spec, []string{"dbus", "wifi"}); err != nil {
+		t.Error("Can't setServiceResources: ", err)
+	}
+
+	etalonEnv := []string{"ENV1", "ENV2=HELLO", "BUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"}
+	if false == reflect.DeepEqual(etalonEnv, spec.ocSpec.Process.Env) {
+		t.Error("incorrect env")
+	}
+
+	etalonMounts := []runtimespec.Mount{
+		runtimespec.Mount{
+			Destination: "/orig1",
+			Source:      "/orig2"},
+		runtimespec.Mount{
+			Destination: "/destination",
+			Source:      "/source",
+			Type:        "bind",
+		},
+	}
+	if false == reflect.DeepEqual(etalonMounts, spec.ocSpec.Mounts) {
+		t.Error("incorrect env")
+	}
+
+	etalonGids := []uint32{1000, 2}
+	if false == reflect.DeepEqual(etalonGids, spec.ocSpec.Process.User.AdditionalGids) {
+		t.Error("incorrect env")
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -2139,6 +2183,34 @@ func (deviceManager *testDeviceManager) ReleaseDevice(device string, serviceID s
 	}
 
 	return nil
+}
+func (deviceManager *testDeviceManager) RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource,
+	err error) {
+	switch name {
+	case "dbus":
+		boardResource := resourcemanager.BoardResource{
+			Env: []string{"BUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"},
+			Mounts: []resourcemanager.FileSystemMount{resourcemanager.FileSystemMount{
+				Destination: "/destination",
+				Source:      "/source",
+			}},
+		}
+		return boardResource, nil
+
+	case "wifi":
+		boardResource := resourcemanager.BoardResource{
+			Env: []string{"BUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"},
+			Mounts: []resourcemanager.FileSystemMount{resourcemanager.FileSystemMount{
+				Destination: "/destination",
+				Source:      "/source"},
+			},
+			Groups: []string{"bin"},
+		}
+		return boardResource, nil
+
+	default:
+		return boardResource, errors.New("Resource doesn't exist")
+	}
 }
 
 /*******************************************************************************

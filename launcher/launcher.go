@@ -37,6 +37,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/docker/docker/pkg/stringid"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
@@ -241,6 +242,7 @@ type DeviceManagement interface {
 	RequestDeviceResourceByName(name string) (deviceResource resourcemanager.DeviceResource, err error)
 	RequestDevice(device string, serviceID string) (err error)
 	ReleaseDevice(device string, serviceID string) (err error)
+	RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource, err error)
 }
 
 // NewState new state message
@@ -1122,6 +1124,11 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
+	err = launcher.setServiceResources(spec, service.BoardResources)
+	if err != nil {
+		return err
+	}
+
 	if err = launcher.updateNetwork(spec, service); err != nil {
 		return err
 	}
@@ -1507,6 +1514,34 @@ func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (devic
 	return deviceBytes, nil
 }
 
+func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []string) (err error) {
+	for _, resource := range resources {
+		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
+		if err != nil {
+			return err
+		}
+
+		for _, group := range boardResource.Groups {
+			if err = spec.addAdditionalGroup(group); err != nil {
+				return err
+			}
+		}
+
+		for _, mount := range boardResource.Mounts {
+			if err = spec.addMount(runtimespec.Mount{Destination: mount.Destination,
+				Source:  mount.Source,
+				Type:    mount.Type,
+				Options: mount.Options}); err != nil {
+				return err
+			}
+		}
+
+		spec.mergeEnv(boardResource.Env)
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
 	userName, err := platform.CreateUser(serviceInfo.ID)
@@ -1580,6 +1615,11 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
+	err = launcher.setServiceResources(spec, aosConfig.Resources)
+	if err != nil {
+		return service, err
+	}
+
 	if err = spec.setRootfs(serviceMergedDir); err != nil {
 		return service, err
 	}
@@ -1600,15 +1640,17 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	service = Service{
-		ID:         serviceInfo.ID,
-		Version:    serviceInfo.Version,
-		Path:       installDir,
-		UnitName:   serviceName,
-		UserName:   userName,
-		State:      stateInit,
-		Status:     statusOk,
-		AlertRules: string(alertRules),
-		Devices:    string(deviceResourcesForService)}
+		ID:             serviceInfo.ID,
+		Version:        serviceInfo.Version,
+		Path:           installDir,
+		UnitName:       serviceName,
+		UserName:       userName,
+		State:          stateInit,
+		Status:         statusOk,
+		AlertRules:     string(alertRules),
+		Devices:        string(deviceResourcesForService),
+		BoardResources: aosConfig.Resources,
+	}
 
 	for _, layerDigest := range imageParts.layersDigest {
 		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)

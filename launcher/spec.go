@@ -316,10 +316,18 @@ func (spec *serviceSpec) addBindMount(source, destination, attr string) (err err
 		Source:      absSource,
 		Options:     []string{"bind", attr}}
 
+	return spec.addMount(newMount)
+}
+
+func (spec *serviceSpec) addMount(newMount runtimespec.Mount) (err error) {
+	if newMount.Type == "" {
+		newMount.Type = "bind"
+	}
+
 	existIndex := len(spec.ocSpec.Mounts)
 
 	for i, mount := range spec.ocSpec.Mounts {
-		if mount.Destination == destination {
+		if mount.Destination == newMount.Destination {
 			existIndex = i
 
 			break
@@ -520,12 +528,21 @@ func (spec *serviceSpec) addAdditionalGroup(groupName string) (err error) {
 		return err
 	}
 
-	gid, err := strconv.ParseUint(group.Gid, 10, 32)
+	parsedValues, err := strconv.ParseUint(group.Gid, 10, 32)
 	if err != nil {
 		return err
 	}
 
-	spec.ocSpec.Process.User.AdditionalGids = append(spec.ocSpec.Process.User.AdditionalGids, uint32(gid))
+	gid := uint32(parsedValues)
+
+	for _, value := range spec.ocSpec.Process.User.AdditionalGids {
+		if value == gid {
+			log.Debugf("gid %d already added", gid)
+			return nil
+		}
+	}
+
+	spec.ocSpec.Process.User.AdditionalGids = append(spec.ocSpec.Process.User.AdditionalGids, gid)
 
 	return nil
 }
