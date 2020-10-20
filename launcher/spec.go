@@ -90,7 +90,8 @@ type aosServiceConfig struct {
 		HostPath      string   `json:"hostPath"`
 		Options       []string `json:"options,omitempty"`
 	} `json:"mounts,omitempty"`
-	Devices []Device `json:"devices,omitempty"`
+	Devices   []Device `json:"devices,omitempty"`
+	Resources []string `json:"resources,omitempty"`
 }
 
 type serviceSpec struct {

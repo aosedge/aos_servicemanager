@@ -179,6 +179,7 @@ type Service struct {
 	StateLimit      uint64        // state limit
 	Layers          []string      // list layers dir
 	Devices         string        // device resources in json format
+	BoardResources  []string      // list of sw board resources
 }
 
 // UsersService describes users service structure

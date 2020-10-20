@@ -147,13 +147,18 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	layerTextList, err := convertLayerListToText(service.Layers)
+	layerTextList, err := convertListToText(service.Layers)
+	if err != nil {
+		return err
+	}
+
+	boardResourceText, err := convertListToText(service.BoardResources)
 	if err != nil {
 		return err
 	}
@@ -161,7 +166,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 	_, err = stmt.Exec(service.ID, service.Version, service.ServiceProvider, service.Path, service.UnitName,
 		service.UserName, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList, service.Devices)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText)
 
 	return err
 }
@@ -172,14 +177,20 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, user = ?, hostName = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?, ulSpeed = ?, dlSpeed = ?,
-								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ? WHERE id = ?`)
+								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ?, 
+								 boardResources = ? WHERE id = ?`)
 
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	layerTextList, err := convertLayerListToText(service.Layers)
+	layerTextList, err := convertListToText(service.Layers)
+	if err != nil {
+		return err
+	}
+
+	boardResourceText, err := convertListToText(service.BoardResources)
 	if err != nil {
 		return err
 	}
@@ -187,7 +198,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UserName,
 		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, service.ID)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText, service.ID)
 	if err != nil {
 		return err
 	}
@@ -226,11 +237,13 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	defer stmt.Close()
 
 	var layerListText string
+	var boardResourcesText string
 
 	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
+		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
+		&service.Devices, &boardResourcesText)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -238,7 +251,12 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 		return service, err
 	}
 
-	service.Layers, err = getLayerListfromText(layerListText)
+	service.Layers, err = getListfromText(layerListText)
+	if err != nil {
+		return service, err
+	}
+
+	service.BoardResources, err = getListfromText(boardResourcesText)
 
 	return service, err
 }
@@ -254,16 +272,23 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 	for rows.Next() {
 		var service launcher.Service
 		var layerListText string
+		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
+			&service.Devices, &boardResourcesText)
 		if err != nil {
 			return services, err
 		}
 
-		service.Layers, err = getLayerListfromText(layerListText)
+		service.Layers, err = getListfromText(layerListText)
+		if err != nil {
+			return services, err
+		}
+
+		service.BoardResources, err = getListfromText(boardResourcesText)
 		if err != nil {
 			return services, err
 		}
@@ -285,16 +310,23 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 	for rows.Next() {
 		var service launcher.Service
 		var layerListText string
+		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
+			&service.Devices, &boardResourcesText)
 		if err != nil {
 			return services, err
 		}
 
-		service.Layers, err = getLayerListfromText(layerListText)
+		service.Layers, err = getListfromText(layerListText)
+		if err != nil {
+			return services, err
+		}
+
+		service.BoardResources, err = getListfromText(boardResourcesText)
 		if err != nil {
 			return services, err
 		}
@@ -314,11 +346,13 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	defer stmt.Close()
 
 	var layerListText string
+	var boardResourcesText string
 
 	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
+		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
+		&service.Devices, &boardResourcesText)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -326,9 +360,14 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 		return service, err
 	}
 
-	service.Layers, err = getLayerListfromText(layerListText)
+	service.Layers, err = getListfromText(layerListText)
+	if err != nil {
+		return service, err
+	}
 
-	return service, nil
+	service.BoardResources, err = getListfromText(boardResourcesText)
+
+	return service, err
 }
 
 // SetServiceStatus sets service status
@@ -563,16 +602,23 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		var service launcher.Service
 
 		var layerListText string
+		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
-			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText, &service.Devices)
+			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
+			&service.Devices, &boardResourcesText)
 		if err != nil {
 			return usersServices, err
 		}
 
-		service.Layers, err = getLayerListfromText(layerListText)
+		service.Layers, err = getListfromText(layerListText)
+		if err != nil {
+			return usersServices, err
+		}
+
+		service.BoardResources, err = getListfromText(boardResourcesText)
 		if err != nil {
 			return usersServices, err
 		}
@@ -964,7 +1010,8 @@ func (db *Database) createServiceTable() (err error) {
 															   storageLimit INTEGER,
 															   stateLimit INTEGER,
 															   layerList TEXT,
-															   deviceResources TEXT)`)
+															   deviceResources TEXT,
+															   boardResources TEXT)`)
 
 	return err
 }
@@ -1020,22 +1067,22 @@ func (db *Database) removeAllTrafficMonitor() (err error) {
 	return err
 }
 
-func convertLayerListToText(list []string) (layerListText string, err error) {
+func convertListToText(list []string) (listText string, err error) {
 	data, err := json.Marshal(list)
 	if err != nil {
-		return layerListText, err
+		return listText, err
 	}
 
-	layerListText = string(data)
+	listText = string(data)
 
-	return layerListText, nil
+	return listText, nil
 }
 
-func getLayerListfromText(layersText string) (layerList []string, err error) {
-	err = json.Unmarshal([]byte(layersText), &layerList)
+func getListfromText(text string) (list []string, err error) {
+	err = json.Unmarshal([]byte(text), &list)
 	if err != nil {
-		return layerList, err
+		return list, err
 	}
 
-	return layerList, nil
+	return list, nil
 }
