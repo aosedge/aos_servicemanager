@@ -1,15 +1,15 @@
-# Resource Management
+# Board Resource Management
 
-This functionality responses for proper providing system resources such as devices, RAM, CPU, etc for AOS services.
+This functionality responses for proper providing HW and SW system resources such as devices, RAM, CPU, D-BUS access, sockets, etc for AOS services.
 
-This document describes resource management for devices.
+This document describes board resource management.
 
 ## Resource configuration
 
-This configuration contains list of available system resources such as devices, RAM, CPU, etc.
+This configuration contains list of available board resources.
 <p align="center"><img src="images/provide_resource_configuration.png"></p>
 
-1. Create *Resource Configuration* of system in *JSON* format
+1. Create *Board Resource Configuration* of system in *JSON* format
 ```json
 {
     "cpu": {...},
@@ -58,6 +58,22 @@ This configuration contains list of available system resources such as devices, 
                 "/dev/dri/renderD128"
             ]
         }
+    ],
+    "resources": [
+        {
+            "name": "system-dbus",
+            "mounts": [{
+                "destination": "/var/run/dbus/system_bus_socket",
+                "type": "bind",
+                "source": "/var/run/dbus/system_bus_socket",
+                "options": ["rw", "bind"]
+            }],
+            "env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
+        },
+        {
+            "name": "bluetooth",
+            "groups": ["bluetooth"]
+        },
     ]
 }
 ```
@@ -74,11 +90,11 @@ It should be created at step of creation new target system:
 
 3. Provide this *configuration* to Units
 
-Resource configuration should be provided to **Unit** on [provisioning state](https://kb.epam.com/display/EPMDAEPRA/Provisioning+-+unit+side). It means that provisioning script should download provided to AOS Cloud **resource configuration** and put it to Unit as */var/aos/resources/available_configuration.cfg* file.
+Resource configuration should be provided to **Unit** on [provisioning state](https://kb.epam.com/display/EPMDAEPRA/Provisioning+-+unit+side). It means that provisioning script should download provided to AOS Cloud **board resource configuration** and put it to path which is specified by **boardConfigFile** field in SM configuration file
 
-4. Update **Resource Configuration**
+4. Update **Board Resource Configuration**
 
-Update of resource configuration file is done using SOTA/FOTA mechanism. After uploading updated configuration to cloud, the backend generates next update bundle:
+Update of board resource configuration file is done using SOTA/FOTA mechanism. After uploading updated configuration to cloud, the backend generates next update bundle:
 
 ```text
 update_bundle.tar.gz
@@ -93,7 +109,7 @@ Where top metadata.json
 ```json
 {
     "platformId": "AOS",
-    "bundleDescription": "Device resource configuration update",
+    "bundleDescription": "Board resource configuration update",
     "updateItems": [{
         "type": "boardconfig",
         "path": "./board_config_update"
@@ -147,12 +163,14 @@ for example
     # gpu may include several devices at HW rootfs (/dev/...)
         - name : gpu0
           mode  : rw
+    
+    resources: ["system-dbus", "bluetooth"]
 ```
-- Store *Resource Configuration* that can be provided on init target system
+- Store *Board Resource Configuration* that can be provided on init target system
 - Provide this file on provisioning
-- Handle update process of *Resource Configuration* (upload new version, show at frontend available devices, etc)
+- Handle update process of *Board Resource Configuration* (upload new version, show at frontend available devices, etc)
 - Create proper [Aos Service configuration](https://kb.epam.com/display/EPMDAEPRA/aos_service_config.json).
-  Devices' node should correspond for aliases that used at [aos_container.yaml](https://kb.epam.com/display/EPMDAEPRA/aos_container.yml):
+  Devices' and Resources' nodes should correspond for aliases that used at [aos_container.yaml](https://kb.epam.com/display/EPMDAEPRA/aos_container.yml):
 ```json
 {
     ...
@@ -165,7 +183,8 @@ for example
             "name": "gpu0",
             "permissions": "rwm"
         }
-    ]
+    ],
+    "resources" : ["system-dbus", "bluetooth"]
 }
 ```
 
@@ -210,7 +229,7 @@ Resource manager should:
 ```
 - Process Desired configuration on provided devices (perform all necessary checks and parse json)
 - Check that devices are available (in system and free to use) for each requested service if all devices are occupied then service should not be started and [Alert](https://kb.epam.com/display/EPMDAEPRA/Alerts+message) message (*tag*: **aosCore**, *source*: **service ID**) to Cloud
-- Prepare runtime-spec with [devices node]([devices](https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#devices)) for services
+- Prepare runtime-spec with [devices node]([devices](https://github.com/opencontainers/runtime-spec/blob/master/config-linux.md#devices)), mounts, groups for services
 - Launch services and save in DB status of devices
 - Send to Backend [Unit Status Message](https://kb.epam.com/display/EPMDAEPRA/Unit+Status+Message)
 
@@ -220,7 +239,7 @@ Resource manager component is a part of Service Manager and responsible for mana
 
 ##### Flow diagram
 
-Below you can find flow diagram where shown comunication between AOS Cloud and AOS Core according to devices.
+Below you can find flow diagram where shown communication between AOS Cloud and AOS Core according to devices.
 
 <p align="center"><img src="images/Containers_at_aos.png"></p>
 
@@ -238,6 +257,7 @@ Below you can find flow diagram where shown comunication between AOS Cloud and A
 
 Device discovery will be performed on Resource Manager initialization or creating.
 ResourceManager is the ServiceManager's module with the following API:
+
 ```go
 // Check status of available devices from resources configuration with host (real) devices
 AreResourcesValid() (err error)
@@ -250,6 +270,13 @@ type DeviceResource struct {
 	HostDevices []string `json:"hostDevices"`
 }
 
+type BoardResource struct {
+	Name   string            `json:"name"`
+	Groups []string          `json:"groups,omitempty"`
+	Mounts []FileSystemMount `json:"mounts,omitempty"`
+	Env    []string          `json:"env,omitempty"`
+}
+
 // Provide device resources by name (alias from aos service configuration)
 RequestDeviceResourceByName(name string) (deviceResource DeviceResource, err error)
 
@@ -260,6 +287,9 @@ RequestDevice(device string, serviceID string) (err error)
 // Request release device for service id
 // Return Error in case divice is already released for this service id
 ReleaseDevice(device string, serviceID string) (err error)
+
+// Provide board resources by name (alias from aos service configuration)
+RequestBoardResourceByName(name string) (boardResource BoardResource, err error) {
 ```
 
 This API will be called by **launcher** on service start and stop accordingly.
@@ -397,6 +427,22 @@ Here is a list of resource configuration for real devices
                 "/dev/dri/renderD128"
             ]
         }
+    ],
+    "resources": [
+        {
+            "name": "system-dbus",
+            "mounts": [{
+                "destination": "/var/run/dbus/system_bus_socket",
+                "type": "bind",
+                "source": "/var/run/dbus/system_bus_socket",
+                "options": ["rw", "bind"]
+            }],
+            "env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
+        },
+        {
+            "name": "bluetooth",
+            "groups": ["bluetooth"]
+        },
     ]
 }
 ```
