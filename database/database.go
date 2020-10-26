@@ -152,7 +152,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -168,10 +168,11 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 		return err
 	}
 
-	_, err = stmt.Exec(service.ID, service.Version, service.ServiceProvider, service.Path, service.UnitName,
+	_, err = stmt.Exec(service.ID, service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
 		service.UID, service.GID, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText,
+		service.VendorVersion, service.Description)
 
 	return err
 }
@@ -179,13 +180,14 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 // UpdateService updates service
 func (db *Database) UpdateService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?, hostName = ?,
+								 SET aosVersion = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?, hostName = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?, ulSpeed = ?, dlSpeed = ?,
 								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ?, 
-								 boardResources = ? WHERE id = ?`)
+								 boardResources = ?, vendorVersion = ?, description =? WHERE id = ?`)
 
 	if err != nil {
+		log.Error("erro prepare")
 		return err
 	}
 	defer stmt.Close()
@@ -200,11 +202,13 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 		return err
 	}
 
-	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UID, service.GID,
+	result, err := stmt.Exec(service.AosVersion, service.ServiceProvider, service.Path, service.UnitName, service.UID, service.GID,
 		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
-		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText, service.ID)
+		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText,
+		service.VendorVersion, service.Description, service.ID)
 	if err != nil {
+		log.Error("erro exec")
 		return err
 	}
 
@@ -244,11 +248,11 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	var layerListText string
 	var boardResourcesText string
 
-	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
+	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-		&service.Devices, &boardResourcesText)
+		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -279,11 +283,11 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		var layerListText string
 		var boardResourcesText string
 
-		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
 		if err != nil {
 			return services, err
 		}
@@ -317,11 +321,11 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 		var layerListText string
 		var boardResourcesText string
 
-		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
 		if err != nil {
 			return services, err
 		}
@@ -353,11 +357,11 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	var layerListText string
 	var boardResourcesText string
 
-	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
+	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-		&service.Devices, &boardResourcesText)
+		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -609,11 +613,11 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		var layerListText string
 		var boardResourcesText string
 
-		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
+		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
 		if err != nil {
 			return usersServices, err
 		}
@@ -996,7 +1000,7 @@ func (db *Database) createServiceTable() (err error) {
 	log.Info("Create service table")
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
-															   version INTEGER,
+															   aosVersion INTEGER,
 															   serviceProvider TEXT,
 															   path TEXT,
 															   unit TEXT,
@@ -1017,7 +1021,9 @@ func (db *Database) createServiceTable() (err error) {
 															   stateLimit INTEGER,
 															   layerList TEXT,
 															   deviceResources TEXT,
-															   boardResources TEXT)`)
+															   boardResources TEXT,
+															   vendorVersion TEXT,
+															   description TEXT)`)
 
 	return err
 }
