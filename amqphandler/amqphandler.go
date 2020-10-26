@@ -95,6 +95,8 @@ const unitSecureVersion = 1
 
 // AmqpHandler structure with all amqp connection info
 type AmqpHandler struct {
+	config *config.Config
+
 	// MessageChannel channel for amqp messages
 	MessageChannel chan Message
 
@@ -524,10 +526,10 @@ var messageMap = map[string]func() interface{}{
  ******************************************************************************/
 
 // New creates new amqp object
-func New() (handler *AmqpHandler, err error) {
+func New(cfg *config.Config) (handler *AmqpHandler, err error) {
 	log.Debug("New AMQP")
 
-	handler = &AmqpHandler{}
+	handler = &AmqpHandler{config: cfg}
 
 	handler.sendChannel = make(chan Message, sendChannelSize)
 	handler.retryChannel = make(chan Message, retryChannelSize)

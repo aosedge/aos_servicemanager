@@ -95,6 +95,7 @@ type Config struct {
 	LayersDir           string     `json:"layersDir"`
 	BoardConfigFile     string     `json:"boardConfigFile"`
 	DefaultServiceTTL   uint64     `json:"defaultServiceTTLDays"`
+	UnitStatusTimeout   uint64     `json:"unitStatusTimeout"`
 	Monitoring          Monitoring `json:"monitoring"`
 	Logging             Logging    `json:"logging"`
 	Alerts              Alerts     `json:"alerts"`
@@ -119,6 +120,7 @@ func New(fileName string) (config *Config, err error) {
 
 	config = &Config{
 		DefaultServiceTTL: 30,
+		UnitStatusTimeout: 30,
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},
 			PollPeriod:         Duration{10 * time.Second},

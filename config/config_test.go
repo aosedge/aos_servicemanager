@@ -398,3 +398,15 @@ func TestHosts(t *testing.T) {
 		t.Errorf("Incorrect hostname")
 	}
 }
+
+func TestUnitStatusTimeout(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.UnitStatusTimeout != 30 {
+		t.Errorf("Wrong UnitStatusTimeout 30!= %d", config.UnitStatusTimeout)
+	}
+}

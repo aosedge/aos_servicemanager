@@ -165,7 +165,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create amqp
-	if sm.amqp, err = amqp.New(); err != nil {
+	if sm.amqp, err = amqp.New(cfg); err != nil {
 		return sm, err
 	}
 
