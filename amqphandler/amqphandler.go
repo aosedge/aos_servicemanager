@@ -659,11 +659,17 @@ func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err er
 }
 
 // SendLayerStatus sends message with layer status
-func (handler *AmqpHandler) SendLayerStatus(serviceStatus LayerInfo) (err error) {
-	statusMsg := handler.createAosMessage(ServiceStatusType,
-		UnitStatus{Layers: []LayerInfo{serviceStatus}})
+func (handler *AmqpHandler) SendLayerStatus(layerStatus LayerInfo) (err error) {
+	handler.unitStatusMutex.Lock()
+	defer handler.unitStatusMutex.Unlock()
 
-	handler.sendChannel <- Message{"", statusMsg}
+	for i, value := range handler.currentUnitStatus.Layers {
+		if value.Digest == layerStatus.Digest {
+			handler.currentUnitStatus.Layers[i] = layerStatus
+			handler.unitStatusChanged = true
+			break
+		}
+	}
 
 	return nil
 }
@@ -1170,6 +1176,7 @@ func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (
 
 func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *DecodedDesiredStatus) {
 	newServices := []ServiceInfo{}
+	newLayers := []LayerInfo{}
 
 	handler.unitStatusMutex.Lock()
 	defer handler.unitStatusMutex.Unlock()
@@ -1200,6 +1207,28 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 		handler.unitStatusChanged = true
 		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services, newServices...)
 	}
+
+	for _, desLayer := range desiredStatus.Layers {
+		wasFound := false
+
+		for _, curLayer := range handler.currentUnitStatus.Layers {
+			if curLayer.Digest == desLayer.Digest {
+				wasFound = true
+				break
+			}
+		}
+
+		if wasFound == false {
+			newLayers = append(newLayers,
+				LayerInfo{LayerID: desLayer.LayerID, Digest: desLayer.Digest, Status: pendingStatus})
+		}
+	}
+
+	if len(newLayers) > 0 {
+		handler.unitStatusChanged = true
+		handler.currentUnitStatus.Layers = append(handler.currentUnitStatus.Layers, newLayers...)
+	}
+
 }
 
 func (handler *AmqpHandler) processUnitStatusChanges() {
@@ -1214,6 +1243,7 @@ func (handler *AmqpHandler) processUnitStatusChanges() {
 			handler.unitStatusChanged = false
 
 			handler.cleanupServiceStatusList()
+			handler.cleanupLayersStatusList()
 		}
 
 		handler.unitStatusMutex.Unlock()
@@ -1239,5 +1269,20 @@ func (handler *AmqpHandler) cleanupServiceStatusList() {
 	for i, value := range removedElements {
 		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services[:value-i],
 			handler.currentUnitStatus.Services[value-i+1:]...)
+	}
+}
+
+func (handler *AmqpHandler) cleanupLayersStatusList() {
+	removedElements := []int{}
+
+	for i, value := range handler.currentUnitStatus.Layers {
+		if value.Status == removedStatus {
+			removedElements = append(removedElements, i)
+		}
+	}
+
+	for i, value := range removedElements {
+		handler.currentUnitStatus.Layers = append(handler.currentUnitStatus.Layers[:value-i],
+			handler.currentUnitStatus.Layers[value-i+1:]...)
 	}
 }
