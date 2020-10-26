@@ -40,7 +40,7 @@ import (
  ******************************************************************************/
 
 // ProtocolVersion specifies supported protocol version
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 const (
 	sendChannelSize    = 32
@@ -351,7 +351,7 @@ type UnitStatus struct {
 // ServiceInfo struct with service information
 type ServiceInfo struct {
 	ID            string `json:"id"`
-	Version       uint64 `json:"version"`
+	AosVersion    uint64 `json:"aosVersion"`
 	Status        string `json:"status"`
 	Error         string `json:"error,omitempty"`
 	StateChecksum string `json:"stateChecksum,omitempty"`
@@ -384,10 +384,17 @@ type ServiceAlertRules struct {
 	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
 }
 
+// VersionFromCloud commoin struct with version
+type VersionFromCloud struct {
+	AosVersion    uint64 `json:"aosVersion"`
+	VendorVersion string `json:"vendorVersion"`
+	Description   string `json:"description"`
+}
+
 // ServiceInfoFromCloud structure with Encripted Service information
 type ServiceInfoFromCloud struct {
-	ID         string             `json:"id"`
-	Version    uint64             `json:"version"`
+	ID string `json:"id"`
+	VersionFromCloud
 	AlertRules *ServiceAlertRules `json:"alertRules,omitempty"`
 	DecryptDataStruct
 }
@@ -1182,7 +1189,7 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 
 	for _, desSrv := range desiredStatus.Services {
 		wasFound := false
-		pendingService := ServiceInfo{ID: desSrv.ID, Version: desSrv.Version, Status: pendingStatus}
+		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: pendingStatus}
 
 		for _, curSrv := range handler.currentUnitStatus.Services {
 			if curSrv.ID != desSrv.ID {
@@ -1191,7 +1198,7 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 
 			wasFound = true
 
-			if curSrv.Version != desSrv.Version {
+			if curSrv.AosVersion != desSrv.AosVersion {
 				newServices = append(newServices, pendingService)
 			}
 			break

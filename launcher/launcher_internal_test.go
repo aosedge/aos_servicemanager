@@ -226,7 +226,7 @@ func TestInstallRemove(t *testing.T) {
 
 	for i := 0; i < numInstallServices-numUninstallServices; i++ {
 		if status := <-sender.statusChannel; status.Error != "" {
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+			t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 		}
 	}
 
@@ -406,7 +406,7 @@ func TestAutoStart(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-sender.statusChannel; status.Error != "" {
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 		}
 	}
 
@@ -436,21 +436,24 @@ func TestErrors(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	// test version mistmatch
+	// test AosVersion mistmatch
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 5}, chains, certs)
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 4}, chains, certs)
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 6}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 5}}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 4}}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 6}}, chains, certs)
 
 	for i := 0; i < 3; i++ {
 		status := <-sender.statusChannel
 		switch {
-		case status.Version == 5 && status.Error != "":
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
-		case status.Version == 4 && status.Error == "":
-			t.Errorf("Service %s version %d should not be installed", status.ID, status.Version)
-		case status.Version == 6 && status.Error != "":
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		case status.AosVersion == 5 && status.Error != "":
+			t.Errorf("%s, service ID %s, AosVersion: %d", status.Error, status.ID, status.AosVersion)
+		case status.AosVersion == 4 && status.Error == "":
+			t.Errorf("Service %s AosVersion %d should not be installed", status.ID, status.AosVersion)
+		case status.AosVersion == 6 && status.Error != "":
+			t.Errorf("%s, service ID %s, AosVersion: %d", status.Error, status.ID, status.AosVersion)
 		}
 	}
 
@@ -460,7 +463,7 @@ func TestErrors(t *testing.T) {
 	}
 	if len(services) != 1 {
 		t.Errorf("Wrong service quantity: %d", len(services))
-	} else if services[0].Version != 6 {
+	} else if services[0].AosVersion != 6 {
 		t.Errorf("Wrong service version")
 	}
 
@@ -496,10 +499,11 @@ func TestUpdate(t *testing.T) {
 
 	imageDownloader.version = 0
 	imageDownloader.serviceID = "service0"
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
@@ -520,10 +524,11 @@ func TestUpdate(t *testing.T) {
 	}
 
 	imageDownloader.version = 1
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)
 
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	n, _, err = serverConn.ReadFromUDP(buf)
@@ -587,7 +592,8 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	// set fake resource system to invalid state (UT emulation)
 	deviceManager.isValid = false
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)
 
 	// wait while service will be installed and tried to run
 	// it should be failed because service requests random device
@@ -623,7 +629,8 @@ func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
 		t.Fatalf("SM can start services when device resources are invalid")
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)
 
 	// installation should be succesfully
 	var status amqp.ServiceInfo
@@ -640,7 +647,7 @@ func TestDeviceManagementReleaseDeviceFail(t *testing.T) {
 	// it should be failed because service releases random device
 	// according to aos service configuration that generates on mocked download operation
 	if status := <-sender.statusChannel; status.Error == "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 	}
 }
 
@@ -667,7 +674,7 @@ func TestNetworkSpeed(t *testing.T) {
 
 	for i := 0; i < numServices; i++ {
 		if status := <-sender.statusChannel; status.Error != "" {
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+			t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 		}
 	}
 
@@ -744,10 +751,11 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	service, ok := serviceProvider.services["service0"]
@@ -797,7 +805,7 @@ func TestUsersServices(t *testing.T) {
 		}
 		for i := 0; i < numServices; i++ {
 			if status := <-sender.statusChannel; status.Error != "" {
-				t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+				t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 			}
 		}
 
@@ -890,7 +898,7 @@ func TestServiceTTL(t *testing.T) {
 	}
 	for i := 0; i < numServices; i++ {
 		if status := <-sender.statusChannel; status.Error != "" {
-			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+			t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 		}
 	}
 
@@ -957,7 +965,7 @@ func TestServiceMonitoring(t *testing.T) {
 
 	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", AlertRules: &serviceAlerts}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	select {
@@ -976,7 +984,7 @@ func TestServiceMonitoring(t *testing.T) {
 
 	launcher.UninstallService("Service1")
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	select {
@@ -1008,9 +1016,10 @@ func TestServiceStorage(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready
@@ -1080,9 +1089,10 @@ func TestServiceState(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready
@@ -1184,9 +1194,10 @@ func TestServiceState(t *testing.T) {
 
 	// Check state after update
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 1}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready
@@ -1231,9 +1242,10 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready
@@ -1256,9 +1268,10 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready
@@ -1520,9 +1533,10 @@ func TestServiceWithLayers(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", Version: 0}, chains, certs)
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
 	if status := <-sender.statusChannel; status.Error != "" {
-		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.Version)
+		t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
 	}
 
 	// Wait ftp server ready

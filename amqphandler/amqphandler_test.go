@@ -266,9 +266,9 @@ func TestReceiveMessages(t *testing.T) {
 	}
 
 	initialServiceSetupData := []amqphandler.ServiceInfo{
-		amqphandler.ServiceInfo{ID: "service0", Version: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
-		amqphandler.ServiceInfo{ID: "service1", Version: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
-		amqphandler.ServiceInfo{ID: "service2", Version: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
+		amqphandler.ServiceInfo{ID: "service0", AosVersion: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
+		amqphandler.ServiceInfo{ID: "service1", AosVersion: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
+		amqphandler.ServiceInfo{ID: "service2", AosVersion: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
 	}
 
 	initialLayersSetupData := []amqphandler.LayerInfo{

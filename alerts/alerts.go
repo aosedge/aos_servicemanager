@@ -169,7 +169,7 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 	var version *uint64
 
 	if service, err := instance.serviceProvider.GetService(source); err == nil {
-		version = &service.Version
+		version = &service.AosVersion
 	}
 
 	instance.addAlert(amqp.AlertItem{
@@ -228,7 +228,7 @@ func (instance *Alerts) SendRequestResourceAlert(source string, message string) 
 	var version *uint64
 
 	if service, err := instance.serviceProvider.GetService(source); err == nil {
-		version = &service.Version
+		version = &service.AosVersion
 	}
 
 	instance.addAlert(amqp.AlertItem{
@@ -452,7 +452,7 @@ func (instance *Alerts) processJournal() (err error) {
 				}
 
 				source = service.ID
-				version = &service.Version
+				version = &service.AosVersion
 			}
 		}
 

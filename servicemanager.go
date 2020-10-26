@@ -361,26 +361,26 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 		for _, service := range servicesMap {
 			if service.serviceInfoFromCloud != nil && service.serviceInfo != nil {
 				// Update
-				if service.serviceInfoFromCloud.Version > service.serviceInfo.Version {
+				if service.serviceInfoFromCloud.AosVersion > service.serviceInfo.AosVersion {
 					log.WithFields(log.Fields{
 						"id":   service.serviceInfo.ID,
-						"from": service.serviceInfo.Version,
-						"to":   service.serviceInfoFromCloud.Version}).Info("Update service")
+						"from": service.serviceInfo.AosVersion,
+						"to":   service.serviceInfoFromCloud.AosVersion}).Info("Update service")
 
 					sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
 				}
 			} else if service.serviceInfoFromCloud != nil {
 				// Install
 				log.WithFields(log.Fields{
-					"id":      service.serviceInfoFromCloud.ID,
-					"version": service.serviceInfoFromCloud.Version}).Info("Install service")
+					"id":         service.serviceInfoFromCloud.ID,
+					"aosVersion": service.serviceInfoFromCloud.AosVersion}).Info("Install service")
 
 				sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
 			} else if service.serviceInfo != nil {
 				// Remove
 				log.WithFields(log.Fields{
-					"id":      service.serviceInfo.ID,
-					"version": service.serviceInfo.Version}).Info("Remove service")
+					"id":         service.serviceInfo.ID,
+					"aosVersion": service.serviceInfo.AosVersion}).Info("Remove service")
 
 				sm.launcher.UninstallService(service.serviceInfo.ID)
 			}
