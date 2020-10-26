@@ -71,7 +71,6 @@ const (
 	MonitoringDataType                      = "monitoringData"
 	NewStateType                            = "newState"
 	PushServiceLogType                      = "pushServiceLog"
-	ServiceStatusType                       = "serviceStatus"
 	StateRequestType                        = "stateRequest"
 	SystemRevertStatusType                  = "systemRevertStatus"
 	SystemUpgradeStatusType                 = "systemUpgradeStatus"
