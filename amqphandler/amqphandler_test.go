@@ -265,7 +265,7 @@ func TestReceiveMessages(t *testing.T) {
 		MessageType string
 	}
 
-	initialSetupData := []amqphandler.ServiceInfo{
+	initialServiceSetupData := []amqphandler.ServiceInfo{
 		amqphandler.ServiceInfo{ID: "service0", Version: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
 		amqphandler.ServiceInfo{ID: "service1", Version: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
 		amqphandler.ServiceInfo{ID: "service2", Version: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
@@ -328,11 +328,11 @@ func TestReceiveMessages(t *testing.T) {
 	testData := []messageDesc{
 		messageDesc{
 			call: func() error {
-				return amqpHandler.SendInitialSetup(initialSetupData, initialLayersSetupData)
+				return amqpHandler.SendInitialSetup(initialServiceSetupData, initialLayersSetupData)
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.UnitStatus{Services: initialSetupData, Layers: initialLayersSetupData}},
+				Data:   &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},
@@ -340,11 +340,11 @@ func TestReceiveMessages(t *testing.T) {
 
 		messageDesc{
 			call: func() error {
-				return amqpHandler.SendServiceStatus(initialSetupData[0])
+				return amqpHandler.SendServiceStatus(initialServiceSetupData[0])
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.ServiceStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.UnitStatus{Services: []amqphandler.ServiceInfo{initialSetupData[0]}}},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},
