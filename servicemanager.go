@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path"
 	"reflect"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,6 +76,9 @@ type serviceManager struct {
 	network         *networkmanager.NetworkManager
 	um              *umclient.Client
 	layerMgr        *layermanager.LayerManager
+
+	isDesiredStatusInProcessing bool
+	desiredStatusMutex          sync.Mutex
 }
 
 /*******************************************************************************
@@ -328,70 +332,7 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
 	case amqp.DecodedDesiredStatus:
-		if err := sm.layerMgr.ProcessDesiredLayersList(data.Layers, data.CertificateChains, data.Certificates); err != nil {
-			log.Error("Can't process layer list: ", err)
-			return err
-		}
-
-		log.WithField("len", len(data.Services)).Info("Receive services info")
-
-		currentList, err := sm.launcher.GetServicesInfo()
-		if err != nil {
-			return err
-		}
-
-		type serviceDesc struct {
-			serviceInfo          *amqp.ServiceInfo
-			serviceInfoFromCloud *amqp.ServiceInfoFromCloud
-		}
-
-		servicesMap := make(map[string]*serviceDesc)
-
-		for _, item := range currentList {
-			serviceInfo := item
-
-			servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
-		}
-
-		for _, item := range data.Services {
-			serviceInfoFromCloud := item
-
-			if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {
-				servicesMap[serviceInfoFromCloud.ID] = &serviceDesc{}
-			}
-
-			servicesMap[serviceInfoFromCloud.ID].serviceInfoFromCloud = &serviceInfoFromCloud
-		}
-
-		for _, service := range servicesMap {
-			if service.serviceInfoFromCloud != nil && service.serviceInfo != nil {
-				// Update
-				if service.serviceInfoFromCloud.AosVersion > service.serviceInfo.AosVersion {
-					log.WithFields(log.Fields{
-						"id":   service.serviceInfo.ID,
-						"from": service.serviceInfo.AosVersion,
-						"to":   service.serviceInfoFromCloud.AosVersion}).Info("Update service")
-
-					sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
-				}
-			} else if service.serviceInfoFromCloud != nil {
-				// Install
-				log.WithFields(log.Fields{
-					"id":         service.serviceInfoFromCloud.ID,
-					"aosVersion": service.serviceInfoFromCloud.AosVersion}).Info("Install service")
-
-				sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
-			} else if service.serviceInfo != nil {
-				// Remove
-				log.WithFields(log.Fields{
-					"id":         service.serviceInfo.ID,
-					"aosVersion": service.serviceInfo.AosVersion}).Info("Remove service")
-
-				sm.launcher.UninstallService(service.serviceInfo.ID)
-			}
-		}
-
-		sm.launcher.FinishProcessingLayers()
+		go sm.processDesiredStatus(data)
 
 	case *amqp.StateAcceptance:
 		log.WithFields(log.Fields{
@@ -514,6 +455,90 @@ func (sm *serviceManager) handleChannels() (err error) {
 			return err
 		}
 	}
+}
+func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
+	sm.desiredStatusMutex.Lock()
+	if sm.isDesiredStatusInProcessing == true {
+		sm.desiredStatusMutex.Unlock()
+		return
+	}
+
+	sm.isDesiredStatusInProcessing = true
+	sm.desiredStatusMutex.Unlock()
+
+	defer func() {
+		sm.desiredStatusMutex.Lock()
+		sm.isDesiredStatusInProcessing = false
+		sm.desiredStatusMutex.Unlock()
+	}()
+
+	if err := sm.um.ProcessDesiredComponents(data.Components, data.CertificateChains, data.Certificates); err != nil {
+		log.Error("Can't process components : ", err)
+	}
+
+	if err := sm.layerMgr.ProcessDesiredLayersList(data.Layers, data.CertificateChains, data.Certificates); err != nil {
+		log.Error("Can't process layer list: ", err)
+	}
+
+	log.WithField("len", len(data.Services)).Info("Receive services info")
+
+	currentList, err := sm.launcher.GetServicesInfo()
+	if err != nil {
+		log.Error("Can't get services list: ", err)
+	}
+
+	type serviceDesc struct {
+		serviceInfo          *amqp.ServiceInfo
+		serviceInfoFromCloud *amqp.ServiceInfoFromCloud
+	}
+
+	servicesMap := make(map[string]*serviceDesc)
+
+	for _, item := range currentList {
+		serviceInfo := item
+
+		servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
+	}
+
+	for _, item := range data.Services {
+		serviceInfoFromCloud := item
+
+		if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {
+			servicesMap[serviceInfoFromCloud.ID] = &serviceDesc{}
+		}
+
+		servicesMap[serviceInfoFromCloud.ID].serviceInfoFromCloud = &serviceInfoFromCloud
+	}
+
+	for _, service := range servicesMap {
+		if service.serviceInfoFromCloud != nil && service.serviceInfo != nil {
+			// Update
+			if service.serviceInfoFromCloud.AosVersion > service.serviceInfo.AosVersion {
+				log.WithFields(log.Fields{
+					"id":   service.serviceInfo.ID,
+					"from": service.serviceInfo.AosVersion,
+					"to":   service.serviceInfoFromCloud.AosVersion}).Info("Update service")
+
+				sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
+			}
+		} else if service.serviceInfoFromCloud != nil {
+			// Install
+			log.WithFields(log.Fields{
+				"id":         service.serviceInfoFromCloud.ID,
+				"aosVersion": service.serviceInfoFromCloud.AosVersion}).Info("Install service")
+
+			sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
+		} else if service.serviceInfo != nil {
+			// Remove
+			log.WithFields(log.Fields{
+				"id":         service.serviceInfo.ID,
+				"aosVersion": service.serviceInfo.AosVersion}).Info("Remove service")
+
+			sm.launcher.UninstallService(service.serviceInfo.ID)
+		}
+	}
+
+	sm.launcher.FinishProcessingLayers()
 }
 
 func (sm *serviceManager) run() {

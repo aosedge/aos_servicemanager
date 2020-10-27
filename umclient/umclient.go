@@ -183,6 +183,13 @@ func (um *Client) GetSystemComponents() (components []amqp.ComponentInfo, err er
 	return components, nil
 }
 
+// ProcessDesiredComponents process desred component list
+func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+
+	return nil
+}
+
 // SystemUpgrade send system upgrade request to UM
 func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
 	um.Lock()
