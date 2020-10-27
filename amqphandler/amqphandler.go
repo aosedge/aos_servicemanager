@@ -74,7 +74,6 @@ const (
 	StateRequestType                        = "stateRequest"
 	SystemRevertStatusType                  = "systemRevertStatus"
 	SystemUpgradeStatusType                 = "systemUpgradeStatus"
-	SystemVersionType                       = "systemVersion"
 	UnitStatusType                          = "unitStatus"
 	IssueUnitCertificatesRequestType        = "issueUnitCertificates"
 	InstallUnitCertificatesConfirmationType = "installUnitCertificatesConfirmation"
@@ -334,12 +333,6 @@ type SystemUpgradeStatus struct {
 	Status       string  `json:"upgradeStatus"`
 	Error        *string `json:"error,omitempty"`
 	ImageVersion uint64  `json:"imageVersion"`
-}
-
-// SystemVersion system version structure
-type SystemVersion struct {
-	ImageVersion           uint64 `json:"imageVersion"`
-	ResourcesConfigVersion uint64 `json:"resourcesConfigVersion"`
 }
 
 // UnitStatus untit status structure
@@ -781,16 +774,6 @@ func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError 
 		SystemUpgradeStatus{Status: upgradeStatus, Error: errorValue, ImageVersion: imageVersion})
 
 	handler.sendChannel <- Message{"", upgradeStatusMsg}
-
-	return nil
-}
-
-// SendSystemVersion sends system version
-func (handler *AmqpHandler) SendSystemVersion(imageVersion, resourceVersion uint64) (err error) {
-	systemVersionMsg := handler.createAosMessage(SystemVersionType,
-		SystemVersion{ImageVersion: imageVersion, ResourcesConfigVersion: resourceVersion})
-
-	handler.sendChannel <- Message{"", systemVersionMsg}
 
 	return nil
 }
