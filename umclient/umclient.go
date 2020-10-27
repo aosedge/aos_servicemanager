@@ -177,6 +177,12 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 	return um.imageVersion, nil
 }
 
+// GetSystemComponents returns list of system components information
+func (um *Client) GetSystemComponents() (components []amqp.ComponentInfo, err error) {
+
+	return components, nil
+}
+
 // SystemUpgrade send system upgrade request to UM
 func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
 	um.Lock()

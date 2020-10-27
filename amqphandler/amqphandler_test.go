@@ -277,6 +277,12 @@ func TestReceiveMessages(t *testing.T) {
 		amqphandler.LayerInfo{ID: "layer2", Digest: "sha256:2", Status: "installed", AosVersion: 3},
 	}
 
+	initialComponentSetupData := []amqphandler.ComponentInfo{
+		amqphandler.ComponentInfo{ID: "rootfs", Status: "installed", VendorVersion: "1.0"},
+		amqphandler.ComponentInfo{ID: "boardConfig", Status: "installed", VendorVersion: "5", AosVersion: 6},
+		amqphandler.ComponentInfo{ID: "bootloader", Status: "installed", VendorVersion: "100"},
+	}
+
 	monitoringData := amqphandler.MonitoringData{Timestamp: time.Now().UTC()}
 	monitoringData.Global.RAM = 1024
 	monitoringData.Global.CPU = 50
@@ -328,11 +334,12 @@ func TestReceiveMessages(t *testing.T) {
 	testData := []messageDesc{
 		messageDesc{
 			call: func() error {
-				return amqpHandler.SendInitialSetup(initialServiceSetupData, initialLayersSetupData)
+				return amqpHandler.SendInitialSetup(initialServiceSetupData, initialLayersSetupData, initialComponentSetupData)
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData}},
+				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
+					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},
@@ -344,7 +351,8 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData}},
+				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
+					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},

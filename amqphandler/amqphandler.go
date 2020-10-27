@@ -344,8 +344,9 @@ type SystemVersion struct {
 
 // UnitStatus untit status structure
 type UnitStatus struct {
-	Services []ServiceInfo `json:"services"`
-	Layers   []LayerInfo   `json:"layers,omitempty"`
+	Services   []ServiceInfo   `json:"services"`
+	Layers     []LayerInfo     `json:"layers,omitempty"`
+	Components []ComponentInfo `json:"components"`
 }
 
 // ServiceInfo struct with service information
@@ -364,6 +365,15 @@ type LayerInfo struct {
 	Digest     string `json:"digest"`
 	Status     string `json:"status"`
 	Error      string `json:"error,omitempty"`
+}
+
+//ComponentInfo struct with system component info and status
+type ComponentInfo struct {
+	ID            string `json:"id"`
+	AosVersion    uint64 `json:"aosVersion"`
+	VendorVersion string `json:"vendorVersion"`
+	Status        string `json:"status"`
+	Error         string `json:"error,omitempty"`
 }
 
 // Message structure used to send/receive data by amqp
@@ -632,7 +642,8 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 }
 
 // SendInitialSetup sends initial list of available services and layers
-func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo, layersList []LayerInfo) (err error) {
+func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo, layersList []LayerInfo,
+	components []ComponentInfo) (err error) {
 	handler.unitStatusMutex.Lock()
 	defer handler.unitStatusMutex.Unlock()
 
@@ -641,6 +652,9 @@ func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo, layersLi
 
 	handler.currentUnitStatus.Layers = make([]LayerInfo, len(layersList))
 	copy(handler.currentUnitStatus.Layers, layersList)
+
+	handler.currentUnitStatus.Components = make([]ComponentInfo, len(components))
+	copy(handler.currentUnitStatus.Components, components)
 
 	handler.unitStatusChanged = true
 
@@ -679,6 +693,17 @@ func (handler *AmqpHandler) SendLayerStatus(layerStatus LayerInfo) (err error) {
 	}
 
 	return nil
+}
+
+// SendComponentStatus sends message with layer status
+func (handler *AmqpHandler) SendComponentStatus(components []ComponentInfo) {
+	handler.unitStatusMutex.Lock()
+	defer handler.unitStatusMutex.Unlock()
+
+	handler.currentUnitStatus.Components = make([]ComponentInfo, len(components))
+	copy(handler.currentUnitStatus.Components, components)
+
+	handler.unitStatusChanged = true
 }
 
 // SendMonitoringData sends monitoring data
