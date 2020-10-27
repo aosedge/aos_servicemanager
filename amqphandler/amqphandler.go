@@ -143,6 +143,7 @@ type AOSMessage struct {
 type DesiredStatus struct {
 	Services          []byte             `json:"services"`
 	Layers            []byte             `json:"layers"`
+	Components        []byte             `json:"components"`
 	CertificateChains []CertificateChain `json:"certificateChains,omitempty"`
 	Certificates      []Certificate      `json:"certificates,omitempty"`
 }
@@ -411,10 +412,19 @@ type LayerInfoFromCloud struct {
 	DecryptDataStruct
 }
 
+// ComponentInfoFromCloud component decryption info
+type ComponentInfoFromCloud struct {
+	ID          string          `json:"id"`
+	Annotations json.RawMessage `json:"annotations"`
+	VersionFromCloud
+	DecryptDataStruct
+}
+
 // DecodedDesiredStatus decoded Desired configuration
 type DecodedDesiredStatus struct {
 	Layers            []LayerInfoFromCloud
 	Services          []ServiceInfoFromCloud
+	Components        []ComponentInfoFromCloud
 	CertificateChains []CertificateChain
 	Certificates      []Certificate
 }
@@ -1081,28 +1091,28 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 			}
 
 			if incomingMsg.Header.MessageType == DesiredStatusType {
-				var err error
-
 				encodedData, ok := data.(*DesiredStatus)
 				if !ok {
 					log.Error("Wrong data type: expect desired status")
 					continue
 				}
 
-				layersList, err := handler.decodeLayers(encodedData.Layers)
-				if err != nil {
-					log.Errorf("Can't decode layers: %s", err)
-					continue
-				}
+				desiredStatus := DecodedDesiredStatus{CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
 
-				servicesList, err := handler.decodeServices(encodedData.Services)
-				if err != nil {
+				if err := handler.decodeDesiredStatusParts(encodedData.Services, &desiredStatus.Services); err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
 				}
 
-				desiredStatus := DecodedDesiredStatus{Layers: layersList, Services: servicesList,
-					CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
+				if err := handler.decodeDesiredStatusParts(encodedData.Layers, &desiredStatus.Layers); err != nil {
+					log.Errorf("Can't decode Layers: %s", err)
+					continue
+				}
+
+				if err := handler.decodeDesiredStatusParts(encodedData.Components, &desiredStatus.Components); err != nil {
+					log.Errorf("Can't decode Components: %s", err)
+					continue
+				}
 
 				handler.updateUnitStatusWithDesiredFromCloud(&desiredStatus)
 
@@ -1147,38 +1157,23 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 	}
 }
 
-func (handler *AmqpHandler) decodeServices(data []byte) (services []ServiceInfoFromCloud, err error) {
-	decryptData, err := handler.cryptoContext.DecryptMetadata(data)
-	if err != nil {
-		return nil, err
-	}
-
-	log.WithField("data", string(decryptData)).Debug("Decrypted data")
-
-	if err = json.Unmarshal(decryptData, &services); err != nil {
-		return nil, err
-	}
-
-	return services, nil
-}
-
-func (handler *AmqpHandler) decodeLayers(data []byte) (layers []LayerInfoFromCloud, err error) {
+func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interface{}) (err error) {
 	if len(data) == 0 {
-		return layers, nil
+		return nil
 	}
 
 	decryptData, err := handler.cryptoContext.DecryptMetadata(data)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	log.WithField("data", string(decryptData)).Debug("Decrypted data")
 
-	if err = json.Unmarshal(decryptData, &layers); err != nil {
-		return nil, err
+	if err = json.Unmarshal(decryptData, result); err != nil {
+		return err
 	}
 
-	return layers, nil
+	return nil
 }
 
 func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
@@ -1244,7 +1239,6 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 		handler.unitStatusChanged = true
 		handler.currentUnitStatus.Layers = append(handler.currentUnitStatus.Layers, newLayers...)
 	}
-
 }
 
 func (handler *AmqpHandler) processUnitStatusChanges() {
