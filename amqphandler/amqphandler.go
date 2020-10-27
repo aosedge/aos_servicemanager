@@ -359,10 +359,11 @@ type ServiceInfo struct {
 
 //LayerInfo struct with layer info and status
 type LayerInfo struct {
-	LayerID string `json:"layerId"`
-	Digest  string `json:"digest"`
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
+	ID         string `json:"id"`
+	AosVersion uint64 `json:"aosVersion"`
+	Digest     string `json:"digest"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
 }
 
 // Message structure used to send/receive data by amqp
@@ -401,9 +402,9 @@ type ServiceInfoFromCloud struct {
 
 // LayerInfoFromCloud service layer decryption info
 type LayerInfoFromCloud struct {
-	LayerID string `json:"layerId"`
-	Digest  string `json:"digest"`
-	Name    string `json:"name,omitempty"`
+	ID     string `json:"id"`
+	Digest string `json:"digest"`
+	VersionFromCloud
 	DecryptDataStruct
 }
 
@@ -1226,7 +1227,8 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 
 		if wasFound == false {
 			newLayers = append(newLayers,
-				LayerInfo{LayerID: desLayer.LayerID, Digest: desLayer.Digest, Status: pendingStatus})
+				LayerInfo{ID: desLayer.ID, Digest: desLayer.Digest, Status: pendingStatus,
+					AosVersion: desLayer.AosVersion})
 		}
 	}
 

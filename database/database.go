@@ -875,14 +875,15 @@ func (db *Database) GetUpgradeVersion() (version uint64, err error) {
 }
 
 //AddLayer add layer to layers table
-func (db *Database) AddLayer(digest, layerID, path, osVersion string) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?)")
+func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, description string,
+	aosVersion uint64) (err error) {
+	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(digest, layerID, path, osVersion)
+	_, err = stmt.Exec(digest, layerID, path, osVersion, vendorVersion, description, aosVersion)
 
 	return err
 }
@@ -921,7 +922,7 @@ func (db *Database) GetLayerPathByDigest(digest string) (path string, err error)
 
 //GetLayersInfo get all installed layers
 func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
-	rows, err := db.sql.Query("SELECT digest, layerId FROM layers ")
+	rows, err := db.sql.Query("SELECT digest, layerId, aosVersion FROM layers ")
 	if err != nil {
 		return layersList, err
 	}
@@ -930,7 +931,7 @@ func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
 	for rows.Next() {
 		layer := amqp.LayerInfo{Status: installedStatus}
 
-		if err = rows.Scan(&layer.Digest, &layer.LayerID); err != nil {
+		if err = rows.Scan(&layer.Digest, &layer.ID, &layer.AosVersion); err != nil {
 			return layersList, err
 		}
 
@@ -1056,7 +1057,10 @@ func (db *Database) createLayersTable() (err error) {
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
 															 layerId TEXT,
 															 path TEXT,
-															 osVersion TEXT	)`)
+															 osVersion TEXT,
+															 vendorVersion TEXT,
+															 description TEXT,
+															 aosVersion INTEGER)`)
 
 	return err
 }

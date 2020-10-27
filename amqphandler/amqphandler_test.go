@@ -272,9 +272,9 @@ func TestReceiveMessages(t *testing.T) {
 	}
 
 	initialLayersSetupData := []amqphandler.LayerInfo{
-		amqphandler.LayerInfo{LayerID: "layer0", Digest: "sha256:0", Status: "installed"},
-		amqphandler.LayerInfo{LayerID: "layer1", Digest: "sha256:1", Status: "installed"},
-		amqphandler.LayerInfo{LayerID: "layer2", Digest: "sha256:2", Status: "installed"},
+		amqphandler.LayerInfo{ID: "layer0", Digest: "sha256:0", Status: "installed", AosVersion: 1},
+		amqphandler.LayerInfo{ID: "layer1", Digest: "sha256:1", Status: "installed", AosVersion: 2},
+		amqphandler.LayerInfo{ID: "layer2", Digest: "sha256:2", Status: "installed", AosVersion: 3},
 	}
 
 	monitoringData := amqphandler.MonitoringData{Timestamp: time.Now().UTC()}

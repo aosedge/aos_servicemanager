@@ -111,7 +111,7 @@ func TestInstallRemoveLayer(t *testing.T) {
 
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest)}
+	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest, 1)}
 
 	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
 		t.Errorf("Can't process layer list %s", err)
@@ -126,8 +126,12 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Error("Count of layers should be 1")
 	}
 
-	if list[0].LayerID != "LayerId1" {
+	if list[0].ID != "LayerId1" {
 		t.Error("Layer ID should be LayerId1")
+	}
+
+	if list[0].AosVersion != 1 {
+		t.Error("Layer AosVersion should be 1")
 	}
 
 	if err = layerMgr.DeleteUnneededLayers(); err != nil {
@@ -183,8 +187,9 @@ func TestLayerConsistencyCheck(t *testing.T) {
 
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest),
-		generateLayerFromCloud(layerFile2, "LayerId2", digest2)}
+	layerList := []amqp.LayerInfoFromCloud{
+		generateLayerFromCloud(layerFile, "LayerId1", digest, 1),
+		generateLayerFromCloud(layerFile2, "LayerId2", digest2, 2)}
 
 	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
 		t.Errorf("Can't process layer list %s", err)
@@ -351,9 +356,10 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	return retDigest, nil
 }
 
-func generateLayerFromCloud(layerFile, layerID, digest string) (layerInfo amqp.LayerInfoFromCloud) {
-	layerInfo.LayerID = layerID
+func generateLayerFromCloud(layerFile, layerID, digest string, aosVersion uint64) (layerInfo amqp.LayerInfoFromCloud) {
+	layerInfo.ID = layerID
 	layerInfo.Digest = digest
+	layerInfo.AosVersion = aosVersion
 
 	filePath := path.Join(tmpServerDir, layerFile)
 	layerInfo.URLs = []string{filePath}

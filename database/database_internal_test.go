@@ -826,15 +826,15 @@ func TestMultiThread(t *testing.T) {
 }
 
 func TestLayers(t *testing.T) {
-	if err := db.AddLayer("sha256:1", "id1", "path1", "1"); err != nil {
+	if err := db.AddLayer("sha256:1", "id1", "path1", "1", "1.0", "some layer 1", 1); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:2", "id2", "path2", "1"); err != nil {
+	if err := db.AddLayer("sha256:2", "id2", "path2", "1", "2.0", "some layer 2", 2); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:3", "id3", "path3", "1"); err != nil {
+	if err := db.AddLayer("sha256:3", "id3", "path3", "1", "1.0", "some layer 3", 3); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
@@ -845,6 +845,10 @@ func TestLayers(t *testing.T) {
 
 	if path != "path2" {
 		t.Errorf("Path form db %s != path2", path)
+	}
+
+	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
+		t.Errorf("Should be error: entry does not exist")
 	}
 
 	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
@@ -862,6 +866,10 @@ func TestLayers(t *testing.T) {
 
 	if len(layers) != 2 {
 		t.Errorf("Count of layers in DB %d != 2", len(layers))
+	}
+
+	if layers[0].AosVersion != 1 {
+		t.Errorf("Layer AosVersion should be 1")
 	}
 }
 

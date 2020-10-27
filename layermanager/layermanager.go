@@ -57,7 +57,7 @@ type LayerManager struct {
 
 // LayerInfoProvider provides API to add, remove or access layer information
 type LayerInfoProvider interface {
-	AddLayer(digest, layerID, path, osVersion string) (err error)
+	AddLayer(digest, layerID, path, osVersion, vendorVersion, description string, aosVersion uint64) (err error)
 	DeleteLayerByDigest(digest string) (err error)
 	GetLayerPathByDigest(digest string) (path string, err error)
 	GetLayersInfo() (layersList []amqp.LayerInfo, err error)
@@ -118,7 +118,8 @@ func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.Laye
 
 		if !layerInstalled {
 			layerInfo, err := layermanager.installLayer(desiredLayer, chains, certs)
-			layerStatus := amqp.LayerInfo{Digest: layerInfo.Digest, LayerID: layerInfo.LayerID, Status: layerInfo.Status}
+			layerStatus := amqp.LayerInfo{Digest: layerInfo.Digest, ID: layerInfo.ID,
+				Status: layerInfo.Status, AosVersion: desiredLayer.AosVersion}
 			if err != nil {
 				log.Error("Can't install layer ", err)
 				layerStatus.Error = err.Error()
@@ -144,7 +145,8 @@ func (layermanager *LayerManager) DeleteUnneededLayers() (err error) {
 	defer func() { layermanager.layersToRemove = nil }()
 
 	for _, layer := range layermanager.layersToRemove {
-		layerStatus := amqp.LayerInfo{Digest: layer.Digest, LayerID: layer.LayerID, Status: "removed"}
+		layerStatus := amqp.LayerInfo{Digest: layer.Digest, ID: layer.ID, Status: "removed",
+			AosVersion: layer.AosVersion}
 
 		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
 		if err != nil {
@@ -233,7 +235,8 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		DecryptionInfo: desiredLayer.DecryptionInfo,
 		Signs:          desiredLayer.Signs}
 
-	layerInfo := amqp.LayerInfo{Digest: desiredLayer.Digest, LayerID: desiredLayer.LayerID, Status: "error"}
+	layerInfo := amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: "error",
+		AosVersion: desiredLayer.AosVersion}
 
 	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
 	if err != nil {
@@ -282,8 +285,9 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		osVersion = layerDescriptor.Platform.OSVersion
 	}
 
-	if err = layermanager.layerInfoProvider.AddLayer(desiredLayer.Digest, desiredLayer.LayerID,
-		layerStorageDir, osVersion); err != nil {
+	if err = layermanager.layerInfoProvider.AddLayer(desiredLayer.Digest, desiredLayer.ID,
+		layerStorageDir, osVersion, desiredLayer.VendorVersion, desiredLayer.Description,
+		desiredLayer.AosVersion); err != nil {
 		err = fmt.Errorf("can't add layer to DB: %s", err.Error())
 		layerInfo.Error = err.Error()
 		return layerInfo, err
