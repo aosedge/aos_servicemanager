@@ -930,51 +930,56 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 		case message = <-handler.sendChannel:
 		}
 
-		if message.Data != nil {
-			data, err := json.Marshal(message.Data)
-			if err != nil {
-				log.Errorf("Can't parse message: %s", err)
-				continue
-			}
+		aosMessage, ok := message.Data.(AOSMessage)
+		if !ok {
+			continue
+		}
 
-			if retry {
-				log.WithFields(log.Fields{
-					"correlationID": message.CorrelationID,
-					"data":          string(data)}).Debug("AMQP retry message")
-			} else {
-				log.WithFields(log.Fields{
-					"correlationID": message.CorrelationID,
-					"data":          string(data)}).Debug("AMQP send message")
-			}
+		aosMessage.Header.SystemID = handler.systemID
 
-			if err := amqpChannel.Publish(
-				params.Exchange.Name, // exchange
-				"",                   // routing key
-				params.Mandatory,     // mandatory
-				params.Immediate,     // immediate
-				amqp.Publishing{
-					ContentType:   "application/json",
-					DeliveryMode:  amqp.Persistent,
-					CorrelationId: message.CorrelationID,
-					UserId:        params.User,
-					Body:          data,
-				}); err != nil {
-				handler.MessageChannel <- Message{"", err}
-			}
+		data, err := json.Marshal(&aosMessage)
+		if err != nil {
+			log.Errorf("Can't parse message: %s", err)
+			continue
+		}
 
-			// Handle retry packets
-			confirm, ok := <-confirmChannel
-			if !ok || !confirm.Ack {
-				log.WithFields(log.Fields{
-					"correlationID": message.CorrelationID,
-					"data":          string(data)}).Warning("AMQP data is not sent. Put into retry queue")
+		if retry {
+			log.WithFields(log.Fields{
+				"correlationID": message.CorrelationID,
+				"data":          string(data)}).Debug("AMQP retry message")
+		} else {
+			log.WithFields(log.Fields{
+				"correlationID": message.CorrelationID,
+				"data":          string(data)}).Debug("AMQP send message")
+		}
 
-				handler.retryChannel <- message
-			}
+		if err := amqpChannel.Publish(
+			params.Exchange.Name, // exchange
+			"",                   // routing key
+			params.Mandatory,     // mandatory
+			params.Immediate,     // immediate
+			amqp.Publishing{
+				ContentType:   "application/json",
+				DeliveryMode:  amqp.Persistent,
+				CorrelationId: message.CorrelationID,
+				UserId:        params.User,
+				Body:          data,
+			}); err != nil {
+			handler.MessageChannel <- Message{"", err}
+		}
 
-			if !ok {
-				handler.MessageChannel <- Message{"", errors.New("receive channel is closed")}
-			}
+		// Handle retry packets
+		confirm, ok := <-confirmChannel
+		if !ok || !confirm.Ack {
+			log.WithFields(log.Fields{
+				"correlationID": message.CorrelationID,
+				"data":          string(data)}).Warning("AMQP data is not sent. Put into retry queue")
+
+			handler.retryChannel <- message
+		}
+
+		if !ok {
+			handler.MessageChannel <- Message{"", errors.New("receive channel is closed")}
 		}
 	}
 }
@@ -1154,7 +1159,7 @@ func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interfa
 
 func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
 	msg = AOSMessage{
-		Header: MessageHeader{Version: ProtocolVersion, SystemID: handler.systemID, MessageType: msgType},
+		Header: MessageHeader{Version: ProtocolVersion, MessageType: msgType},
 		Data:   data}
 
 	return msg
