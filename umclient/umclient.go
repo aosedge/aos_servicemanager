@@ -74,6 +74,8 @@ type Client struct {
 	upgradeState   int
 	upgradeVersion uint64
 	upgradeData    amqp.SystemUpgrade
+
+	currentComponents []amqp.ComponentInfo
 }
 
 // Sender provides API to send messages to the cloud
@@ -146,7 +148,15 @@ func (um *Client) SetDownloader(downloader downloader) {
 
 // Connect connects to UM server
 func (um *Client) Connect(url string) (err error) {
-	return um.wsClient.Connect(url)
+	if err = um.wsClient.Connect(url); err != nil {
+		return err
+	}
+
+	if err = um.getSystemComponents(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Disconnect disconnects from UM server
@@ -179,8 +189,10 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 
 // GetSystemComponents returns list of system components information
 func (um *Client) GetSystemComponents() (components []amqp.ComponentInfo, err error) {
+	um.Lock()
+	defer um.Unlock()
 
-	return components, nil
+	return um.currentComponents, nil
 }
 
 // ProcessDesiredComponents process desred component list
@@ -480,6 +492,27 @@ func (um *Client) handleSystemStatus(status umprotocol.StatusRsp) (err error) {
 
 	default:
 		log.Error("Unexpected status received")
+	}
+
+	return nil
+}
+
+func (um *Client) getSystemComponents() (err error) {
+	um.Lock()
+	defer um.Unlock()
+
+	componentsFromUm := []umprotocol.ComponentStatus{}
+
+	if err = um.sendRequest(umprotocol.GetComponentsRequestType, umprotocol.GetComponentsResponseType,
+		nil, &componentsFromUm); err != nil {
+		return err
+	}
+
+	um.currentComponents = []amqp.ComponentInfo{}
+
+	for _, value := range componentsFromUm {
+		um.currentComponents = append(um.currentComponents, amqp.ComponentInfo{ID: value.ID, VendorVersion: value.VendorVersion,
+			AosVersion: value.AosVersion, Error: value.Error, Status: value.Status})
 	}
 
 	return nil
