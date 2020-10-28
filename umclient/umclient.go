@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -76,6 +77,8 @@ type Client struct {
 	upgradeData    amqp.SystemUpgrade
 
 	currentComponents []amqp.ComponentInfo
+	finishChannel     chan bool
+	stopChan          chan bool
 }
 
 // Sender provides API to send messages to the cloud
@@ -109,9 +112,12 @@ type downloader interface {
 // New creates new umclient
 func New(config *config.Config, sender Sender, storage Storage) (um *Client, err error) {
 	um = &Client{
-		sender:     sender,
-		storage:    storage,
-		upgradeDir: config.UpgradeDir}
+		sender:        sender,
+		storage:       storage,
+		upgradeDir:    config.UpgradeDir,
+		upgradeState:  stateInit,
+		finishChannel: make(chan bool, 1),
+		stopChan:      make(chan bool, 1)}
 
 	if err = os.MkdirAll(config.UpgradeDir, 0755); err != nil {
 		return nil, err
@@ -122,10 +128,6 @@ func New(config *config.Config, sender Sender, storage Storage) (um *Client, err
 	}
 
 	um.ErrorChannel = um.wsClient.ErrorChannel
-
-	if um.upgradeState, err = um.storage.GetUpgradeState(); err != nil {
-		return nil, err
-	}
 
 	return um, nil
 }
@@ -169,9 +171,9 @@ func (um *Client) GetSystemVersion() (version uint64, err error) {
 		return 0, err
 	}
 
-	if err = um.handleSystemStatus(status); err != nil {
-		return 0, err
-	}
+	// if err = um.handleSystemStatus(status); err != nil {
+	// 	return 0, err
+	// }
 
 	return um.imageVersion, nil
 }
@@ -187,7 +189,6 @@ func (um *Client) GetSystemComponents() (components []amqp.ComponentInfo, err er
 // ProcessDesiredComponents process desred component list
 func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
-
 	if um.upgradeState == stateInit {
 		newComponents := []amqp.ComponentInfoFromCloud{}
 		for _, desComponent := range components {
@@ -212,6 +213,11 @@ func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCl
 		if len(newComponents) == 0 {
 			log.Debug("No update for componenets")
 			return nil
+		}
+
+		//cleanup finish channel
+		for len(um.finishChannel) > 0 {
+			<-um.finishChannel
 		}
 
 		for _, newElement := range newComponents {
@@ -245,9 +251,31 @@ func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCl
 				return err
 			}
 		}
+
+		if err = um.sendMessage(umprotocol.UpdateRequestType, componentsToUpdate); err != nil {
+			return err
+		}
+
+		um.upgradeState = stateUpgrading
+
+		for i, curElement := range um.currentComponents {
+			if curElement.Status == umprotocol.StatusDownloaded {
+				um.currentComponents[i].Status = umprotocol.StatusInstalling
+			}
+		}
 	}
 
-	return nil
+	// wait for update complete or reboot
+
+	select {
+	case <-um.stopChan:
+		return nil
+
+	case <-um.finishChannel:
+		log.Debug("Update finished")
+		return nil
+	}
+
 }
 
 // SystemUpgrade send system upgrade request to UM
@@ -482,6 +510,7 @@ func (um *Client) GetCertificateForSM(request fcrypt.RetrieveCertificateRequest)
 
 // Close closes umclient
 func (um *Client) Close() (err error) {
+	um.stopChan <- true
 	return um.wsClient.Close()
 }
 
@@ -500,12 +529,12 @@ func (um *Client) messageHandler(dataJSON []byte) {
 		return
 	}
 
-	if message.Header.MessageType != umprotocol.StatusResponseType {
+	if message.Header.MessageType != umprotocol.UpdateStatusType {
 		log.Errorf("Wrong message type received: %s", message.Header.MessageType)
 		return
 	}
 
-	var status umprotocol.StatusRsp
+	var status []umprotocol.ComponentStatus
 
 	if err := json.Unmarshal(message.Data, &status); err != nil {
 		log.Errorf("Can't parse status: %s", err)
@@ -518,31 +547,62 @@ func (um *Client) messageHandler(dataJSON []byte) {
 	}
 }
 
-func (um *Client) handleSystemStatus(status umprotocol.StatusRsp) (err error) {
-	um.imageVersion = status.CurrentVersion
+func (um *Client) handleSystemStatus(status []umprotocol.ComponentStatus) (err error) {
+	if um.upgradeState != stateUpgrading {
+		log.Warn("Unexpected updateStatus upgradeState ", um.upgradeState)
+		return nil
+	}
 
-	switch {
-	// any update at this moment
-	case (um.upgradeState == stateInit || um.upgradeState == stateDownloading) && status.Status != umprotocol.InProgressStatus:
+	for _, value := range status {
+		if value.Status == umprotocol.StatusInstalled {
+			toRemove := []int{}
 
-	// upgrade/revert is in progress
-	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status == umprotocol.InProgressStatus:
+			for i, curStatus := range um.currentComponents {
+				if value.ID == curStatus.ID {
+					if curStatus.Status != umprotocol.StatusInstalled {
+						continue
+					}
 
-	// upgrade/revert complete
-	case (um.upgradeState == stateUpgrading || um.upgradeState == stateReverting) && status.Status != umprotocol.InProgressStatus:
-		if status.Operation == umprotocol.RevertOperation {
-			um.sendRevertStatus(status.Status, status.Error)
+					if value.VendorVersion != curStatus.VendorVersion {
+						toRemove = append(toRemove, i)
+						continue
+					}
+				}
+			}
+
+			sort.Ints(toRemove)
+
+			for i, value := range toRemove {
+				um.currentComponents = append(um.currentComponents[:value-i], um.currentComponents[value-i+1:]...)
+			}
 		}
 
-		if status.Operation == umprotocol.UpgradeOperation {
-			um.sendUpgradeStatus(status.Status, status.Error)
-		}
+		um.updateCurrentComponentStatus(value.ID, value.VendorVersion, value.Status, value.Error)
+	}
 
-	default:
-		log.Error("Unexpected status received")
+	um.sender.SendComponentStatus(um.currentComponents)
+
+	if um.updateFinished() == true {
+		um.upgradeState = stateInit
+
+		um.finishChannel <- true
 	}
 
 	return nil
+}
+
+func (um *Client) updateFinished() (updateFinished bool) {
+	for _, status := range um.currentComponents {
+		if (status.Status != umprotocol.StatusInstalled) && (status.Status != umprotocol.StatusError) {
+			return false
+		}
+	}
+
+	if err := um.clearDirs(); err != nil {
+		log.Error("Can't clean update dir ", err)
+	}
+
+	return true
 }
 
 func (um *Client) getSystemComponents() (err error) {
@@ -561,6 +621,12 @@ func (um *Client) getSystemComponents() (err error) {
 	for _, value := range componentsFromUm {
 		um.currentComponents = append(um.currentComponents, amqp.ComponentInfo{ID: value.ID, VendorVersion: value.VendorVersion,
 			AosVersion: value.AosVersion, Error: value.Error, Status: value.Status})
+	}
+
+	if um.updateFinished() == true {
+		um.upgradeState = stateInit
+	} else {
+		um.upgradeState = stateUpgrading
 	}
 
 	return nil
