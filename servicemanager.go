@@ -362,18 +362,6 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 		sm.logging.GetServiceCrashLog(*data)
 
-	case *amqp.SystemUpgrade:
-		log.WithFields(log.Fields{
-			"imageVersion": data.ImageVersion}).Info("Receive system upgrade request")
-
-		sm.um.SystemUpgrade(*data)
-
-	case *amqp.SystemRevert:
-		log.WithFields(log.Fields{
-			"imageVersion": data.ImageVersion}).Info("Receive system revert request")
-
-		sm.um.SystemRevert(data.ImageVersion)
-
 	case *amqp.RenewCertificatesNotificationWithPwd:
 		log.Info("RenewCertificatesNotificationWithPwd")
 

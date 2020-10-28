@@ -57,8 +57,6 @@ const (
 	RequestServiceLogType             = "requestServiceLog"
 	ServiceDiscoveryType              = "serviceDiscovery"
 	StateAcceptanceType               = "stateAcceptance"
-	SystemRevertType                  = "systemRevert"
-	SystemUpgradeType                 = "systemUpgrade"
 	UpdateStateType                   = "updateState"
 	DeviceErrors                      = "deviceErrors"
 	RenewCertificatesNotificationType = "renewCertificatesNotification"
@@ -72,8 +70,6 @@ const (
 	NewStateType                            = "newState"
 	PushServiceLogType                      = "pushServiceLog"
 	StateRequestType                        = "stateRequest"
-	SystemRevertStatusType                  = "systemRevertStatus"
-	SystemUpgradeStatusType                 = "systemUpgradeStatus"
 	UnitStatusType                          = "unitStatus"
 	IssueUnitCertificatesRequestType        = "issueUnitCertificates"
 	InstallUnitCertificatesConfirmationType = "installUnitCertificatesConfirmation"
@@ -170,11 +166,6 @@ type StateAcceptance struct {
 	Reason    string `json:"reason"`
 }
 
-// SystemRevert system revert structure
-type SystemRevert struct {
-	ImageVersion uint64 `json:"imageVersion"`
-}
-
 // DecryptionInfo upgrade decryption info
 type DecryptionInfo struct {
 	BlockAlg     string `json:"blockAlg"`
@@ -206,14 +197,6 @@ type CertificateChain struct {
 type Certificate struct {
 	Fingerprint string `json:"fingerprint"`
 	Certificate []byte `json:"certificate"`
-}
-
-// SystemUpgrade system upgrade structure
-type SystemUpgrade struct {
-	ImageVersion uint64 `json:"imageVersion"`
-	DecryptDataStruct
-	CertificateChains []CertificateChain `json:"certificateChains,omitempty"`
-	Certificates      []Certificate      `json:"certificates,omitempty"`
 }
 
 //DecryptDataStruct struct contains how to decrypt data
@@ -320,20 +303,6 @@ type PushServiceLog struct {
 type StateRequest struct {
 	ServiceID string `json:"serviceId"`
 	Default   bool   `json:"default"`
-}
-
-// SystemRevertStatus system revert status structure
-type SystemRevertStatus struct {
-	Status       string  `json:"revertStatus"`
-	Error        *string `json:"error,omitempty"`
-	ImageVersion uint64  `json:"imageVersion"`
-}
-
-// SystemUpgradeStatus system upgrade status structure
-type SystemUpgradeStatus struct {
-	Status       string  `json:"upgradeStatus"`
-	Error        *string `json:"error,omitempty"`
-	ImageVersion uint64  `json:"imageVersion"`
 }
 
 // UnitStatus untit status structure
@@ -546,8 +515,6 @@ var messageMap = map[string]func() interface{}{
 	RequestServiceCrashLogType:        func() interface{} { return &RequestServiceCrashLog{} },
 	RequestServiceLogType:             func() interface{} { return &RequestServiceLog{} },
 	StateAcceptanceType:               func() interface{} { return &StateAcceptance{} },
-	SystemRevertType:                  func() interface{} { return &SystemRevert{} },
-	SystemUpgradeType:                 func() interface{} { return &SystemUpgrade{} },
 	UpdateStateType:                   func() interface{} { return &UpdateState{} },
 	RenewCertificatesNotificationType: func() interface{} { return &RenewCertificatesNotification{} },
 	IssuedUnitCertificatesType:        func() interface{} { return &IssuedUnitCertificates{} },
@@ -752,38 +719,6 @@ func (handler *AmqpHandler) SendAlerts(alerts Alerts) (err error) {
 	alertMsg := handler.createAosMessage(AlertsType, alerts)
 
 	handler.sendChannel <- Message{"", alertMsg}
-
-	return nil
-}
-
-// SendSystemRevertStatus sends system revert status
-func (handler *AmqpHandler) SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error) {
-	errorValue := &revertError
-
-	if revertError == "" {
-		errorValue = nil
-	}
-
-	revertStatusMsg := handler.createAosMessage(SystemRevertStatusType,
-		SystemRevertStatus{Status: revertStatus, Error: errorValue, ImageVersion: imageVersion})
-
-	handler.sendChannel <- Message{"", revertStatusMsg}
-
-	return nil
-}
-
-// SendSystemUpgradeStatus sends system upgrade status
-func (handler *AmqpHandler) SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error) {
-	errorValue := &upgradeError
-
-	if upgradeError == "" {
-		errorValue = nil
-	}
-
-	upgradeStatusMsg := handler.createAosMessage(SystemUpgradeStatusType,
-		SystemUpgradeStatus{Status: upgradeStatus, Error: errorValue, ImageVersion: imageVersion})
-
-	handler.sendChannel <- Message{"", upgradeStatusMsg}
 
 	return nil
 }

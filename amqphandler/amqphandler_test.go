@@ -200,14 +200,6 @@ func TestSendMessages(t *testing.T) {
 		&amqphandler.AOSMessage{
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
 			Data:   &amqphandler.RequestServiceCrashLog{ServiceID: "service3", LogID: uuid.New().String()}},
-
-		&amqphandler.AOSMessage{
-			Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.SystemRevert{ImageVersion: 3}},
-
-		&amqphandler.AOSMessage{
-			Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.SystemUpgrade{ImageVersion: 4}},
 	}
 
 	for _, message := range testData {
@@ -421,30 +413,6 @@ func TestReceiveMessages(t *testing.T) {
 				Data:   &alertsData},
 			getDataType: func() interface{} {
 				return &amqphandler.Alerts{}
-			},
-		},
-
-		messageDesc{
-			call: func() error {
-				return amqpHandler.SendSystemRevertStatus("success", "", 3)
-			},
-			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemRevertStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.SystemRevertStatus{Status: "success", ImageVersion: 3}},
-			getDataType: func() interface{} {
-				return &amqphandler.SystemRevertStatus{}
-			},
-		},
-
-		messageDesc{
-			call: func() error {
-				return amqpHandler.SendSystemUpgradeStatus("failed", "", 4)
-			},
-			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.SystemUpgradeStatusType, Version: amqphandler.ProtocolVersion},
-				Data:   &amqphandler.SystemUpgradeStatus{Status: "failed", ImageVersion: 4}},
-			getDataType: func() interface{} {
-				return &amqphandler.SystemUpgradeStatus{}
 			},
 		},
 	}
