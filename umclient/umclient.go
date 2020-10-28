@@ -80,6 +80,7 @@ type Client struct {
 
 // Sender provides API to send messages to the cloud
 type Sender interface {
+	SendComponentStatus(components []amqp.ComponentInfo)
 	SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error)
 	SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error)
 	SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error)
@@ -124,18 +125,6 @@ func New(config *config.Config, sender Sender, storage Storage) (um *Client, err
 
 	if um.upgradeState, err = um.storage.GetUpgradeState(); err != nil {
 		return nil, err
-	}
-
-	if um.upgradeVersion, err = um.storage.GetUpgradeVersion(); err != nil {
-		return nil, err
-	}
-
-	if um.upgradeState == stateDownloading {
-		if um.upgradeData, err = um.storage.GetUpgradeData(); err != nil {
-			return nil, err
-		}
-
-		go um.downloadImage()
 	}
 
 	return um, nil
@@ -198,6 +187,65 @@ func (um *Client) GetSystemComponents() (components []amqp.ComponentInfo, err er
 // ProcessDesiredComponents process desred component list
 func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+
+	if um.upgradeState == stateInit {
+		newComponents := []amqp.ComponentInfoFromCloud{}
+		for _, desComponent := range components {
+			wasFound := false
+
+			for _, curComponent := range um.currentComponents {
+				if curComponent.ID == desComponent.ID {
+					if curComponent.VendorVersion == desComponent.VendorVersion &&
+						curComponent.Status != umprotocol.StatusError {
+						wasFound = true
+					}
+
+					break
+				}
+			}
+
+			if wasFound == false {
+				newComponents = append(newComponents, desComponent)
+			}
+		}
+
+		if len(newComponents) == 0 {
+			log.Debug("No update for componenets")
+			return nil
+		}
+
+		for _, newElement := range newComponents {
+			um.currentComponents = append(um.currentComponents, amqp.ComponentInfo{
+				ID:            newElement.ID,
+				VendorVersion: newElement.VendorVersion,
+				Status:        umprotocol.StatusPending,
+				AosVersion:    newElement.AosVersion})
+		}
+
+		um.sender.SendComponentStatus(um.currentComponents)
+
+		componentsToUpdate := []umprotocol.ComponentInfo{}
+
+		for _, newElement := range newComponents {
+			if err := um.updateCurrentComponentStatus(newElement.ID, newElement.VendorVersion,
+				umprotocol.StatusDownloading, ""); err != nil {
+				return err
+			}
+
+			updateComponent, err := um.downloadComponentUpdate(newElement, chains, certs)
+			if err != nil {
+				um.updateCurrentComponentStatus(newElement.ID, newElement.VendorVersion, umprotocol.StatusError, err.Error())
+				return err
+			}
+
+			componentsToUpdate = append(componentsToUpdate, updateComponent)
+
+			if err := um.updateCurrentComponentStatus(newElement.ID, newElement.VendorVersion,
+				umprotocol.StatusDownloaded, ""); err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
@@ -585,6 +633,38 @@ func (um *Client) sendRevertStatus(revertStatus, revertError string) {
 	}
 }
 
+func (um *Client) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate umprotocol.ComponentInfo, err error) {
+	decryptData := amqp.DecryptDataStruct{URLs: componentUpdate.URLs,
+		Sha256:         componentUpdate.Sha256,
+		Sha512:         componentUpdate.Sha512,
+		Size:           componentUpdate.Size,
+		DecryptionInfo: componentUpdate.DecryptionInfo,
+		Signs:          componentUpdate.Signs}
+
+	infoForUpdate = umprotocol.ComponentInfo{ID: componentUpdate.ID,
+		VendorVersion: componentUpdate.VendorVersion,
+		AosVersion:    componentUpdate.AosVersion,
+		Annotations:   componentUpdate.Annotations,
+	}
+
+	infoForUpdate.Path, err = um.downloader.DownloadAndDecrypt(decryptData, chains, certs, um.upgradeDir)
+	if err != nil {
+		return infoForUpdate, err
+	}
+
+	fileInfo, err := image.CreateFileInfo(infoForUpdate.Path)
+	if err != nil {
+		return infoForUpdate, err
+	}
+
+	infoForUpdate.Sha256 = fileInfo.Sha256
+	infoForUpdate.Sha512 = fileInfo.Sha512
+	infoForUpdate.Size = fileInfo.Size
+
+	return infoForUpdate, err
+}
+
 func (um *Client) downloadImage() {
 	um.Lock()
 	defer um.Unlock()
@@ -677,4 +757,17 @@ func (um *Client) sendRequest(messageType, expectedMessageType string, request, 
 	}
 
 	return nil
+}
+
+func (um *Client) updateCurrentComponentStatus(ID, vendorVersion, status, errorStr string) (err error) {
+	for i, curElement := range um.currentComponents {
+		if curElement.ID == ID && curElement.VendorVersion == vendorVersion {
+			um.currentComponents[i].Status = status
+			um.currentComponents[i].Error = errorStr
+			um.sender.SendComponentStatus(um.currentComponents)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no element with ID =%s vendorVersion =%s", ID, vendorVersion)
 }
