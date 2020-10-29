@@ -40,6 +40,7 @@ import (
 
 const devHostDirectory = "/dev/"
 const userHostDirectory = "/etc/group"
+const supportedFormatVersion = 1
 
 /*******************************************************************************
  * Types
@@ -89,9 +90,10 @@ type BoardResource struct {
 
 // BoardConfiguration resources that are proviced by Cloud for using at AOS services
 type BoardConfiguration struct {
-	Version   uint64           `json:"version,omitempty"`
-	Devices   []DeviceResource `json:"devices"`
-	Resources []BoardResource  `json:"resources"`
+	FormatVersion uint64           `json:"formatVersion`
+	Version       string           `json:"version"`
+	Devices       []DeviceResource `json:"devices"`
+	Resources     []BoardResource  `json:"resources"`
 }
 
 /*******************************************************************************
@@ -114,6 +116,10 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 
 	if resourcemanager.boardConfiguration, err = resourcemanager.parseBoardConfiguration(boardConfigFile); err != nil {
 		log.Errorf("Can't parse resource configuration file: %s", boardConfigFile)
+	}
+
+	if resourcemanager.boardConfiguration.FormatVersion != supportedFormatVersion {
+		log.Errorf("Unsupported board config format version %d != %d", resourcemanager.boardConfiguration.FormatVersion, supportedFormatVersion)
 	}
 
 	// do validation only if non-zero amount of the devices was provided
@@ -389,9 +395,6 @@ func (resourcemanager *ResourceManager) parseBoardConfiguration(boardConfigFile 
 	if err = json.Unmarshal(byteValue, &resources); err != nil {
 		return resources, err
 	}
-
-	// print debug information that resource configuration has been parsed succesfully
-	log.Debugf("Available resources %s", byteValue)
 
 	return resources, nil
 }

@@ -490,6 +490,8 @@ func cleanup() (err error) {
 
 func createRealBoardConfigFile() (err error) {
 	configContent := `{
+	"formatVersion": 1,
+	"version": "1.0",
 	"devices": [
 		{
 			"name": "random",
@@ -520,6 +522,8 @@ func createRealBoardConfigFile() (err error) {
 
 func createTestBoardConfigFile() (err error) {
 	configContent := `{
+	"formatVersion": 1,
+	"version": "1.0", 
 	"devices": [
 		{
 			"name": "random",
@@ -584,6 +588,8 @@ func createTestBoardConfigFile() (err error) {
 
 func createInValidBoardConfigFile() (err error) {
 	configContent := `{
+	"formatVersion": 1,
+	"version": "1.0",
 	"devices": [
 		{
 			"name": "some_not_existed_device",
@@ -607,6 +613,8 @@ func createInValidBoardConfigFile() (err error) {
 
 func createEmptyBoardConfigFile() (err error) {
 	configContent := `{
+	"formatVersion": 1,
+	"version": "1.0",
 	"devices": []
 }`
 
