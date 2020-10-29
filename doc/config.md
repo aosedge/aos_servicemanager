@@ -69,8 +69,8 @@ The configuration file has JSON format. Following is JSON schema:
             "description": "Directory where service storage folders are located",
             "type": "string"
         },
-        "upgradeDir": {
-            "description": "Directory where upgrade image are stored",
+        "updateDir": {
+            "description": "Directory where update image are stored",
             "type": "string"
         },
         "layersDir": {

@@ -182,7 +182,7 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Cannot create root cert: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, sender)
+	client, err = umclient.New(&config.Config{UpdateDir: path.Join(tmpDir, "/update")}, sender)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}

@@ -44,7 +44,7 @@ func createConfigFile() (err error) {
 	"workingDir" : "workingDir",
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
-	"upgradeDir" : "/var/aos/upgrade",
+	"UpdateDir" : "/var/aos/update",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"visServer" : "wss://localhost:8088",
 	"umServer" : "wss://localhost:8089",
@@ -235,14 +235,14 @@ func TestGetUMServerURL(t *testing.T) {
 	}
 }
 
-func TestGetUpgradeDir(t *testing.T) {
+func TestGetUpdateDir(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.UpgradeDir != "/var/aos/upgrade" {
-		t.Errorf("Wrong upgrade dir value: %s", config.UpgradeDir)
+	if config.UpdateDir != "/var/aos/update" {
+		t.Errorf("Wrong update dir value: %s", config.UpdateDir)
 	}
 }
 

@@ -90,7 +90,7 @@ type Config struct {
 	VISServerURL        string     `json:"visServer"`
 	UMServerURL         string     `json:"umServer"`
 	WorkingDir          string     `json:"workingDir"`
-	UpgradeDir          string     `json:"upgradeDir"`
+	UpdateDir           string     `json:"updateDir"`
 	StorageDir          string     `json:"storageDir"`
 	LayersDir           string     `json:"layersDir"`
 	BoardConfigFile     string     `json:"boardConfigFile"`
@@ -142,8 +142,8 @@ func New(fileName string) (config *Config, err error) {
 		config.StorageDir = path.Join(config.WorkingDir, "storages")
 	}
 
-	if config.UpgradeDir == "" {
-		config.UpgradeDir = path.Join(config.WorkingDir, "upgrade")
+	if config.UpdateDir == "" {
+		config.UpdateDir = path.Join(config.WorkingDir, "update")
 	}
 
 	if config.LayersDir == "" {

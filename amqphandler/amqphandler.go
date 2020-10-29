@@ -166,7 +166,7 @@ type StateAcceptance struct {
 	Reason    string `json:"reason"`
 }
 
-// DecryptionInfo upgrade decryption info
+// DecryptionInfo update decryption info
 type DecryptionInfo struct {
 	BlockAlg     string `json:"blockAlg"`
 	BlockIv      []byte `json:"blockIv"`
