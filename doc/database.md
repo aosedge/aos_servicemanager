@@ -16,9 +16,6 @@ The tables have following format:
 |---------------|-----------|-----|---------------------------------------------|
 | version       | INTEGER   |     | Curren system version                       |
 | cursor        | TEXT      |     |                                             |
-| upgradeState  | INTEGER   |     | Current upgrade state                       |
-| upgradeData   | BLOB      |     |                                             |
-| upgradeVersion| INTEGER   |     | Desired upgrade version                     |
 
 ## `services` table
 

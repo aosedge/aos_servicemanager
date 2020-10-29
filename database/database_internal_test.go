@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
 )
 
@@ -720,62 +720,6 @@ func TestGetServiceByUnitName(t *testing.T) {
 	}
 }
 
-func TestUpgradeState(t *testing.T) {
-	setUpgradeState := 4
-
-	if err := db.SetUpgradeState(setUpgradeState); err != nil {
-		t.Fatalf("Can't set upgrade state: %s", err)
-	}
-
-	getUpgradeState, err := db.GetUpgradeState()
-	if err != nil {
-		t.Fatalf("Can't get upgrade state: %s", err)
-	}
-
-	if setUpgradeState != getUpgradeState {
-		t.Fatalf("Wrong upgrade state value: %v", getUpgradeState)
-	}
-}
-
-func TestUpgradeData(t *testing.T) {
-	setUpgradeData := amqp.SystemUpgrade{
-		DecryptDataStruct: amqp.DecryptDataStruct{URLs: []string{"url1", "url2", "url3"},
-			Sha256: []byte("sha256"),
-			Sha512: []byte("sha512"),
-			Size:   1234},
-	}
-
-	if err := db.SetUpgradeData(setUpgradeData); err != nil {
-		t.Fatalf("Can't set upgrade data: %s", err)
-	}
-
-	getUpgradeData, err := db.GetUpgradeData()
-	if err != nil {
-		t.Fatalf("Can't get upgrade data: %s", err)
-	}
-
-	if !reflect.DeepEqual(setUpgradeData, getUpgradeData) {
-		t.Fatalf("Wrong upgrade data value: %v", getUpgradeData)
-	}
-}
-
-func TestUpgradeVersion(t *testing.T) {
-	setUpgradeVersion := uint64(5)
-
-	if err := db.SetUpgradeVersion(setUpgradeVersion); err != nil {
-		t.Fatalf("Can't set upgrade version: %s", err)
-	}
-
-	getUpgradeVersion, err := db.GetUpgradeVersion()
-	if err != nil {
-		t.Fatalf("Can't get upgrade version: %s", err)
-	}
-
-	if setUpgradeVersion != getUpgradeVersion {
-		t.Fatalf("Wrong upgrade version value: %v", getUpgradeVersion)
-	}
-}
-
 func TestMultiThread(t *testing.T) {
 	const numIterations = 1000
 
@@ -787,8 +731,8 @@ func TestMultiThread(t *testing.T) {
 		defer wg.Done()
 
 		for i := 0; i < numIterations; i++ {
-			if err := db.SetUpgradeState(i); err != nil {
-				t.Fatalf("Can't set upgrade state: %s", err)
+			if err := db.SetOperationVersion(uint64(i)); err != nil {
+				t.Fatalf("Can't set operation version: %s", err)
 			}
 		}
 	}()
@@ -796,9 +740,9 @@ func TestMultiThread(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		_, err := db.GetUpgradeState()
+		_, err := db.GetOperationVersion()
 		if err != nil {
-			t.Fatalf("Can't get upgrade state: %s", err)
+			t.Fatalf("Can't get Operation Version : %s", err)
 		}
 	}()
 
@@ -806,8 +750,8 @@ func TestMultiThread(t *testing.T) {
 		defer wg.Done()
 
 		for i := 0; i < numIterations; i++ {
-			if err := db.SetUpgradeVersion(uint64(i)); err != nil {
-				t.Fatalf("Can't set upgrade version: %s", err)
+			if err := db.SetJournalCursor(strconv.Itoa(i)); err != nil {
+				t.Fatalf("Can't set journal cursor: %s", err)
 			}
 		}
 	}()
@@ -816,8 +760,8 @@ func TestMultiThread(t *testing.T) {
 		defer wg.Done()
 
 		for i := 0; i < numIterations; i++ {
-			if _, err := db.GetUpgradeVersion(); err != nil {
-				t.Fatalf("Can't get upgrade version: %s", err)
+			if _, err := db.GetJournalCursor(); err != nil {
+				t.Fatalf("Can't get journal cursor: %s", err)
 			}
 		}
 	}()

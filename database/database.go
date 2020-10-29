@@ -744,136 +744,6 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 	return cursor, nil
 }
 
-// SetUpgradeState stores upgrade state
-func (db *Database) SetUpgradeState(state int) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET upgradeState = ?", state)
-	if err != nil {
-		return err
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetUpgradeState returns upgrade state
-func (db *Database) GetUpgradeState() (state int, err error) {
-	stmt, err := db.sql.Prepare("SELECT upgradeState FROM config")
-	if err != nil {
-		return state, err
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&state)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return state, ErrNotExist
-		}
-
-		return state, err
-	}
-
-	return state, nil
-}
-
-// SetUpgradeData stores upgrade data
-func (db *Database) SetUpgradeData(data amqp.SystemUpgrade) (err error) {
-	dataJSON, err := json.Marshal(&data)
-	if err != nil {
-		return err
-	}
-
-	result, err := db.sql.Exec("UPDATE config SET upgradeData = ?", dataJSON)
-	if err != nil {
-		return err
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetUpgradeData returns upgrade data
-func (db *Database) GetUpgradeData() (data amqp.SystemUpgrade, err error) {
-	stmt, err := db.sql.Prepare("SELECT upgradeData FROM config")
-	if err != nil {
-		return data, err
-	}
-	defer stmt.Close()
-
-	var dataJSON []byte
-
-	if err = stmt.QueryRow().Scan(&dataJSON); err != nil {
-		if err == sql.ErrNoRows {
-			return data, ErrNotExist
-		}
-
-		return data, err
-	}
-
-	if dataJSON == nil {
-		return data, nil
-	}
-
-	if err = json.Unmarshal(dataJSON, &data); err != nil {
-		return data, err
-	}
-
-	return data, nil
-}
-
-// SetUpgradeVersion stores upgrade version
-func (db *Database) SetUpgradeVersion(version uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET upgradeVersion = ?", version)
-	if err != nil {
-		return err
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetUpgradeVersion returns upgrade version
-func (db *Database) GetUpgradeVersion() (version uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT upgradeVersion FROM config")
-	if err != nil {
-		return 0, err
-	}
-	defer stmt.Close()
-
-	if err = stmt.QueryRow().Scan(&version); err != nil {
-		if err == sql.ErrNoRows {
-			return 0, ErrNotExist
-		}
-
-		return 0, err
-	}
-
-	return version, nil
-}
-
 //AddLayer add layer to layers table
 func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, description string,
 	aosVersion uint64) (err error) {
@@ -977,20 +847,14 @@ func (db *Database) createConfigTable() (err error) {
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
 			version INTEGER,
-			cursor TEXT,
-			upgradeState INTEGER,
-			upgradeData BLOB,
-			upgradeVersion INTEGER)`); err != nil {
+			cursor TEXT)`); err != nil {
 		return err
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
 			version,
-			cursor,
-			upgradeState,
-			upgradeData,
-			upgradeVersion) values(?, ?, ?, ?, ?)`, OperationVersion, "", 0, []byte{}, 3); err != nil {
+			cursor) values(?, ?)`, OperationVersion, ""); err != nil {
 		return err
 	}
 
