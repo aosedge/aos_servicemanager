@@ -22,8 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -50,10 +48,6 @@ const (
 	stateReverting
 )
 
-const (
-	updateDownloadsTime = 10 * time.Second
-)
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -65,16 +59,11 @@ type Client struct {
 	sync.Mutex
 	crypt      *fcrypt.CryptoContext
 	sender     Sender
-	storage    Storage
 	wsClient   *wsclient.Client
 	downloader downloader
 
-	upgradeDir string
-
-	imageVersion   uint64
-	upgradeState   int
-	upgradeVersion uint64
-	upgradeData    amqp.SystemUpgrade
+	upgradeDir   string
+	upgradeState int
 
 	currentComponents []amqp.ComponentInfo
 	finishChannel     chan bool
@@ -84,20 +73,8 @@ type Client struct {
 // Sender provides API to send messages to the cloud
 type Sender interface {
 	SendComponentStatus(components []amqp.ComponentInfo)
-	SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error)
-	SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error)
 	SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error)
 	SendInstallCertificatesConfirmation(confirmation []amqp.CertificateConfirmation) (err error)
-}
-
-// Storage provides API to store/retreive persistent data
-type Storage interface {
-	SetUpgradeState(state int) (err error)
-	GetUpgradeState() (state int, err error)
-	SetUpgradeData(data amqp.SystemUpgrade) (err error)
-	GetUpgradeData() (data amqp.SystemUpgrade, err error)
-	SetUpgradeVersion(version uint64) (err error)
-	GetUpgradeVersion() (version uint64, err error)
 }
 
 type downloader interface {
@@ -110,10 +87,9 @@ type downloader interface {
  ******************************************************************************/
 
 // New creates new umclient
-func New(config *config.Config, sender Sender, storage Storage) (um *Client, err error) {
+func New(config *config.Config, sender Sender) (um *Client, err error) {
 	um = &Client{
 		sender:        sender,
-		storage:       storage,
 		upgradeDir:    config.UpgradeDir,
 		upgradeState:  stateInit,
 		finishChannel: make(chan bool, 1),
@@ -158,24 +134,6 @@ func (um *Client) Disconnect() (err error) {
 // IsConnected returns true if connected to UM server
 func (um *Client) IsConnected() (result bool) {
 	return um.wsClient.IsConnected()
-}
-
-// GetSystemVersion return system version
-func (um *Client) GetSystemVersion() (version uint64, err error) {
-	um.Lock()
-	defer um.Unlock()
-
-	var status umprotocol.StatusRsp
-
-	if err = um.sendRequest(umprotocol.StatusRequestType, umprotocol.StatusResponseType, nil, &status); err != nil {
-		return 0, err
-	}
-
-	// if err = um.handleSystemStatus(status); err != nil {
-	// 	return 0, err
-	// }
-
-	return um.imageVersion, nil
 }
 
 // GetSystemComponents returns list of system components information
@@ -276,115 +234,6 @@ func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCl
 		return nil
 	}
 
-}
-
-// SystemUpgrade send system upgrade request to UM
-func (um *Client) SystemUpgrade(upgradeData amqp.SystemUpgrade) {
-	um.Lock()
-	defer um.Unlock()
-
-	log.WithField("version", upgradeData.ImageVersion).Info("System upgrade")
-
-	if um.imageVersion == upgradeData.ImageVersion {
-		um.sendUpgradeStatus(umprotocol.SuccessStatus, "")
-		return
-	}
-
-	/* TODO: Shall image version be without gaps?
-	if um.imageVersion+1 != imageVersion {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
-		return
-	}
-	*/
-
-	if um.imageVersion > upgradeData.ImageVersion {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "wrong image version")
-		return
-	}
-
-	if um.upgradeState != stateInit && um.upgradeVersion != upgradeData.ImageVersion {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, "another upgrade is in progress")
-		return
-	}
-
-	if um.upgradeState == stateInit {
-		um.upgradeVersion = upgradeData.ImageVersion
-		um.upgradeData = upgradeData
-		um.upgradeState = stateDownloading
-
-		if err := um.clearDirs(); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		if err := um.storage.SetUpgradeVersion(um.upgradeVersion); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		if err := um.storage.SetUpgradeData(um.upgradeData); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-			um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		go um.downloadImage()
-	}
-}
-
-// SystemRevert send system revert request to UM
-func (um *Client) SystemRevert(imageVersion uint64) {
-	um.Lock()
-	defer um.Unlock()
-
-	log.WithField("version", imageVersion).Info("System revert")
-
-	if um.imageVersion == imageVersion {
-		um.sendRevertStatus(umprotocol.SuccessStatus, "")
-		return
-	}
-
-	/* TODO: Shall image version be without gaps?
-	if um.imageVersion-1 != imageVersion {
-		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
-		return
-	}
-	*/
-
-	if um.imageVersion < imageVersion {
-		um.sendRevertStatus(umprotocol.FailedStatus, "wrong image version")
-		return
-	}
-
-	if um.upgradeState != stateInit && um.upgradeVersion != imageVersion {
-		um.sendRevertStatus(umprotocol.FailedStatus, "another upgrade is in progress")
-		return
-	}
-
-	if um.upgradeState == stateInit {
-		um.upgradeVersion = imageVersion
-		um.upgradeState = stateReverting
-
-		if err := um.storage.SetUpgradeVersion(um.upgradeVersion); err != nil {
-			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-
-		if err := um.sendMessage(umprotocol.RevertRequestType, umprotocol.RevertReq{
-			ImageVersion: um.upgradeVersion}); err != nil {
-			um.sendRevertStatus(umprotocol.FailedStatus, err.Error())
-			return
-		}
-	}
 }
 
 // RenewCertificatesNotification send notification aboute renew certificates
@@ -632,73 +481,6 @@ func (um *Client) getSystemComponents() (err error) {
 	return nil
 }
 
-func (um *Client) sendUpgradeRequest() (err error) {
-	// This function is called under locked context but we need to unlock for downloads
-	um.Unlock()
-	defer um.Lock()
-
-	if len(um.upgradeData.URLs) == 0 {
-		return errors.New("metadata doesn't contain URL for download")
-	}
-
-	fileInfo, err := image.CreateFileInfo(path.Join(um.upgradeDir, um.upgradeData.URLs[0]))
-	if err != nil {
-		return err
-	}
-
-	upgradeReq := umprotocol.UpgradeReq{
-		ImageVersion: um.upgradeVersion,
-		ImageInfo: umprotocol.ImageInfo{
-			Path:   um.upgradeData.URLs[0],
-			Sha256: fileInfo.Sha256,
-			Sha512: fileInfo.Sha512,
-			Size:   fileInfo.Size,
-		},
-	}
-
-	if err = um.sendMessage(umprotocol.UpgradeRequestType, upgradeReq); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (um *Client) sendUpgradeStatus(upgradeStatus, upgradeError string) {
-	if upgradeStatus == umprotocol.SuccessStatus {
-		log.WithFields(log.Fields{"version": um.upgradeVersion}).Info("Upgrade success")
-	} else {
-		log.WithFields(log.Fields{"version": um.upgradeVersion}).Errorf("Upgrade failed: %s", upgradeError)
-	}
-
-	um.upgradeState = stateInit
-
-	if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-		log.Errorf("Can't set upgrade state: %s", err)
-	}
-
-	if err := um.sender.SendSystemUpgradeStatus(upgradeStatus, upgradeError, um.upgradeVersion); err != nil {
-		log.Errorf("Can't send system upgrade status: %s", err)
-	}
-}
-
-func (um *Client) sendRevertStatus(revertStatus, revertError string) {
-	if revertStatus == umprotocol.SuccessStatus {
-		log.WithFields(log.Fields{"version": um.upgradeVersion}).Info("Revert success")
-	} else {
-		log.WithFields(log.Fields{"version": um.upgradeVersion}).Errorf("Revert failed: %s", revertError)
-	}
-
-	um.upgradeState = stateInit
-
-	if err := um.storage.SetUpgradeState(um.upgradeState); err != nil {
-		log.Errorf("Can't set upgrade state: %s", err)
-	}
-
-	if err := um.sender.SendSystemRevertStatus(revertStatus, revertError, um.upgradeVersion); err != nil {
-		log.Errorf("Can't send system revert status: %s", err)
-	}
-}
-
 func (um *Client) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate umprotocol.ComponentInfo, err error) {
 	decryptData := amqp.DecryptDataStruct{URLs: componentUpdate.URLs,
@@ -729,46 +511,6 @@ func (um *Client) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFrom
 	infoForUpdate.Size = fileInfo.Size
 
 	return infoForUpdate, err
-}
-
-func (um *Client) downloadImage() {
-	um.Lock()
-	defer um.Unlock()
-
-	decryptData := amqp.DecryptDataStruct{URLs: um.upgradeData.URLs,
-		Sha256:         um.upgradeData.Sha256,
-		Sha512:         um.upgradeData.Sha512,
-		Size:           um.upgradeData.Size,
-		DecryptionInfo: um.upgradeData.DecryptionInfo,
-		Signs:          um.upgradeData.Signs}
-
-	um.Unlock()
-	destinationFile, err := um.downloader.DownloadAndDecrypt(decryptData, um.upgradeData.CertificateChains,
-		um.upgradeData.Certificates, um.upgradeDir)
-	um.Lock()
-	if err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
-
-	um.upgradeData.URLs = []string{filepath.Base(destinationFile)}
-
-	if err = um.storage.SetUpgradeData(um.upgradeData); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
-
-	um.upgradeState = stateUpgrading
-
-	if err = um.sendUpgradeRequest(); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
-
-	if err = um.storage.SetUpgradeState(um.upgradeState); err != nil {
-		um.sendUpgradeStatus(umprotocol.FailedStatus, err.Error())
-		return
-	}
 }
 
 func (um *Client) clearDirs() (err error) {

@@ -173,7 +173,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if sm.um, err = umclient.New(cfg, sm.amqp, sm.db); err != nil {
+	if sm.um, err = umclient.New(cfg, sm.amqp); err != nil {
 		return sm, err
 	}
 
