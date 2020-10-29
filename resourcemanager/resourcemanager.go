@@ -281,11 +281,6 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 	return nil
 }
 
-// GetBoardConfigVersion get current version of configuration file
-func (resourcemanager *ResourceManager) GetBoardConfigVersion() (version uint64) {
-	return resourcemanager.boardConfiguration.Version
-}
-
 /*******************************************************************************
  * Private
  ******************************************************************************/
