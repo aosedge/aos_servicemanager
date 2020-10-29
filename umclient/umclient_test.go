@@ -68,17 +68,10 @@ type operationStatus struct {
 
 // Test sender
 type testSender struct {
-	upgradeStatusChannel chan operationStatus
-	revertStatusChannel  chan operationStatus
+	updateStatusChannel chan []amqp.ComponentInfo
 }
 
 type messageProcessor struct {
-}
-
-type testStorage struct {
-	state   int
-	data    amqp.SystemUpgrade
-	version uint64
 }
 
 type clientHandler struct {
@@ -96,17 +89,16 @@ type updateDownloader struct {
  ******************************************************************************/
 
 var (
-	sender *testSender
-	server *wsserver.Server
-	client *umclient.Client
+	sender                 *testSender
+	server                 *wsserver.Server
+	client                 *umclient.Client
+	currentComponentStatus []umprotocol.ComponentStatus
 )
 
 var (
 	imageVersion     uint64
 	operationVersion uint64
 )
-
-var storage testStorage
 
 /*******************************************************************************
  * Init
@@ -147,6 +139,13 @@ func TestMain(m *testing.M) {
 	}
 	defer server.Close()
 
+	currentComponentStatus = append(currentComponentStatus,
+		umprotocol.ComponentStatus{ID: "rootfs", VendorVersion: "v1.0", Status: umprotocol.StatusInstalled})
+	currentComponentStatus = append(currentComponentStatus,
+		umprotocol.ComponentStatus{ID: "bootloader", VendorVersion: "v1.0", Status: umprotocol.StatusInstalled})
+	currentComponentStatus = append(currentComponentStatus,
+		umprotocol.ComponentStatus{ID: "boardConfig", VendorVersion: "v1.0", Status: umprotocol.StatusInstalled})
+
 	// Wait for server becomes ready
 	time.Sleep(1 * time.Second)
 
@@ -183,7 +182,7 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
 		log.Fatalf("Cannot create root cert: %s", err)
 	}
 
-	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, sender, &storage)
+	client, err = umclient.New(&config.Config{UpgradeDir: path.Join(tmpDir, "/upgrade")}, sender)
 	if err != nil {
 		log.Fatalf("Error creating UM client: %s", err)
 	}
@@ -212,103 +211,111 @@ VHEOzvaGk9miP6nBrDfNv7mIkgEKARrjjSpmJasIEU+mNtzeOIEiMtW1EMRc457o
  ******************************************************************************/
 
 func TestGetSystemVersion(t *testing.T) {
-	imageVersion = 4
-
 	if err := client.Connect(serverURL); err != nil {
 		log.Fatalf("Error connecting to UM server: %s", err)
 	}
 	defer client.Disconnect()
 
-	version, err := client.GetSystemVersion()
+	components, err := client.GetSystemComponents()
 	if err != nil {
 		t.Fatalf("Can't get system version: %s", err)
 	}
 
-	if version != imageVersion {
-		t.Errorf("Wrong image version: %d", version)
+	if len(components) != 3 {
+		t.Fatal("Incorrect component count: ", len(components))
 	}
-
-	client.Disconnect()
 }
 
-func TestSystemUpgrade(t *testing.T) {
+func TestSystemUpdateOneComponent(t *testing.T) {
 	if err := client.Connect(serverURL); err != nil {
 		log.Fatalf("Error connecting to UM server: %s", err)
 	}
 	defer client.Disconnect()
 
-	if _, err := client.GetSystemVersion(); err != nil {
-		t.Errorf("Can't get system version: %s", err)
-	}
-
-	data, err := createUpgradeData(5, "imagefile", []byte(imagePlainText))
+	components, err := client.GetSystemComponents()
 	if err != nil {
-		t.Fatalf("Can't create upgrade data: %s", err)
+		t.Fatalf("Can't get system version: %s", err)
 	}
 
-	client.SystemUpgrade(data)
+	if len(components) != 3 {
+		t.Fatal("Incorrect component count: ", len(components))
+	}
 
-	// wait for upgrade status
-	select {
-	case status := <-sender.upgradeStatusChannel:
-		if status.err != "" {
-			t.Errorf("Upgrade failed: %s", status.err)
+	data, err := createUpdateData("rootfsUpdate", []byte(imagePlainText))
+	if err != nil {
+		t.Fatalf("Can't create update data: %s", err)
+	}
+	data.ID = "rootfs"
+	data.VendorVersion = "2.0"
+
+	finishChannel := make(chan error)
+	resultComponentStatus := []amqp.ComponentInfo{}
+
+	go func(errChan chan error) {
+		errChan <- client.ProcessDesiredComponents([]amqp.ComponentInfoFromCloud{data}, []amqp.CertificateChain{}, []amqp.Certificate{})
+	}(finishChannel)
+
+	// wait for update status
+	updateFinished := false
+	for {
+		if updateFinished == true {
+			break
 		}
 
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for upgrade status timeout")
+		select {
+		case status := <-sender.updateStatusChannel:
+			resultComponentStatus = make([]amqp.ComponentInfo, len(status))
+			copy(resultComponentStatus, status)
+
+		case finish := <-finishChannel:
+			if finish != nil {
+				t.Fatal("Update finished with error ", finish)
+			}
+			updateFinished = true
+
+		case <-time.After(3 * time.Second):
+			t.Error("Waiting for update status timeout")
+			updateFinished = true
+		}
 	}
 
-	// Try to upgrade the same version
-	client.SystemUpgrade(data)
+	if len(resultComponentStatus) != 3 {
+		log.Debug("Components ", resultComponentStatus)
+		t.Fatal("Incorrect component count: ", len(resultComponentStatus))
+	}
 
-	select {
-	case status := <-sender.upgradeStatusChannel:
-		if status.err != "" {
-			t.Errorf("Upgrade failed: %s", status.err)
+	for _, value := range resultComponentStatus {
+		if value.Status != umprotocol.StatusInstalled {
+			t.Fatalf("Update finished with incorrect status %s, err=%s ", value.Status, value.Error)
+		}
+	}
+
+	// Try to update the same version
+	resultComponentStatus = []amqp.ComponentInfo{}
+
+	go func(errChan chan error) {
+		errChan <- client.ProcessDesiredComponents([]amqp.ComponentInfoFromCloud{data}, []amqp.CertificateChain{}, []amqp.Certificate{})
+	}(finishChannel)
+
+	for {
+		if updateFinished == true {
+			break
 		}
 
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for upgrade status timeout")
-	}
-}
+		select {
+		case <-sender.updateStatusChannel:
+			t.Error("Should finished without update status")
 
-func TestRevertUpgrade(t *testing.T) {
-	imageVersion = 4
+		case finish := <-finishChannel:
+			if finish != nil {
+				t.Fatal("Update finished with error ", finish)
+			}
+			updateFinished = true
 
-	if err := client.Connect(serverURL); err != nil {
-		log.Fatalf("Error connecting to UM server: %s", err)
-	}
-	defer client.Disconnect()
-
-	if _, err := client.GetSystemVersion(); err != nil {
-		t.Errorf("Can't get system version: %s", err)
-	}
-
-	client.SystemRevert(3)
-
-	// wait for revert status
-	select {
-	case status := <-sender.revertStatusChannel:
-		if status.err != "" {
-			t.Errorf("Revert failed: %s", status.err)
+		case <-time.After(3 * time.Second):
+			t.Error("Waiting for update status timeout")
+			updateFinished = true
 		}
-
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for revert status timeout")
-	}
-
-	// Try to revert the same version
-	client.SystemRevert(3)
-
-	select {
-	case status := <-sender.revertStatusChannel:
-		if status.err != "" {
-			t.Errorf("Revert failed: %s", status.err)
-		}
-
-	case <-time.After(1 * time.Second):
-		t.Error("Waiting for upgrade status timeout")
 	}
 }
 
@@ -316,39 +323,12 @@ func TestRevertUpgrade(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func (storage *testStorage) SetUpgradeState(state int) (err error) {
-	storage.state = state
-
-	return nil
-}
-
-func (storage *testStorage) GetUpgradeState() (state int, err error) {
-	return storage.state, nil
-}
-
-func (storage *testStorage) SetUpgradeData(data amqp.SystemUpgrade) (err error) {
-	storage.data = data
-
-	return nil
-}
-
-func (storage *testStorage) GetUpgradeData() (data amqp.SystemUpgrade, err error) {
-	return storage.data, nil
-}
-
-func (storage *testStorage) SetUpgradeVersion(version uint64) (err error) {
-	storage.version = version
-
-	return nil
-}
-
-func (storage *testStorage) GetUpgradeVersion() (version uint64, err error) {
-	return storage.version, nil
-}
-
 func (downloader *updateDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
 	srcFile := packageInfo.URLs[0]
+	log.Debug("src = ", srcFile)
+
+	log.Debug("decryptDir = ", decryptDir)
 
 	cpCmd := exec.Command("cp", srcFile, decryptDir)
 	err = cpCmd.Run()
@@ -363,22 +343,13 @@ func (downloader *updateDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptD
 func newTestSender() (sender *testSender) {
 	sender = &testSender{}
 
-	sender.revertStatusChannel = make(chan operationStatus, 1)
-	sender.upgradeStatusChannel = make(chan operationStatus, 1)
+	sender.updateStatusChannel = make(chan []amqp.ComponentInfo, 1)
 
 	return sender
 }
 
-func (sender *testSender) SendSystemRevertStatus(revertStatus, revertError string, imageVersion uint64) (err error) {
-	sender.revertStatusChannel <- operationStatus{revertStatus, revertError, imageVersion}
-
-	return nil
-}
-
-func (sender *testSender) SendSystemUpgradeStatus(upgradeStatus, upgradeError string, imageVersion uint64) (err error) {
-	sender.upgradeStatusChannel <- operationStatus{upgradeStatus, upgradeError, imageVersion}
-
-	return nil
+func (sender *testSender) SendComponentStatus(components []amqp.ComponentInfo) {
+	sender.updateStatusChannel <- components
 }
 
 func (sender *testSender) SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error) {
@@ -400,78 +371,60 @@ func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType
 	}
 
 	switch message.Header.MessageType {
-	case umprotocol.StatusRequestType:
-		response = umprotocol.StatusRsp{
-			Operation:        umprotocol.UpgradeOperation,
-			Status:           umprotocol.SuccessStatus,
-			RequestedVersion: operationVersion,
-			CurrentVersion:   imageVersion}
+	case umprotocol.GetComponentsRequestType:
+		response = currentComponentStatus
+		message.Header.MessageType = umprotocol.GetComponentsResponseType
 
-	case umprotocol.UpgradeRequestType:
-		var upgradeReq umprotocol.UpgradeReq
+	case umprotocol.UpdateRequestType:
+		var updateReq []umprotocol.ComponentInfo
 
-		if err = json.Unmarshal(message.Data, &upgradeReq); err != nil {
+		if err = json.Unmarshal(message.Data, &updateReq); err != nil {
 			return nil, err
 		}
 
-		operationVersion = upgradeReq.ImageVersion
-		imageVersion = upgradeReq.ImageVersion
+		updateStatus := []umprotocol.ComponentStatus{}
 
-		status := umprotocol.SuccessStatus
-		errStr := ""
+		for _, component := range updateReq {
 
-		fileName := path.Join(tmpDir, "upgrade/", upgradeReq.ImageInfo.Path)
+			componentStatus := umprotocol.ComponentStatus{ID: component.ID, VendorVersion: component.VendorVersion}
+			for {
+				fileName := path.Join(component.Path)
 
-		if err = image.CheckFileInfo(fileName, image.FileInfo{
-			Sha256: upgradeReq.ImageInfo.Sha256,
-			Sha512: upgradeReq.ImageInfo.Sha512,
-			Size:   upgradeReq.ImageInfo.Size}); err != nil {
-			status = umprotocol.FailedStatus
-			errStr = err.Error()
-			break
+				if err = image.CheckFileInfo(fileName, image.FileInfo{
+					Sha256: component.Sha256,
+					Sha512: component.Sha512,
+					Size:   component.Size}); err != nil {
+					componentStatus.Status = umprotocol.StatusError
+					componentStatus.Error = err.Error()
+					break
+				}
+
+				data, err := ioutil.ReadFile(fileName)
+				if err != nil {
+					componentStatus.Status = umprotocol.StatusError
+					componentStatus.Error = err.Error()
+					break
+				}
+
+				if imagePlainText != string(data) {
+					componentStatus.Status = umprotocol.StatusError
+					componentStatus.Error = err.Error()
+					break
+				}
+
+				componentStatus.Status = umprotocol.StatusInstalled
+				break
+			}
+
+			updateStatus = append(updateStatus, componentStatus)
+
+			response = updateStatus
+			message.Header.MessageType = umprotocol.UpdateStatusType
 		}
-
-		data, err := ioutil.ReadFile(fileName)
-		if err != nil {
-			status = umprotocol.FailedStatus
-			errStr = err.Error()
-			break
-		}
-
-		if imagePlainText != string(data) {
-			status = umprotocol.FailedStatus
-			errStr = "image file content mismatch"
-			break
-		}
-
-		response = umprotocol.StatusRsp{
-			Operation:        umprotocol.UpgradeOperation,
-			Status:           status,
-			Error:            errStr,
-			RequestedVersion: operationVersion,
-			CurrentVersion:   imageVersion}
-
-	case umprotocol.RevertRequestType:
-		var revertReq umprotocol.UpgradeReq
-
-		if err = json.Unmarshal(message.Data, &revertReq); err != nil {
-			return nil, err
-		}
-
-		operationVersion = revertReq.ImageVersion
-		imageVersion = revertReq.ImageVersion
-
-		response = umprotocol.StatusRsp{
-			Operation:        umprotocol.RevertOperation,
-			Status:           umprotocol.SuccessStatus,
-			RequestedVersion: operationVersion,
-			CurrentVersion:   imageVersion}
 
 	default:
 		return nil, fmt.Errorf("unsupported message type: %s", message.Header.MessageType)
 	}
-
-	message.Header.MessageType = umprotocol.StatusResponseType
 
 	if message.Data, err = json.Marshal(response); err != nil {
 		return nil, err
@@ -492,14 +445,13 @@ func (handler clientHandler) ClientDisconnected(client *wsserver.Client) {
 
 }
 
-func createUpgradeData(version uint64, fileName string, content []byte) (data amqp.SystemUpgrade, err error) {
+func createUpdateData(fileName string, content []byte) (data amqp.ComponentInfoFromCloud, err error) {
 	filePath := path.Join(tmpDir, "fileServer", fileName)
 
 	if err = ioutil.WriteFile(filePath, content, 0644); err != nil {
 		return data, err
 	}
 
-	data.ImageVersion = version
 	data.URLs = []string{filePath}
 
 	imageFileInfo, err := image.CreateFileInfo(filePath)
