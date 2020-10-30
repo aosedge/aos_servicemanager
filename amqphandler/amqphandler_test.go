@@ -309,11 +309,11 @@ func TestReceiveMessages(t *testing.T) {
 			Payload:   map[string]interface{}{"Message": "System error"},
 		},
 		amqphandler.AlertItem{
-			Timestamp: time.Now().UTC(),
-			Tag:       amqphandler.AlertTagSystemError,
-			Source:    "service 1",
-			Version:   &alertVersion,
-			Payload:   map[string]interface{}{"Message": "Service crashed"},
+			Timestamp:  time.Now().UTC(),
+			Tag:        amqphandler.AlertTagSystemError,
+			Source:     "service 1",
+			AosVersion: &alertVersion,
+			Payload:    map[string]interface{}{"Message": "Service crashed"},
 		},
 		amqphandler.AlertItem{
 			Timestamp: time.Now().UTC(),

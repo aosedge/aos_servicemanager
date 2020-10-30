@@ -173,10 +173,10 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 	}
 
 	instance.addAlert(amqp.AlertItem{
-		Timestamp: time,
-		Tag:       amqp.AlertTagResource,
-		Source:    source,
-		Version:   version,
+		Timestamp:  time,
+		Tag:        amqp.AlertTagResource,
+		Source:     source,
+		AosVersion: version,
 		Payload: amqp.ResourceAlert{
 			Parameter: resource,
 			Value:     value}})
@@ -232,10 +232,10 @@ func (instance *Alerts) SendRequestResourceAlert(source string, message string) 
 	}
 
 	instance.addAlert(amqp.AlertItem{
-		Timestamp: time,
-		Tag:       amqp.AlertTagAosCore,
-		Source:    source,
-		Version:   version,
+		Timestamp:  time,
+		Tag:        amqp.AlertTagAosCore,
+		Source:     source,
+		AosVersion: version,
 		Payload: amqp.SystemAlert{
 			Message: message}})
 }
@@ -473,11 +473,11 @@ func (instance *Alerts) processJournal() (err error) {
 
 		if !skipsend {
 			instance.addAlert(amqp.AlertItem{
-				Timestamp: t,
-				Tag:       amqp.AlertTagSystemError,
-				Source:    source,
-				Version:   version,
-				Payload:   amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
+				Timestamp:  t,
+				Tag:        amqp.AlertTagSystemError,
+				Source:     source,
+				AosVersion: version,
+				Payload:    amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
 		}
 	}
 }

@@ -250,11 +250,11 @@ type ResourseValidatePayload struct {
 
 // AlertItem alert item structure
 type AlertItem struct {
-	Timestamp time.Time   `json:"timestamp"`
-	Tag       string      `json:"tag"`
-	Source    string      `json:"source"`
-	Version   *uint64     `json:"version,omitempty"`
-	Payload   interface{} `json:"payload"`
+	Timestamp  time.Time   `json:"timestamp"`
+	Tag        string      `json:"tag"`
+	Source     string      `json:"source"`
+	AosVersion *uint64     `json:"aosVersion,omitempty"`
+	Payload    interface{} `json:"payload"`
 }
 
 // Alerts alerts message structure

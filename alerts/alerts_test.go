@@ -869,12 +869,12 @@ func waitAlerts(alertsChannel <-chan amqp.Alerts, timeout time.Duration, tag, so
 					return false, fmt.Errorf("wrong alert source: %s", alert.Source)
 				}
 
-				if !reflect.DeepEqual(alert.Version, version) {
-					if alert.Version != nil {
-						return false, fmt.Errorf("wrong alert version: %d", *alert.Version)
+				if !reflect.DeepEqual(alert.AosVersion, version) {
+					if alert.AosVersion != nil {
+						return false, fmt.Errorf("wrong alert AosVersion: %d", *alert.AosVersion)
 					}
 
-					return false, errors.New("version field missing")
+					return false, errors.New("AosVersion field missing")
 				}
 
 				if len(data) == 0 {
