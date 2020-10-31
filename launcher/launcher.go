@@ -26,6 +26,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -119,6 +120,9 @@ const (
 
 const defaultServiceProvider = "default"
 
+const uidRangeBegin = 5000
+const uidRangeEnd = 10000
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -164,7 +168,8 @@ type Service struct {
 	ServiceProvider string        // service provider
 	Path            string        // path to service bundle
 	UnitName        string        // systemd unit name
-	UserName        string        // user used to run this service
+	UID             uint32        // service userID
+	GID             uint32        // service gid
 	HostName        string        // service host name
 	Permissions     string        // VIS permissions
 	State           ServiceState  // service state
@@ -582,13 +587,6 @@ func Cleanup(cfg *config.Config) (err error) {
 					if _, err := systemd.DisableUnitFiles([]string{serviceName}, false); err != nil {
 						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
 					}
-
-					// Delete service user
-					serviceID := strings.TrimSuffix(strings.TrimPrefix(serviceName, "aos_"), ".service")
-
-					if err := platform.DeleteUser(serviceID); err != nil {
-						log.WithField("serviceID", serviceID).Error("Can't delete user: ", err)
-					}
 				}
 			}
 		}
@@ -859,15 +857,6 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 	defer func() {
 		if err != nil {
 			log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Error install service: %s", err)
-
-			if !serviceExists {
-				// Remove system user
-				if platform.IsUserExist(serviceInfo.serviceDetails.ID) {
-					if err := platform.DeleteUser(serviceInfo.serviceDetails.ID); err != nil {
-						log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Can't delete user: %s", err)
-					}
-				}
-			}
 
 			// Remove install dir if exists
 			if _, err := os.Stat(installDir); err == nil {
@@ -1379,7 +1368,8 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 		}
 	}
 
-	if err := platform.SetUserFSQuota(launcher.config.StorageDir, service.StorageLimit, service.UserName); err != nil {
+	if err := platform.SetUserFSQuota(launcher.config.StorageDir, service.StorageLimit,
+		service.UID, service.GID); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
 			retErr = err
@@ -1544,7 +1534,7 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
-	userName, err := platform.CreateUser(serviceInfo.ID)
+	uid, gid, err := launcher.getUIDGIDForService(service.ID)
 	if err != nil {
 		return service, err
 	}
@@ -1558,12 +1548,6 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	// unpack rootfs layer
 	if err = utils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
-		return service, err
-	}
-
-	// set service rootfs owner
-	uid, gid, err := platform.GetUserUIDGID(userName)
-	if err != nil {
 		return service, err
 	}
 
@@ -1606,9 +1590,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	if err = spec.setUser(userName); err != nil {
-		return service, err
-	}
+	spec.setUserUIDGID(uid, gid)
 
 	deviceResourcesForService, err := launcher.setDevices(spec, aosConfig.Devices)
 	if err != nil {
@@ -1644,7 +1626,8 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		Version:        serviceInfo.Version,
 		Path:           installDir,
 		UnitName:       serviceName,
-		UserName:       userName,
+		UID:            uid,
+		GID:            gid,
 		State:          stateInit,
 		Status:         statusOk,
 		AlertRules:     string(alertRules),
@@ -1673,7 +1656,7 @@ func (launcher *Launcher) addService(service Service) (err error) {
 	// handled by parent function
 
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir,
-		service.StorageLimit+service.StateLimit, service.UserName); err != nil {
+		service.StorageLimit+service.StateLimit, service.UID, service.GID); err != nil {
 		return err
 	}
 
@@ -1747,7 +1730,8 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return err
 	}
 
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit, newService.UserName); err != nil {
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit,
+		newService.UID, newService.GID); err != nil {
 		return err
 	}
 
@@ -1860,13 +1844,6 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
-	if err := platform.DeleteUser(service.ID); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't delete user: %s", err)
-			retErr = err
-		}
-	}
-
 	return retErr
 }
 
@@ -1940,7 +1917,8 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
 			ServiceDir:    service.Path,
 			IPAddress:     ipAddress,
-			User:          service.UserName,
+			UID:           service.UID,
+			GID:           service.GID,
 			UploadLimit:   uint64(service.UploadLimit),
 			DownloadLimit: uint64(service.DownloadLimit),
 			ServiceRules:  &rules}); err != nil {
@@ -2066,4 +2044,58 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 	}
 
 	return nil
+}
+
+func (launcher *Launcher) getUIDGIDForService(serviceID string) (uid, gid uint32, err error) {
+	services, err := launcher.serviceProvider.GetServices()
+	if err != nil {
+		return uid, gid, err
+	}
+
+	if len(services) == 0 {
+		return uidRangeBegin, uidRangeBegin, err
+	}
+
+	type idsPair struct {
+		uid uint32
+		gid uint32
+	}
+	lockedIds := []idsPair{}
+
+	for _, service := range services {
+		if service.ID == serviceID {
+			return service.UID, service.GID, nil
+		}
+
+		lockedIds = append(lockedIds, idsPair{uid: service.UID, gid: service.GID})
+	}
+
+	for i := uint32(uidRangeBegin); i <= uidRangeEnd; i++ {
+		isFree := true
+
+		for _, value := range lockedIds {
+			if i == value.uid || i == value.gid {
+				isFree = false
+				break
+			}
+		}
+
+		if isFree == false {
+			continue
+		}
+
+		if user, err := user.LookupId(fmt.Sprint(i)); err == nil || user != nil {
+			log.Debug("UID is available in system ", i)
+			continue
+		}
+
+		if group, err := user.LookupGroupId(fmt.Sprint(i)); err == nil || group != nil {
+			log.Debug("GID is available in system ", i)
+			continue
+		}
+
+		return i, i, nil
+	}
+
+	return uid, gid, errors.New("No free UID GUID in system")
 }

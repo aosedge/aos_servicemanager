@@ -37,8 +37,6 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
-
-	"aos_servicemanager/platform"
 )
 
 /*******************************************************************************
@@ -361,13 +359,9 @@ func (spec *serviceSpec) removeBindMount(destination string) (err error) {
 	return nil
 }
 
-func (spec *serviceSpec) setUser(user string) (err error) {
-	spec.ocSpec.Process.User.UID, spec.ocSpec.Process.User.GID, err = platform.GetUserUIDGID(user)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (spec *serviceSpec) setUserUIDGID(uid, gid uint32) {
+	spec.ocSpec.Process.User.UID = uid
+	spec.ocSpec.Process.User.GID = gid
 }
 
 func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {

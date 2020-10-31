@@ -1033,7 +1033,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	diskUsage, err := platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UserName)
+	diskUsage, err := platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UID, service.GID)
 	if err != nil {
 		t.Errorf("Can't get disk usage: %s", err)
 	}
@@ -1047,7 +1047,7 @@ func TestServiceStorage(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	diskUsage, err = platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UserName)
+	diskUsage, err = platform.GetUserFSQuotaUsage(launcher.config.StorageDir, service.UID, service.GID)
 	if err != nil {
 		t.Errorf("Can't get disk usage: %s", err)
 	}

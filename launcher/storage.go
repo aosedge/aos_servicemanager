@@ -35,7 +35,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	amqp "aos_servicemanager/amqphandler"
-	"aos_servicemanager/platform"
 )
 
 /*******************************************************************************
@@ -156,7 +155,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	}
 
 	if usersService.StorageFolder == "" {
-		if usersService.StorageFolder, err = createStorageFolder(handler.storageDir, service.UserName); err != nil {
+		if usersService.StorageFolder, err = createStorageFolder(handler.storageDir, service.UID, service.GID); err != nil {
 			return "", err
 		}
 
@@ -180,7 +179,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	}
 
 	if service.StateLimit > 0 {
-		if err = createStateFile(path.Join(usersService.StorageFolder, stateFile), service.UserName); err != nil {
+		if err = createStateFile(path.Join(usersService.StorageFolder, stateFile), service.UID, service.GID); err != nil {
 			return "", err
 		}
 
@@ -475,13 +474,8 @@ func (handler *storageHandler) processWatcher() {
 	}
 }
 
-func createStorageFolder(path, userName string) (folderName string, err error) {
+func createStorageFolder(path string, uid, gid uint32) (folderName string, err error) {
 	if folderName, err = ioutil.TempDir(path, ""); err != nil {
-		return "", err
-	}
-
-	uid, gid, err := platform.GetUserUIDGID(userName)
-	if err != nil {
 		return "", err
 	}
 
@@ -512,17 +506,12 @@ func createStorageFolder(path, userName string) (folderName string, err error) {
 	return folderName, nil
 }
 
-func createStateFile(path, userName string) (err error) {
+func createStateFile(path string, uid, gid uint32) (err error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
-	uid, gid, err := platform.GetUserUIDGID(userName)
-	if err != nil {
-		return err
-	}
 
 	if err = os.Chown(path, int(uid), int(gid)); err != nil {
 		return err
