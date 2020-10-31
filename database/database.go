@@ -147,7 +147,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 	}
 
 	_, err = stmt.Exec(service.ID, service.Version, service.ServiceProvider, service.Path, service.UnitName,
-		service.UserName, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
+		service.UID, service.GID, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
 		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText)
 
@@ -174,7 +174,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 // UpdateService updates service
 func (db *Database) UpdateService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, user = ?, hostName = ?,
+								 SET version = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?, hostName = ?,
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?, ulSpeed = ?, dlSpeed = ?,
 								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ?, 
@@ -195,7 +195,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 		return err
 	}
 
-	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UserName,
+	result, err := stmt.Exec(service.Version, service.ServiceProvider, service.Path, service.UnitName, service.UID, service.GID,
 		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
 		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText, service.ID)
@@ -240,7 +240,7 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	var boardResourcesText string
 
 	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
 		&service.Devices, &boardResourcesText)
@@ -275,7 +275,7 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
-			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
 			&service.Devices, &boardResourcesText)
@@ -313,7 +313,7 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
-			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
 			&service.Devices, &boardResourcesText)
@@ -349,7 +349,7 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	var boardResourcesText string
 
 	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
 		&service.Devices, &boardResourcesText)
@@ -605,7 +605,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		var boardResourcesText string
 
 		err = rows.Scan(&service.ID, &service.Version, &service.ServiceProvider, &service.Path, &service.UnitName,
-			&service.UserName, &service.HostName, &service.Permissions, &service.State, &service.Status,
+			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
 			&service.Devices, &boardResourcesText)
@@ -995,7 +995,8 @@ func (db *Database) createServiceTable() (err error) {
 															   serviceProvider TEXT,
 															   path TEXT,
 															   unit TEXT,
-															   user TEXT,
+															   uid INTEGER,
+															   gid INTEGER,
 															   hostName TEXT,
 															   permissions TEXT,
 															   state INTEGER,
