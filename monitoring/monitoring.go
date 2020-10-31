@@ -107,7 +107,8 @@ type Monitor struct {
 type ServiceMonitoringConfig struct {
 	ServiceDir    string
 	IPAddress     string
-	User          string
+	UID           uint32
+	GID           uint32
 	UploadLimit   uint64
 	DownloadLimit uint64
 	ServiceRules  *amqp.ServiceAlertRules
@@ -125,7 +126,8 @@ type trafficMonitoring struct {
 
 type serviceMonitoring struct {
 	serviceDir             string
-	user                   string
+	uid                    uint32
+	gid                    uint32
 	inChain                string
 	outChain               string
 	monitoringData         amqp.ServiceMonitoringData
@@ -264,7 +266,8 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 	serviceMonitoring := serviceMonitoring{
 		serviceDir: monitoringConfig.ServiceDir,
-		user:       monitoringConfig.User,
+		uid:        monitoringConfig.UID,
+		gid:        monitoringConfig.GID,
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
 
@@ -490,19 +493,19 @@ func (monitor *Monitor) getCurrentSystemData() {
 
 func (monitor *Monitor) getCurrentServicesData() {
 	for serviceID, value := range monitor.serviceMap {
-		cpuUsage, err := getServiceCPUUsage(value.user)
+		cpuUsage, err := getServiceCPUUsage(int32(value.uid))
 		if err != nil {
 			log.Errorf("Can't get service CPU: %s", err)
 		}
 
 		value.monitoringData.CPU = uint64(math.Round(cpuUsage / float64(runtime.NumCPU())))
 
-		value.monitoringData.RAM, err = getServiceRAMUsage(value.user)
+		value.monitoringData.RAM, err = getServiceRAMUsage(int32(value.uid))
 		if err != nil {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.storageDir, value.user)
+		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.storageDir, value.uid, value.gid)
 		if err != nil {
 			log.Errorf("Can't get service Disc usage: %s", err)
 		}
@@ -658,25 +661,28 @@ func getSystemDiskUsage(path string) (discUse uint64, err error) {
 }
 
 // getServiceCPUUsage returns service CPU usage in percent
-func getServiceCPUUsage(user string) (cpuUse float64, err error) {
+func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
 	processes, err := process.Processes()
 	if err != nil {
 		return 0, err
 	}
 
 	for _, process := range processes {
-		processUser, err := process.Username()
+		uids, err := process.Uids()
 		if err != nil {
 			continue
 		}
 
-		if processUser == user {
-			cpu, err := process.CPUPercent()
-			if err != nil {
-				return 0, err
-			}
+		for _, id := range uids {
+			if id == uid {
+				cpu, err := process.CPUPercent()
+				if err != nil {
+					return 0, err
+				}
 
-			cpuUse += cpu
+				cpuUse += cpu
+				break
+			}
 		}
 	}
 
@@ -684,25 +690,28 @@ func getServiceCPUUsage(user string) (cpuUse float64, err error) {
 }
 
 // getServiceRAMUsage returns service RAM usage in bytes
-func getServiceRAMUsage(user string) (ram uint64, err error) {
+func getServiceRAMUsage(uid int32) (ram uint64, err error) {
 	processes, err := process.Processes()
 	if err != nil {
 		return 0, err
 	}
 
 	for _, process := range processes {
-		processUser, err := process.Username()
+		uids, err := process.Uids()
 		if err != nil {
 			continue
 		}
 
-		if processUser == user {
-			memInfo, err := process.MemoryInfo()
-			if err != nil {
-				return 0, err
-			}
+		for _, id := range uids {
+			if id == uid {
+				memInfo, err := process.MemoryInfo()
+				if err != nil {
+					return 0, err
+				}
 
-			ram += memInfo.RSS
+				ram += memInfo.RSS
+				break
+			}
 		}
 	}
 
@@ -710,8 +719,8 @@ func getServiceRAMUsage(user string) (ram uint64, err error) {
 }
 
 // getServiceDiskUsage returns service disk usage in bytes
-func getServiceDiskUsage(path string, user string) (diskUse uint64, err error) {
-	if diskUse, err = platform.GetUserFSQuotaUsage(path, user); err != nil {
+func getServiceDiskUsage(path string, uid, gid uint32) (diskUse uint64, err error) {
+	if diskUse, err = platform.GetUserFSQuotaUsage(path, uid, gid); err != nil {
 		return diskUse, err
 	}
 
