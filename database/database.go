@@ -45,6 +45,11 @@ const (
 
 const installedStatus = "installed"
 
+// IMPORTANT: if new functionality doesn't allow existing services to work
+// properly, this value should be increased. It will force to remove all
+// services and their storages before first start.
+const OperationVersion = 3
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -980,7 +985,7 @@ func (db *Database) createConfigTable() (err error) {
 			cursor,
 			upgradeState,
 			upgradeData,
-			upgradeVersion) values(?, ?, ?, ?, ?)`, 0, "", 0, []byte{}, 3); err != nil {
+			upgradeVersion) values(?, ?, ?, ?, ?)`, OperationVersion, "", 0, []byte{}, 3); err != nil {
 		return err
 	}
 

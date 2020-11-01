@@ -56,11 +56,6 @@ const reconnectTimeout = 10 * time.Second
 
 const dbFileName = "servicemanager.db"
 
-// IMPORTANT: if new functionality doesn't allow existing services to work
-// properly, this value should be increased. It will force to remove all
-// services and their storages before first start.
-const operationVersion = 2
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -157,7 +152,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if operationVersion != version {
+	if database.OperationVersion != version {
 		log.Warning("Unsupported operation version")
 
 		sm.db.Close()
@@ -165,10 +160,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		cleanup(cfg, dbFile)
 
 		if sm.db, err = database.New(dbFile); err != nil {
-			return sm, err
-		}
-
-		if err = sm.db.SetOperationVersion(operationVersion); err != nil {
 			return sm, err
 		}
 	}
