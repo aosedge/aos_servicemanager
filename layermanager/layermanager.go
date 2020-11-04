@@ -235,49 +235,49 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		DecryptionInfo: desiredLayer.DecryptionInfo,
 		Signs:          desiredLayer.Signs}
 
-	layerInfo := amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: "error",
+	layerStatus = amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: "error",
 		AosVersion: desiredLayer.AosVersion}
 
 	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
 	if err != nil {
-		return layerInfo, err
+		return layerStatus, err
 	}
 	defer os.RemoveAll(destinationFile)
 
 	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
 	if err = utils.UnpackTarImage(destinationFile, unpackDir); err != nil {
 		err = fmt.Errorf("extract layer package from archive error: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 	defer os.RemoveAll(unpackDir)
 
 	byteValue, err := ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor))
 	if err != nil {
 		err = fmt.Errorf("error read layer descriptor: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 
 	var layerDescriptor imagespec.Descriptor
 	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
 		err = fmt.Errorf("error parse json descriptor: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 
 	layerPath, err := getValidLayerPath(layerDescriptor, unpackDir)
 	if err != nil {
 		err = fmt.Errorf("layer descriptor in incorrect: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 
 	layerStorageDir := path.Join(layermanager.layersDir, "blobs", (string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
 	if err = utils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
 		err = fmt.Errorf("extract layer to storage: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 
 	osVersion := ""
@@ -289,11 +289,11 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		layerStorageDir, osVersion, desiredLayer.VendorVersion, desiredLayer.Description,
 		desiredLayer.AosVersion); err != nil {
 		err = fmt.Errorf("can't add layer to DB: %s", err.Error())
-		layerInfo.Error = err.Error()
-		return layerInfo, err
+		layerStatus.Error = err.Error()
+		return layerStatus, err
 	}
 
-	layerInfo.Status = "installed"
+	layerStatus.Status = "installed"
 
 	return layerStatus, nil
 }
