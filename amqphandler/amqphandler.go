@@ -996,7 +996,6 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 			}
 
 			log.WithFields(log.Fields{
-				"message":      string(delivery.Body),
 				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
 
 			var rawData json.RawMessage
