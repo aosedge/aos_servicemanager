@@ -48,6 +48,8 @@ const (
 	stateReverting
 )
 
+const updateMaxDuration = 30 * time.Minute
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -223,17 +225,21 @@ func (um *Client) ProcessDesiredComponents(components []amqp.ComponentInfoFromCl
 		}
 	}
 
-	// wait for update complete or reboot
-
+	// wait for update complete or reboot of update timer expired
 	select {
 	case <-um.stopChan:
-		return nil
+		err = nil
 
 	case <-um.finishChannel:
 		log.Debug("Update finished")
-		return nil
+		err = nil
+
+	case <-time.After(updateMaxDuration):
+		err = errors.New("update timeout")
+		um.updateCurrentComponentsWithError(err)
 	}
 
+	return err
 }
 
 // RenewCertificatesNotification send notification aboute renew certificates
@@ -578,4 +584,14 @@ func (um *Client) updateCurrentComponentStatus(ID, vendorVersion, status, errorS
 	}
 
 	return fmt.Errorf("no element with ID =%s vendorVersion =%s", ID, vendorVersion)
+}
+
+func (um *Client) updateCurrentComponentsWithError(err error) {
+	for i, curElement := range um.currentComponents {
+		if curElement.Status != umprotocol.StatusInstalled && curElement.Status != umprotocol.StatusError {
+			um.currentComponents[i].Status = umprotocol.StatusError
+			um.currentComponents[i].Error = err.Error()
+			um.sender.SendComponentStatus(um.currentComponents)
+		}
+	}
 }
