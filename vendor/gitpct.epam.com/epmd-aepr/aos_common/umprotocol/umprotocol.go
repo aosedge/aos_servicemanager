@@ -90,14 +90,6 @@ type ComponentInfo struct {
 	Size          uint64          `json:"size"`
 }
 
-// ImageInfo upgrade image info
-type ImageInfo struct {
-	Path   string `json:"path"`
-	Sha256 []byte `json:"sha256"`
-	Sha512 []byte `json:"sha512"`
-	Size   uint64 `json:"size"`
-}
-
 // CreateKeysReq creates key pair request
 type CreateKeysReq struct {
 	Type     string `json:"type"`

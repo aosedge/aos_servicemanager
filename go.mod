@@ -49,7 +49,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/streadway/amqp v1.0.0
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20201029145441-1c70dae8c8d6
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20201106094923-1348fd104338
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
 	golang.org/x/sys v0.0.0-20200327173247-9dae0f8f5775
 )
