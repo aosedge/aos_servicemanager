@@ -156,7 +156,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if database.OperationVersion != version {
+	if launcher.OperationVersion != version {
 		log.Warning("Unsupported operation version")
 
 		sm.db.Close()

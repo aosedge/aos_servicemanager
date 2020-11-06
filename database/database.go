@@ -43,12 +43,6 @@ const (
 	syncMode    = "NORMAL"
 )
 
-
-// IMPORTANT: if new functionality doesn't allow existing services to work
-// properly, this value should be increased. It will force to remove all
-// services and their storages before first start.
-const OperationVersion = 3
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
