@@ -84,10 +84,11 @@ const (
 
 const unitSecureVersion = 1
 
+// Unit statuses
 const (
-	pendingStatus   = "pending"
-	removedStatus   = "removed"
-	installedStatus = "installed"
+	PendingStatus   = "pending"
+	RemovedStatus   = "removed"
+	InstalledStatus = "installed"
 )
 
 /*******************************************************************************
@@ -1127,7 +1128,7 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 
 	for _, desSrv := range desiredStatus.Services {
 		wasFound := false
-		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: pendingStatus}
+		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: PendingStatus}
 
 		for _, curSrv := range handler.currentUnitStatus.Services {
 			if curSrv.ID != desSrv.ID {
@@ -1164,7 +1165,7 @@ func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *
 
 		if wasFound == false {
 			newLayers = append(newLayers,
-				LayerInfo{ID: desLayer.ID, Digest: desLayer.Digest, Status: pendingStatus,
+				LayerInfo{ID: desLayer.ID, Digest: desLayer.Digest, Status: PendingStatus,
 					AosVersion: desLayer.AosVersion})
 		}
 	}
@@ -1205,7 +1206,7 @@ func (handler *AmqpHandler) cleanupServiceStatusList() {
 	removedElements := []int{}
 
 	for i, value := range handler.currentUnitStatus.Services {
-		if value.Status == removedStatus {
+		if value.Status == RemovedStatus {
 			removedElements = append(removedElements, i)
 		}
 	}
@@ -1220,7 +1221,7 @@ func (handler *AmqpHandler) cleanupLayersStatusList() {
 	removedElements := []int{}
 
 	for i, value := range handler.currentUnitStatus.Layers {
-		if value.Status == removedStatus {
+		if value.Status == RemovedStatus {
 			removedElements = append(removedElements, i)
 		}
 	}

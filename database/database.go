@@ -43,7 +43,6 @@ const (
 	syncMode    = "NORMAL"
 )
 
-const installedStatus = "installed"
 
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
@@ -799,7 +798,7 @@ func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		layer := amqp.LayerInfo{Status: installedStatus}
+		layer := amqp.LayerInfo{Status: amqp.InstalledStatus}
 
 		if err = rows.Scan(&layer.Digest, &layer.ID, &layer.AosVersion); err != nil {
 			return layersList, err
