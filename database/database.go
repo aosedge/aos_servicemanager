@@ -112,7 +112,7 @@ func New(name string) (db *Database, err error) {
 
 // GetOperationVersion returns operation version
 func (db *Database) GetOperationVersion() (version uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT version FROM config")
+	stmt, err := db.sql.Prepare("SELECT operationVersion FROM config")
 	if err != nil {
 		return version, err
 	}
@@ -132,7 +132,7 @@ func (db *Database) GetOperationVersion() (version uint64, err error) {
 
 // SetOperationVersion sets operation version
 func (db *Database) SetOperationVersion(version uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET version = ?", version)
+	result, err := db.sql.Exec("UPDATE config SET operationVersion = ?", version)
 	if err != nil {
 		return err
 	}
@@ -845,15 +845,15 @@ func (db *Database) createConfigTable() (err error) {
 
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
-			version INTEGER,
+			operationVersion INTEGER,
 			cursor TEXT)`); err != nil {
 		return err
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
-			version,
-			cursor) values(?, ?)`, OperationVersion, ""); err != nil {
+			operationVersion,
+			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
 		return err
 	}
 
