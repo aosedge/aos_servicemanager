@@ -628,6 +628,10 @@ func Cleanup(cfg *config.Config) (err error) {
 		log.Fatalf("Can't remove service template file: %s", err)
 	}
 
+	if err := os.RemoveAll(cfg.LayersDir); err != nil {
+		log.Errorf("Can't cleanup layers: %s", err)
+	}
+
 	return nil
 }
 
