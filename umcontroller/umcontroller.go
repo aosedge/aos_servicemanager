@@ -22,6 +22,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 )
 
@@ -31,10 +32,11 @@ import (
 
 // UmController update managers controller
 type UmController struct {
-	server       *umCtrlServer
-	eventChannel chan umCtrlInternalMsg
-	stopChannel  chan bool
-	connections  []umConnection
+	server            *umCtrlServer
+	eventChannel      chan umCtrlInternalMsg
+	stopChannel       chan bool
+	connections       []umConnection
+	currentComponents []amqp.ComponentInfo
 }
 
 type umConnection struct {
@@ -84,6 +86,16 @@ const (
 	openConnection = iota
 	closeConnection
 	umStatusUpdate
+)
+
+// Component status
+const (
+	StatusPending     = "pending"
+	StatusDownloading = "downloading"
+	StatusDownloaded  = "downloaded"
+	StatusInstalling  = "installing"
+	StatusInstalled   = "installed"
+	StatusError       = "error"
 )
 
 /*******************************************************************************
@@ -162,6 +174,8 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 		if value.umID != umID {
 			continue
 		}
+		
+		umCtrl.updateCurrentComponetsStatus(status.componsStatus)
 
 		if value.handler != nil {
 			log.Warn("Connection already availabe umID = ", umID)
@@ -208,4 +222,55 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 
 func (umCtrl *UmController) umHandlerStatusUpdate(umID string, status umStatus) {
 	log.Debugf("Status um = %s changed to %s", umID, status.umState)
+	umCtrl.updateCurrentComponetsStatus(status.componsStatus)
+}
+
+func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemComponentStatus) {
+	for _, value := range componsStatus {
+		if value.status == StatusInstalled {
+			toRemove := []int{}
+
+			for i, curStatus := range umCtrl.currentComponents {
+				if value.id == curStatus.ID {
+					if curStatus.Status != StatusInstalled {
+						continue
+					}
+
+					if value.vendorVersion != curStatus.VendorVersion {
+						toRemove = append(toRemove, i)
+						continue
+					}
+				}
+			}
+
+			sort.Ints(toRemove)
+
+			for i, value := range toRemove {
+				umCtrl.currentComponents = append(umCtrl.currentComponents[:value-i],
+					umCtrl.currentComponents[value-i+1:]...)
+			}
+		}
+
+		umCtrl.updateComponentElement(value)
+	}
+}
+
+func (umCtrl *UmController) updateComponentElement(component systemComponentStatus) {
+	for i, curElement := range umCtrl.currentComponents {
+		if curElement.ID == component.id && curElement.VendorVersion == component.vendorVersion {
+			umCtrl.currentComponents[i].Status = component.status
+			umCtrl.currentComponents[i].Error = component.err
+			return
+		}
+	}
+
+	umCtrl.currentComponents = append(umCtrl.currentComponents, amqp.ComponentInfo{
+		ID:            component.id,
+		VendorVersion: component.vendorVersion,
+		AosVersion:    component.aosVersion,
+		Status:        component.status,
+		Error:         component.err,
+	})
+
+	return
 }
