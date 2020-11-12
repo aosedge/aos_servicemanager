@@ -83,17 +83,31 @@ func TestConnection(t *testing.T) {
 		t.Fatalf("Can't create: UM controller %s", err)
 	}
 
-	streamUM1, connUM1, err := createClientConnection("umID1")
+	streamUM1, connUM1, err := createClientConnection("umID1", []string{"component1", "component2"})
 	if err != nil {
 		t.Errorf("Error connect %s", err)
 	}
 
-	streamUM2, connUM2, err := createClientConnection("umID2")
+	streamUM2, connUM2, err := createClientConnection("umID2", []string{"component3", "component4"})
+	if err != nil {
+		t.Errorf("Error connect %s", err)
+	}
+
+	streamUM1_copy, connUM1_copy, err := createClientConnection("umID1", []string{"component1", "component2"})
 	if err != nil {
 		t.Errorf("Error connect %s", err)
 	}
 
 	umCtrl.Close()
+
+	components, err := umCtrl.GetSystemComponents()
+	if err != nil {
+		t.Errorf("Can't get system components %s", err)
+	}
+
+	if len(components) != 4 {
+		t.Errorf("Incorrect count of components %d", len(components))
+	}
 
 	streamUM1.CloseSend()
 	connUM1.Close()
@@ -101,10 +115,13 @@ func TestConnection(t *testing.T) {
 	streamUM2.CloseSend()
 	connUM2.Close()
 
+	streamUM1_copy.CloseSend()
+	connUM1_copy.Close()
+
 	time.Sleep(1 * time.Second)
 }
 
-func createClientConnection(clientID string) (stream pb.UpdateController_RegisterUMClient, conn *grpc.ClientConn, err error) {
+func createClientConnection(clientID string, components []string) (stream pb.UpdateController_RegisterUMClient, conn *grpc.ClientConn, err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
 	opts = append(opts, grpc.WithBlock())
@@ -122,6 +139,14 @@ func createClientConnection(clientID string) (stream pb.UpdateController_Registe
 	}
 
 	umMsg := &pb.UpdateStatus{UmId: clientID, UmState: pb.UmState_IDLE}
+
+	for _, componentId := range components {
+		umMsg.Components = append(umMsg.Components, &pb.SystemComponent{Id: componentId, VendorVersion: "1",
+			Status: pb.ComponentStatus_INSTALLED,
+		})
+	}
+
+	umMsg.Components = append(umMsg.Components, nil)
 
 	if err = stream.Send(umMsg); err != nil {
 		log.Errorf("Fail send update status message %s", err)

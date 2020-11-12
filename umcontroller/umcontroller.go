@@ -18,8 +18,12 @@
 package umcontroller
 
 import (
+	"errors"
 	"sort"
+	"sync"
+	"time"
 
+	"github.com/looplab/fsm"
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -37,6 +41,9 @@ type UmController struct {
 	stopChannel       chan bool
 	connections       []umConnection
 	currentComponents []amqp.ComponentInfo
+	fsm               *fsm.FSM
+	connectionMonitor allConnectionMonitor
+	operable          bool
 }
 
 type umConnection struct {
@@ -44,6 +51,7 @@ type umConnection struct {
 	isLocalClient  bool
 	handler        *umHandler
 	updatePriority uint32
+	state          string
 	components     []string
 }
 
@@ -78,6 +86,13 @@ type systemComponent struct {
 	size          uint64
 }
 
+type allConnectionMonitor struct {
+	connTimer     *time.Timer
+	timeoutChan   chan bool
+	stopTimerChan chan bool
+	wg            sync.WaitGroup
+}
+
 /*******************************************************************************
  * Consts
  ******************************************************************************/
@@ -98,17 +113,39 @@ const (
 	StatusError       = "error"
 )
 
+// FSM states
+const (
+	stateInit       = "init"
+	stateIdle       = "idle"
+	stateFaultState = "fault"
+)
+
+// FSM events
+const (
+	evAllClientsConnected = "allClientsConnected"
+	evConnectionTimeout   = "connectionTimeout"
+)
+
+// client sates
+const (
+	umIdle     = "IDLE"
+	umPrepared = "PREPARED"
+	umUpdated  = "UPDATED"
+	umFailed   = "FAILED"
+)
+
+const connectionTimeoutSec = 300
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
 
 // New creates new update managers controller
 func New(config *config.Config, insecure bool) (umCtrl *UmController, err error) {
-	umCtrl = &UmController{eventChannel: make(chan umCtrlInternalMsg), stopChannel: make(chan bool)}
-
-	umCtrl.server, err = newServer(config.UmController, umCtrl.eventChannel, insecure)
-	if err != nil {
-		return nil, err
+	umCtrl = &UmController{eventChannel: make(chan umCtrlInternalMsg),
+		stopChannel:       make(chan bool),
+		connectionMonitor: allConnectionMonitor{stopTimerChan: make(chan bool, 1), timeoutChan: make(chan bool, 1)},
+		operable:          true,
 	}
 
 	for _, client := range config.UmController.UmClients {
@@ -120,7 +157,26 @@ func New(config *config.Config, insecure bool) (umCtrl *UmController, err error)
 		return umCtrl.connections[i].updatePriority < umCtrl.connections[j].updatePriority
 	})
 
+	umCtrl.fsm = fsm.NewFSM(
+		stateInit,
+		fsm.Events{
+			//process Idle state
+			{Name: evAllClientsConnected, Src: []string{stateInit}, Dst: stateIdle},
+			{Name: evConnectionTimeout, Src: []string{stateInit}, Dst: stateFaultState},
+		},
+		fsm.Callbacks{
+			"enter_" + stateIdle: umCtrl.processIdleState,
+			"before_event":       umCtrl.onEvent,
+		},
+	)
+
+	umCtrl.server, err = newServer(config.UmController, umCtrl.eventChannel, insecure)
+	if err != nil {
+		return nil, err
+	}
+
 	go umCtrl.processInternallMessages()
+	go umCtrl.connectionMonitor.startConnectionTimer(len(umCtrl.connections))
 	go umCtrl.server.Start()
 
 	return umCtrl, nil
@@ -128,7 +184,20 @@ func New(config *config.Config, insecure bool) (umCtrl *UmController, err error)
 
 // Close close server
 func (umCtrl *UmController) Close() {
+	umCtrl.operable = false
 	umCtrl.stopChannel <- true
+}
+
+// GetSystemComponents returns list of system components information
+func (umCtrl *UmController) GetSystemComponents() (components []amqp.ComponentInfo, err error) {
+	currentState := umCtrl.fsm.Current()
+	if currentState != stateInit {
+		return umCtrl.currentComponents, nil
+	}
+
+	umCtrl.connectionMonitor.wg.Wait()
+
+	return umCtrl.currentComponents, nil
 }
 
 /*******************************************************************************
@@ -138,6 +207,14 @@ func (umCtrl *UmController) Close() {
 func (umCtrl *UmController) processInternallMessages() {
 	for {
 		select {
+		case <-umCtrl.connectionMonitor.timeoutChan:
+			if len(umCtrl.connections) == 0 {
+				umCtrl.generateFSMEvent(evAllClientsConnected)
+			} else {
+				log.Error("Ums connection timeout")
+				umCtrl.generateFSMEvent(evConnectionTimeout)
+			}
+
 		case internalMsg := <-umCtrl.eventChannel:
 			log.Debug("Internal Event ", internalMsg.requestType)
 
@@ -157,7 +234,9 @@ func (umCtrl *UmController) processInternallMessages() {
 
 		case <-umCtrl.stopChannel:
 			log.Debug("Close all connections")
+
 			umCtrl.server.Stop()
+			umCtrl.updateFinishCond.Broadcast()
 
 			return
 		}
@@ -170,12 +249,15 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 		return
 	}
 
+	umIDfound := false
 	for i, value := range umCtrl.connections {
 		if value.umID != umID {
 			continue
 		}
-		
+
 		umCtrl.updateCurrentComponetsStatus(status.componsStatus)
+
+		umIDfound = true
 
 		if value.handler != nil {
 			log.Warn("Connection already availabe umID = ", umID)
@@ -183,6 +265,7 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 		}
 
 		umCtrl.connections[i].handler = handler
+		umCtrl.connections[i].state = handler.GetInitilState()
 		umCtrl.connections[i].components = []string{}
 
 		for _, newComponent := range status.componsStatus {
@@ -199,14 +282,29 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 			}
 
 			umCtrl.connections[i].components = append(umCtrl.connections[i].components, newComponent.id)
-
 		}
 
+		break
+
+	}
+
+	if umIDfound == false {
+	log.Error("Unexpected new UM connection with ID = ", umID)
+		handler.Close()
 		return
 	}
 
-	log.Error("Unexpected new UM connection with ID = ", umID)
-	handler.Close()
+	for _, value := range umCtrl.connections {
+		if value.handler == nil {
+			return
+		}
+	}
+
+	log.Debug("All connection to Ums established")
+
+	umCtrl.connectionMonitor.stopConnectionTimer()
+
+	umCtrl.generateFSMEvent(evAllClientsConnected)
 
 	return
 }
@@ -273,4 +371,66 @@ func (umCtrl *UmController) updateComponentElement(component systemComponentStat
 	})
 
 	return
+}
+
+func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) (err error) {
+	if umCtrl.operable == false {
+		return errors.New("update controller in shutdown state")
+	}
+
+	err = umCtrl.fsm.Event(event, args...)
+	if err != nil {
+		log.Error("Error transaction ", err)
+	}
+
+	return err
+}
+
+func (monitor *allConnectionMonitor) startConnectionTimer(connectionsCount int) {
+	if connectionsCount == 0 {
+		monitor.timeoutChan <- true
+		return
+	}
+
+	if monitor.connTimer != nil {
+		log.Debug("Timer already started")
+		return
+	}
+
+	monitor.wg.Add(1)
+	defer monitor.wg.Done()
+
+	monitor.connTimer = time.NewTimer(connectionTimeoutSec * time.Second)
+
+	select {
+	case <-monitor.connTimer.C:
+		monitor.timeoutChan <- true
+
+	case <-monitor.stopTimerChan:
+		monitor.connTimer.Stop()
+	}
+
+	monitor.connTimer = nil
+
+	return
+}
+
+func (monitor *allConnectionMonitor) stopConnectionTimer() {
+	monitor.stopTimerChan <- true
+}
+
+/*******************************************************************************
+ * FSM callbacks
+ ******************************************************************************/
+
+func (umCtrl *UmController) onEvent(e *fsm.Event) {
+	log.Infof("[CtrlFSM] %s -> %s : Event: %s", e.Src, e.Dst, e.Event)
+}
+
+func (umCtrl *UmController) processIdleState(e *fsm.Event) {
+
+}
+
+func (umCtrl *UmController) processFaultState(e *fsm.Event) {
+
 }
