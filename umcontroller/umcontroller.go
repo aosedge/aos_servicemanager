@@ -19,12 +19,14 @@ package umcontroller
 
 import (
 	"errors"
+	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/looplab/fsm"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -36,14 +38,19 @@ import (
 
 // UmController update managers controller
 type UmController struct {
-	server            *umCtrlServer
-	eventChannel      chan umCtrlInternalMsg
-	stopChannel       chan bool
+	downloader   downloader
+	server       *umCtrlServer
+	eventChannel chan umCtrlInternalMsg
+	stopChannel  chan bool
+
+	updateDir string
+
 	connections       []umConnection
 	currentComponents []amqp.ComponentInfo
 	fsm               *fsm.FSM
 	connectionMonitor allConnectionMonitor
 	operable          bool
+	updateFinishCond  *sync.Cond
 }
 
 type umConnection struct {
@@ -53,6 +60,7 @@ type umConnection struct {
 	updatePriority uint32
 	state          string
 	components     []string
+	updatePackages []systemComponent
 }
 
 type umCtrlInternalMsg struct {
@@ -86,11 +94,22 @@ type systemComponent struct {
 	size          uint64
 }
 
+type updateRequest struct {
+	components []amqp.ComponentInfoFromCloud
+	chains     []amqp.CertificateChain
+	certs      []amqp.Certificate
+}
+
 type allConnectionMonitor struct {
 	connTimer     *time.Timer
 	timeoutChan   chan bool
 	stopTimerChan chan bool
 	wg            sync.WaitGroup
+}
+
+type downloader interface {
+	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
 }
 
 /*******************************************************************************
@@ -115,15 +134,20 @@ const (
 
 // FSM states
 const (
-	stateInit       = "init"
-	stateIdle       = "idle"
-	stateFaultState = "fault"
+	stateInit        = "init"
+	stateIdle        = "idle"
+	stateFaultState  = "fault"
+	stateDownloading = "downloading"
 )
 
 // FSM events
 const (
 	evAllClientsConnected = "allClientsConnected"
 	evConnectionTimeout   = "connectionTimeout"
+	evUpdateRequest       = "updateRequest"
+	evDownloadSuccess     = "downloadSuccess"
+
+	evUpdateFailed = "updateFailed"
 )
 
 // client sates
@@ -141,11 +165,15 @@ const connectionTimeoutSec = 300
  ******************************************************************************/
 
 // New creates new update managers controller
-func New(config *config.Config, insecure bool) (umCtrl *UmController, err error) {
-	umCtrl = &UmController{eventChannel: make(chan umCtrlInternalMsg),
+func New(config *config.Config, downloader downloader, insecure bool) (umCtrl *UmController, err error) {
+	umCtrl = &UmController{
+		downloader:        downloader,
+		updateDir:         config.UmController.UpdateDir,
+		eventChannel:      make(chan umCtrlInternalMsg),
 		stopChannel:       make(chan bool),
 		connectionMonitor: allConnectionMonitor{stopTimerChan: make(chan bool, 1), timeoutChan: make(chan bool, 1)},
 		operable:          true,
+		updateFinishCond:  sync.NewCond(&sync.Mutex{}),
 	}
 
 	for _, client := range config.UmController.UmClients {
@@ -162,6 +190,9 @@ func New(config *config.Config, insecure bool) (umCtrl *UmController, err error)
 		fsm.Events{
 			//process Idle state
 			{Name: evAllClientsConnected, Src: []string{stateInit}, Dst: stateIdle},
+			//process downloading
+			{Name: evUpdateRequest, Src: []string{stateIdle}, Dst: stateDownloading},
+			{Name: evUpdateFailed, Src: []string{stateDownloading}, Dst: stateIdle},
 			{Name: evConnectionTimeout, Src: []string{stateInit}, Dst: stateFaultState},
 		},
 		fsm.Callbacks{
@@ -198,6 +229,56 @@ func (umCtrl *UmController) GetSystemComponents() (components []amqp.ComponentIn
 	umCtrl.connectionMonitor.wg.Wait()
 
 	return umCtrl.currentComponents, nil
+}
+
+// ProcessDesiredComponents process desred component list
+func (umCtrl *UmController) ProcessDesiredComponents(components []amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	currentState := umCtrl.fsm.Current()
+	if currentState == stateIdle {
+		newComponents := []amqp.ComponentInfoFromCloud{}
+
+		for _, desComponent := range components {
+			wasFound := false
+
+			for _, curComponent := range umCtrl.currentComponents {
+				if curComponent.ID != desComponent.ID {
+					continue
+				}
+
+				if curComponent.VendorVersion == desComponent.VendorVersion &&
+					curComponent.Status != StatusError {
+					wasFound = true
+				}
+
+				break
+			}
+
+			if wasFound == false {
+				newComponents = append(newComponents, desComponent)
+				umCtrl.updateComponentElement(systemComponentStatus{id: desComponent.ID,
+					vendorVersion: desComponent.VendorVersion,
+					aosVersion:    desComponent.AosVersion,
+					status:        StatusPending,
+				})
+			}
+		}
+
+		if len(newComponents) == 0 {
+			log.Debug("No update for componenets")
+			return nil
+		}
+
+		umCtrl.generateFSMEvent(evUpdateRequest, updateRequest{components: newComponents, certs: certs, chains: chains})
+	} else {
+		log.Debug("Another update in progress, state =", currentState)
+	}
+
+	umCtrl.updateFinishCond.L.Lock()
+	umCtrl.updateFinishCond.Wait()
+	umCtrl.updateFinishCond.L.Unlock()
+
+	return nil
 }
 
 /*******************************************************************************
@@ -373,6 +454,51 @@ func (umCtrl *UmController) updateComponentElement(component systemComponentStat
 	return
 }
 
+func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate systemComponent, err error) {
+	decryptData := amqp.DecryptDataStruct{URLs: componentUpdate.URLs,
+		Sha256:         componentUpdate.Sha256,
+		Sha512:         componentUpdate.Sha512,
+		Size:           componentUpdate.Size,
+		DecryptionInfo: componentUpdate.DecryptionInfo,
+		Signs:          componentUpdate.Signs}
+
+	infoForUpdate = systemComponent{id: componentUpdate.ID,
+		vendorVersion: componentUpdate.VendorVersion,
+		aosVersion:    componentUpdate.AosVersion,
+		annotations:   string(componentUpdate.Annotations),
+	}
+
+	infoForUpdate.url, err = umCtrl.downloader.DownloadAndDecrypt(decryptData, chains, certs, umCtrl.updateDir)
+	if err != nil {
+		return infoForUpdate, err
+	}
+
+	fileInfo, err := image.CreateFileInfo(infoForUpdate.url)
+	if err != nil {
+		return infoForUpdate, err
+	}
+
+	infoForUpdate.sha256 = fileInfo.Sha256
+	infoForUpdate.sha512 = fileInfo.Sha512
+	infoForUpdate.size = fileInfo.Size
+
+	return infoForUpdate, err
+}
+
+func (umCtrl *UmController) addComponentForUpdateToUm(componentInfo SystemComponent) (added bool) {
+	for i := range umCtrl.connections {
+		for _, id := range umCtrl.connections[i].components {
+			if id == componentInfo.ID {
+				umCtrl.connections[i].updatePackages = append(umCtrl.connections[i].updatePackages, componentInfo)
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) (err error) {
 	if umCtrl.operable == false {
 		return errors.New("update controller in shutdown state")
@@ -433,4 +559,43 @@ func (umCtrl *UmController) processIdleState(e *fsm.Event) {
 
 func (umCtrl *UmController) processFaultState(e *fsm.Event) {
 
+}
+
+func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
+	newComponentList := e.Args[0].(updateRequest)
+
+	if err := os.MkdirAll(umCtrl.updateDir, 755); err != nil {
+		go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+		return
+	}
+
+	for _, component := range newComponentList.components {
+		componentStatus := systemComponentStatus{id: component.ID, vendorVersion: component.VendorVersion,
+			aosVersion: component.AosVersion, status: StatusDownloading}
+
+		umCtrl.updateComponentElement(componentStatus)
+		updatePackage, err := umCtrl.downloadComponentUpdate(component, newComponentList.chains, newComponentList.certs)
+
+		//todo add file server
+		updatePackage.url = "file://" + updatePackage.url
+
+		if err != nil {
+			componentStatus.status = StatusError
+			componentStatus.err = err.Error()
+			umCtrl.updateComponentElement(componentStatus)
+
+			go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+			return
+		}
+
+		if umCtrl.addComponentForUpdateToUm(updatePackage) == false {
+			log.Warn("Downloaded unsupported component ", updatePackage.ID)
+			continue
+		}
+
+		componentStatus.status = StatusDownloaded
+		umCtrl.updateComponentElement(componentStatus)
+	}
+
+	go umCtrl.generateFSMEvent(evDownloadSuccess)
 }

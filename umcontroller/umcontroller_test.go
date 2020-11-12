@@ -29,6 +29,7 @@ import (
 
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager"
 
+	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/umcontroller"
 )
@@ -40,6 +41,9 @@ import (
 const (
 	serverURL = "localhost:8091"
 )
+
+type testDownloader struct {
+}
 
 /*******************************************************************************
  * Init
@@ -78,7 +82,7 @@ func TestConnection(t *testing.T) {
 	}
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	umCtrl, err := umcontroller.New(&smConfig, true)
+	umCtrl, err := umcontroller.New(&smConfig, &testDownloader{}, true)
 	if err != nil {
 		t.Fatalf("Can't create: UM controller %s", err)
 	}
@@ -121,6 +125,10 @@ func TestConnection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 }
 
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
 func createClientConnection(clientID string, components []string) (stream pb.UpdateController_RegisterUMClient, conn *grpc.ClientConn, err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
@@ -154,4 +162,14 @@ func createClientConnection(clientID string, components []string) (stream pb.Upd
 	time.Sleep(1 * time.Second)
 
 	return stream, conn, nil
+}
+
+/*******************************************************************************
+ * Interfaces
+ ******************************************************************************/
+
+func (downloader *testDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
+
+	return "", nil
 }
