@@ -38,6 +38,7 @@ import (
 
 // UmController update managers controller
 type UmController struct {
+	storage      storage
 	downloader   downloader
 	server       *umCtrlServer
 	eventChannel chan umCtrlInternalMsg
@@ -108,6 +109,11 @@ type allConnectionMonitor struct {
 	wg            sync.WaitGroup
 }
 
+type storage interface {
+	GetComponentsUpdateInfo() (updateInfo []SystemComponent, err error)
+	SetComponentsUpdateInfo(updateInfo []SystemComponent) (err error)
+}
+
 type downloader interface {
 	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
@@ -166,8 +172,10 @@ const connectionTimeoutSec = 300
  ******************************************************************************/
 
 // New creates new update managers controller
-func New(config *config.Config, downloader downloader, insecure bool) (umCtrl *UmController, err error) {
+func New(config *config.Config, storage storage,
+	downloader downloader, insecure bool) (umCtrl *UmController, err error) {
 	umCtrl = &UmController{
+		storage:           storage,
 		downloader:        downloader,
 		updateDir:         config.UmController.UpdateDir,
 		eventChannel:      make(chan umCtrlInternalMsg),
@@ -570,6 +578,8 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 		return
 	}
 
+	componentsToSave := []SystemComponent{}
+
 	for _, component := range newComponentList.components {
 		componentStatus := systemComponentStatus{id: component.ID, vendorVersion: component.VendorVersion,
 			aosVersion: component.AosVersion, status: StatusDownloading}
@@ -593,9 +603,16 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 			log.Warn("Downloaded unsupported component ", updatePackage.ID)
 			continue
 		}
+		
+		componentsToSave = append(componentsToSave, updatePackage)
 
 		componentStatus.status = StatusDownloaded
 		umCtrl.updateComponentElement(componentStatus)
+	}
+
+	if err := umCtrl.storage.SetComponentsUpdateInfo(componentsToSave); err != nil {
+		go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+		return
 	}
 
 	go umCtrl.generateFSMEvent(evDownloadSuccess)
