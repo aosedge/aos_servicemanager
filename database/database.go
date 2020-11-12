@@ -32,6 +32,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
+	"aos_servicemanager/umcontroller"
 )
 
 /*******************************************************************************
@@ -770,6 +771,63 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 	return cursor, nil
 }
 
+// SetComponentsUpdateInfo store update data for update managers
+func (db *Database) SetComponentsUpdateInfo(updateInfo []umcontroller.SystemComponent) (err error) {
+	dataJSON, err := json.Marshal(&updateInfo)
+	if err != nil {
+		return err
+	}
+
+	result, err := db.sql.Exec("UPDATE config SET componentsUpdateInfo = ?", dataJSON)
+	if err != nil {
+		return err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
+}
+
+// GetComponentsUpdateInfo returns update data for sysytem components
+func (db *Database) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
+	stmt, err := db.sql.Prepare("SELECT componentsUpdateInfo FROM config")
+	if err != nil {
+		return updateInfo, err
+	}
+	defer stmt.Close()
+
+	var dataJSON []byte
+
+	if err = stmt.QueryRow().Scan(&dataJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return updateInfo, ErrNotExist
+		}
+
+		return updateInfo, err
+	}
+
+	if dataJSON == nil {
+		return updateInfo, nil
+	}
+
+	if len(dataJSON) == 0 {
+		return updateInfo, nil
+	}
+
+	if err = json.Unmarshal(dataJSON, &updateInfo); err != nil {
+		return updateInfo, err
+	}
+
+	return updateInfo, nil
+}
+
 //AddLayer add layer to layers table
 func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, description string,
 	aosVersion uint64) (err error) {
@@ -873,14 +931,16 @@ func (db *Database) createConfigTable() (err error) {
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
 			operationVersion INTEGER,
-			cursor TEXT)`); err != nil {
+			cursor TEXT,
+			componentsUpdateInfo BLOB)`); err != nil {
 		return err
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
 			operationVersion,
-			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
+			cursor, 
+			componentsUpdateInfo) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
 		return err
 	}
 

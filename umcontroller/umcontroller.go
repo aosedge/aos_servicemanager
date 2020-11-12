@@ -53,6 +53,18 @@ type UmController struct {
 	updateFinishCond  *sync.Cond
 }
 
+// SystemComponent infromation about system component update
+type SystemComponent struct {
+	ID            string `json:"id"`
+	VendorVersion string `json:"vendorVersion"`
+	AosVersion    uint64 `json:"aosVersion"`
+	Annotations   string `json:"annotations,omitempty"`
+	URL           string `json:"url"`
+	Sha256        []byte `json:"sha256"`
+	Sha512        []byte `json:"sha512"`
+	Size          uint64 `json:"size"`
+}
+
 type umConnection struct {
 	umID           string
 	isLocalClient  bool
@@ -60,7 +72,7 @@ type umConnection struct {
 	updatePriority uint32
 	state          string
 	components     []string
-	updatePackages []systemComponent
+	updatePackages []SystemComponent
 }
 
 type umCtrlInternalMsg struct {
@@ -81,17 +93,6 @@ type systemComponentStatus struct {
 	aosVersion    uint64
 	status        string
 	err           string
-}
-
-type systemComponent struct {
-	id            string
-	vendorVersion string
-	aosVersion    uint64
-	annotations   string
-	url           string
-	sha256        []byte
-	sha512        []byte
-	size          uint64
 }
 
 type updateRequest struct {
@@ -455,7 +456,7 @@ func (umCtrl *UmController) updateComponentElement(component systemComponentStat
 }
 
 func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
-	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate systemComponent, err error) {
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate SystemComponent, err error) {
 	decryptData := amqp.DecryptDataStruct{URLs: componentUpdate.URLs,
 		Sha256:         componentUpdate.Sha256,
 		Sha512:         componentUpdate.Sha512,
@@ -463,25 +464,25 @@ func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.Compone
 		DecryptionInfo: componentUpdate.DecryptionInfo,
 		Signs:          componentUpdate.Signs}
 
-	infoForUpdate = systemComponent{id: componentUpdate.ID,
-		vendorVersion: componentUpdate.VendorVersion,
-		aosVersion:    componentUpdate.AosVersion,
-		annotations:   string(componentUpdate.Annotations),
+	infoForUpdate = SystemComponent{ID: componentUpdate.ID,
+		VendorVersion: componentUpdate.VendorVersion,
+		AosVersion:    componentUpdate.AosVersion,
+		Annotations:   string(componentUpdate.Annotations),
 	}
 
-	infoForUpdate.url, err = umCtrl.downloader.DownloadAndDecrypt(decryptData, chains, certs, umCtrl.updateDir)
+	infoForUpdate.URL, err = umCtrl.downloader.DownloadAndDecrypt(decryptData, chains, certs, umCtrl.updateDir)
 	if err != nil {
 		return infoForUpdate, err
 	}
 
-	fileInfo, err := image.CreateFileInfo(infoForUpdate.url)
+	fileInfo, err := image.CreateFileInfo(infoForUpdate.URL)
 	if err != nil {
 		return infoForUpdate, err
 	}
 
-	infoForUpdate.sha256 = fileInfo.Sha256
-	infoForUpdate.sha512 = fileInfo.Sha512
-	infoForUpdate.size = fileInfo.Size
+	infoForUpdate.Sha256 = fileInfo.Sha256
+	infoForUpdate.Sha512 = fileInfo.Sha512
+	infoForUpdate.Size = fileInfo.Size
 
 	return infoForUpdate, err
 }
@@ -577,7 +578,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 		updatePackage, err := umCtrl.downloadComponentUpdate(component, newComponentList.chains, newComponentList.certs)
 
 		//todo add file server
-		updatePackage.url = "file://" + updatePackage.url
+		updatePackage.URL = "file://" + updatePackage.URL
 
 		if err != nil {
 			componentStatus.status = StatusError

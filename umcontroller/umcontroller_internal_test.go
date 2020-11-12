@@ -91,8 +91,8 @@ func TestNormalUpdate(t *testing.T) {
 	}
 	stream.step = StepPrepare
 
-	components := []systemComponent{systemComponent{url: "file:///path/to/update",
-		vendorVersion: "vendorversion1", aosVersion: 1}}
+	components := []SystemComponent{SystemComponent{URL: "file:///path/to/update",
+		VendorVersion: "vendorversion1", AosVersion: 1}}
 
 	handler.PrepareUpdate(components)
 	for {
@@ -159,8 +159,8 @@ func TestNormalUpdateWithReboot(t *testing.T) {
 	}
 	stream.step = StepPrepare
 
-	components := []systemComponent{systemComponent{url: "file:///path/to/update",
-		vendorVersion: "vendorversion2", aosVersion: 1}}
+	components := []SystemComponent{SystemComponent{URL: "file:///path/to/update",
+		VendorVersion: "vendorversion2", AosVersion: 1}}
 
 	handler.PrepareUpdate(components)
 	for {
@@ -215,8 +215,8 @@ func TestRevert(t *testing.T) {
 	}
 	stream.step = StepPrepare
 
-	components := []systemComponent{systemComponent{url: "file:///path/to/update",
-		vendorVersion: "vendorversion3", aosVersion: 1}}
+	components := []SystemComponent{SystemComponent{URL: "file:///path/to/update",
+		VendorVersion: "vendorversion3", AosVersion: 1}}
 
 	handler.PrepareUpdate(components)
 	for {
@@ -271,8 +271,8 @@ func TestRevertWithReboot(t *testing.T) {
 	}
 	stream.step = StepPrepare
 
-	components := []systemComponent{systemComponent{url: "file:///path/to/update",
-		vendorVersion: "vendorVersion4", aosVersion: 1}}
+	components := []SystemComponent{SystemComponent{URL: "file:///path/to/update",
+		VendorVersion: "vendorversion4", AosVersion: 1}}
 
 	handler.PrepareUpdate(components)
 	for {

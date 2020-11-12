@@ -40,7 +40,7 @@ type umHandler struct {
 }
 
 type prepareRequest struct {
-	components []systemComponent
+	components []SystemComponent
 }
 
 /*******************************************************************************
@@ -142,7 +142,7 @@ func (handler *umHandler) GetInitilState() (state string) {
 }
 
 // Close close connection
-func (handler *umHandler) PrepareUpdate(prepareComponents []systemComponent) (err error) {
+func (handler *umHandler) PrepareUpdate(prepareComponents []SystemComponent) (err error) {
 	log.Debug("PrepareUpdate for UMID ", handler.umID)
 
 	request := prepareRequest{components: prepareComponents}
@@ -218,14 +218,14 @@ func (handler *umHandler) sendPrepareUpdateRequest(e *fsm.Event) {
 
 	componetForUpdate := []*pb.PrepareComponentInfo{}
 	for _, value := range request.components {
-		componetInfo := pb.PrepareComponentInfo{Id: value.id,
-			VendorVersion: value.vendorVersion,
-			AosVersion:    value.aosVersion,
-			Annotations:   value.annotations,
-			Url:           value.url,
-			Sha256:        value.sha256,
-			Sha512:        value.sha512,
-			Size:          value.size}
+		componetInfo := pb.PrepareComponentInfo{Id: value.ID,
+			VendorVersion: value.VendorVersion,
+			AosVersion:    value.AosVersion,
+			Annotations:   value.Annotations,
+			Url:           value.URL,
+			Sha256:        value.Sha256,
+			Sha512:        value.Sha512,
+			Size:          value.Size}
 
 		componetForUpdate = append(componetForUpdate, &componetInfo)
 	}
