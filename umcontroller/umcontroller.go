@@ -38,6 +38,7 @@ import (
 
 // UmController update managers controller
 type UmController struct {
+	sender       statusSender
 	storage      storage
 	downloader   downloader
 	server       *umCtrlServer
@@ -109,6 +110,10 @@ type allConnectionMonitor struct {
 	wg            sync.WaitGroup
 }
 
+type statusSender interface {
+	SendComponentStatus(components []amqp.ComponentInfo)
+}
+
 type storage interface {
 	GetComponentsUpdateInfo() (updateInfo []SystemComponent, err error)
 	SetComponentsUpdateInfo(updateInfo []SystemComponent) (err error)
@@ -172,9 +177,10 @@ const connectionTimeoutSec = 300
  ******************************************************************************/
 
 // New creates new update managers controller
-func New(config *config.Config, storage storage,
+func New(config *config.Config, sender statusSender, storage storage,
 	downloader downloader, insecure bool) (umCtrl *UmController, err error) {
 	umCtrl = &UmController{
+		sender:            sender,
 		storage:           storage,
 		downloader:        downloader,
 		updateDir:         config.UmController.UpdateDir,
@@ -444,21 +450,30 @@ func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemC
 }
 
 func (umCtrl *UmController) updateComponentElement(component systemComponentStatus) {
+	componentExist := false
 	for i, curElement := range umCtrl.currentComponents {
 		if curElement.ID == component.id && curElement.VendorVersion == component.vendorVersion {
 			umCtrl.currentComponents[i].Status = component.status
 			umCtrl.currentComponents[i].Error = component.err
-			return
+			umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
+
+			componentExist = true
+
+			break
 		}
 	}
 
-	umCtrl.currentComponents = append(umCtrl.currentComponents, amqp.ComponentInfo{
-		ID:            component.id,
-		VendorVersion: component.vendorVersion,
-		AosVersion:    component.aosVersion,
-		Status:        component.status,
-		Error:         component.err,
-	})
+	if componentExist == false {
+		umCtrl.currentComponents = append(umCtrl.currentComponents, amqp.ComponentInfo{
+			ID:            component.id,
+			VendorVersion: component.vendorVersion,
+			AosVersion:    component.aosVersion,
+			Status:        component.status,
+			Error:         component.err,
+		})
+	}
+
+	umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
 
 	return
 }

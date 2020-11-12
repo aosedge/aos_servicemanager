@@ -42,6 +42,9 @@ const (
 	serverURL = "localhost:8091"
 )
 
+type testStatusSender struct {
+}
+
 type testStorage struct {
 }
 type testDownloader struct {
@@ -84,7 +87,7 @@ func TestConnection(t *testing.T) {
 	}
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	umCtrl, err := umcontroller.New(&smConfig, &testStorage{}, &testDownloader{}, true)
+	umCtrl, err := umcontroller.New(&smConfig, &testStatusSender{}, &testStorage{}, &testDownloader{}, true)
 	if err != nil {
 		t.Fatalf("Can't create: UM controller %s", err)
 	}
@@ -169,6 +172,9 @@ func createClientConnection(clientID string, components []string) (stream pb.Upd
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
+func (sender *testStatusSender) SendComponentStatus(components []amqp.ComponentInfo) {
+
+}
 
 func (storage *testStorage) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
 	return updateInfo, err
