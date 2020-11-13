@@ -146,10 +146,12 @@ const (
 
 // FSM states
 const (
-	stateInit        = "init"
-	stateIdle        = "idle"
-	stateFaultState  = "fault"
-	stateDownloading = "downloading"
+	stateInit                          = "init"
+	stateIdle                          = "idle"
+	stateFaultState                    = "fault"
+	stateDownloading                   = "downloading"
+	statePrepareUpdate                 = "prepareUpdate"
+	stateUpdateUmStatusOnPrepareUpdate = "updateUmStatusOnPrepareUpdate"
 )
 
 // FSM events
@@ -158,6 +160,9 @@ const (
 	evConnectionTimeout   = "connectionTimeout"
 	evUpdateRequest       = "updateRequest"
 	evDownloadSuccess     = "downloadSuccess"
+	evContinue            = "continue"
+	evUpdatePrepared      = "updatePrepared"
+	evUmStateUpdated      = "umStateUpdated"
 
 	evUpdateFailed = "updateFailed"
 )
@@ -208,10 +213,17 @@ func New(config *config.Config, sender statusSender, storage storage,
 			//process downloading
 			{Name: evUpdateRequest, Src: []string{stateIdle}, Dst: stateDownloading},
 			{Name: evUpdateFailed, Src: []string{stateDownloading}, Dst: stateIdle},
+			//process prepare
+			{Name: evDownloadSuccess, Src: []string{stateDownloading}, Dst: statePrepareUpdate},
+			{Name: evUmStateUpdated, Src: []string{statePrepareUpdate}, Dst: stateUpdateUmStatusOnPrepareUpdate},
+			{Name: evContinue, Src: []string{stateUpdateUmStatusOnPrepareUpdate}, Dst: statePrepareUpdate},
 			{Name: evConnectionTimeout, Src: []string{stateInit}, Dst: stateFaultState},
 		},
 		fsm.Callbacks{
-			"enter_" + stateIdle: umCtrl.processIdleState,
+			"enter_" + stateIdle:                          umCtrl.processIdleState,
+			"enter_" + statePrepareUpdate:                 umCtrl.processPrepareState,
+			"enter_" + stateUpdateUmStatusOnPrepareUpdate: umCtrl.processUpdateUmState,
+			
 			"before_event":       umCtrl.onEvent,
 		},
 	)
@@ -322,7 +334,7 @@ func (umCtrl *UmController) processInternallMessages() {
 				umCtrl.handleCloseConnection(internalMsg.umID)
 
 			case umStatusUpdate:
-				umCtrl.umHandlerStatusUpdate(internalMsg.umID, internalMsg.status)
+				umCtrl.generateFSMEvent(evUmStateUpdated, internalMsg.umID, internalMsg.status)
 
 			default:
 				log.Error("Unsupported internal message ", internalMsg.requestType)
@@ -412,11 +424,6 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 			umCtrl.connections[i].handler = nil
 		}
 	}
-}
-
-func (umCtrl *UmController) umHandlerStatusUpdate(umID string, status umStatus) {
-	log.Debugf("Status um = %s changed to %s", umID, status.umState)
-	umCtrl.updateCurrentComponetsStatus(status.componsStatus)
 }
 
 func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemComponentStatus) {
@@ -631,4 +638,44 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 	}
 
 	go umCtrl.generateFSMEvent(evDownloadSuccess)
+}
+
+func (umCtrl *UmController) processPrepareState(e *fsm.Event) {
+	for i := range umCtrl.connections {
+		if len(umCtrl.connections[i].updatePackages) > 0 {
+			if umCtrl.connections[i].state == umFailed {
+				go umCtrl.generateFSMEvent(evUpdateFailed, "preparUpdate failure umID = "+umCtrl.connections[i].umID)
+				return
+			}
+
+			if umCtrl.connections[i].handler == nil {
+				log.Warnf("Connection to um %s closed", umCtrl.connections[i].umID)
+				return
+			}
+
+			if err := umCtrl.connections[i].handler.PrepareUpdate(umCtrl.connections[i].updatePackages); err == nil {
+				return
+			}
+		}
+	}
+
+	go umCtrl.generateFSMEvent(evUpdatePrepared)
+}
+
+func (umCtrl *UmController) processUpdateUmState(e *fsm.Event) {
+	log.Debug("processUpdateUmState")
+	umID := e.Args[0].(string)
+	status := e.Args[1].(umStatus)
+
+	for i, v := range umCtrl.connections {
+		if v.umID == umID {
+			umCtrl.connections[i].state = status.umState
+			log.Debugf("UMid = %s  state= %s", umID, status.umState)
+			break
+		}
+	}
+
+	umCtrl.updateCurrentComponetsStatus(status.componsStatus)
+
+	go umCtrl.generateFSMEvent(evContinue)
 }
