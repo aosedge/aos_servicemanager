@@ -152,6 +152,10 @@ const (
 	stateDownloading                   = "downloading"
 	statePrepareUpdate                 = "prepareUpdate"
 	stateUpdateUmStatusOnPrepareUpdate = "updateUmStatusOnPrepareUpdate"
+	stateStartUpdate                   = "startUpdate"
+	stateUpdateUmStatusOnStartUpdate   = "updateUmStatusOnStartUpdate"
+	stateStartApply                    = "startApply"
+	stateUpdateUmStatusOnStartApply    = "updateUmStatusOnStartApply"
 )
 
 // FSM events
@@ -163,6 +167,8 @@ const (
 	evContinue            = "continue"
 	evUpdatePrepared      = "updatePrepared"
 	evUmStateUpdated      = "umStateUpdated"
+	evSystemUpdated       = "systemUpdated"
+	evApplyComplete       = "applyComplete"
 
 	evUpdateFailed = "updateFailed"
 )
@@ -217,14 +223,30 @@ func New(config *config.Config, sender statusSender, storage storage,
 			{Name: evDownloadSuccess, Src: []string{stateDownloading}, Dst: statePrepareUpdate},
 			{Name: evUmStateUpdated, Src: []string{statePrepareUpdate}, Dst: stateUpdateUmStatusOnPrepareUpdate},
 			{Name: evContinue, Src: []string{stateUpdateUmStatusOnPrepareUpdate}, Dst: statePrepareUpdate},
+			//process start update
+			{Name: evUpdatePrepared, Src: []string{statePrepareUpdate}, Dst: stateStartUpdate},
+			{Name: evUmStateUpdated, Src: []string{stateStartUpdate}, Dst: stateUpdateUmStatusOnStartUpdate},
+			{Name: evContinue, Src: []string{stateUpdateUmStatusOnStartUpdate}, Dst: stateStartUpdate},
+			//process start apply
+			{Name: evSystemUpdated, Src: []string{stateStartUpdate}, Dst: stateStartApply},
+			{Name: evUmStateUpdated, Src: []string{stateStartApply}, Dst: stateUpdateUmStatusOnStartApply},
+			{Name: evContinue, Src: []string{stateUpdateUmStatusOnStartApply}, Dst: stateStartApply},
+			{Name: evApplyComplete, Src: []string{stateStartApply}, Dst: stateIdle},
 			{Name: evConnectionTimeout, Src: []string{stateInit}, Dst: stateFaultState},
 		},
 		fsm.Callbacks{
 			"enter_" + stateIdle:                          umCtrl.processIdleState,
+			"enter_" + stateDownloading:                   umCtrl.processNewComponentList,
 			"enter_" + statePrepareUpdate:                 umCtrl.processPrepareState,
 			"enter_" + stateUpdateUmStatusOnPrepareUpdate: umCtrl.processUpdateUmState,
-			
-			"before_event":       umCtrl.onEvent,
+			"enter_" + stateStartUpdate:                   umCtrl.processStartUpdateState,
+			"enter_" + stateUpdateUmStatusOnStartUpdate:   umCtrl.processUpdateUmState,
+			"enter_" + stateStartApply:                    umCtrl.processStartApplyState,
+			"enter_" + stateUpdateUmStatusOnStartApply:    umCtrl.processUpdateUmState,
+
+			"before_event":              umCtrl.onEvent,
+			"before_" + evApplyComplete: umCtrl.updateComplete,
+			"before_" + evUpdateFailed:  umCtrl.processError,
 		},
 	)
 
@@ -662,6 +684,51 @@ func (umCtrl *UmController) processPrepareState(e *fsm.Event) {
 	go umCtrl.generateFSMEvent(evUpdatePrepared)
 }
 
+func (umCtrl *UmController) processStartUpdateState(e *fsm.Event) {
+	log.Debug("processStartUpdateState")
+	for i := range umCtrl.connections {
+		if len(umCtrl.connections[i].updatePackages) > 0 {
+			if umCtrl.connections[i].state == umFailed {
+				go umCtrl.generateFSMEvent(evUpdateFailed, "update failure umID = "+umCtrl.connections[i].umID)
+				return
+			}
+		}
+
+		if umCtrl.connections[i].handler == nil {
+			log.Warnf("Connection to um %s closed", umCtrl.connections[i].umID)
+			return
+		}
+
+		if err := umCtrl.connections[i].handler.StartUpdate(); err == nil {
+			return
+		}
+	}
+
+	go umCtrl.generateFSMEvent(evSystemUpdated)
+}
+
+func (umCtrl *UmController) processStartApplyState(e *fsm.Event) {
+	for i := range umCtrl.connections {
+		if len(umCtrl.connections[i].updatePackages) > 0 {
+			if umCtrl.connections[i].state == umFailed {
+				go umCtrl.generateFSMEvent(evUpdateFailed, "apply failure umID = "+umCtrl.connections[i].umID)
+				return
+			}
+		}
+
+		if umCtrl.connections[i].handler == nil {
+			log.Warnf("Connection to um %s closed", umCtrl.connections[i].umID)
+			return
+		}
+
+		if err := umCtrl.connections[i].handler.StartApply(); err == nil {
+			return
+		}
+	}
+
+	go umCtrl.generateFSMEvent(evApplyComplete)
+}
+
 func (umCtrl *UmController) processUpdateUmState(e *fsm.Event) {
 	log.Debug("processUpdateUmState")
 	umID := e.Args[0].(string)
@@ -678,4 +745,15 @@ func (umCtrl *UmController) processUpdateUmState(e *fsm.Event) {
 	umCtrl.updateCurrentComponetsStatus(status.componsStatus)
 
 	go umCtrl.generateFSMEvent(evContinue)
+}
+
+func (umCtrl *UmController) processError(e *fsm.Event) {
+	errtorMSg := e.Args[0].(string)
+	log.Error("update Error: ", errtorMSg)
+}
+
+func (umCtrl *UmController) updateComplete(e *fsm.Event) {
+	log.Debug("update finished")
+
+	umCtrl.updateFinishCond.Broadcast()
 }
