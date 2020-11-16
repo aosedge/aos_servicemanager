@@ -170,7 +170,10 @@ const (
 	evSystemUpdated       = "systemUpdated"
 	evApplyComplete       = "applyComplete"
 
-	evUpdateFailed = "updateFailed"
+	evContinuePrepare = "continuePrepare"
+	evContinueUpdate  = "continueUpdate"
+	evContinueApply   = "continueApply"
+	evUpdateFailed    = "updateFailed"
 )
 
 // client sates
@@ -216,6 +219,9 @@ func New(config *config.Config, sender statusSender, storage storage,
 		fsm.Events{
 			//process Idle state
 			{Name: evAllClientsConnected, Src: []string{stateInit}, Dst: stateIdle},
+			{Name: evContinuePrepare, Src: []string{stateIdle}, Dst: statePrepareUpdate},
+			{Name: evContinueUpdate, Src: []string{stateIdle}, Dst: stateStartUpdate},
+			{Name: evContinueApply, Src: []string{stateIdle}, Dst: stateStartApply},
 			//process downloading
 			{Name: evUpdateRequest, Src: []string{stateIdle}, Dst: stateDownloading},
 			{Name: evUpdateFailed, Src: []string{stateDownloading}, Dst: stateIdle},
@@ -434,6 +440,10 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 
 	umCtrl.connectionMonitor.stopConnectionTimer()
 
+	if err := umCtrl.getUpdateComponentsFromStorage(); err != nil {
+		log.Error("Can't read update components from storage: ", err)
+	}
+
 	umCtrl.generateFSMEvent(evAllClientsConnected)
 
 	return
@@ -444,6 +454,12 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 	for i, value := range umCtrl.connections {
 		if value.umID == umID {
 			umCtrl.connections[i].handler = nil
+
+			umCtrl.fsm.SetState(stateInit)
+
+			go umCtrl.connectionMonitor.startConnectionTimer(len(umCtrl.connections))
+
+			return
 		}
 	}
 }
@@ -539,6 +555,54 @@ func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.Compone
 	return infoForUpdate, err
 }
 
+func (umCtrl *UmController) getCurrentUpdateState() (state string) {
+	var onPrepareState, onApplyState bool
+
+	for _, conn := range umCtrl.connections {
+		switch conn.state {
+		case umFailed:
+			return stateFaultState
+
+		case umPrepared:
+			onPrepareState = true
+
+		case umUpdated:
+			onApplyState = true
+
+		default:
+			continue
+
+		}
+	}
+
+	if onPrepareState == true {
+		return statePrepareUpdate
+	}
+
+	if onApplyState == true {
+		return stateStartApply
+	}
+
+	return stateIdle
+}
+
+func (umCtrl *UmController) getUpdateComponentsFromStorage() (err error) {
+	for i := range umCtrl.connections {
+		umCtrl.connections[i].updatePackages = []SystemComponent{}
+	}
+
+	updatecomponents, err := umCtrl.storage.GetComponentsUpdateInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, component := range updatecomponents {
+		umCtrl.addComponentForUpdateToUm(component)
+	}
+
+	return nil
+}
+
 func (umCtrl *UmController) addComponentForUpdateToUm(componentInfo SystemComponent) (added bool) {
 	for i := range umCtrl.connections {
 		for _, id := range umCtrl.connections[i].components {
@@ -550,6 +614,30 @@ func (umCtrl *UmController) addComponentForUpdateToUm(componentInfo SystemCompon
 	}
 
 	return false
+}
+
+func (umCtrl *UmController) cleanupUpdateData() {
+	for i := range umCtrl.connections {
+		umCtrl.connections[i].updatePackages = []SystemComponent{}
+	}
+
+	os.RemoveAll(umCtrl.updateDir)
+
+	updatecomponents, err := umCtrl.storage.GetComponentsUpdateInfo()
+	if err != nil {
+		log.Error("Can't get components update info ", err)
+		return
+	}
+
+	if len(updatecomponents) == 0 {
+		return
+	}
+
+	if err := umCtrl.storage.SetComponentsUpdateInfo([]SystemComponent{}); err != nil {
+		log.Error("Can't clean components update info ", err)
+	}
+
+	return
 }
 
 func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) (err error) {
@@ -607,7 +695,24 @@ func (umCtrl *UmController) onEvent(e *fsm.Event) {
 }
 
 func (umCtrl *UmController) processIdleState(e *fsm.Event) {
+	umState := umCtrl.getCurrentUpdateState()
 
+	switch umState {
+	case stateFaultState:
+		//todo process fault
+		break
+
+	case statePrepareUpdate:
+		go umCtrl.generateFSMEvent(evContinuePrepare)
+		return
+
+	case stateStartApply:
+		go umCtrl.generateFSMEvent(evContinueApply)
+		return
+	}
+
+	umCtrl.updateFinishCond.Broadcast()
+	umCtrl.cleanupUpdateData()
 }
 
 func (umCtrl *UmController) processFaultState(e *fsm.Event) {
@@ -647,7 +752,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 			log.Warn("Downloaded unsupported component ", updatePackage.ID)
 			continue
 		}
-		
+
 		componentsToSave = append(componentsToSave, updatePackage)
 
 		componentStatus.status = StatusDownloaded
@@ -754,6 +859,4 @@ func (umCtrl *UmController) processError(e *fsm.Event) {
 
 func (umCtrl *UmController) updateComplete(e *fsm.Event) {
 	log.Debug("update finished")
-
-	umCtrl.updateFinishCond.Broadcast()
 }
