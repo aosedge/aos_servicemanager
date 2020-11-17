@@ -1606,6 +1606,103 @@ func TestSetServiceResources(t *testing.T) {
 	}
 }
 
+func TestNotStartIfInvalidResource(t *testing.T) {
+	sender := newTestSender()
+
+	// set fake resource system to valid state (UT emulation)
+	deviceManager.isValid = true
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	numServices := 5
+
+	// install services
+	for i := 0; i < numServices; i++ {
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)}, chains, certs)
+	}
+
+	for i := 0; i < numServices; i++ {
+		status := <-sender.statusChannel
+		if status.Error != "" {
+			t.Errorf("%s, service ID %s", status.Error, status.ID)
+		}
+		if serviceProvider.services[status.ID].State != stateRunning {
+			t.Errorf("Service %s state is invalid : %s", status.ID, serviceProvider.services[status.ID].State)
+		}
+
+	}
+
+	launcher.Close()
+
+	// set fake resource system to valid state (UT emulation)
+	deviceManager.isValid = false
+
+	defer func() {
+		deviceManager.isValid = true
+	}()
+
+	time.Sleep(time.Second * 2)
+
+	launcher, err = newTestLauncher(new(pythonImage), sender, nil, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	defer launcher.Close()
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	time.Sleep(time.Second * 2)
+
+	services, err := launcher.GetServicesInfo()
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+	if len(services) != numServices {
+		t.Errorf("Resource config is invalid, services shouldn't start")
+	}
+
+	for _, service := range services {
+		if service.Status != "OK" {
+			t.Errorf("Service %s error status: %s", service.ID, service.Status)
+		}
+		if serviceProvider.services[service.ID].State == stateRunning {
+			t.Errorf("Service %s should be stopped", service.ID)
+		}
+	}
+
+	// remove services
+	for i := 0; i < numServices; i++ {
+		launcher.UninstallService(fmt.Sprintf("service%d", i))
+	}
+
+	for i := 0; i < numServices; i++ {
+		if status := <-sender.statusChannel; status.Error != "" {
+			t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
+		}
+	}
+
+	services, err = launcher.GetServicesInfo()
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+	if len(services) != 0 {
+		t.Errorf("Wrong service quantity")
+	}
+
+	if err := launcher.RemoveAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
