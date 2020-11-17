@@ -156,6 +156,8 @@ const (
 	stateUpdateUmStatusOnStartUpdate   = "updateUmStatusOnStartUpdate"
 	stateStartApply                    = "startApply"
 	stateUpdateUmStatusOnStartApply    = "updateUmStatusOnStartApply"
+	stateStartRevert                   = "startRevert"
+	stateUpdateUmStatusOnRevert        = "updateUmStatusOnRevert"
 )
 
 // FSM events
@@ -173,7 +175,10 @@ const (
 	evContinuePrepare = "continuePrepare"
 	evContinueUpdate  = "continueUpdate"
 	evContinueApply   = "continueApply"
-	evUpdateFailed    = "updateFailed"
+	evContinueRevert  = "continueRevert"
+
+	evUpdateFailed   = "updateFailed"
+	evSystemReverted = "systemReverted"
 )
 
 // client sates
@@ -222,6 +227,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 			{Name: evContinuePrepare, Src: []string{stateIdle}, Dst: statePrepareUpdate},
 			{Name: evContinueUpdate, Src: []string{stateIdle}, Dst: stateStartUpdate},
 			{Name: evContinueApply, Src: []string{stateIdle}, Dst: stateStartApply},
+			{Name: evContinueRevert, Src: []string{stateIdle}, Dst: stateStartRevert},
 			//process downloading
 			{Name: evUpdateRequest, Src: []string{stateIdle}, Dst: stateDownloading},
 			{Name: evUpdateFailed, Src: []string{stateDownloading}, Dst: stateIdle},
@@ -238,6 +244,14 @@ func New(config *config.Config, sender statusSender, storage storage,
 			{Name: evUmStateUpdated, Src: []string{stateStartApply}, Dst: stateUpdateUmStatusOnStartApply},
 			{Name: evContinue, Src: []string{stateUpdateUmStatusOnStartApply}, Dst: stateStartApply},
 			{Name: evApplyComplete, Src: []string{stateStartApply}, Dst: stateIdle},
+			//process revert
+			{Name: evUpdateFailed, Src: []string{statePrepareUpdate}, Dst: stateStartRevert},
+			{Name: evUpdateFailed, Src: []string{stateStartUpdate}, Dst: stateStartRevert},
+			{Name: evUpdateFailed, Src: []string{stateStartApply}, Dst: stateStartRevert},
+			{Name: evUmStateUpdated, Src: []string{stateStartRevert}, Dst: stateUpdateUmStatusOnRevert},
+			{Name: evContinue, Src: []string{stateUpdateUmStatusOnRevert}, Dst: stateStartRevert},
+			{Name: evSystemReverted, Src: []string{stateStartRevert}, Dst: stateIdle},
+
 			{Name: evConnectionTimeout, Src: []string{stateInit}, Dst: stateFaultState},
 		},
 		fsm.Callbacks{
@@ -249,10 +263,14 @@ func New(config *config.Config, sender statusSender, storage storage,
 			"enter_" + stateUpdateUmStatusOnStartUpdate:   umCtrl.processUpdateUmState,
 			"enter_" + stateStartApply:                    umCtrl.processStartApplyState,
 			"enter_" + stateUpdateUmStatusOnStartApply:    umCtrl.processUpdateUmState,
+			"enter_" + stateStartRevert:                   umCtrl.processStartRevertState,
+			"enter_" + stateUpdateUmStatusOnRevert:        umCtrl.processUpdateUmState,
+			"enter_" + stateFaultState:                    umCtrl.processFaultState,
 
-			"before_event":              umCtrl.onEvent,
-			"before_" + evApplyComplete: umCtrl.updateComplete,
-			"before_" + evUpdateFailed:  umCtrl.processError,
+			"before_event":               umCtrl.onEvent,
+			"before_" + evApplyComplete:  umCtrl.updateComplete,
+			"before_" + evSystemReverted: umCtrl.revertComplete,
+			"before_" + evUpdateFailed:   umCtrl.processError,
 		},
 	)
 
@@ -523,6 +541,27 @@ func (umCtrl *UmController) updateComponentElement(component systemComponentStat
 	return
 }
 
+func (umCtrl *UmController) clenupCurrentCompontStatusOnRevertComplete() {
+	toRemove := []int{}
+
+	for i, value := range umCtrl.currentComponents {
+		if value.Status != StatusInstalled && value.Status != StatusError {
+			toRemove = append(toRemove, i)
+		}
+	}
+
+	if len(toRemove) == 0 {
+		return
+	}
+
+	for i, value := range toRemove {
+		umCtrl.currentComponents = append(umCtrl.currentComponents[:value-i], umCtrl.currentComponents[value-i+1:]...)
+
+	}
+
+	umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
+}
+
 func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (infoForUpdate SystemComponent, err error) {
 	decryptData := amqp.DecryptDataStruct{URLs: componentUpdate.URLs,
@@ -699,8 +738,8 @@ func (umCtrl *UmController) processIdleState(e *fsm.Event) {
 
 	switch umState {
 	case stateFaultState:
-		//todo process fault
-		break
+		go umCtrl.generateFSMEvent(evContinueRevert)
+		return
 
 	case statePrepareUpdate:
 		go umCtrl.generateFSMEvent(evContinuePrepare)
@@ -812,6 +851,35 @@ func (umCtrl *UmController) processStartUpdateState(e *fsm.Event) {
 	go umCtrl.generateFSMEvent(evSystemUpdated)
 }
 
+func (umCtrl *UmController) processStartRevertState(e *fsm.Event) {
+	errAvailable := false
+
+	for i := range umCtrl.connections {
+		log.Debug(len(umCtrl.connections[i].updatePackages))
+		if len(umCtrl.connections[i].updatePackages) > 0 {
+			if umCtrl.connections[i].handler == nil {
+				log.Warnf("Connection to um %s closed", umCtrl.connections[i].umID)
+				return
+			}
+
+			if err := umCtrl.connections[i].handler.StartRevert(); err == nil {
+				return
+			}
+
+			if umCtrl.connections[i].state == umFailed {
+				errAvailable = true
+			}
+		}
+	}
+
+	if errAvailable == true {
+		log.Error("Maintain need") //todo think about cyclic  revert
+		return
+	}
+
+	go umCtrl.generateFSMEvent(evSystemReverted)
+}
+
 func (umCtrl *UmController) processStartApplyState(e *fsm.Event) {
 	for i := range umCtrl.connections {
 		if len(umCtrl.connections[i].updatePackages) > 0 {
@@ -855,6 +923,12 @@ func (umCtrl *UmController) processUpdateUmState(e *fsm.Event) {
 func (umCtrl *UmController) processError(e *fsm.Event) {
 	errtorMSg := e.Args[0].(string)
 	log.Error("update Error: ", errtorMSg)
+}
+
+func (umCtrl *UmController) revertComplete(e *fsm.Event) {
+	log.Debug("Revert complete")
+
+	umCtrl.clenupCurrentCompontStatusOnRevertComplete()
 }
 
 func (umCtrl *UmController) updateComplete(e *fsm.Event) {

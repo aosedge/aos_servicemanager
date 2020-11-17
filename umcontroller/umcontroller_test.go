@@ -51,6 +51,7 @@ type testStatusSender struct {
 }
 
 type testStorage struct {
+	updateInfo []umcontroller.SystemComponent
 }
 type testDownloader struct {
 }
@@ -633,6 +634,548 @@ func TestFullUpdateWithReboot(t *testing.T) {
 	time.Sleep(time.Second)
 }
 
+func TestRevertOnPrepare(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	umCtrlConfig := config.UmController{
+		ServerURL: "localhost:8091",
+		UmClients: []config.UmClientConfig{
+			config.UmClientConfig{UmID: "testUM7", Priority: 1},
+			config.UmClientConfig{UmID: "testUM8", Priority: 10}},
+		UpdateDir: tmpDir,
+	}
+
+	smConfig := config.Config{UmController: umCtrlConfig}
+
+	var updateSender testStatusSender
+	var updateStorage testStorage
+
+	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
+
+	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create: UM controller %s", err)
+	}
+
+	um7Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um7C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um7C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um7 := newTestUM("testUM7", pb.UmState_IDLE, "init", um7Components, t)
+	go um7.processMessages()
+
+	um8Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um8C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um8C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um8 := newTestUM("testUM8", pb.UmState_IDLE, "init", um8Components, t)
+	go um8.processMessages()
+
+	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um7C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
+		amqp.ComponentInfoFromCloud{ID: "um7C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um8C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um8C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	}
+
+	finishChanel := make(chan bool)
+
+	go func() {
+		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChanel)
+	}()
+
+	<-updateDownloader.downloadSyncCh
+
+	um7Components = append(um7Components, &pb.SystemComponent{Id: "um7C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um7.setComponents(um7Components)
+
+	um7.step = "prepare"
+	um7.continueChan <- true
+	<-um7.notifyTestChan // receive prepare
+	um7.sendState(pb.UmState_PREPARED)
+
+	um8Components = append(um8Components, &pb.SystemComponent{Id: "um8C1", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um8Components = append(um8Components, &pb.SystemComponent{Id: "um8C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR})
+	um8.setComponents(um8Components)
+
+	um8.step = "prepare"
+	um8.continueChan <- true
+	<-um8.notifyTestChan
+	um8.sendState(pb.UmState_FAILED)
+
+	um7Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um7C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um7C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um7.step = "revert"
+	um7.continueChan <- true
+	<-um7.notifyTestChan //um7 revert received
+	um7.sendState(pb.UmState_IDLE)
+
+	um8Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um8C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um8C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um8C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+
+	um8.step = "revert"
+	um8.continueChan <- true
+	<-um8.notifyTestChan //um8 revert received
+	um8.sendState(pb.UmState_IDLE)
+
+	um7.step = "finish"
+	um8.step = "finish"
+
+	<-finishChanel
+
+	um7.closeConnection()
+	um8.closeConnection()
+
+	<-um7.notifyTestChan
+	<-um8.notifyTestChan
+
+	umCtrl.Close()
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um7C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um7C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "2", Status: "error"}}
+
+	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
+		log.Debug(updateSender.Components)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
+
+	time.Sleep(time.Second)
+}
+
+func TestRevertOnUpdate(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	umCtrlConfig := config.UmController{
+		ServerURL: "localhost:8091",
+		UmClients: []config.UmClientConfig{
+			config.UmClientConfig{UmID: "testUM9", Priority: 1},
+			config.UmClientConfig{UmID: "testUM10", Priority: 10}},
+		UpdateDir: tmpDir,
+	}
+
+	smConfig := config.Config{UmController: umCtrlConfig}
+
+	var updateSender testStatusSender
+	var updateStorage testStorage
+
+	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
+
+	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create: UM controller %s", err)
+	}
+
+	um9Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um9C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um9C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um9 := newTestUM("testUM9", pb.UmState_IDLE, "init", um9Components, t)
+	go um9.processMessages()
+
+	um10Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um10C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um10 := newTestUM("testUM10", pb.UmState_IDLE, "init", um10Components, t)
+	go um10.processMessages()
+
+	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um9C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
+		amqp.ComponentInfoFromCloud{ID: "um9C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um10C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um10C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	}
+
+	finishChanel := make(chan bool)
+
+	go func() {
+		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChanel)
+	}()
+
+	<-updateDownloader.downloadSyncCh
+
+	um9Components = append(um9Components, &pb.SystemComponent{Id: "um9C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um9.setComponents(um9Components)
+
+	um9.step = "prepare"
+	um9.continueChan <- true
+	<-um9.notifyTestChan // receive prepare
+	um9.sendState(pb.UmState_PREPARED)
+
+	um10Components = append(um10Components, &pb.SystemComponent{Id: "um10C1", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um10Components = append(um10Components, &pb.SystemComponent{Id: "um10C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um10.setComponents(um10Components)
+
+	um10.step = "prepare"
+	um10.continueChan <- true
+	<-um10.notifyTestChan
+	um10.sendState(pb.UmState_PREPARED)
+
+	um9.step = "update"
+	um9.continueChan <- true
+	<-um9.notifyTestChan //um9 updated
+	um9.sendState(pb.UmState_UPDATED)
+
+	um10Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um10C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+	um10.setComponents(um10Components)
+
+	um10.step = "update"
+	um10.continueChan <- true
+	<-um10.notifyTestChan //um10 updated
+	um10.sendState(pb.UmState_FAILED)
+
+	um9Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um9C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um9C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+	um9.setComponents(um9Components)
+
+	um9.step = "revert"
+	um9.continueChan <- true
+	<-um9.notifyTestChan //um9 revert received
+	um9.sendState(pb.UmState_IDLE)
+
+	um10Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um10C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um10C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+
+	um10.step = "revert"
+	um10.continueChan <- true
+	<-um10.notifyTestChan //um10 revert received
+	um10.sendState(pb.UmState_IDLE)
+
+	um9.step = "finish"
+	um10.step = "finish"
+
+	<-finishChanel
+
+	um9.closeConnection()
+	um10.closeConnection()
+
+	<-um9.notifyTestChan
+	<-um10.notifyTestChan
+
+	umCtrl.Close()
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um9C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um9C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "2", Status: "error"}}
+
+	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
+		log.Debug(updateSender.Components)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
+
+	time.Sleep(time.Second)
+}
+
+func TestRevertOnUpdateWithDisconnect(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	umCtrlConfig := config.UmController{
+		ServerURL: "localhost:8091",
+		UmClients: []config.UmClientConfig{
+			config.UmClientConfig{UmID: "testUM11", Priority: 1},
+			config.UmClientConfig{UmID: "testUM12", Priority: 10}},
+		UpdateDir: tmpDir,
+	}
+
+	smConfig := config.Config{UmController: umCtrlConfig}
+
+	var updateSender testStatusSender
+	var updateStorage testStorage
+
+	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
+
+	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create: UM controller %s", err)
+	}
+
+	um11Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um11C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um11C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um11 := newTestUM("testUM11", pb.UmState_IDLE, "init", um11Components, t)
+	go um11.processMessages()
+
+	um12Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um12C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um12C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um12 := newTestUM("testUM12", pb.UmState_IDLE, "init", um12Components, t)
+	go um12.processMessages()
+
+	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um11C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
+		amqp.ComponentInfoFromCloud{ID: "um11C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um12C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um12C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	}
+
+	finishChanel := make(chan bool)
+
+	go func() {
+		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChanel)
+	}()
+
+	<-updateDownloader.downloadSyncCh
+
+	um11Components = append(um11Components, &pb.SystemComponent{Id: "um11C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um11.setComponents(um11Components)
+
+	um11.step = "prepare"
+	um11.continueChan <- true
+	<-um11.notifyTestChan // receive prepare
+	um11.sendState(pb.UmState_PREPARED)
+
+	um12Components = append(um12Components, &pb.SystemComponent{Id: "um12C1", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um12Components = append(um12Components, &pb.SystemComponent{Id: "um12C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um12.setComponents(um12Components)
+
+	um12.step = "prepare"
+	um12.continueChan <- true
+	<-um12.notifyTestChan
+	um12.sendState(pb.UmState_PREPARED)
+
+	um11.step = "update"
+	um11.continueChan <- true
+	<-um11.notifyTestChan //um11 updated
+	um11.sendState(pb.UmState_UPDATED)
+
+	um12Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um12C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um12C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um12C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+	um12.setComponents(um12Components)
+
+	um12.step = "update"
+	um12.continueChan <- true
+	<-um12.notifyTestChan //um12 updated
+	// um12  reboot
+	um12.step = "reboot"
+	um12.closeConnection()
+	<-um12.notifyTestChan
+
+	um12 = newTestUM("testUM12", pb.UmState_FAILED, "revert", um12Components, t)
+	go um12.processMessages()
+
+	um11Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um11C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um11C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+	um11.setComponents(um11Components)
+
+	um11.step = "revert"
+	um11.continueChan <- true
+	<-um11.notifyTestChan //um11 revert received
+	um11.sendState(pb.UmState_IDLE)
+
+	um12Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um12C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um12C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um12C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+
+	um12.step = "revert"
+	um12.continueChan <- true
+	<-um12.notifyTestChan //um12 revert received
+	um12.sendState(pb.UmState_IDLE)
+
+	um11.step = "finish"
+	um12.step = "finish"
+
+	<-finishChanel
+
+	um11.closeConnection()
+	um12.closeConnection()
+
+	<-um11.notifyTestChan
+	<-um12.notifyTestChan
+
+	umCtrl.Close()
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um11C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um11C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "2", Status: "error"}}
+
+	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
+		log.Debug(updateSender.Components)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
+
+	time.Sleep(time.Second)
+}
+
+func TestRevertOnUpdateWithReboot(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	umCtrlConfig := config.UmController{
+		ServerURL: "localhost:8091",
+		UmClients: []config.UmClientConfig{
+			config.UmClientConfig{UmID: "testUM13", Priority: 1},
+			config.UmClientConfig{UmID: "testUM14", Priority: 10}},
+		UpdateDir: tmpDir,
+	}
+
+	smConfig := config.Config{UmController: umCtrlConfig}
+
+	var updateSender testStatusSender
+	var updateStorage testStorage
+
+	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
+
+	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create: UM controller %s", err)
+	}
+
+	um13Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um13C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um13C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um13 := newTestUM("testUM13", pb.UmState_IDLE, "init", um13Components, t)
+	go um13.processMessages()
+
+	um14Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um14C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um14C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um14 := newTestUM("testUM14", pb.UmState_IDLE, "init", um14Components, t)
+	go um14.processMessages()
+
+	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um13C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
+		amqp.ComponentInfoFromCloud{ID: "um13C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um14C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		amqp.ComponentInfoFromCloud{ID: "um14C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	}
+
+	finishChanel := make(chan bool)
+
+	go func() {
+		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChanel)
+	}()
+
+	<-updateDownloader.downloadSyncCh
+
+	um13Components = append(um13Components, &pb.SystemComponent{Id: "um13C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um13.setComponents(um13Components)
+
+	um13.step = "prepare"
+	um13.continueChan <- true
+	<-um13.notifyTestChan // receive prepare
+	um13.sendState(pb.UmState_PREPARED)
+
+	um14Components = append(um14Components, &pb.SystemComponent{Id: "um14C1", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um14Components = append(um14Components, &pb.SystemComponent{Id: "um14C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLING})
+	um14.setComponents(um14Components)
+
+	um14.step = "prepare"
+	um14.continueChan <- true
+	<-um14.notifyTestChan
+	um14.sendState(pb.UmState_PREPARED)
+
+	um13.step = "update"
+	um13.continueChan <- true
+	<-um13.notifyTestChan //um13 updated
+	um13.sendState(pb.UmState_UPDATED)
+
+	um14Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um14C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um14C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um14C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+	um14.setComponents(um14Components)
+
+	um14.step = "update"
+	um14.continueChan <- true
+	<-um14.notifyTestChan //um14 updated
+
+	// full reboot
+	um13.step = "reboot"
+	um14.step = "reboot"
+
+	um13.closeConnection()
+	um14.closeConnection()
+	umCtrl.Close()
+
+	<-um13.notifyTestChan
+	<-um14.notifyTestChan
+	<-finishChanel
+	// um14  reboot
+
+	umCtrl, err = umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create: UM controller %s", err)
+	}
+
+	um13 = newTestUM("testUM13", pb.UmState_UPDATED, "revert", um13Components, t)
+	go um13.processMessages()
+
+	um14 = newTestUM("testUM14", pb.UmState_FAILED, "revert", um14Components, t)
+	go um14.processMessages()
+
+	um13Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um13C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um13C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+	um13.setComponents(um13Components)
+
+	um13.step = "revert"
+	um13.continueChan <- true
+	<-um13.notifyTestChan //um13 revert received
+	um13.sendState(pb.UmState_IDLE)
+
+	um14Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um14C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um14C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		&pb.SystemComponent{Id: "um14C2", VendorVersion: "2", Status: pb.ComponentStatus_ERROR}}
+
+	um14.step = "revert"
+	um14.continueChan <- true
+	<-um14.notifyTestChan //um14 revert received
+	um14.sendState(pb.UmState_IDLE)
+
+	um13.step = "finish"
+	um14.step = "finish"
+
+	time.Sleep(time.Second)
+
+	um13.closeConnection()
+	um14.closeConnection()
+
+	<-um13.notifyTestChan
+	<-um14.notifyTestChan
+
+	umCtrl.Close()
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um13C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um13C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "2", Status: "error"}}
+
+	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
+		log.Debug(updateSender.Components)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
+
+	time.Sleep(time.Second)
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -642,10 +1185,11 @@ func (sender *testStatusSender) SendComponentStatus(components []amqp.ComponentI
 }
 
 func (storage *testStorage) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
-	return updateInfo, err
+	return storage.updateInfo, err
 }
 
 func (storage *testStorage) SetComponentsUpdateInfo(updateInfo []umcontroller.SystemComponent) (err error) {
+	storage.updateInfo = updateInfo
 	return err
 }
 
