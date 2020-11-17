@@ -442,6 +442,34 @@ func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
 	}
 }
 
+func TestResourceConfigNotExist(t *testing.T) {
+	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	err = rm.AreResourcesValid()
+	if err == nil {
+		t.Errorf("Resources should be invalid if config is not exits")
+	}
+}
+
+func TestResourceConfigInvalidVersion(t *testing.T) {
+	if err := createWrongVerisonBoardConfigFile(); err != nil {
+		t.Errorf("Can't write invalid resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	err = rm.AreResourcesValid()
+	if err == nil {
+		t.Errorf("Resources should be invalid in case of version mismatch")
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -483,6 +511,38 @@ func setup() (err error) {
 func cleanup() (err error) {
 	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp dir: %s", err)
+	}
+
+	return nil
+}
+
+func createWrongVerisonBoardConfigFile() (err error) {
+	configContent := `{
+	"formatVersion": 256,
+	"version": "1.0",
+	"devices": [
+		{
+			"name": "random",
+			"sharedCount": 0,
+			"groups": [
+				"root"
+			],
+			"hostDevices": [
+				"/dev/random"
+			]
+		},
+		{
+			"name": "null",
+			"sharedCount": 2,
+			"hostDevices": [
+				"/dev/null"
+			]
+		}
+	]
+}`
+
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board_wrong_version.cfg"), []byte(configContent), 0644); err != nil {
+		return err
 	}
 
 	return nil
