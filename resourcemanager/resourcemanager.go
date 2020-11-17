@@ -114,12 +114,21 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 		return nil, err
 	}
 
+	// init map with available device names
+	resourcemanager.deviceWithServices = make(map[string][]string)
+
 	if resourcemanager.boardConfiguration, err = resourcemanager.parseBoardConfiguration(boardConfigFile); err != nil {
 		log.Errorf("Can't parse resource configuration file: %s", boardConfigFile)
+		resourcemanager.areResourcesValid = err
+		// Continue if board configuration is invalid
+		return resourcemanager, nil
 	}
 
 	if resourcemanager.boardConfiguration.FormatVersion != supportedFormatVersion {
 		log.Errorf("Unsupported board config format version %d != %d", resourcemanager.boardConfiguration.FormatVersion, supportedFormatVersion)
+		resourcemanager.areResourcesValid = errors.New("Unsupported version")
+		// Continue if boardConfig is having invalid version
+		return resourcemanager, nil
 	}
 
 	// do validation only if non-zero amount of the devices was provided
@@ -128,9 +137,6 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 	} else {
 		resourcemanager.areResourcesValid = nil
 	}
-
-	// init map with available device names
-	resourcemanager.deviceWithServices = make(map[string][]string)
 
 	return resourcemanager, nil
 }
