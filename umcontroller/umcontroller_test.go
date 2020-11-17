@@ -1031,9 +1031,10 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 	umCtrlConfig := config.UmController{
 		ServerURL: "localhost:8091",
 		UmClients: []config.UmClientConfig{
-			config.UmClientConfig{UmID: "testUM13", Priority: 1},
+			config.UmClientConfig{UmID: "testUM13", Priority: 1, IsLocal: true},
 			config.UmClientConfig{UmID: "testUM14", Priority: 10}},
-		UpdateDir: tmpDir,
+		UpdateDir:     tmpDir,
+		FileServerURL: "localhost:8099",
 	}
 
 	smConfig := config.Config{UmController: umCtrlConfig}

@@ -51,6 +51,7 @@ type UmController struct {
 	currentComponents []amqp.ComponentInfo
 	fsm               *fsm.FSM
 	connectionMonitor allConnectionMonitor
+	fileStorage       *fileStorage
 	operable          bool
 	updateFinishCond  *sync.Cond
 }
@@ -210,6 +211,9 @@ func New(config *config.Config, sender statusSender, storage storage,
 		updateFinishCond:  sync.NewCond(&sync.Mutex{}),
 	}
 
+	if umCtrl.fileStorage, err = newFileStorage(config.UmController); err != nil {
+		return nil, err
+	}
 	for _, client := range config.UmController.UmClients {
 		umCtrl.connections = append(umCtrl.connections, umConnection{umID: client.UmID,
 			isLocalClient: client.IsLocal, updatePriority: client.Priority, handler: nil})
@@ -282,6 +286,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 	go umCtrl.processInternallMessages()
 	go umCtrl.connectionMonitor.startConnectionTimer(len(umCtrl.connections))
 	go umCtrl.server.Start()
+	go umCtrl.fileStorage.startFileStorage()
 
 	return umCtrl, nil
 }
@@ -390,6 +395,7 @@ func (umCtrl *UmController) processInternallMessages() {
 			log.Debug("Close all connections")
 
 			umCtrl.server.Stop()
+			umCtrl.fileStorage.stopFileStorage()
 			umCtrl.updateFinishCond.Broadcast()
 
 			return
@@ -646,6 +652,9 @@ func (umCtrl *UmController) addComponentForUpdateToUm(componentInfo SystemCompon
 	for i := range umCtrl.connections {
 		for _, id := range umCtrl.connections[i].components {
 			if id == componentInfo.ID {
+				componentInfo.URL = umCtrl.fileStorage.getImageURL(umCtrl.connections[i].isLocalClient,
+					componentInfo.URL)
+
 				umCtrl.connections[i].updatePackages = append(umCtrl.connections[i].updatePackages, componentInfo)
 				return true
 			}
@@ -774,9 +783,6 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 
 		umCtrl.updateComponentElement(componentStatus)
 		updatePackage, err := umCtrl.downloadComponentUpdate(component, newComponentList.chains, newComponentList.certs)
-
-		//todo add file server
-		updatePackage.URL = "file://" + updatePackage.URL
 
 		if err != nil {
 			componentStatus.status = StatusError
