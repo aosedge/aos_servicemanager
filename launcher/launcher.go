@@ -482,15 +482,6 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	launcher.users = users
 
-	// run stored service configuration only in case system resources are valid
-	// check available devices with system ones
-	if err = launcher.devicemanager.AreResourcesValid(); err != nil {
-		log.Errorf("Validation resources: %s", err)
-
-		//Do not fail here, just print message
-		return nil
-	}
-
 	launcher.startServices()
 
 	if err = launcher.cleanServicesDB(); err != nil {
@@ -1193,6 +1184,15 @@ func (launcher *Launcher) requestDeviceResources(service Service) (err error) {
 }
 
 func (launcher *Launcher) startService(service Service) (err error) {
+	// Start service only in case system resources are valid
+	// check available devices with system ones
+	if err = launcher.devicemanager.AreResourcesValid(); err != nil {
+		log.WithField("id", service.ID).Error("Service can't be started due to resources are invalid")
+
+		// Do not start service if resources are invalid
+		return nil
+	}
+
 	if err = launcher.prestartService(service); err != nil {
 		return err
 	}
@@ -1249,6 +1249,12 @@ func (launcher *Launcher) startServices() {
 }
 
 func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
+	// Ignore this step if deviceConfiguration is invalid
+	if err = launcher.devicemanager.AreResourcesValid(); err != nil && service.State != stateRunning {
+		log.Debugf("Validation resources: %s", err)
+		return nil
+	}
+
 	var devices []Device
 	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
 		return err
