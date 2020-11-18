@@ -59,7 +59,6 @@ func createConfigFile() (err error) {
 		}],
 		"updateDir": "/var/aos/update"
 	},
-	"umServer" : "wss://localhost:8089",
 	"cmServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
@@ -238,17 +237,6 @@ func TestGetVisServerURL(t *testing.T) {
 
 	if config.VISServerURL != "wss://localhost:8088" {
 		t.Errorf("Wrong VIS server value: %s", config.VISServerURL)
-	}
-}
-
-func TestGetUMServerURL(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if config.UMServerURL != "wss://localhost:8089" {
-		t.Errorf("Wrong UM server value: %s", config.UMServerURL)
 	}
 }
 
