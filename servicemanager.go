@@ -47,7 +47,7 @@ import (
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/pluginprovider"
 	resource "aos_servicemanager/resourcemanager"
-	"aos_servicemanager/umclient"
+	"aos_servicemanager/umcontroller"
 )
 
 /*******************************************************************************
@@ -75,7 +75,7 @@ type serviceManager struct {
 	logging         *logging.Logging
 	monitor         *monitoring.Monitor
 	network         *networkmanager.NetworkManager
-	um              *umclient.Client
+	umCtrl          *umcontroller.UmController
 	cm              *cmclient.Client
 	layerMgr        *layermanager.LayerManager
 
@@ -181,10 +181,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if sm.um, err = umclient.New(cfg, sm.amqp); err != nil {
-		return sm, err
-	}
-
 	if sm.cm, err = cmclient.New(cfg, sm.amqp, true); err != nil {
 		return sm, err
 	}
@@ -209,7 +205,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	sm.um.SetDownloader(sm.downloader)
+	if sm.umCtrl, err = umcontroller.New(cfg, sm.amqp, sm.db, sm.downloader, true); err != nil {
+		return sm, err
+	}
 
 	// Create network
 	if sm.network, err = networkmanager.New(cfg); err != nil {
@@ -264,9 +262,9 @@ func (sm *serviceManager) close() {
 		sm.amqp.Close()
 	}
 
-	// Close UM client
-	if sm.um != nil {
-		sm.um.Close()
+	// Close UM controller
+	if sm.umCtrl != nil {
+		sm.umCtrl.Close()
 	}
 
 	// Close identifier
@@ -329,7 +327,7 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 		log.Fatalf("Can't get layers list: %s", err)
 	}
 
-	initialComponentList, err := sm.um.GetSystemComponents()
+	initialComponentList, err := sm.umCtrl.GetSystemComponents()
 	if err != nil {
 		log.Fatalf("Can't get component list: %s", err)
 	}
@@ -404,7 +402,6 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 func (sm *serviceManager) handleChannels() (err error) {
 	var monitorDataChannel chan amqp.MonitoringData
 	var alertsChannel chan amqp.Alerts
-	var umErrChannel chan error
 
 	if sm.monitor != nil {
 		monitorDataChannel = sm.monitor.DataChannel
@@ -413,8 +410,6 @@ func (sm *serviceManager) handleChannels() (err error) {
 	if sm.alerts != nil {
 		alertsChannel = sm.alerts.AlertsChannel
 	}
-
-	umErrChannel = sm.um.ErrorChannel
 
 	for {
 		select {
@@ -454,12 +449,10 @@ func (sm *serviceManager) handleChannels() (err error) {
 
 		case err := <-sm.identifier.ErrorChannel():
 			return err
-
-		case err := <-umErrChannel:
-			return err
 		}
 	}
 }
+
 func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 	sm.desiredStatusMutex.Lock()
 	if sm.isDesiredStatusInProcessing == true {
@@ -479,7 +472,7 @@ func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 		sm.desiredStatusMutex.Unlock()
 	}()
 
-	if err := sm.um.ProcessDesiredComponents(data.Components, data.CertificateChains, data.Certificates); err != nil {
+	if err := sm.umCtrl.ProcessDesiredComponents(data.Components, data.CertificateChains, data.Certificates); err != nil {
 		log.Error("Can't process components : ", err)
 	}
 
@@ -571,13 +564,6 @@ func (sm *serviceManager) run() {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
-		if !sm.um.IsConnected() {
-			if err = sm.um.Connect(sm.cfg.UMServerURL); err != nil {
-				log.Errorf("Can't connect to UM: %s", err)
-				goto reconnect
-			}
-		}
-
 		// Get organization names from certificate and use it as discovery URL
 		if orgNames, err = fcrypt.GetCertificateOrganizations(sm.cm); err != nil {
 			log.Warningf("Organization name will be taken from config file: %s", err)
@@ -612,7 +598,6 @@ func (sm *serviceManager) run() {
 
 	reconnect:
 		sm.amqp.Disconnect()
-		sm.um.Disconnect()
 
 		<-time.After(reconnectTimeout)
 
