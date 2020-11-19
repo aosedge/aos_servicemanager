@@ -449,6 +449,9 @@ func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 	}
 
 	sm.isDesiredStatusInProcessing = true
+
+	sm.amqp.UpdateUnitStatusWithDesiredFromCloud(&data)
+
 	sm.desiredStatusMutex.Unlock()
 
 	defer func() {

@@ -752,6 +752,64 @@ func (handler *AmqpHandler) Close() {
 	handler.Disconnect()
 }
 
+// UpdateUnitStatusWithDesiredFromCloud update current status
+func (handler *AmqpHandler) UpdateUnitStatusWithDesiredFromCloud(desiredStatus *DecodedDesiredStatus) {
+	newServices := []ServiceInfo{}
+	newLayers := []LayerInfo{}
+
+	handler.unitStatusMutex.Lock()
+	defer handler.unitStatusMutex.Unlock()
+
+	for _, desSrv := range desiredStatus.Services {
+		wasFound := false
+		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: PendingStatus}
+
+		for _, curSrv := range handler.currentUnitStatus.Services {
+			if curSrv.ID != desSrv.ID {
+				continue
+			}
+
+			wasFound = true
+
+			if curSrv.AosVersion != desSrv.AosVersion {
+				newServices = append(newServices, pendingService)
+			}
+			break
+		}
+
+		if wasFound == false {
+			newServices = append(newServices, pendingService)
+		}
+	}
+
+	if len(newServices) > 0 {
+		handler.unitStatusChanged = true
+		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services, newServices...)
+	}
+
+	for _, desLayer := range desiredStatus.Layers {
+		wasFound := false
+
+		for _, curLayer := range handler.currentUnitStatus.Layers {
+			if curLayer.Digest == desLayer.Digest {
+				wasFound = true
+				break
+			}
+		}
+
+		if wasFound == false {
+			newLayers = append(newLayers,
+				LayerInfo{ID: desLayer.ID, Digest: desLayer.Digest, Status: PendingStatus,
+					AosVersion: desLayer.AosVersion})
+		}
+	}
+
+	if len(newLayers) > 0 {
+		handler.unitStatusChanged = true
+		handler.currentUnitStatus.Layers = append(handler.currentUnitStatus.Layers, newLayers...)
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -1049,8 +1107,6 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 					continue
 				}
 
-				handler.updateUnitStatusWithDesiredFromCloud(&desiredStatus)
-
 				data = desiredStatus
 			}
 
@@ -1117,63 +1173,6 @@ func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (
 		Data:   data}
 
 	return msg
-}
-
-func (handler *AmqpHandler) updateUnitStatusWithDesiredFromCloud(desiredStatus *DecodedDesiredStatus) {
-	newServices := []ServiceInfo{}
-	newLayers := []LayerInfo{}
-
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	for _, desSrv := range desiredStatus.Services {
-		wasFound := false
-		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: PendingStatus}
-
-		for _, curSrv := range handler.currentUnitStatus.Services {
-			if curSrv.ID != desSrv.ID {
-				continue
-			}
-
-			wasFound = true
-
-			if curSrv.AosVersion != desSrv.AosVersion {
-				newServices = append(newServices, pendingService)
-			}
-			break
-		}
-
-		if wasFound == false {
-			newServices = append(newServices, pendingService)
-		}
-	}
-
-	if len(newServices) > 0 {
-		handler.unitStatusChanged = true
-		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services, newServices...)
-	}
-
-	for _, desLayer := range desiredStatus.Layers {
-		wasFound := false
-
-		for _, curLayer := range handler.currentUnitStatus.Layers {
-			if curLayer.Digest == desLayer.Digest {
-				wasFound = true
-				break
-			}
-		}
-
-		if wasFound == false {
-			newLayers = append(newLayers,
-				LayerInfo{ID: desLayer.ID, Digest: desLayer.Digest, Status: PendingStatus,
-					AosVersion: desLayer.AosVersion})
-		}
-	}
-
-	if len(newLayers) > 0 {
-		handler.unitStatusChanged = true
-		handler.currentUnitStatus.Layers = append(handler.currentUnitStatus.Layers, newLayers...)
-	}
 }
 
 func (handler *AmqpHandler) processUnitStatusChanges() {
