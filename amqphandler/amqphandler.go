@@ -810,6 +810,21 @@ func (handler *AmqpHandler) UpdateUnitStatusWithDesiredFromCloud(desiredStatus *
 	}
 }
 
+func (service ServiceInfoFromCloud) String() string {
+	return fmt.Sprintf("{id: %s, vendorVersion: %s aosVersion: %d, description: %s}",
+		service.ID, service.VendorVersion, service.AosVersion, service.Description)
+}
+
+func (layer LayerInfoFromCloud) String() string {
+	return fmt.Sprintf("{id: %s, digest: %s, vendorVersion: %s aosVersion: %d, description: %s}",
+		layer.ID, layer.Digest, layer.VendorVersion, layer.AosVersion, layer.Description)
+}
+
+func (component ComponentInfoFromCloud) String() string {
+	return fmt.Sprintf("{id: %s, annotations: %s, vendorVersion: %s aosVersion: %d, description: %s}",
+		component.ID, component.Annotations, component.VendorVersion, component.AosVersion, component.Description)
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -1158,11 +1173,11 @@ func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interfa
 		return err
 	}
 
-	log.WithField("data", string(decryptData)).Debug("Decrypted data")
-
 	if err = json.Unmarshal(decryptData, result); err != nil {
 		return err
 	}
+
+	log.WithField("data", result).Debug("Decrypted data")
 
 	return nil
 }
