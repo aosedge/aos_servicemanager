@@ -161,8 +161,6 @@ func decryptCMSKey(ktri *keyTransRecipientInfo, decryptor crypto.Decrypter) (sym
 		return nil, err
 	}
 
-	log.Debugf("AES KEY: %#v", symmetrickey)
-
 	return symmetrickey, nil
 }
 
