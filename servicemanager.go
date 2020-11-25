@@ -142,7 +142,15 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	// Create DB
 	dbFile := path.Join(cfg.WorkingDir, dbFileName)
 
-	if sm.db, err = database.New(dbFile); err != nil {
+	sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath, cfg.Migration.MergedMigrationPath)
+	if err == database.ErrMigrationFailed {
+		cleanup(cfg, dbFile)
+
+		if sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath,
+			cfg.Migration.MergedMigrationPath); err != nil {
+			return sm, err
+		}
+	} else if err != nil {
 		return sm, err
 	}
 
@@ -160,7 +168,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 		cleanup(cfg, dbFile)
 
-		if sm.db, err = database.New(dbFile); err != nil {
+		if sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath,
+			cfg.Migration.MergedMigrationPath); err != nil {
 			return sm, err
 		}
 	}

@@ -39,6 +39,19 @@ import (
 var db *Database
 
 /*******************************************************************************
+ * Init
+ ******************************************************************************/
+
+func init() {
+	log.SetFormatter(&log.TextFormatter{
+		DisableTimestamp: false,
+		TimestampFormat:  "2006-01-02 15:04:05.000",
+		FullTimestamp:    true})
+	log.SetLevel(log.DebugLevel)
+	log.SetOutput(os.Stdout)
+}
+
+/*******************************************************************************
  * Main
  ******************************************************************************/
 
@@ -49,7 +62,15 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Error creating service images: %s", err)
 	}
 
-	db, err = New("tmp/test.db")
+	if err = os.MkdirAll("tmp/migration", 0755); err != nil {
+		log.Fatalf("Error migration path: %s", err)
+	}
+
+	if err = os.MkdirAll("tmp/mergedMigration", 0755); err != nil {
+		log.Fatalf("Error migration path: %s", err)
+	}
+
+	db, err = New("tmp/test.db", "tmp/migration", "tmp/mergedMigration")
 	if err != nil {
 		log.Fatalf("Can't create database: %s", err)
 	}

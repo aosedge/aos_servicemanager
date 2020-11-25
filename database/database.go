@@ -28,6 +28,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
@@ -43,12 +44,17 @@ const (
 	syncMode    = "NORMAL"
 )
 
+const dbVersion = 1
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 // ErrNotExist is returned when requested entry not exist in DB
 var ErrNotExist = errors.New("entry does not exist")
+
+// ErrMigrationFailed is returned if migration was failed and db returned to the previous state
+var ErrMigrationFailed = errors.New("database migration failed")
 
 /*******************************************************************************
  * Types
@@ -64,7 +70,7 @@ type Database struct {
  ******************************************************************************/
 
 // New creates new database handle
-func New(name string) (db *Database, err error) {
+func New(name string, migrationPath string, mergedMigrationPath string) (db *Database, err error) {
 	log.WithField("name", name).Debug("Open database")
 
 	// Check and create db path
@@ -84,6 +90,33 @@ func New(name string) (db *Database, err error) {
 	}
 
 	db = &Database{sqlite}
+	defer func() {
+		if err != nil {
+			db.Close()
+		}
+	}()
+
+	if err = migration.MergeMigrationFiles(migrationPath, mergedMigrationPath); err != nil {
+		return db, err
+	}
+
+	exists, err := db.isTableExist("config")
+	if err != nil {
+		return db, err
+	}
+
+	if !exists {
+		// Set database version if database not exist
+		if err = migration.SetDatabaseVersion(sqlite, migrationPath, dbVersion); err != nil {
+			log.Errorf("Error forcing database version. Err: %s", err)
+			return db, ErrMigrationFailed
+		}
+	} else {
+		if err = migration.DoMigrate(db.sql, mergedMigrationPath, dbVersion); err != nil {
+			log.Errorf("Error during database migration. Err: %s", err)
+			return db, ErrMigrationFailed
+		}
+	}
 
 	if err := db.createConfigTable(); err != nil {
 		return db, err
