@@ -408,6 +408,8 @@ func (um *Client) handleSystemStatus(status []umprotocol.ComponentStatus) (err e
 		return nil
 	}
 
+	errorExist := false
+
 	for _, value := range status {
 		if value.Status == umprotocol.StatusInstalled {
 			toRemove := []int{}
@@ -432,7 +434,23 @@ func (um *Client) handleSystemStatus(status []umprotocol.ComponentStatus) (err e
 			}
 		}
 
+		if value.Status == umprotocol.StatusError {
+			errorExist = true
+		}
+
 		um.updateCurrentComponentStatus(value.ID, value.VendorVersion, value.Status, value.Error)
+	}
+
+	if errorExist == true {
+		tmpSlice := []amqp.ComponentInfo{}
+
+		for _, value := range um.currentComponents {
+			if (value.Status == umprotocol.StatusInstalled) || (value.Status == umprotocol.StatusError) {
+				tmpSlice = append(tmpSlice, value)
+			}
+		}
+
+		um.currentComponents = tmpSlice
 	}
 
 	um.sender.SendComponentStatus(um.currentComponents)
