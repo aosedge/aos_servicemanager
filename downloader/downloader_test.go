@@ -304,6 +304,8 @@ func setup() (err error) {
 		log.Fatal(http.ListenAndServe(":8001", http.FileServer(http.Dir(serverDir))))
 	}()
 
+	time.Sleep(time.Second)
+
 	return nil
 }
 
