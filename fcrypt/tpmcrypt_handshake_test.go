@@ -28,6 +28,7 @@ import (
 	"io/ioutil"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/google/go-tpm-tools/simulator"
 	log "github.com/sirupsen/logrus"
@@ -182,6 +183,8 @@ func createTLSServer(url string, config *tls.Config) error {
 	}
 
 	tlsListener := tls.NewListener(listener, config)
+
+	time.Sleep(time.Second)
 
 	go func() {
 		defer tlsListener.Close()
