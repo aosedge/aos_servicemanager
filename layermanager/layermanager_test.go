@@ -26,6 +26,8 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -48,6 +50,7 @@ const tmpServerDir = "/tmp/aos/layerserver"
  * Types
  ******************************************************************************/
 type fakeLayerSender struct {
+	LayerList []amqp.LayerInfo
 }
 
 type layerDownloader struct {
@@ -222,11 +225,109 @@ func TestLayerConsistencyCheck(t *testing.T) {
 	}
 }
 
+func TestLayersStatus(t *testing.T) {
+	testTmpDir, err := ioutil.TempDir("", "aos_layers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(testTmpDir)
+
+	testDb, err := database.New(path.Join(testTmpDir, "db.txt"))
+	if err != nil {
+		log.Fatalf("Can't create database: %s", err)
+	}
+
+	sender := new(fakeLayerSender)
+
+	testLayerMgr, err := New(path.Join(testTmpDir, "layerStorage"), new(layerDownloader), testDb, sender)
+	if err != nil {
+		log.Fatalf("Can't create layer manager: %s", err)
+	}
+
+	type testLayerInfo struct {
+		layerFile string
+		digest    string
+	}
+
+	layersInfo := []testLayerInfo{}
+
+	for i := 1; i <= 3; i++ {
+		layerDir := "layerdir" + strconv.Itoa(i)
+		if err := os.MkdirAll(layerDir, 0755); err != nil {
+			log.Fatalf("Can't create folder: %s", err)
+		}
+		defer os.RemoveAll(layerDir)
+
+		layerFile, digest, err := createLayer(layerDir)
+		if err != nil {
+			log.Fatalf("Can't layer: %s", err)
+		}
+
+		layersInfo = append(layersInfo, testLayerInfo{layerFile: layerFile, digest: digest})
+	}
+
+	layer1FomCloud := generateLayerFromCloud(layersInfo[0].layerFile, "LayerId1", layersInfo[0].digest, 1)
+	layer2FomCloud := generateLayerFromCloud(layersInfo[1].layerFile, "LayerId2", layersInfo[1].digest, 2)
+	layer2UpdateFomCloud := generateLayerFromCloud(layersInfo[2].layerFile, "LayerId2", layersInfo[2].digest, 3)
+
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+	layerList := []amqp.LayerInfoFromCloud{layer1FomCloud, layer2FomCloud}
+
+	if err := testLayerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
+		t.Errorf("Can't process layer list %s", err)
+	}
+	testLayerMgr.DeleteUnneededLayers()
+
+	referenceList := []amqp.LayerInfo{
+		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
+		amqp.LayerInfo{ID: "LayerId2", AosVersion: 2, Digest: layersInfo[1].digest, Status: "installed"}}
+
+	if !reflect.DeepEqual(referenceList, sender.LayerList) {
+		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
+	}
+
+	layerList = []amqp.LayerInfoFromCloud{layer1FomCloud, layer2UpdateFomCloud}
+	if err := testLayerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
+		t.Errorf("Can't process layer list %s", err)
+	}
+
+	referenceList = []amqp.LayerInfo{
+		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
+		amqp.LayerInfo{ID: "LayerId2", AosVersion: 2, Digest: layersInfo[1].digest, Status: "installed"},
+		amqp.LayerInfo{ID: "LayerId2", AosVersion: 3, Digest: layersInfo[2].digest, Status: "installed"}}
+
+	if !reflect.DeepEqual(referenceList, sender.LayerList) {
+		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
+	}
+
+	testLayerMgr.DeleteUnneededLayers()
+
+	referenceList[1].Status = "removed"
+	if !reflect.DeepEqual(referenceList, sender.LayerList) {
+		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
+	}
+
+	referenceList = []amqp.LayerInfo{
+		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
+		amqp.LayerInfo{ID: "LayerId2", AosVersion: 3, Digest: layersInfo[2].digest, Status: "installed"}}
+
+	currentList, err := testLayerMgr.GetLayersInfo()
+	if err != nil {
+		t.Error("Can't get current layer list")
+	}
+
+	if !reflect.DeepEqual(referenceList, currentList) {
+		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-func (sender fakeLayerSender) SendLayerStatus(serviceStatus amqp.LayerInfo) (err error) {
-	return nil
+func (sender *fakeLayerSender) SendLayerStatus(layers []amqp.LayerInfo) {
+	sender.LayerList = make([]amqp.LayerInfo, len(layers))
+	copy(sender.LayerList, layers)
 }
 
 func (downloader *layerDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,

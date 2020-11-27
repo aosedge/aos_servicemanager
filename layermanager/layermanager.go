@@ -41,6 +41,12 @@ const (
 	layerOCIDescriptor = "layer.json"
 )
 
+const (
+	layerStatusError     = "error"
+	layerStatusInstalled = "installed"
+	layerStatusRemoved   = "removed"
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -53,6 +59,7 @@ type LayerManager struct {
 	downloader        downloader
 	layersToRemove    []amqp.LayerInfo
 	statusSender      LayerStatusSender
+	currentLayerList  []amqp.LayerInfo
 }
 
 // LayerInfoProvider provides API to add, remove or access layer information
@@ -65,7 +72,7 @@ type LayerInfoProvider interface {
 
 //LayerStatusSender provides API to send messages to the cloud
 type LayerStatusSender interface {
-	SendLayerStatus(serviceStatus amqp.LayerInfo) (err error)
+	SendLayerStatus(serviceStatus []amqp.LayerInfo)
 }
 
 type downloader interface {
@@ -91,27 +98,33 @@ func New(layersStorageDir string, downloader downloader, infoProvider LayerInfoP
 		return nil, err
 	}
 
+	layermanager.currentLayerList, err = layermanager.layerInfoProvider.GetLayersInfo()
+	if err != nil {
+		return nil, err
+	}
+
 	return layermanager, nil
 }
 
 // ProcessDesiredLayersList add, remove
 func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.LayerInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
-	layermanager.layersToRemove = nil
-	currentList, err := layermanager.layerInfoProvider.GetLayersInfo()
-	if err != nil {
-		return err
-	}
+	layermanager.layersToRemove = make([]amqp.LayerInfo, len(layermanager.currentLayerList))
+	copy(layermanager.layersToRemove, layermanager.currentLayerList)
 
 	var resultError error
 
 	for _, desiredLayer := range layerList {
 		layerInstalled := false
 
-		for i, currentLayer := range currentList {
+		for i, currentLayer := range layermanager.layersToRemove {
 			if currentLayer.Digest == desiredLayer.Digest {
-				currentList = append(currentList[:i], currentList[i+1:]...)
-				layerInstalled = true
+				layermanager.layersToRemove = append(layermanager.layersToRemove[:i], layermanager.layersToRemove[i+1:]...)
+
+				if currentLayer.Status != layerStatusError {
+					layerInstalled = true
+				}
+
 				break
 			}
 		}
@@ -128,42 +141,43 @@ func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.Laye
 				}
 			}
 
-			if err := layermanager.statusSender.SendLayerStatus(layerStatus); err != nil {
-				log.Error("Can't send Layer status")
-			}
+			layermanager.updateCurrentLayerList(layerStatus)
+
+			layermanager.statusSender.SendLayerStatus(layermanager.currentLayerList)
 		}
 	}
-
-	//Layers which are nit present in desired configuration will be removed after processing services
-	layermanager.layersToRemove = currentList
 
 	return resultError
 }
 
 // DeleteUnneededLayers remove all layer which are not present in desired configuration
 func (layermanager *LayerManager) DeleteUnneededLayers() (err error) {
-	defer func() { layermanager.layersToRemove = nil }()
+	defer func() { layermanager.layersToRemove = []amqp.LayerInfo{} }()
 
 	for _, layer := range layermanager.layersToRemove {
-		layerStatus := amqp.LayerInfo{Digest: layer.Digest, ID: layer.ID, Status: "removed",
+		layerStatus := amqp.LayerInfo{Digest: layer.Digest, ID: layer.ID, Status: layerStatusRemoved,
 			AosVersion: layer.AosVersion}
 
 		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
 		if err != nil {
-			layerStatus.Status = "error"
+			layerStatus.Status = layerStatusError
 			layerStatus.Error = err.Error()
 		} else {
 			os.RemoveAll(layerPath)
 		}
 
 		if err = layermanager.layerInfoProvider.DeleteLayerByDigest(layer.Digest); err != nil {
-			layerStatus.Status = "error"
+			layerStatus.Status = layerStatusError
 			layerStatus.Error = err.Error()
 		}
 
-		if err = layermanager.statusSender.SendLayerStatus(layerStatus); err != nil {
-			log.Error("Can't send Layer status")
-		}
+		layermanager.updateCurrentLayerList(layerStatus)
+	}
+
+	if len(layermanager.layersToRemove) > 0 {
+		layermanager.statusSender.SendLayerStatus(layermanager.currentLayerList)
+
+		layermanager.currentLayerList, err = layermanager.layerInfoProvider.GetLayersInfo()
 	}
 
 	return err
@@ -212,7 +226,7 @@ func (layermanager *LayerManager) Cleanup() (err error) {
 
 // GetLayersInfo provided list of already installed fs layers
 func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err error) {
-	return layermanager.layerInfoProvider.GetLayersInfo()
+	return layermanager.currentLayerList, nil
 }
 
 // GetLayerPathByDigest provied installed layer path by digest
@@ -235,7 +249,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		DecryptionInfo: desiredLayer.DecryptionInfo,
 		Signs:          desiredLayer.Signs}
 
-	layerStatus = amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: "error",
+	layerStatus = amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: layerStatusError,
 		AosVersion: desiredLayer.AosVersion}
 
 	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
@@ -293,7 +307,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 		return layerStatus, err
 	}
 
-	layerStatus.Status = "installed"
+	layerStatus.Status = layerStatusInstalled
 
 	return layerStatus, nil
 }
@@ -303,4 +317,15 @@ func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (
 
 	layerPath = path.Join(unTarPath, layerDescriptor.Digest.Hex())
 	return layerPath, err
+}
+
+func (layermanager *LayerManager) updateCurrentLayerList(layerStatus amqp.LayerInfo) {
+	for i, value := range layermanager.currentLayerList {
+		if value.Digest == layerStatus.Digest {
+			layermanager.currentLayerList[i] = layerStatus
+			return
+		}
+	}
+
+	layermanager.currentLayerList = append(layermanager.currentLayerList, layerStatus)
 }
