@@ -82,7 +82,7 @@ const (
 	AlertTagAosCore     = "aosCore"
 )
 
-const unitSecureVersion = 1
+const unitSecureVersion = 2
 
 // Unit statuses
 const (
@@ -1140,8 +1140,6 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 						log.Error("Can't decrypt UnitSecureData ", err)
 						continue
 					}
-
-					secret := new(unitSecret)
 
 					if err := json.Unmarshal(rowSecret, secret); err != nil {
 						log.Error("Can't unmarshal unitSecret ", err)
