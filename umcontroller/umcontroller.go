@@ -449,7 +449,7 @@ func (umCtrl *UmController) handleNewConnection(umID string, handler *umHandler,
 	}
 
 	if umIDfound == false {
-	log.Error("Unexpected new UM connection with ID = ", umID)
+		log.Error("Unexpected new UM connection with ID = ", umID)
 		handler.Close()
 		return
 	}
@@ -547,7 +547,7 @@ func (umCtrl *UmController) updateComponentElement(component systemComponentStat
 	return
 }
 
-func (umCtrl *UmController) clenupCurrentCompontStatusOnRevertComplete() {
+func (umCtrl *UmController) cleanupCurrentCompontStatus() {
 	toRemove := []int{}
 
 	for i, value := range umCtrl.currentComponents {
@@ -934,9 +934,11 @@ func (umCtrl *UmController) processError(e *fsm.Event) {
 func (umCtrl *UmController) revertComplete(e *fsm.Event) {
 	log.Debug("Revert complete")
 
-	umCtrl.clenupCurrentCompontStatusOnRevertComplete()
+	umCtrl.cleanupCurrentCompontStatus()
 }
 
 func (umCtrl *UmController) updateComplete(e *fsm.Event) {
-	log.Debug("update finished")
+	log.Debug("Update finished")
+
+	umCtrl.cleanupCurrentCompontStatus()
 }
