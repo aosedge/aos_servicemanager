@@ -35,7 +35,7 @@ var SignalMap = map[string]syscall.Signal{
 	"PWR":      unix.SIGPWR,
 	"QUIT":     unix.SIGQUIT,
 	"SEGV":     unix.SIGSEGV,
-	"EMT":      unix.SIGEMT,
+	"SIGEMT":   unix.SIGEMT,
 	"STOP":     unix.SIGSTOP,
 	"SYS":      unix.SIGSYS,
 	"TERM":     unix.SIGTERM,

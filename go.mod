@@ -15,7 +15,7 @@ require (
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.0.0
 	github.com/deckarep/golang-set v1.7.1 // indirect
-	github.com/docker/docker v17.12.0-ce-rc1.0.20200615234814-88241b99893c+incompatible
+	github.com/docker/docker v17.12.0-ce-rc1.0.20200618181300-9dc6525e6118+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/docker/libkv v0.2.1 // indirect
@@ -25,7 +25,7 @@ require (
 	github.com/godbus/dbus v4.1.0+incompatible
 	github.com/google/go-tpm v0.2.1-0.20191118184001-a2abb88b0a52
 	github.com/google/go-tpm-tools v0.1.2
-	github.com/google/uuid v1.1.1
+	github.com/google/uuid v1.1.2
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/consul/api v1.4.0 // indirect
 	github.com/hashicorp/go-version v1.2.0 // indirect
@@ -46,10 +46,10 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200520003142-237cc4f519e2
 	github.com/samuel/go-zookeeper v0.0.0-20190923202752-2cc03de413da // indirect
 	github.com/shirou/gopsutil v2.20.5+incompatible
-	github.com/sirupsen/logrus v1.6.0
+	github.com/sirupsen/logrus v1.7.0
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/streadway/amqp v1.0.0
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20201106094923-1348fd104338
-	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
-	golang.org/x/sys v0.0.0-20200327173247-9dae0f8f5775
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210105102527-589ead2f596e
+	golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
+	golang.org/x/sys v0.0.0-20201029080932-201ba4db2418
 )

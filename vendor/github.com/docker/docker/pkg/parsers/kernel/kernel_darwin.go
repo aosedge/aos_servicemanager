@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	shellwords "github.com/mattn/go-shellwords"
+	"github.com/mattn/go-shellwords"
 )
 
 // GetKernelVersion gets the current kernel version.

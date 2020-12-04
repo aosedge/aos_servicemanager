@@ -47,6 +47,10 @@ github.com/cavaliercoder/grab
 ## explicit
 # github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f
 github.com/containerd/cgroups/stats/v1
+# github.com/containerd/containerd v1.4.1
+github.com/containerd/containerd/errdefs
+# github.com/containerd/continuity v0.0.0-20190426062206-aaeac12a7ffc
+github.com/containerd/continuity/pathdriver
 # github.com/coreos/etcd v3.3.22+incompatible
 ## explicit
 github.com/coreos/etcd/client
@@ -68,11 +72,14 @@ github.com/coreos/go-systemd/v22/sdjournal
 # github.com/deckarep/golang-set v1.7.1
 ## explicit
 github.com/deckarep/golang-set
-# github.com/docker/docker v17.12.0-ce-rc1.0.20200615234814-88241b99893c+incompatible
+# github.com/docker/distribution v2.7.1+incompatible
+github.com/docker/distribution/registry/api/errcode
+# github.com/docker/docker v17.12.0-ce-rc1.0.20200618181300-9dc6525e6118+incompatible
 ## explicit
 github.com/docker/docker/api/types/filters
 github.com/docker/docker/api/types/network
 github.com/docker/docker/api/types/versions
+github.com/docker/docker/errdefs
 github.com/docker/docker/pkg/discovery
 github.com/docker/docker/pkg/discovery/kv
 github.com/docker/docker/pkg/ioutils
@@ -171,7 +178,23 @@ github.com/godbus/dbus/v5
 github.com/gogo/protobuf/gogoproto
 github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/protoc-gen-gogo/descriptor
-# github.com/google/btree v0.0.0-20180813153112-4030bb1f1f0c
+# github.com/golang-migrate/migrate/v4 v4.14.1
+github.com/golang-migrate/migrate/v4
+github.com/golang-migrate/migrate/v4/database
+github.com/golang-migrate/migrate/v4/database/sqlite3
+github.com/golang-migrate/migrate/v4/internal/url
+github.com/golang-migrate/migrate/v4/source
+github.com/golang-migrate/migrate/v4/source/file
+github.com/golang-migrate/migrate/v4/source/httpfs
+# github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
+github.com/golang/groupcache/lru
+# github.com/golang/protobuf v1.4.3
+github.com/golang/protobuf/proto
+github.com/golang/protobuf/ptypes
+github.com/golang/protobuf/ptypes/any
+github.com/golang/protobuf/ptypes/duration
+github.com/golang/protobuf/ptypes/timestamp
+# github.com/google/btree v1.0.0
 github.com/google/btree
 # github.com/google/go-tpm v0.2.1-0.20191118184001-a2abb88b0a52
 ## explicit
@@ -182,7 +205,7 @@ github.com/google/go-tpm/tpmutil/tbs
 ## explicit
 github.com/google/go-tpm-tools/simulator
 github.com/google/go-tpm-tools/simulator/internal
-# github.com/google/uuid v1.1.1
+# github.com/google/uuid v1.1.2
 ## explicit
 github.com/google/uuid
 # github.com/gorilla/websocket v1.4.2
@@ -230,8 +253,10 @@ github.com/jlaffaye/ftp
 # github.com/json-iterator/go v1.1.10
 ## explicit
 github.com/json-iterator/go
-# github.com/konsorten/go-windows-terminal-sequences v1.0.3
-github.com/konsorten/go-windows-terminal-sequences
+# github.com/lib/pq v1.8.0
+github.com/lib/pq
+github.com/lib/pq/oid
+github.com/lib/pq/scram
 # github.com/mattn/go-colorable v0.1.6
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.12
@@ -254,9 +279,6 @@ github.com/mitchellh/mapstructure
 github.com/moby/ipvs
 # github.com/moby/sys/mount v0.1.0
 ## explicit
-github.com/moby/sys/mount
-# github.com/moby/sys/mountinfo v0.1.3
-github.com/moby/sys/mountinfo
 # github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421
 github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.1
@@ -297,7 +319,7 @@ github.com/shirou/gopsutil/load
 github.com/shirou/gopsutil/mem
 github.com/shirou/gopsutil/net
 github.com/shirou/gopsutil/process
-# github.com/sirupsen/logrus v1.6.0
+# github.com/sirupsen/logrus v1.7.0
 ## explicit
 github.com/sirupsen/logrus
 # github.com/speijnik/go-errortree v1.0.1
@@ -311,26 +333,27 @@ github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20201106094923-1348fd104338
+# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210105102527-589ead2f596e
 ## explicit
 gitpct.epam.com/epmd-aepr/aos_common/fs
 gitpct.epam.com/epmd-aepr/aos_common/image
+gitpct.epam.com/epmd-aepr/aos_common/migration
 gitpct.epam.com/epmd-aepr/aos_common/umprotocol
 gitpct.epam.com/epmd-aepr/aos_common/visprotocol
 gitpct.epam.com/epmd-aepr/aos_common/wsclient
 gitpct.epam.com/epmd-aepr/aos_common/wsserver
-# go.opencensus.io v0.22.0
+# go.opencensus.io v0.22.4
 go.opencensus.io
 go.opencensus.io/internal
 go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/tracestate
-# golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9
+# golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
 ## explicit
 golang.org/x/crypto/ed25519
 golang.org/x/crypto/ed25519/internal/edwards25519
 golang.org/x/crypto/sha3
-# golang.org/x/net v0.0.0-20191004110552-13f9640d40b9
+# golang.org/x/net v0.0.0-20201029221708-28c70e62bb1d
 golang.org/x/net/bpf
 golang.org/x/net/context
 golang.org/x/net/internal/iana
@@ -339,9 +362,46 @@ golang.org/x/net/internal/socks
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/proxy
-# golang.org/x/sys v0.0.0-20200327173247-9dae0f8f5775
+# golang.org/x/sys v0.0.0-20201029080932-201ba4db2418
 ## explicit
 golang.org/x/sys/cpu
+golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
+# google.golang.org/genproto v0.0.0-20201030142918-24207fddd1c3
+google.golang.org/genproto/googleapis/rpc/status
+# google.golang.org/grpc v1.33.1
+google.golang.org/grpc/codes
+google.golang.org/grpc/internal/status
+google.golang.org/grpc/status
+# google.golang.org/protobuf v1.25.0
+google.golang.org/protobuf/encoding/prototext
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/detrand
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/protobuf/internal/errors
+google.golang.org/protobuf/internal/fieldsort
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/protobuf/internal/filetype
+google.golang.org/protobuf/internal/flags
+google.golang.org/protobuf/internal/genid
+google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/internal/mapsort
+google.golang.org/protobuf/internal/pragma
+google.golang.org/protobuf/internal/set
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/internal/version
+google.golang.org/protobuf/proto
+google.golang.org/protobuf/reflect/protoreflect
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/protobuf/runtime/protoiface
+google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/protobuf/types/known/anypb
+google.golang.org/protobuf/types/known/durationpb
+google.golang.org/protobuf/types/known/timestamppb
