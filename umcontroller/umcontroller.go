@@ -19,6 +19,7 @@ package umcontroller
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"sync"
@@ -489,6 +490,7 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 }
 
 func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemComponentStatus) {
+	log.Debug("Receive components: ", componsStatus)
 	for _, value := range componsStatus {
 		if value.status == StatusInstalled {
 			toRemove := []int{}
@@ -941,4 +943,9 @@ func (umCtrl *UmController) updateComplete(e *fsm.Event) {
 	log.Debug("Update finished")
 
 	umCtrl.cleanupCurrentCompontStatus()
+}
+
+func (status systemComponentStatus) String() string {
+	return fmt.Sprintf("{id: %s, status: %s, vendorVersion: %s aosVersion: %d }",
+		status.id, status.status, status.vendorVersion, status.aosVersion)
 }
