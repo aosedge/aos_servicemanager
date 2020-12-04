@@ -83,6 +83,12 @@ type Host struct {
 	Hostname string `json:"hostname"`
 }
 
+// Migration struct represents path for db migration
+type Migration struct {
+	MigrationPath       string `json:"migrationPath"`
+	MergedMigrationPath string `json:"mergedMigrationPath"`
+}
+
 // Config instance
 type Config struct {
 	Crypt               Crypt      `json:"fcrypt"`
@@ -103,8 +109,9 @@ type Config struct {
 		Type   string          `json:"type"`
 		Config json.RawMessage `json:"config"`
 	} `json:"identifier"`
-	HostBinds []string `json:"hostBinds"`
-	Hosts     []Host   `json:"hosts,omitempty"`
+	HostBinds []string  `json:"hostBinds"`
+	Hosts     []Host    `json:"hosts,omitempty"`
+	Migration Migration `json:"migration"`
 }
 
 /*******************************************************************************
@@ -152,6 +159,14 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.BoardConfigFile == "" {
 		config.BoardConfigFile = path.Join(config.WorkingDir, "aos_board.cfg")
+	}
+
+	if config.Migration.MigrationPath == "" {
+		config.Migration.MigrationPath = "/usr/share/aos/servicemanager/migration"
+	}
+
+	if config.Migration.MergedMigrationPath == "" {
+		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
 	}
 
 	return config, nil

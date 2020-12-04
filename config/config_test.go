@@ -91,7 +91,11 @@ func createConfigFile() (err error) {
 			"ip": "127.0.0.1",
 			"hostName" : "wwwaosum"
 		}
-	]
+	],
+	"migration": {
+		"migrationPath" : "/usr/share/aos_servicemnager/migration",
+		"mergedMigrationPath" : "/var/aos/servicemanager/mergedMigration"
+	}
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -408,5 +412,21 @@ func TestUnitStatusTimeout(t *testing.T) {
 
 	if config.UnitStatusTimeout != 30 {
 		t.Errorf("Wrong UnitStatusTimeout 30!= %d", config.UnitStatusTimeout)
+	}
+}
+
+func TestDatabaseMigration(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.Migration.MigrationPath != "/usr/share/aos_servicemnager/migration" {
+		t.Errorf("Wrong migrationPath /usr/share/aos_servicemanager/migration != %s", config.Migration.MigrationPath)
+	}
+
+	if config.Migration.MergedMigrationPath != "/var/aos/servicemanager/mergedMigration" {
+		t.Errorf("Wrong migrationPath /var/aos/servicemanager/mergedMigration != %s", config.Migration.MergedMigrationPath)
 	}
 }
