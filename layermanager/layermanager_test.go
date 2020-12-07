@@ -232,7 +232,7 @@ func TestLayersStatus(t *testing.T) {
 	}
 	defer os.RemoveAll(testTmpDir)
 
-	testDb, err := database.New(path.Join(testTmpDir, "db.txt"))
+	testDb, err := database.New(path.Join(testTmpDir, "db.txt"), tmpServerDir, tmpServerDir)
 	if err != nil {
 		log.Fatalf("Can't create database: %s", err)
 	}
@@ -353,7 +353,7 @@ func setup() (err error) {
 		return err
 	}
 
-	db, err := database.New(path.Join(tmpServerDir, "db.txt"))
+	db, err := database.New(path.Join(tmpServerDir, "db.txt"), tmpServerDir, tmpServerDir)
 	if err != nil {
 		log.Fatalf("Can't create database: %s", err)
 	}
