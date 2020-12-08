@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cmclient_test
+package iamclient_test
 
 import (
 	"context"
@@ -30,12 +30,12 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/certificatemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
 	"google.golang.org/grpc"
 
 	amqp "aos_servicemanager/amqphandler"
-	"aos_servicemanager/cmclient"
 	"aos_servicemanager/config"
+	"aos_servicemanager/iamclient"
 )
 
 /*******************************************************************************
@@ -86,7 +86,7 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	tmpDir, err = ioutil.TempDir("", "cm_")
+	tmpDir, err = ioutil.TempDir("", "iam_")
 	if err != nil {
 		log.Fatalf("Error create temporary dir: %s", err)
 	}
@@ -115,9 +115,9 @@ func TestRenewCertificatesNotification(t *testing.T) {
 
 	server.csr = map[string]string{"online": "onlineCSR", "offline": "offlineCSR"}
 
-	client, err := cmclient.New(&config.Config{CMServerURL: serverURL}, sender, true)
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, sender, true)
 	if err != nil {
-		t.Fatalf("Can't create CM client: %s", err)
+		t.Fatalf("Can't create IAM client: %s", err)
 	}
 	defer client.Close()
 
@@ -207,9 +207,9 @@ KzpDMr/kcScwzmmNcN8aLp31TSRVee64QrK7yF3YJxL+rA==
 		"online":  onlineURL.String(),
 		"offline": offlineURL.String()}
 
-	client, err := cmclient.New(&config.Config{CMServerURL: serverURL}, sender, true)
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, sender, true)
 	if err != nil {
-		t.Fatalf("Can't create CM client: %s", err)
+		t.Fatalf("Can't create IAM client: %s", err)
 	}
 	defer client.Close()
 
@@ -241,9 +241,9 @@ func TestGetCertificates(t *testing.T) {
 	server.certURL = map[string]string{"online": "onlineCertURL", "offline": "offlineCertURL"}
 	server.keyURL = map[string]string{"online": "onlineKeyURL", "offline": "offlineKeyURL"}
 
-	client, err := cmclient.New(&config.Config{CMServerURL: serverURL}, sender, true)
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, sender, true)
 	if err != nil {
-		t.Fatalf("Can't create CM client: %s", err)
+		t.Fatalf("Can't create IAM client: %s", err)
 	}
 	defer client.Close()
 
@@ -277,7 +277,7 @@ func newTestServer(url string) (server *testServer, err error) {
 	}
 	server.grpcServer = grpc.NewServer()
 
-	pb.RegisterCertificateManagerServer(server.grpcServer, server)
+	pb.RegisterIAManagerServer(server.grpcServer, server)
 
 	go server.grpcServer.Serve(listener)
 

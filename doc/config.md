@@ -116,8 +116,8 @@ The configuration file has JSON format. Following is JSON schema:
             "minimum": 0,
             "default": 30
         },
-        "cmServer": {
-            "description": "Host and port where CM is located",
+        "iamServer": {
+            "description": "Host and port where IAM is located",
             "type": "string"
         },
         "monitoring": {

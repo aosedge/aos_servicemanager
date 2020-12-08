@@ -59,7 +59,7 @@ func createConfigFile() (err error) {
 		}],
 		"updateDir": "/var/aos/update"
 	},
-	"cmServer" : "localhost:8090",
+	"iamServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
 		"sendPeriod": "00:05:00",
@@ -240,14 +240,14 @@ func TestGetVisServerURL(t *testing.T) {
 	}
 }
 
-func TestGetCMServerURL(t *testing.T) {
+func TestGetIAMServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.CMServerURL != "localhost:8090" {
-		t.Errorf("Wrong CM server value: %s", config.CMServerURL)
+	if config.IAMServerURL != "localhost:8090" {
+		t.Errorf("Wrong IAM server value: %s", config.IAMServerURL)
 	}
 }
 

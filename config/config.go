@@ -112,7 +112,7 @@ type Config struct {
 	ServiceDiscoveryURL string       `json:"serviceDiscovery"`
 	UmController        UmController `json:"umController"`
 	VISServerURL        string       `json:"visServer"`
-	CMServerURL         string       `json:"cmServer"`
+	IAMServerURL        string       `json:"iamServer"`
 	WorkingDir          string       `json:"workingDir"`
 	UpdateDir           string       `json:"updateDir"`
 	StorageDir          string       `json:"storageDir"`

@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cmclient
+package iamclient
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/certificatemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -39,18 +39,18 @@ import (
  ******************************************************************************/
 
 const (
-	cmRequestTimeout = 30 * time.Second
+	iamRequestTimeout = 30 * time.Second
 )
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-// Client CM client instance
+// Client IAM client instance
 type Client struct {
 	sender     Sender
 	connection *grpc.ClientConn
-	pbclient   pb.CertificateManagerClient
+	pbclient   pb.IAManagerClient
 }
 
 // Sender provides API to send messages to the cloud
@@ -63,7 +63,7 @@ type Sender interface {
  * Public
  ******************************************************************************/
 
-// New creates new CM client
+// New creates new IAM client
 func New(config *config.Config, sender Sender, insecure bool) (client *Client, err error) {
 	if sender == nil {
 		return nil, errors.New("sender is nil")
@@ -71,9 +71,9 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 
 	client = &Client{sender: sender}
 
-	log.Debug("Connecting to CM...")
+	log.Debug("Connecting to IAM...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), cmRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
 	var secureOpt grpc.DialOption
@@ -84,13 +84,13 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 		secureOpt = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: false}))
 	}
 
-	if client.connection, err = grpc.DialContext(ctx, config.CMServerURL, secureOpt, grpc.WithBlock()); err != nil {
+	if client.connection, err = grpc.DialContext(ctx, config.IAMServerURL, secureOpt, grpc.WithBlock()); err != nil {
 		return nil, err
 	}
 
-	client.pbclient = pb.NewCertificateManagerClient(client.connection)
+	client.pbclient = pb.NewIAManagerClient(client.connection)
 
-	log.Debug("Connected to CM")
+	log.Debug("Connected to IAM")
 
 	return client, nil
 }
@@ -102,7 +102,7 @@ func (client *Client) RenewCertificatesNotification(systemID, pwd string, certIn
 	for _, cert := range certInfo {
 		log.WithFields(log.Fields{"type": cert.Type, "serial": cert.Serial, "validTill": cert.ValidTill}).Debug("Renew certificate")
 
-		ctx, cancel := context.WithTimeout(context.Background(), cmRequestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 		defer cancel()
 
 		request := &pb.CreateKeysReq{Type: cert.Type, SystemId: systemID, Password: pwd}
@@ -137,7 +137,7 @@ func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificates
 	for _, cert := range certInfo {
 		log.WithFields(log.Fields{"type": cert.Type}).Debug("Install certificate")
 
-		ctx, cancel := context.WithTimeout(context.Background(), cmRequestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 		defer cancel()
 
 		request := &pb.ApplyCertReq{Type: cert.Type, Cert: cert.CertificateChain}
@@ -183,7 +183,7 @@ func (client *Client) GetCertificate(certType string, issuer []byte, serial stri
 		"issuer": base64.StdEncoding.EncodeToString(issuer),
 		"serial": serial}).Debug("Get certificate")
 
-	ctx, cancel := context.WithTimeout(context.Background(), cmRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
 	request := &pb.GetCertReq{Type: certType, Issuer: issuer, Serial: serial}
@@ -202,9 +202,9 @@ func (client *Client) GetCertificate(certType string, issuer []byte, serial stri
 	return response.CertUrl, response.KeyUrl, nil
 }
 
-// Close closes CM client
+// Close closes IAM client
 func (client *Client) Close() (err error) {
-	log.Debug("Disconnected from CM")
+	log.Debug("Disconnected from IAM")
 
 	if client.connection != nil {
 		client.connection.Close()
