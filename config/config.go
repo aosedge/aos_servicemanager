@@ -127,9 +127,10 @@ type Config struct {
 		Type   string          `json:"type"`
 		Config json.RawMessage `json:"config"`
 	} `json:"identifier"`
-	HostBinds []string  `json:"hostBinds"`
-	Hosts     []Host    `json:"hosts,omitempty"`
-	Migration Migration `json:"migration"`
+	HostBinds        []string  `json:"hostBinds"`
+	Hosts            []Host    `json:"hosts,omitempty"`
+	Migration        Migration `json:"migration"`
+	EnableDBusServer bool      `json:"enableDBusServer"`
 }
 
 /*******************************************************************************
