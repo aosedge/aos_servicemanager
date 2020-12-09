@@ -33,14 +33,14 @@ import (
 
 const (
 	// ObjectPath object path
-	ObjectPath = "/com/epam/aos/vis"
+	ObjectPath = "/com/epam/aos/servicemanager"
 	// InterfaceName interface name
-	InterfaceName = "com.epam.aos.vis"
+	InterfaceName = "com.epam.aos.servicemanager"
 )
 
 const intro = `
 <node>
-	<interface name="com.epam.aos.vis">
+	<interface name="com.epam.aos.servicemanager">
 		<method name="GetPermissions">
 			<arg name="token" direction="in" type="s">
 				<doc:doc><doc:summary>VIS client token (service id)</doc:summary></doc:doc>

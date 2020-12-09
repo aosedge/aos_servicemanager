@@ -36,6 +36,7 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
+	"aos_servicemanager/dbushandler"
 	"aos_servicemanager/downloader"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/iamclient"
@@ -68,6 +69,7 @@ type serviceManager struct {
 	cfg             *config.Config
 	crypt           *fcrypt.CryptoContext
 	db              *database.Database
+	dbus            *dbushandler.DBusHandler
 	downloader      *downloader.Downloader
 	identifier      pluginprovider.Identifier
 	launcher        *launcher.Launcher
@@ -239,12 +241,18 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create identifier
 	// Use plugged in identifier
-	if sm.identifier, err = pluginprovider.GetIdentifier(cfg.Identifier.Type, cfg.Identifier.Config, sm.db); err != nil {
+	if sm.identifier, err = pluginprovider.GetIdentifier(cfg.Identifier.Type, cfg.Identifier.Config); err != nil {
 		return sm, err
 	}
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
+		return sm, err
+	}
+
+	// Create D-Bus handler
+
+	if sm.dbus, err = dbushandler.New(sm.db); err != nil {
 		return sm, err
 	}
 
@@ -299,6 +307,10 @@ func (sm *serviceManager) close() {
 
 	if sm.downloader != nil {
 		sm.downloader.Close()
+	}
+
+	if sm.dbus != nil {
+		sm.dbus.Close()
 	}
 }
 

@@ -22,8 +22,6 @@ import (
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
-
-	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -31,7 +29,7 @@ import (
  ******************************************************************************/
 
 // NewIdentifier plugin edintifier
-type NewIdentifier func(configJSON []byte, serviceProvider ServiceProvider) (dierectIdentifier Identifier, err error)
+type NewIdentifier func(configJSON []byte) (dierectIdentifier Identifier, err error)
 
 //Identifier interface for identifier
 type Identifier interface {
@@ -45,11 +43,6 @@ type Identifier interface {
 	UsersChangedChannel() (channel <-chan []string)
 	// ErrorChannel returns error channel
 	ErrorChannel() (channel <-chan error)
-}
-
-// ServiceProvider provides service info
-type ServiceProvider interface {
-	GetService(serviceID string) (service launcher.Service, err error)
 }
 
 /*******************************************************************************
@@ -70,11 +63,11 @@ func RegisterIdentifier(plugin string, newFunc NewIdentifier) {
 }
 
 //GetIdentifier create plugged in identifier
-func GetIdentifier(identifierType string, configJSON json.RawMessage, serviceProvider ServiceProvider) (identifier Identifier, err error) {
+func GetIdentifier(identifierType string, configJSON json.RawMessage) (identifier Identifier, err error) {
 	newFunc, ok := identifiers[identifierType]
 	if !ok {
 		return nil, fmt.Errorf("plugin %s not found", identifierType)
 	}
 
-	return newFunc(configJSON, serviceProvider)
+	return newFunc(configJSON)
 }

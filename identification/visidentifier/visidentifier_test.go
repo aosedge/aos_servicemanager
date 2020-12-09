@@ -20,22 +20,18 @@ package visidentifier_test
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/rand"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/godbus/dbus"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/visprotocol"
 	"gitpct.epam.com/epmd-aepr/aos_common/wsserver"
 
 	"aos_servicemanager/identification/visidentifier"
-	"aos_servicemanager/identification/visidentifier/dbushandler"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/pluginprovider"
 )
@@ -51,10 +47,6 @@ const serverURL = "wss://localhost:8088"
  ******************************************************************************/
 
 type testServiceProvider struct {
-	services map[string]*launcher.Service
-}
-
-type renewCertificatesNotification struct {
 	services map[string]*launcher.Service
 }
 
@@ -107,7 +99,9 @@ func setup() (err error) {
 		return err
 	}
 
-	if vis, err = visidentifier.New([]byte(`{"VisServer": "wss://localhost:8088"}`), &serviceProvider); err != nil {
+	time.Sleep(1 * time.Second)
+
+	if vis, err = visidentifier.New([]byte(`{"VisServer": "wss://localhost:8088"}`)); err != nil {
 		return err
 	}
 
@@ -200,73 +194,9 @@ func TestUsersChanged(t *testing.T) {
 	}
 }
 
-func TestGetPermission(t *testing.T) {
-	serviceProvider.services["Service1"] = &launcher.Service{ID: "Service1",
-		Permissions: `{"*": "rw", "123": "rw"}`}
-
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		t.Fatalf("Can't connect to session bus: %s", err)
-	}
-
-	var (
-		permissionJson string
-		status         string
-		permissions    map[string]string
-	)
-
-	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
-
-	err = obj.Call(dbushandler.InterfaceName+".GetPermission", 0, "Service1").Store(&permissionJson, &status)
-	if err != nil {
-		t.Fatalf("Can't make D-Bus call: %s", err)
-	}
-
-	if strings.ToUpper(status) != "OK" {
-		t.Fatalf("Can't get permissions: %s", status)
-	}
-
-	err = json.Unmarshal([]byte(permissionJson), &permissions)
-	if err != nil {
-		t.Fatalf("Can't decode permissions: %s", err)
-	}
-
-	if len(permissions) != 2 {
-		t.Fatal("Permission list length !=2")
-	}
-
-	if permissions["*"] != "rw" {
-		t.Fatal("Incorrect permission")
-	}
-}
-
-func TestIntrospect(t *testing.T) {
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		t.Fatalf("Can't connect to session bus: %s", err)
-	}
-
-	var intro string
-
-	obj := conn.Object(dbushandler.InterfaceName, dbushandler.ObjectPath)
-
-	if err = obj.Call("org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&intro); err != nil {
-		t.Errorf("Can't make D-Bus call: %s", err)
-	}
-}
-
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-
-func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
-	s, ok := serviceProvider.services[serviceID]
-	if !ok {
-		return service, fmt.Errorf("service %s does not exist", serviceID)
-	}
-
-	return *s, nil
-}
 
 func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType int, message []byte) (response []byte, err error) {
 	var header visprotocol.MessageHeader

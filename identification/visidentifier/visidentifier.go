@@ -28,7 +28,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/wsclient"
 
 	"aos_servicemanager/config"
-	"aos_servicemanager/identification/visidentifier/dbushandler"
 	"aos_servicemanager/pluginprovider"
 )
 
@@ -53,8 +52,6 @@ type Instance struct {
 
 	usersChangedChannel chan []string
 	errorChannel        chan error
-
-	dbusHandler *dbushandler.DBusHandler
 
 	wsClient *wsclient.Client
 
@@ -83,7 +80,7 @@ type instanceConfig struct {
  ******************************************************************************/
 
 // New creates new vis identifier instance
-func New(configJSON []byte, serviceProvider pluginprovider.ServiceProvider) (identifier pluginprovider.Identifier, err error) {
+func New(configJSON []byte) (identifier pluginprovider.Identifier, err error) {
 	log.Info("Create VIS identification instance")
 
 	instance := &Instance{}
@@ -92,10 +89,6 @@ func New(configJSON []byte, serviceProvider pluginprovider.ServiceProvider) (ide
 	instance.config.ReconnectTime.Duration = defaultReconnectTime
 
 	if err = json.Unmarshal(configJSON, &instance.config); err != nil {
-		return nil, err
-	}
-
-	if instance.dbusHandler, err = dbushandler.New(serviceProvider); err != nil {
 		return nil, err
 	}
 
@@ -117,10 +110,6 @@ func (instance *Instance) Close() (err error) {
 	log.Info("Close VIS identification instance")
 
 	var retErr error
-
-	if err = instance.dbusHandler.Close(); err != nil {
-		retErr = err
-	}
 
 	if err = instance.wsClient.Close(); err != nil && retErr == nil {
 		retErr = err
