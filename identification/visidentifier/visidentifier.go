@@ -42,6 +42,11 @@ const (
 
 const defaultReconnectTime = 10 * time.Second
 
+const (
+	vinVISPath   = "Attribute.Vehicle.VehicleIdentification.VIN"
+	usersVISPath = "Attribute.Vehicle.UserIdentification.Users"
+)
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -67,8 +72,8 @@ type Instance struct {
 }
 
 type instanceConfig struct {
-	VISServer     string
-	ReconnectTime config.Duration
+	VISServer     string          `json:"visServer"`
+	ReconnectTime config.Duration `json:"reconnectTime"`
 }
 
 /*******************************************************************************
@@ -109,7 +114,19 @@ func New(configJSON []byte) (identifier pluginprovider.Identifier, err error) {
 func (instance *Instance) Close() (err error) {
 	log.Info("Close VIS identification instance")
 
+	req := visprotocol.UnsubscribeAllRequest{
+		MessageHeader: visprotocol.MessageHeader{
+			Action:    visprotocol.ActionUnsubscribeAll,
+			RequestID: wsclient.GenerateRequestID()},
+	}
+
+	var rsp visprotocol.UnsubscribeAllResponse
+
 	var retErr error
+
+	if err = instance.wsClient.SendRequest("RequestID", req.RequestID, &req, &rsp); err != nil && retErr == nil {
+		retErr = err
+	}
 
 	if err = instance.wsClient.Close(); err != nil && retErr == nil {
 		retErr = err
@@ -128,13 +145,13 @@ func (instance *Instance) GetSystemID() (systemID string, err error) {
 		MessageHeader: visprotocol.MessageHeader{
 			Action:    visprotocol.ActionGet,
 			RequestID: wsclient.GenerateRequestID()},
-		Path: "Attribute.Vehicle.VehicleIdentification.VIN"}
+		Path: vinVISPath}
 
 	if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 		return "", err
 	}
 
-	value, err := getValueByPath("Attribute.Vehicle.VehicleIdentification.VIN", rsp.Value)
+	value, err := getValueByPath(vinVISPath, rsp.Value)
 	if err != nil {
 		return "", err
 	}
@@ -153,6 +170,9 @@ func (instance *Instance) GetSystemID() (systemID string, err error) {
 func (instance *Instance) GetUsers() (users []string, err error) {
 	instance.waitConnection()
 
+	instance.Lock()
+	defer instance.Unlock()
+
 	if instance.users == nil {
 		var rsp visprotocol.GetResponse
 
@@ -160,16 +180,13 @@ func (instance *Instance) GetUsers() (users []string, err error) {
 			MessageHeader: visprotocol.MessageHeader{
 				Action:    visprotocol.ActionGet,
 				RequestID: wsclient.GenerateRequestID()},
-			Path: "Attribute.Vehicle.UserIdentification.Users"}
+			Path: usersVISPath}
 
 		if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
 			return nil, err
 		}
 
-		instance.Lock()
-		defer instance.Unlock()
-
-		if err = instance.setUsers(rsp.Value); err != nil {
+		if err = instance.updateUsers(rsp.Value); err != nil {
 			return nil, err
 		}
 	}
@@ -177,6 +194,30 @@ func (instance *Instance) GetUsers() (users []string, err error) {
 	log.WithField("users", instance.users).Debug("Get users")
 
 	return instance.users, err
+}
+
+// SetUsers sets the user claims
+func (instance *Instance) SetUsers(users []string) (err error) {
+	instance.waitConnection()
+
+	instance.Lock()
+	defer instance.Unlock()
+
+	var rsp visprotocol.SetResponse
+
+	req := visprotocol.SetRequest{
+		MessageHeader: visprotocol.MessageHeader{
+			Action:    visprotocol.ActionSet,
+			RequestID: wsclient.GenerateRequestID()},
+		Path:  usersVISPath,
+		Value: users,
+	}
+
+	if err = instance.wsClient.SendRequest("RequestID", req.MessageHeader.RequestID, &req, &rsp); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // UsersChangedChannel returns users changed channel
@@ -215,7 +256,7 @@ func (instance *Instance) handleConnection(url string, reconnectTime time.Durati
 
 		instance.subscribeMap = sync.Map{}
 
-		if err := instance.subscribe("Attribute.Vehicle.UserIdentification.Users", instance.handleUsersChanged); err != nil {
+		if err := instance.subscribe(usersVISPath, instance.handleUsersChanged); err != nil {
 			log.Errorf("Can't subscribe to VIS: %s", err)
 			goto reconnect
 		}
@@ -300,8 +341,8 @@ func (instance *Instance) processSubscriptions(message []byte) (err error) {
 	return nil
 }
 
-func (instance *Instance) setUsers(value interface{}) (err error) {
-	value, err = getValueByPath("Attribute.Vehicle.UserIdentification.Users", value)
+func (instance *Instance) updateUsers(value interface{}) (err error) {
+	value, err = getValueByPath(usersVISPath, value)
 	if err != nil {
 		return err
 	}
@@ -328,14 +369,18 @@ func (instance *Instance) handleUsersChanged(value interface{}) {
 	instance.Lock()
 	defer instance.Unlock()
 
-	if err := instance.setUsers(value); err != nil {
+	if err := instance.updateUsers(value); err != nil {
 		log.Errorf("Can't set users: %s", err)
 		return
 	}
 
-	instance.usersChangedChannel <- instance.users
-
 	log.WithField("users", instance.users).Debug("Users changed")
+
+	if len(instance.usersChangedChannel) == usersChangedChannelSize {
+		return
+	}
+
+	instance.usersChangedChannel <- instance.users
 }
 
 func (instance *Instance) subscribe(path string, callback func(value interface{})) (err error) {

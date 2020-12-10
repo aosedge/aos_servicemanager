@@ -39,6 +39,8 @@ type Identifier interface {
 	GetSystemID() (systemID string, err error)
 	// GetUsers returns the user claims
 	GetUsers() (users []string, err error)
+	// SetUsers sets the user claims
+	SetUsers(users []string) (err error)
 	// UsersChangedChannel returns users changed channel
 	UsersChangedChannel() (channel <-chan []string)
 	// ErrorChannel returns error channel

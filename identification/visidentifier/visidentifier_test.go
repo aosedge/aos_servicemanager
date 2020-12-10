@@ -20,12 +20,13 @@ package visidentifier_test
 import (
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"net/url"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/visprotocol"
@@ -51,6 +52,8 @@ type testServiceProvider struct {
 }
 
 type clientHandler struct {
+	subscriptionID string
+	users          []string
 }
 
 /*******************************************************************************
@@ -60,9 +63,8 @@ type clientHandler struct {
 var vis pluginprovider.Identifier
 var server *wsserver.Server
 
-var subscriptionID = "test_subscription"
-
 var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
+var testHandler = &clientHandler{}
 
 /*******************************************************************************
  * Init
@@ -82,12 +84,6 @@ func init() {
  ******************************************************************************/
 
 func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
-	}
-
-	rand.Seed(time.Now().UnixNano())
-
 	url, err := url.Parse(serverURL)
 	if err != nil {
 		return err
@@ -95,7 +91,7 @@ func setup() (err error) {
 
 	if server, err = wsserver.New("TestServer", url.Host,
 		"../../ci/crt.pem",
-		"../../ci/key.pem", new(clientHandler)); err != nil {
+		"../../ci/key.pem", testHandler); err != nil {
 		return err
 	}
 
@@ -109,10 +105,6 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	if err := os.RemoveAll("tmp"); err != nil {
-		return err
-	}
-
 	if err = vis.Close(); err != nil {
 		return err
 	}
@@ -154,42 +146,32 @@ func TestGetSystemID(t *testing.T) {
 }
 
 func TestGetUsers(t *testing.T) {
+	testHandler.users = []string{uuid.New().String(), uuid.New().String(), uuid.New().String()}
+
 	users, err := vis.GetUsers()
 	if err != nil {
 		t.Fatalf("Error getting users: %s", err)
 	}
 
-	if users == nil {
-		t.Fatalf("Wrong users value: %s", users)
+	if !reflect.DeepEqual(users, testHandler.users) {
+		t.Errorf("Wrong users value: %s", users)
 	}
 }
 
 func TestUsersChanged(t *testing.T) {
-	newUsers := []string{generateRandomString(10), generateRandomString(10)}
+	newUsers := []string{uuid.New().String(), uuid.New().String(), uuid.New().String()}
 
-	message, err := json.Marshal(&visprotocol.SubscriptionNotification{
-		Action:         "subscription",
-		SubscriptionID: subscriptionID,
-		Value:          map[string][]string{"Attribute.Vehicle.UserIdentification.Users": newUsers}})
-	if err != nil {
-		t.Fatalf("Error marshal request: %s", err)
-	}
-
-	clients := server.GetClients()
-
-	for _, client := range clients {
-		if err := client.SendMessage(websocket.TextMessage, message); err != nil {
-			t.Fatalf("Error send message: %s", err)
-		}
+	if err := vis.SetUsers(newUsers); err != nil {
+		t.Fatalf("Can't set users: %s", err)
 	}
 
 	select {
 	case users := <-vis.UsersChangedChannel():
-		if len(users) != len(newUsers) {
-			t.Errorf("Wrong users len: %d", len(users))
+		if !reflect.DeepEqual(newUsers, users) {
+			t.Errorf("Wrong users value: %s", users)
 		}
 
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Error("Waiting for users changed timeout")
 	}
 }
@@ -198,7 +180,7 @@ func TestUsersChanged(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType int, message []byte) (response []byte, err error) {
+func (handler *clientHandler) ProcessMessage(client *wsserver.Client, messageType int, message []byte) (response []byte, err error) {
 	var header visprotocol.MessageHeader
 
 	if err = json.Unmarshal(message, &header); err != nil {
@@ -209,9 +191,37 @@ func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType
 
 	switch header.Action {
 	case visprotocol.ActionSubscribe:
+		handler.subscriptionID = uuid.New().String()
+
 		rsp = &visprotocol.SubscribeResponse{
 			MessageHeader:  header,
-			SubscriptionID: subscriptionID}
+			SubscriptionID: handler.subscriptionID}
+
+	case visprotocol.ActionUnsubscribe:
+		var unsubscribeReq visprotocol.UnsubscribeRequest
+
+		if err = json.Unmarshal(message, &unsubscribeReq); err != nil {
+			return nil, err
+		}
+
+		unsubscribeRsp := visprotocol.UnsubscribeResponse{
+			MessageHeader:  header,
+			SubscriptionID: unsubscribeReq.SubscriptionID,
+		}
+
+		rsp = &unsubscribeRsp
+
+		if unsubscribeReq.SubscriptionID != handler.subscriptionID {
+			unsubscribeRsp.Error = &visprotocol.ErrorInfo{Message: "subscription ID not found"}
+			break
+		}
+
+		handler.subscriptionID = ""
+
+	case visprotocol.ActionUnsubscribeAll:
+		handler.subscriptionID = ""
+
+		rsp = &visprotocol.UnsubscribeAllResponse{MessageHeader: header}
 
 	case visprotocol.ActionGet:
 		var getReq visprotocol.GetRequest
@@ -228,10 +238,54 @@ func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType
 			getRsp.Value = map[string]string{getReq.Path: "VIN1234567890"}
 
 		case "Attribute.Vehicle.UserIdentification.Users":
-			getRsp.Value = map[string][]string{getReq.Path: []string{"user1", "user2", "user3"}}
+			getRsp.Value = map[string][]string{getReq.Path: handler.users}
 		}
 
 		rsp = &getRsp
+
+	case visprotocol.ActionSet:
+		var setReq visprotocol.SetRequest
+
+		setRsp := visprotocol.SetResponse{
+			MessageHeader: header}
+
+		rsp = &setRsp
+
+		if err = json.Unmarshal(message, &setReq); err != nil {
+			return nil, err
+		}
+
+		switch setReq.Path {
+		case "Attribute.Vehicle.VehicleIdentification.VIN":
+			setRsp.Error = &visprotocol.ErrorInfo{Message: "readonly path"}
+
+		case "Attribute.Vehicle.UserIdentification.Users":
+			handler.users = nil
+
+			for _, claim := range setReq.Value.([]interface{}) {
+				handler.users = append(handler.users, claim.(string))
+			}
+
+			if handler.subscriptionID != "" {
+				go func() {
+					message, err := json.Marshal(&visprotocol.SubscriptionNotification{
+						Action:         "subscription",
+						SubscriptionID: handler.subscriptionID,
+						Value:          map[string][]string{"Attribute.Vehicle.UserIdentification.Users": handler.users}})
+					if err != nil {
+						log.Errorf("Error marshal request: %s", err)
+					}
+
+					clients := server.GetClients()
+
+					for _, client := range clients {
+						if err := client.SendMessage(websocket.TextMessage, message); err != nil {
+							log.Errorf("Error sending message: %s", err)
+						}
+					}
+				}()
+			}
+		}
 
 	default:
 		return nil, errors.New("unknown action")
@@ -244,25 +298,10 @@ func (handler clientHandler) ProcessMessage(client *wsserver.Client, messageType
 	return response, nil
 }
 
-func (handler clientHandler) ClientConnected(client *wsserver.Client) {
+func (handler *clientHandler) ClientConnected(client *wsserver.Client) {
 
 }
 
-func (handler clientHandler) ClientDisconnected(client *wsserver.Client) {
+func (handler *clientHandler) ClientDisconnected(client *wsserver.Client) {
 
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func generateRandomString(size uint) (result string) {
-	letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-	tmp := make([]rune, size)
-	for i := range tmp {
-		tmp[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-
-	return string(tmp)
 }
