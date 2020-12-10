@@ -15,10 +15,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package identification
+package fileidentifier
 
 import (
-	// include all supported plugins
-	_ "aos_servicemanager/identification/fileidentifier"
-	_ "aos_servicemanager/identification/visidentifier"
+	"aos_servicemanager/pluginprovider"
 )
+
+/*******************************************************************************
+ * Init
+ ******************************************************************************/
+
+func init() {
+	pluginprovider.RegisterIdentifier("fileidentifier", New)
+}
