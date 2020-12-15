@@ -212,7 +212,7 @@ func TestInstallRemove(t *testing.T) {
 		t.Errorf("Wrong service quantity")
 	}
 	for _, service := range services {
-		if service.Status != "OK" {
+		if service.Status != "installed" {
 			t.Errorf("Service %s error status: %s", service.ID, service.Status)
 		}
 	}
@@ -394,7 +394,7 @@ func TestAutoStart(t *testing.T) {
 		t.Errorf("Wrong service quantity")
 	}
 	for _, service := range services {
-		if service.Status != "OK" {
+		if service.Status != "installed" {
 			t.Errorf("Service %s error status: %s", service.ID, service.Status)
 		}
 	}
@@ -1671,7 +1671,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	}
 
 	for _, service := range services {
-		if service.Status != "OK" {
+		if service.Status != "installed" {
 			t.Errorf("Service %s error status: %s", service.ID, service.Status)
 		}
 		if serviceProvider.services[service.ID].State == stateRunning {

@@ -631,7 +631,7 @@ func (state ServiceState) String() string {
 }
 
 func (status ServiceStatus) String() string {
-	return [...]string{"OK", "Error"}[status]
+	return [...]string{"installed", "Error"}[status]
 }
 
 /*******************************************************************************
