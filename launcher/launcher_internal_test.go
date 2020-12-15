@@ -2410,7 +2410,7 @@ func createTestPartition(mountPoint string, fsType string, size uint64) (err err
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
-	if output, err = exec.Command("quotacheck", "-avum").CombinedOutput(); err != nil {
+	if output, err = exec.Command("quotacheck", "-favum").CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
