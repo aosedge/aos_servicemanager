@@ -369,6 +369,10 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		return nil, err
 	}
 
+	if err = launcher.addServicesToSystemd(); err != nil {
+		return nil, err
+	}
+
 	return launcher, nil
 }
 
@@ -583,7 +587,7 @@ func Cleanup(cfg *config.Config) (err error) {
 						<-channel
 					}
 
-					if _, err := systemd.DisableUnitFiles([]string{serviceName}, false); err != nil {
+					if _, err := systemd.DisableUnitFiles([]string{serviceName}, true); err != nil {
 						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
 					}
 				}
@@ -637,6 +641,30 @@ func (status ServiceStatus) String() string {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (launcher *Launcher) addServicesToSystemd() (err error) {
+	services, err := launcher.serviceProvider.GetServices()
+	if err != nil {
+		return err
+	}
+
+	for _, service := range services {
+		fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
+		if err != nil {
+			return err
+		}
+
+		if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
+			return err
+		}
+	}
+
+	if err = launcher.systemd.Reload(); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func (launcher *Launcher) prepareHostfsDir() (err error) {
 	witeoutsDir := path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir)
@@ -1153,9 +1181,7 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 		return err
 	}
 
-	// Use launcher.systemd.EnableUnitFiles if services should be started automatically
-	// on system restart
-	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
 		return err
 	}
 
@@ -1794,11 +1820,15 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
-	if _, err := launcher.systemd.DisableUnitFiles([]string{service.UnitName}, false); err != nil {
+	if _, err := launcher.systemd.DisableUnitFiles([]string{service.UnitName}, true); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't disable systemd unit: %s", err)
 			retErr = err
 		}
+	}
+
+	if err := launcher.systemd.Reload(); err != nil {
+		log.Errorf("Can't reload systemd: %s", err)
 	}
 
 	usersServices, err := launcher.serviceProvider.GetUsersServicesByServiceID(service.ID)
