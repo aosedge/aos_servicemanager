@@ -113,6 +113,8 @@ func TestRenewCertificatesNotification(t *testing.T) {
 	}
 	defer server.close()
 
+	time.Sleep(5 * time.Second)
+
 	server.csr = map[string]string{"online": "onlineCSR", "offline": "offlineCSR"}
 
 	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, sender, true)
