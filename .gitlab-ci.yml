@@ -1,6 +1,7 @@
 stages:
   - build
   - test
+  - cyclonedx
 
 after_script:  
    - cd $CI_PROJECT_DIR
@@ -27,4 +28,18 @@ test:
     - /usr/local/go/bin/go tool cover -func=.testCoverage.txt
     - sudo rm .testCoverage.txt
     - sudo systemctl stop rabbitmq-server.service --no-block
+
+dependency:
+  only:
+    refs: 
+     - master
+  tags:
+    - sm_ci
+  stage: cyclonedx
+  script:
+    - sed -i '/aos_common/d' ./go.mod
+    - cyclonedx-go -o /tmp/bom.xml
+    - curl -X 'POST' 'https://aos-dependency.westeurope.cloudapp.azure.com/api/v1/bom' -H "X-Api-Key:$DEP_API_KEY" -F 'projectName=aos-servicemanager' -F 'autoCreate=true' -F 'bom=@/tmp/bom.xml'
+
+
 
