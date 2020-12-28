@@ -2,24 +2,45 @@ syntax = "proto3";
 
 option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
 
+import "google/protobuf/empty.proto";
+
 package iamanager;
 
 service IAManager {
+    rpc GetCertTypes(google.protobuf.Empty) returns (GetCertTypesRsp) {}
+    rpc FinishProvisioning(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+    rpc Clear(ClearReq) returns (google.protobuf.Empty) {}
+    rpc SetOwner(SetOwnerReq) returns (google.protobuf.Empty) {}
     rpc CreateKeys(CreateKeysReq) returns (CreateKeysRsp) {}
     rpc ApplyCert(ApplyCertReq) returns (ApplyCertRsp) {}
     rpc GetCert(GetCertReq) returns (GetCertRsp) {}
+    rpc GetSystemID(google.protobuf.Empty) returns (GetSystemIDRsp) {}
+    rpc SetUsers(SetUsersReq) returns (google.protobuf.Empty) {}
+    rpc GetUsers(google.protobuf.Empty) returns (GetUsersRsp) {}
+    rpc SubscribeUsersChanged(google.protobuf.Empty) returns (stream UsersChangedNtf) {}
+}
+
+message GetCertTypesRsp {
+    repeated string types = 1;
+}
+
+message ClearReq {
+    string type = 1;
+}
+
+message SetOwnerReq {
+    string type = 1;
+    string password = 2;
 }
 
 message CreateKeysReq {
     string type = 1;
-    string system_id = 2;
-    string password = 3;
+    string password = 2;
 }
 
 message CreateKeysRsp {
     string type = 1;
     string csr = 2;
-    string error = 3;
 }
 
 message ApplyCertReq {
@@ -30,7 +51,6 @@ message ApplyCertReq {
 message ApplyCertRsp {
     string type = 1;
     string cert_url = 2;
-    string error = 3;
 }
 
 message GetCertReq {
@@ -43,5 +63,20 @@ message GetCertRsp {
     string type = 1;
     string cert_url = 2;
     string key_url = 3;
-    string error = 4;
+}
+
+message GetSystemIDRsp {
+    string id = 1;
+}
+
+message SetUsersReq {
+    repeated string users = 1;
+}
+
+message GetUsersRsp {
+    repeated string users = 1;
+}
+
+message UsersChangedNtf {
+    repeated string users = 1;
 }

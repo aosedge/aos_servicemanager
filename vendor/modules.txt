@@ -189,10 +189,12 @@ github.com/golang-migrate/migrate/v4/source/httpfs
 # github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 github.com/golang/groupcache/lru
 # github.com/golang/protobuf v1.4.3
+## explicit
 github.com/golang/protobuf/proto
 github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
+github.com/golang/protobuf/ptypes/empty
 github.com/golang/protobuf/ptypes/timestamp
 # github.com/google/btree v1.0.0
 github.com/google/btree
@@ -210,7 +212,6 @@ github.com/google/go-tpm-tools/simulator/internal
 github.com/google/uuid
 # github.com/gorilla/websocket v1.4.2
 ## explicit
-github.com/gorilla/websocket
 # github.com/hashicorp/consul/api v1.4.0
 ## explicit
 github.com/hashicorp/consul/api
@@ -336,16 +337,13 @@ github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210105102527-589ead2f596e
+# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210106152734-d37646a47bd2
 ## explicit
 gitpct.epam.com/epmd-aepr/aos_common/api/iamanager
 gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager
 gitpct.epam.com/epmd-aepr/aos_common/fs
 gitpct.epam.com/epmd-aepr/aos_common/image
 gitpct.epam.com/epmd-aepr/aos_common/migration
-gitpct.epam.com/epmd-aepr/aos_common/visprotocol
-gitpct.epam.com/epmd-aepr/aos_common/wsclient
-gitpct.epam.com/epmd-aepr/aos_common/wsserver
 # go.opencensus.io v0.22.4
 go.opencensus.io
 go.opencensus.io/internal
@@ -457,4 +455,5 @@ google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
+google.golang.org/protobuf/types/known/emptypb
 google.golang.org/protobuf/types/known/timestamppb
