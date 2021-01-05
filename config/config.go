@@ -39,8 +39,6 @@ type Crypt struct {
 // UmController configuration for update controller
 type UmController struct {
 	ServerURL     string           `json:"serverUrl"`
-	Cert          string           `json:"cert"`
-	Key           string           `json:"key"`
 	FileServerURL string           `json:"fileServerUrl,omitempty"`
 	UmClients     []UmClientConfig `json:"umClients"`
 	UpdateDir     string           `json:"updateDir"`
@@ -109,6 +107,7 @@ type Migration struct {
 // Config instance
 type Config struct {
 	Crypt               Crypt        `json:"fcrypt"`
+	CertStorage         string       `json:"certStorage"`
 	ServiceDiscoveryURL string       `json:"serviceDiscovery"`
 	UmController        UmController `json:"umController"`
 	VISServerURL        string       `json:"visServer"`
@@ -162,6 +161,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, err
+	}
+
+	if config.CertStorage == "" {
+		config.CertStorage = "/var/aos/crypt/sm/"
 	}
 
 	if config.StorageDir == "" {

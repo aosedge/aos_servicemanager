@@ -40,6 +40,7 @@ func createConfigFile() (err error) {
 		"CACert" : "CACert",
 		"tpmDevice": "/dev/tpmrm0"
 	},
+	"certStorage": "/var/aos/crypt/sm/",
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
 	"storageDir" : "/var/aos/storage",
@@ -49,8 +50,6 @@ func createConfigFile() (err error) {
 	"visServer" : "wss://localhost:8088",
 	"umController": {
         "serverUrl": "localhost:8091",
-        "cert": "/var/aos/crypt/sm/cert.pem",
-		"key": "/var/aos/crypt/sm/key.pem",
 		"fileServerUrl": "localhost:8092",
 		"umClients": [{
 			"umId": "um",
@@ -425,8 +424,6 @@ func TestUmControllerConfig(t *testing.T) {
 	umClient := config.UmClientConfig{UmID: "um", Priority: 0, IsLocal: true}
 
 	originalConfig := config.UmController{ServerURL: "localhost:8091",
-		Cert:          "/var/aos/crypt/sm/cert.pem",
-		Key:           "/var/aos/crypt/sm/key.pem",
 		FileServerURL: "localhost:8092",
 		UmClients:     []config.UmClientConfig{umClient},
 		UpdateDir:     "/var/aos/update",
@@ -461,5 +458,16 @@ func TestEnableDBusServer(t *testing.T) {
 
 	if !config.EnableDBusServer {
 		t.Errorf("Wrong EnableDBusServer value: %v", config.EnableDBusServer)
+	}
+}
+
+func TestCertStorage(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.CertStorage != "/var/aos/crypt/sm/" {
+		t.Errorf("Wrong CertStorage value: %s", config.CertStorage)
 	}
 }

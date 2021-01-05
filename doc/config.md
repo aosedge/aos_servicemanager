@@ -58,6 +58,10 @@ The configuration file has JSON format. Following is JSON schema:
                 }
             }
         },
+        "certStorage": {
+            "description": "Directory with certificate and key for SM gRPC server and client",
+            "type": "string"
+        },
         "serviceDiscovery": {
             "description": "Address of service discovery server",
             "type": "string"
@@ -72,15 +76,7 @@ The configuration file has JSON format. Following is JSON schema:
                 "ServerUrl": {
                     "description": "UM controller server url",
                     "type": "string"
-                },
-                "Cert": {
-                    "type": "string",
-                    "description": " Path to server certificate"
-                },
-                "Key": {
-                    "type": "string",
-                    "description": " Path to key"
-                },
+                },                
                 "UmIds": {
                     "type": "array",
                     "items": {
