@@ -186,7 +186,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create amqp
-	if sm.amqp, err = amqp.New(cfg); err != nil {
+	if sm.amqp, err = amqp.New(sm.iam.GetSystemID(), cfg); err != nil {
 		return sm, err
 	}
 
@@ -560,7 +560,7 @@ func (sm *serviceManager) run() {
 		}
 
 		// Connect
-		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, sm.iam.GetSystemID(), sm.iam.GetUsers()); err != nil {
+		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, sm.iam.GetUsers()); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
 			goto reconnect
 		}

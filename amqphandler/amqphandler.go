@@ -526,10 +526,10 @@ var messageMap = map[string]func() interface{}{
  ******************************************************************************/
 
 // New creates new amqp object
-func New(cfg *config.Config) (handler *AmqpHandler, err error) {
+func New(systemID string, cfg *config.Config) (handler *AmqpHandler, err error) {
 	log.Debug("New AMQP")
 
-	handler = &AmqpHandler{config: cfg}
+	handler = &AmqpHandler{systemID: systemID, config: cfg}
 
 	handler.sendChannel = make(chan Message, sendChannelSize)
 	handler.retryChannel = make(chan Message, retryChannelSize)
@@ -544,9 +544,8 @@ func (handler *AmqpHandler) SetCryptoContext(crypt amqpCryptoContext) {
 }
 
 // Connect connects to cloud
-func (handler *AmqpHandler) Connect(sdURL string, systemID string, users []string) (err error) {
-	log.WithFields(log.Fields{"url": sdURL, "systemID": systemID, "users": users}).Debug("AMQP connect")
-	handler.systemID = systemID
+func (handler *AmqpHandler) Connect(sdURL string, users []string) (err error) {
+	log.WithFields(log.Fields{"url": sdURL, "users": users}).Debug("AMQP connect")
 
 	tlsConfig, err := handler.cryptoContext.GetTLSConfig()
 	if err != nil {
@@ -930,14 +929,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 		case message = <-handler.sendChannel:
 		}
 
-		aosMessage, ok := message.Data.(AOSMessage)
-		if !ok {
-			continue
-		}
-
-		aosMessage.Header.SystemID = handler.systemID
-
-		data, err := json.Marshal(&aosMessage)
+		data, err := json.Marshal(message.Data)
 		if err != nil {
 			log.Errorf("Can't parse message: %s", err)
 			continue
@@ -1159,7 +1151,7 @@ func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interfa
 
 func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (msg AOSMessage) {
 	msg = AOSMessage{
-		Header: MessageHeader{Version: ProtocolVersion, MessageType: msgType},
+		Header: MessageHeader{Version: ProtocolVersion, SystemID: handler.systemID, MessageType: msgType},
 		Data:   data}
 
 	return msg

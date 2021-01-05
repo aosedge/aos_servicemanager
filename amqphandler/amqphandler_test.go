@@ -173,7 +173,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestSendMessages(t *testing.T) {
-	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
+	amqpHandler, err := amqphandler.New("TestID", &config.Config{UnitStatusTimeout: 2})
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}
@@ -185,21 +185,22 @@ func TestSendMessages(t *testing.T) {
 	}
 
 	testData := []*amqphandler.AOSMessage{
-		&amqphandler.AOSMessage{
+		{
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.StateAcceptanceType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.StateAcceptance{ServiceID: "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"}},
-
-		&amqphandler.AOSMessage{
+			Data:   &amqphandler.StateAcceptance{ServiceID: "service0", Checksum: "0123456890", Result: "accepted", Reason: "just because"},
+		},
+		{
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.UpdateStateType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.UpdateState{ServiceID: "service1", Checksum: "0993478847", State: "This is new state"}},
-
-		&amqphandler.AOSMessage{
+			Data:   &amqphandler.UpdateState{ServiceID: "service1", Checksum: "0993478847", State: "This is new state"},
+		},
+		{
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceLogType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.RequestServiceLog{ServiceID: "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}}},
-
-		&amqphandler.AOSMessage{
+			Data:   &amqphandler.RequestServiceLog{ServiceID: "service2", LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
+		},
+		{
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
-			Data:   &amqphandler.RequestServiceCrashLog{ServiceID: "service3", LogID: uuid.New().String()}},
+			Data:   &amqphandler.RequestServiceCrashLog{ServiceID: "service3", LogID: uuid.New().String()},
+		},
 	}
 
 	for _, message := range testData {
@@ -234,7 +235,9 @@ func TestSendMessages(t *testing.T) {
 }
 
 func TestReceiveMessages(t *testing.T) {
-	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
+	systemID := "testID"
+
+	amqpHandler, err := amqphandler.New(systemID, &config.Config{UnitStatusTimeout: 2})
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}
@@ -258,21 +261,21 @@ func TestReceiveMessages(t *testing.T) {
 	}
 
 	initialServiceSetupData := []amqphandler.ServiceInfo{
-		amqphandler.ServiceInfo{ID: "service0", AosVersion: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
-		amqphandler.ServiceInfo{ID: "service1", AosVersion: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
-		amqphandler.ServiceInfo{ID: "service2", AosVersion: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
+		{ID: "service0", AosVersion: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
+		{ID: "service1", AosVersion: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
+		{ID: "service2", AosVersion: 3, Status: "unknown", Error: "unknown", StateChecksum: "1234567890"},
 	}
 
 	initialLayersSetupData := []amqphandler.LayerInfo{
-		amqphandler.LayerInfo{ID: "layer0", Digest: "sha256:0", Status: "installed", AosVersion: 1},
-		amqphandler.LayerInfo{ID: "layer1", Digest: "sha256:1", Status: "installed", AosVersion: 2},
-		amqphandler.LayerInfo{ID: "layer2", Digest: "sha256:2", Status: "installed", AosVersion: 3},
+		{ID: "layer0", Digest: "sha256:0", Status: "installed", AosVersion: 1},
+		{ID: "layer1", Digest: "sha256:1", Status: "installed", AosVersion: 2},
+		{ID: "layer2", Digest: "sha256:2", Status: "installed", AosVersion: 3},
 	}
 
 	initialComponentSetupData := []amqphandler.ComponentInfo{
-		amqphandler.ComponentInfo{ID: "rootfs", Status: "installed", VendorVersion: "1.0"},
-		amqphandler.ComponentInfo{ID: "boardConfig", Status: "installed", VendorVersion: "5", AosVersion: 6},
-		amqphandler.ComponentInfo{ID: "bootloader", Status: "installed", VendorVersion: "100"},
+		{ID: "rootfs", Status: "installed", VendorVersion: "1.0"},
+		{ID: "boardConfig", Status: "installed", VendorVersion: "5", AosVersion: 6},
+		{ID: "bootloader", Status: "installed", VendorVersion: "100"},
 	}
 
 	monitoringData := amqphandler.MonitoringData{Timestamp: time.Now().UTC()}
@@ -282,10 +285,10 @@ func TestReceiveMessages(t *testing.T) {
 	monitoringData.Global.InTraffic = 8192
 	monitoringData.Global.OutTraffic = 4096
 	monitoringData.ServicesData = []amqphandler.ServiceMonitoringData{
-		amqphandler.ServiceMonitoringData{ServiceID: "service0", RAM: 1024, CPU: 50, UsedDisk: 100000},
-		amqphandler.ServiceMonitoringData{ServiceID: "service1", RAM: 128, CPU: 60, UsedDisk: 200000},
-		amqphandler.ServiceMonitoringData{ServiceID: "service2", RAM: 256, CPU: 70, UsedDisk: 300000},
-		amqphandler.ServiceMonitoringData{ServiceID: "service3", RAM: 512, CPU: 80, UsedDisk: 400000}}
+		{ServiceID: "service0", RAM: 1024, CPU: 50, UsedDisk: 100000},
+		{ServiceID: "service1", RAM: 128, CPU: 60, UsedDisk: 200000},
+		{ServiceID: "service2", RAM: 256, CPU: 70, UsedDisk: 300000},
+		{ServiceID: "service3", RAM: 512, CPU: 80, UsedDisk: 400000}}
 
 	sendNewStateCorrelationID := uuid.New().String()
 
@@ -324,75 +327,70 @@ func TestReceiveMessages(t *testing.T) {
 	}
 
 	testData := []messageDesc{
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendInitialSetup(initialServiceSetupData, initialLayersSetupData, initialComponentSetupData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
 					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},
 		},
-
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendServiceStatus(initialServiceSetupData[0])
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
 					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
 			},
 		},
-
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendMonitoringData(monitoringData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.MonitoringDataType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.MonitoringDataType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data:   &monitoringData},
 			getDataType: func() interface{} {
 				return &amqphandler.MonitoringData{}
 			},
 		},
-
-		messageDesc{
+		{
 			correlationID: sendNewStateCorrelationID,
 			call: func() error {
 				return amqpHandler.SendNewState("service0", "This is state", "12345679", sendNewStateCorrelationID)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.NewStateType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.NewStateType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data:   &amqphandler.NewState{ServiceID: "service0", Checksum: "12345679", State: "This is state"}},
 			getDataType: func() interface{} {
 				return &amqphandler.NewState{}
 			},
 		},
-
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendStateRequest("service1", true)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.StateRequestType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.StateRequestType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data:   &amqphandler.StateRequest{ServiceID: "service1", Default: true}},
 			getDataType: func() interface{} {
 				return &amqphandler.StateRequest{}
 			},
 		},
-
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendServiceLog(pushServiceLogData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.PushServiceLogType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.PushServiceLogType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data: &amqphandler.PushServiceLog{
 					LogID:     pushServiceLogData.LogID,
 					PartCount: pushServiceLogData.PartCount,
@@ -403,13 +401,12 @@ func TestReceiveMessages(t *testing.T) {
 				return &amqphandler.PushServiceLog{}
 			},
 		},
-
-		messageDesc{
+		{
 			call: func() error {
 				return amqpHandler.SendAlerts(alertsData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.AlertsType, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.AlertsType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data:   &alertsData},
 			getDataType: func() interface{} {
 				return &amqphandler.Alerts{}
