@@ -206,6 +206,22 @@ The configuration file has JSON format. Following is JSON schema:
             "items": {
                 "type": "string"
             }
+        },
+        "migration": {
+            "description": "Database migration config parameters",
+            "type": "object",
+            "properties": {
+                "migrationPath": {
+                    "description": "Path of the migration scripts on the rootfs",
+                    "type": "string",
+                    "default": "/usr/share/aos/servicemanager/migration"
+                },
+                "mergedMigrationPath": {
+                    "description": "Path of the merged migration scripts on rw partition",
+                    "type": "string",
+                    "default": "/var/aos/servicemanager/mergedMigrationPath"
+                }
+            }
         }
     }
 }
