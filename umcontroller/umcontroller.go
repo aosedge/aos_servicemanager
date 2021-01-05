@@ -279,7 +279,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 		},
 	)
 
-	umCtrl.server, err = newServer(config.UmController, umCtrl.eventChannel, insecure)
+	umCtrl.server, err = newServer(config, umCtrl.eventChannel, insecure)
 	if err != nil {
 		return nil, err
 	}

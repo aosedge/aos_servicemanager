@@ -207,7 +207,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	if sm.umCtrl, err = umcontroller.New(cfg, sm.amqp, sm.db, sm.downloader, true); err != nil {
+	if sm.umCtrl, err = umcontroller.New(cfg, sm.amqp, sm.db, sm.downloader, false); err != nil {
 		return sm, err
 	}
 

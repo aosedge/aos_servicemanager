@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 
 	"aos_servicemanager/config"
 )
@@ -49,24 +50,24 @@ type umCtrlServer struct {
  ******************************************************************************/
 
 // NewServer create update controller server
-func newServer(cfg config.UmController, ch chan umCtrlInternalMsg, insecure bool) (server *umCtrlServer, err error) {
-	log.Debug("newServer on ", cfg.ServerURL)
+func newServer(cfg *config.Config, ch chan umCtrlInternalMsg, insecure bool) (server *umCtrlServer, err error) {
+	log.Debug("newServer on ", cfg.UmController.ServerURL)
 	server = &umCtrlServer{controllerCh: ch}
 
 	var opts []grpc.ServerOption
 
 	if insecure == false {
-		creds, err := credentials.NewServerTLSFromFile(cfg.Cert, cfg.Key)
+		tlsConfig, err := cryptutils.GetServerTLSConfig(cfg.Crypt.CACert, cfg.CertStorage)
 		if err != nil {
 			return nil, err
 		}
 
-		opts = []grpc.ServerOption{grpc.Creds(creds)}
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
 	} else {
 		log.Info("GRPC server starts in insecure mode")
 	}
 
-	server.url = cfg.ServerURL
+	server.url = cfg.UmController.ServerURL
 
 	server.grpcServer = grpc.NewServer(opts...)
 
