@@ -40,13 +40,11 @@ import (
 	"aos_servicemanager/downloader"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/iamclient"
-	_ "aos_servicemanager/identification"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/layermanager"
 	"aos_servicemanager/logging"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
-	"aos_servicemanager/pluginprovider"
 	resource "aos_servicemanager/resourcemanager"
 	"aos_servicemanager/umcontroller"
 )
@@ -71,7 +69,6 @@ type serviceManager struct {
 	db              *database.Database
 	dbus            *dbushandler.DBusHandler
 	downloader      *downloader.Downloader
-	identifier      pluginprovider.Identifier
 	launcher        *launcher.Launcher
 	resourcemanager *resource.ResourceManager
 	logging         *logging.Logging
@@ -178,17 +175,18 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	// Create amqp
-	if sm.amqp, err = amqp.New(cfg); err != nil {
-		return sm, err
-	}
-
+	// Create IAM client
 	if sm.iam, err = iamclient.New(cfg, sm.amqp, true); err != nil {
 		return sm, err
 	}
 
 	// Create crypto context
 	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.iam); err != nil {
+		return sm, err
+	}
+
+	// Create amqp
+	if sm.amqp, err = amqp.New(cfg); err != nil {
 		return sm, err
 	}
 
@@ -239,12 +237,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	// Create identifier
-	// Use plugged in identifier
-	if sm.identifier, err = pluginprovider.GetIdentifier(cfg.Identifier.Type, cfg.Identifier.Config); err != nil {
-		return sm, err
-	}
-
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
 		return sm, err
@@ -275,11 +267,6 @@ func (sm *serviceManager) close() {
 	// Close UM controller
 	if sm.umCtrl != nil {
 		sm.umCtrl.Close()
-	}
-
-	// Close identifier
-	if sm.identifier != nil {
-		sm.identifier.Close()
 	}
 
 	// Close launcher
@@ -451,12 +438,9 @@ func (sm *serviceManager) handleChannels() (err error) {
 				log.Errorf("Error send alerts: %s", err)
 			}
 
-		case users := <-sm.identifier.UsersChangedChannel():
+		case users := <-sm.iam.UsersChangedChannel():
 			log.WithField("users", users).Info("Users changed")
 			return nil
-
-		case err := <-sm.identifier.ErrorChannel():
-			return err
 		}
 	}
 }
@@ -551,24 +535,10 @@ func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 
 func (sm *serviceManager) run() {
 	for {
-		var users []string
-		var systemID string
 		var orgNames []string
 		var err error
 
-		// Get system id
-		if systemID, err = sm.identifier.GetSystemID(); err != nil {
-			log.Errorf("Can't get system id: %s", err)
-			goto reconnect
-		}
-
-		// Get users
-		if users, err = sm.identifier.GetUsers(); err != nil {
-			log.Errorf("Can't get users: %s", err)
-			goto reconnect
-		}
-
-		if err = sm.launcher.SetUsers(users); err != nil {
+		if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
 			log.Fatalf("Can't set users: %s", err)
 		}
 
@@ -590,7 +560,7 @@ func (sm *serviceManager) run() {
 		}
 
 		// Connect
-		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, systemID, users); err != nil {
+		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, sm.iam.GetSystemID(), sm.iam.GetUsers()); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
 			goto reconnect
 		}
