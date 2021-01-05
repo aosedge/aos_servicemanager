@@ -19,6 +19,7 @@ package iamclient_test
 
 import (
 	"context"
+	"errors"
 	"io/ioutil"
 	"net"
 	"net/url"
@@ -29,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
 	"google.golang.org/grpc"
@@ -49,10 +51,13 @@ const serverURL = "localhost:8089"
  ******************************************************************************/
 
 type testServer struct {
-	grpcServer *grpc.Server
-	csr        map[string]string
-	certURL    map[string]string
-	keyURL     map[string]string
+	grpcServer          *grpc.Server
+	systemID            string
+	users               []string
+	usersChangedChannel chan []string
+	csr                 map[string]string
+	certURL             map[string]string
+	keyURL              map[string]string
 }
 
 type testSender struct {
@@ -104,6 +109,60 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
+func TestGetSystemID(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %s", err)
+	}
+	defer server.close()
+
+	server.systemID = "testID"
+
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, &testSender{}, true)
+	if err != nil {
+		t.Fatalf("Can't create IAM client: %s", err)
+	}
+	defer client.Close()
+
+	if client.GetSystemID() != server.systemID {
+		t.Errorf("Invalid system ID: %s", client.GetSystemID())
+	}
+}
+
+func TestGetUsers(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %s", err)
+	}
+	defer server.close()
+
+	server.users = []string{"user1", "user2", "user3"}
+
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, &testSender{}, true)
+	if err != nil {
+		t.Fatalf("Can't create IAM client: %s", err)
+	}
+	defer client.Close()
+
+	if !reflect.DeepEqual(server.users, client.GetUsers()) {
+		t.Errorf("Invalid users: %s", client.GetUsers())
+	}
+
+	newUsers := []string{"newUser1", "newUser2", "newUser3"}
+
+	server.usersChangedChannel <- newUsers
+
+	select {
+	case users := <-client.UsersChangedChannel():
+		if !reflect.DeepEqual(users, newUsers) {
+			t.Errorf("Invalid users: %s", users)
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Error("Wait users changed timeout")
+	}
+}
+
 func TestRenewCertificatesNotification(t *testing.T) {
 	sender := &testSender{}
 
@@ -112,8 +171,6 @@ func TestRenewCertificatesNotification(t *testing.T) {
 		t.Fatalf("Can't create test server: %s", err)
 	}
 	defer server.close()
-
-	time.Sleep(5 * time.Second)
 
 	server.csr = map[string]string{"online": "onlineCSR", "offline": "offlineCSR"}
 
@@ -128,7 +185,7 @@ func TestRenewCertificatesNotification(t *testing.T) {
 		{Type: "offline", Serial: "serail2", ValidTill: time.Now()},
 	}
 
-	if err = client.RenewCertificatesNotification("testID", "pwd", certInfo); err != nil {
+	if err = client.RenewCertificatesNotification("pwd", certInfo); err != nil {
 		t.Fatalf("Can't process renew certificate notification: %s", err)
 	}
 
@@ -271,7 +328,7 @@ func TestGetCertificates(t *testing.T) {
  ******************************************************************************/
 
 func newTestServer(url string) (server *testServer, err error) {
-	server = &testServer{}
+	server = &testServer{usersChangedChannel: make(chan []string, 1)}
 
 	listener, err := net.Listen("tcp", url)
 	if err != nil {
@@ -299,7 +356,7 @@ func (server *testServer) CreateKeys(context context.Context, req *pb.CreateKeys
 
 	csr, ok := server.csr[req.Type]
 	if !ok {
-		rsp.Error = "not found"
+		return rsp, errors.New("not found")
 	}
 
 	rsp.Csr = csr
@@ -312,7 +369,7 @@ func (server *testServer) ApplyCert(context context.Context, req *pb.ApplyCertRe
 
 	certURL, ok := server.certURL[req.Type]
 	if !ok {
-		rsp.Error = "not found"
+		return rsp, errors.New("not found")
 	}
 
 	rsp.CertUrl = certURL
@@ -325,18 +382,62 @@ func (server *testServer) GetCert(context context.Context, req *pb.GetCertReq) (
 
 	certURL, ok := server.certURL[req.Type]
 	if !ok {
-		rsp.Error = "not found"
+		return rsp, errors.New("not found")
 	}
 
 	keyURL, ok := server.keyURL[req.Type]
 	if !ok {
-		rsp.Error = "not found"
+		return rsp, errors.New("not found")
 	}
 
 	rsp.CertUrl = certURL
 	rsp.KeyUrl = keyURL
 
 	return rsp, nil
+}
+
+func (server *testServer) GetCertTypes(context context.Context, req *empty.Empty) (rsp *pb.GetCertTypesRsp, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) FinishProvisioning(context context.Context, req *empty.Empty) (rsp *empty.Empty, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) Clear(context context.Context, req *pb.ClearReq) (rsp *empty.Empty, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) SetOwner(context context.Context, req *pb.SetOwnerReq) (rsp *empty.Empty, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) GetSystemID(context context.Context, req *empty.Empty) (rsp *pb.GetSystemIDRsp, err error) {
+	rsp = &pb.GetSystemIDRsp{Id: server.systemID}
+
+	return rsp, nil
+}
+
+func (server *testServer) SetUsers(context context.Context, req *pb.SetUsersReq) (rsp *empty.Empty, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.GetUsersRsp, err error) {
+	rsp = &pb.GetUsersRsp{Users: server.users}
+
+	return rsp, nil
+}
+
+func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAManager_SubscribeUsersChangedServer) (err error) {
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+
+		case users := <-server.usersChangedChannel:
+			stream.Send(&pb.UsersChangedNtf{Users: users})
+		}
+	}
 }
 
 func (sender *testSender) SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error) {

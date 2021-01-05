@@ -389,13 +389,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	case *amqp.RenewCertificatesNotificationWithPwd:
 		log.Info("Receive renew certificates notification")
 
-		systemID, err := sm.identifier.GetSystemID()
-		if err != nil {
-			log.Error("Can't get systemID ", err)
-			return err
-		}
-
-		if err = sm.iam.RenewCertificatesNotification(systemID, data.Password, data.Certificates); err != nil {
+		if err = sm.iam.RenewCertificatesNotification(data.Password, data.Certificates); err != nil {
 			log.Errorf("Can't process renew certificates notification: %s", err)
 		}
 

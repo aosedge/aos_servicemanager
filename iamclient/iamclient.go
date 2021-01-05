@@ -22,8 +22,10 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"sync"
 	"time"
 
+	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
 	"google.golang.org/grpc"
@@ -39,8 +41,11 @@ import (
  ******************************************************************************/
 
 const (
-	iamRequestTimeout = 30 * time.Second
+	iamRequestTimeout   = 30 * time.Second
+	iamReconnectTimeout = 10 * time.Second
 )
+
+const usersChangedChannelSize = 1
 
 /*******************************************************************************
  * Types
@@ -48,9 +53,18 @@ const (
 
 // Client IAM client instance
 type Client struct {
-	sender     Sender
+	sync.Mutex
+
+	sender Sender
+
+	systemID string
+	users    []string
+
 	connection *grpc.ClientConn
 	pbclient   pb.IAManagerClient
+
+	closeChannel        chan struct{}
+	usersChangedChannel chan []string
 }
 
 // Sender provides API to send messages to the cloud
@@ -65,13 +79,21 @@ type Sender interface {
 
 // New creates new IAM client
 func New(config *config.Config, sender Sender, insecure bool) (client *Client, err error) {
+	log.Debug("Connecting to IAM...")
+
 	if sender == nil {
 		return nil, errors.New("sender is nil")
 	}
 
-	client = &Client{sender: sender}
-
-	log.Debug("Connecting to IAM...")
+	client = &Client{
+		sender:              sender,
+		usersChangedChannel: make(chan []string, usersChangedChannelSize),
+		closeChannel:        make(chan struct{}, 1)}
+	defer func() {
+		if err != nil {
+			client.Close()
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
@@ -85,18 +107,46 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	}
 
 	if client.connection, err = grpc.DialContext(ctx, config.IAMServerURL, secureOpt, grpc.WithBlock()); err != nil {
-		return nil, err
+		return client, err
 	}
 
 	client.pbclient = pb.NewIAManagerClient(client.connection)
 
 	log.Debug("Connected to IAM")
 
+	if client.systemID, err = client.getSystemID(); err != nil {
+		return client, err
+	}
+
+	if client.users, err = client.getUsers(); err != nil {
+		return client, err
+	}
+
+	go client.handleUsersChanged()
+
 	return client, nil
 }
 
+// GetSystemID returns system ID
+func (client *Client) GetSystemID() (systemID string) {
+	return client.systemID
+}
+
+// GetUsers returns current users
+func (client *Client) GetUsers() (users []string) {
+	client.Lock()
+	defer client.Unlock()
+
+	return client.users
+}
+
+// UsersChangedChannel returns users changed channel
+func (client *Client) UsersChangedChannel() (channel <-chan []string) {
+	return client.usersChangedChannel
+}
+
 // RenewCertificatesNotification renew certificates notification
-func (client *Client) RenewCertificatesNotification(systemID, pwd string, certInfo []amqp.CertificateNotification) (err error) {
+func (client *Client) RenewCertificatesNotification(pwd string, certInfo []amqp.CertificateNotification) (err error) {
 	var newCerts []amqp.CertificateRequest
 
 	for _, cert := range certInfo {
@@ -105,15 +155,11 @@ func (client *Client) RenewCertificatesNotification(systemID, pwd string, certIn
 		ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 		defer cancel()
 
-		request := &pb.CreateKeysReq{Type: cert.Type, SystemId: systemID, Password: pwd}
+		request := &pb.CreateKeysReq{Type: cert.Type, Password: pwd}
 
 		response, err := client.pbclient.CreateKeys(ctx, request)
 		if err != nil {
 			return err
-		}
-
-		if response.Error != "" {
-			return errors.New(response.Error)
 		}
 
 		newCerts = append(newCerts, amqp.CertificateRequest{Type: response.Type, Csr: response.Csr})
@@ -144,11 +190,6 @@ func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificates
 		certConfirmation := amqp.CertificateConfirmation{Type: cert.Type}
 
 		response, err := client.pbclient.ApplyCert(ctx, request)
-
-		if response.GetError() != "" {
-			err = errors.New(response.Error)
-		}
-
 		if err == nil {
 			certConfirmation.Serial, err = fcrypt.GetCrtSerialByURL(response.CertUrl)
 		}
@@ -193,10 +234,6 @@ func (client *Client) GetCertificate(certType string, issuer []byte, serial stri
 		return "", "", err
 	}
 
-	if response.Error != "" {
-		return "", "", errors.New(response.Error)
-	}
-
 	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
 
 	return response.CertUrl, response.KeyUrl, nil
@@ -204,11 +241,12 @@ func (client *Client) GetCertificate(certType string, issuer []byte, serial stri
 
 // Close closes IAM client
 func (client *Client) Close() (err error) {
-	log.Debug("Disconnected from IAM")
-
 	if client.connection != nil {
+		client.closeChannel <- struct{}{}
 		client.connection.Close()
 	}
+
+	log.Debug("Disconnected from IAM")
 
 	return nil
 }
@@ -216,3 +254,109 @@ func (client *Client) Close() (err error) {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (client *Client) getSystemID() (systemID string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	request := &empty.Empty{}
+
+	response, err := client.pbclient.GetSystemID(ctx, request)
+	if err != nil {
+		return "", err
+	}
+
+	log.WithFields(log.Fields{"systemID": response.Id}).Debug("Get system ID")
+
+	return response.Id, nil
+}
+
+func (client *Client) getUsers() (users []string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	request := &empty.Empty{}
+
+	response, err := client.pbclient.GetUsers(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithFields(log.Fields{"users": response.Users}).Debug("Get users")
+
+	return response.Users, nil
+}
+
+func (client *Client) handleUsersChanged() {
+	err := client.subscribeUsersChanged()
+
+	for {
+		if err != nil && len(client.closeChannel) == 0 {
+			log.Errorf("Error subscribe users changed: %s", err)
+			log.Debugf("Reconnect to IAM in %v...", iamReconnectTimeout)
+		}
+
+		select {
+		case <-client.closeChannel:
+			return
+
+		case <-time.After(iamReconnectTimeout):
+			err = client.subscribeUsersChanged()
+		}
+	}
+}
+
+func (client *Client) subscribeUsersChanged() (err error) {
+	log.Debug("Subscribe to users changed notification")
+
+	request := &empty.Empty{}
+
+	stream, err := client.pbclient.SubscribeUsersChanged(context.Background(), request)
+	if err != nil {
+		return err
+	}
+
+	users, err := client.getUsers()
+	if err != nil {
+		return err
+	}
+
+	if !isUsersEqual(users, client.users) {
+		client.Lock()
+		client.users = users
+		client.Unlock()
+
+		client.usersChangedChannel <- client.users
+	}
+
+	for {
+		notification, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+
+		log.WithFields(log.Fields{"users": notification.Users}).Debug("Users changed notification")
+
+		if !isUsersEqual(notification.Users, client.users) {
+			client.Lock()
+			client.users = notification.Users
+			client.Unlock()
+
+			client.usersChangedChannel <- client.users
+		}
+	}
+}
+
+func isUsersEqual(users1, users2 []string) (result bool) {
+	if len(users1) != len(users2) {
+		return false
+	}
+
+	for i, user := range users1 {
+		if user != users2[i] {
+			return false
+		}
+	}
+
+	return true
+}
