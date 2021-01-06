@@ -19,7 +19,6 @@ package iamclient
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -103,7 +103,12 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	if insecure {
 		secureOpt = grpc.WithInsecure()
 	} else {
-		secureOpt = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: false}))
+		tlsConfig, err := cryptutils.GetClientTLSConfig(config.Crypt.CACert, config.CertStorage)
+		if err != nil {
+			return client, err
+		}
+
+		secureOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
 	if client.connection, err = grpc.DialContext(ctx, config.IAMServerURL, secureOpt, grpc.WithBlock()); err != nil {

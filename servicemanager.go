@@ -181,7 +181,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create IAM client
-	if sm.iam, err = iamclient.New(cfg, sm.amqp, true); err != nil {
+	if sm.iam, err = iamclient.New(cfg, sm.amqp, false); err != nil {
 		return sm, err
 	}
 
