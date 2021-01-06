@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
+
+package iamanager;
+
+service IAManager {
+    rpc CreateKeys(CreateKeysReq) returns (CreateKeysRsp) {}
+    rpc ApplyCert(ApplyCertReq) returns (ApplyCertRsp) {}
+    rpc GetCert(GetCertReq) returns (GetCertRsp) {}
+}
+
+message CreateKeysReq {
+    string type = 1;
+    string system_id = 2;
+    string password = 3;
+}
+
+message CreateKeysRsp {
+    string type = 1;
+    string csr = 2;
+    string error = 3;
+}
+
+message ApplyCertReq {
+    string type = 1;
+    string cert = 2;
+}
+
+message ApplyCertRsp {
+    string type = 1;
+    string cert_url = 2;
+    string error = 3;
+}
+
+message GetCertReq {
+    string type = 1;
+    bytes issuer = 2;
+    string serial = 3;
+}
+
+message GetCertRsp {
+    string type = 1;
+    string cert_url = 2;
+    string key_url = 3;
+    string error = 4;
+}

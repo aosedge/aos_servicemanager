@@ -34,6 +34,7 @@ require (
 	github.com/jinzhu/copier v0.0.0-20190924061706-b57f9002281a
 	github.com/jlaffaye/ftp v0.0.0-20200602180915-5563613968bf
 	github.com/json-iterator/go v1.1.10 // indirect
+	github.com/looplab/fsm v0.2.0
 	github.com/mattn/go-shellwords v1.0.10 // indirect
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible
 	github.com/miekg/dns v1.1.29 // indirect
@@ -52,4 +53,5 @@ require (
 	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210105102527-589ead2f596e
 	golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
 	golang.org/x/sys v0.0.0-20201029080932-201ba4db2418
+	google.golang.org/grpc v1.33.1
 )
