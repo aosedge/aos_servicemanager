@@ -11,10 +11,10 @@ service IAManager {
     rpc FinishProvisioning(google.protobuf.Empty) returns (google.protobuf.Empty) {}
     rpc Clear(ClearReq) returns (google.protobuf.Empty) {}
     rpc SetOwner(SetOwnerReq) returns (google.protobuf.Empty) {}
-    rpc CreateKeys(CreateKeysReq) returns (CreateKeysRsp) {}
+    rpc CreateKey(CreateKeyReq) returns (CreateKeyRsp) {}
     rpc ApplyCert(ApplyCertReq) returns (ApplyCertRsp) {}
     rpc GetCert(GetCertReq) returns (GetCertRsp) {}
-    rpc GetSystemID(google.protobuf.Empty) returns (GetSystemIDRsp) {}
+    rpc GetSystemInfo(google.protobuf.Empty) returns (GetSystemInfoRsp) {}
     rpc SetUsers(SetUsersReq) returns (google.protobuf.Empty) {}
     rpc GetUsers(google.protobuf.Empty) returns (GetUsersRsp) {}
     rpc SubscribeUsersChanged(google.protobuf.Empty) returns (stream UsersChangedNtf) {}
@@ -33,12 +33,12 @@ message SetOwnerReq {
     string password = 2;
 }
 
-message CreateKeysReq {
+message CreateKeyReq {
     string type = 1;
     string password = 2;
 }
 
-message CreateKeysRsp {
+message CreateKeyRsp {
     string type = 1;
     string csr = 2;
 }
@@ -65,8 +65,9 @@ message GetCertRsp {
     string key_url = 3;
 }
 
-message GetSystemIDRsp {
-    string id = 1;
+message GetSystemInfoRsp {
+    string system_id = 1;
+    string board_model = 2;
 }
 
 message SetUsersReq {
