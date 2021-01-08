@@ -175,18 +175,20 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	// Create amqp
+	if sm.amqp, err = amqp.New(cfg); err != nil {
+		return sm, err
+	}
+
 	// Create IAM client
 	if sm.iam, err = iamclient.New(cfg, sm.amqp, true); err != nil {
 		return sm, err
 	}
 
+	sm.amqp.SetSystemID(sm.iam.GetSystemID())
+
 	// Create crypto context
 	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.iam); err != nil {
-		return sm, err
-	}
-
-	// Create amqp
-	if sm.amqp, err = amqp.New(sm.iam.GetSystemID(), cfg); err != nil {
 		return sm, err
 	}
 

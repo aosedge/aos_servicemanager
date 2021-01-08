@@ -526,16 +526,21 @@ var messageMap = map[string]func() interface{}{
  ******************************************************************************/
 
 // New creates new amqp object
-func New(systemID string, cfg *config.Config) (handler *AmqpHandler, err error) {
+func New(cfg *config.Config) (handler *AmqpHandler, err error) {
 	log.Debug("New AMQP")
 
-	handler = &AmqpHandler{systemID: systemID, config: cfg}
+	handler = &AmqpHandler{config: cfg}
 
 	handler.sendChannel = make(chan Message, sendChannelSize)
 	handler.retryChannel = make(chan Message, retryChannelSize)
 	handler.stopChannel = make(chan bool, 1)
 
 	return handler, nil
+}
+
+// SetSystemID sets system ID
+func (handler *AmqpHandler) SetSystemID(systemID string) {
+	handler.systemID = systemID
 }
 
 // SetCryptoContext set cryptoContext fro amqp handler

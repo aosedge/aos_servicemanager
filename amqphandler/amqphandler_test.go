@@ -173,7 +173,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestSendMessages(t *testing.T) {
-	amqpHandler, err := amqphandler.New("TestID", &config.Config{UnitStatusTimeout: 2})
+	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}
@@ -237,11 +237,13 @@ func TestSendMessages(t *testing.T) {
 func TestReceiveMessages(t *testing.T) {
 	systemID := "testID"
 
-	amqpHandler, err := amqphandler.New(systemID, &config.Config{UnitStatusTimeout: 2})
+	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}
 	defer amqpHandler.Close()
+
+	amqpHandler.SetSystemID(systemID)
 
 	if err = amqpHandler.ConnectRabbit("localhost", "guest", "guest",
 		exchangeName, consumerName, outQueueName); err != nil {
