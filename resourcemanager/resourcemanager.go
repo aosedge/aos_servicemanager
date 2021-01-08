@@ -32,6 +32,8 @@ import (
 
 	"github.com/jinzhu/copier"
 	log "github.com/sirupsen/logrus"
+
+	amqp "aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************
@@ -137,6 +139,16 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 	}
 
 	return resourcemanager, nil
+}
+
+// GetBoardConfigInfo returns board config info
+func (resourcemanager *ResourceManager) GetBoardConfigInfo() (info []amqp.BoardConfigInfo, err error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	info = append(info, resourcemanager.getCurrentBoardConfigInfo())
+
+	return info, nil
 }
 
 // RequestDeviceResourceByName requests list of device resources for class names
@@ -268,6 +280,18 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (resourcemanager *ResourceManager) getCurrentBoardConfigInfo() (info amqp.BoardConfigInfo) {
+	info.Version = resourcemanager.boardConfiguration.Version
+	info.Status = amqp.InstalledStatus
+
+	if resourcemanager.boardConfigError != nil {
+		info.Error = resourcemanager.boardConfigError.Error()
+		info.Status = amqp.ErrorStatus
+	}
+
+	return info
+}
 
 func handleDir(device string) (hostDevices []string, err error) {
 	err = filepath.Walk(device,

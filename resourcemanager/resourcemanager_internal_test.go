@@ -18,6 +18,7 @@
 package resourcemanager
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -199,7 +200,7 @@ func TestUnavailableResources(t *testing.T) {
 }
 
 func TestRequestAndReleaseDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -230,7 +231,7 @@ func TestRequestAndReleaseDeviceResources(t *testing.T) {
 }
 
 func TestRequestDeviceResourceByName(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -293,8 +294,8 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 	}
 }
 
-func TestRequestBoardConfigByName(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+func TestRequestBoardResourceByName(t *testing.T) {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Error("Can't write resource configuration: ", err)
 	}
 
@@ -328,7 +329,7 @@ func TestRequestBoardConfigByName(t *testing.T) {
 }
 
 func TestRequestLimitDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -373,7 +374,7 @@ func TestRequestLimitDeviceResources(t *testing.T) {
 }
 
 func TestReleaseNotRequestedDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -404,7 +405,7 @@ func TestReleaseNotRequestedDeviceResources(t *testing.T) {
 }
 
 func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile(); err != nil {
+	if err := createTestBoardConfigFile("1.0"); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -445,6 +446,32 @@ func TestResourceConfigInvalidVersion(t *testing.T) {
 
 	if err = rm.boardConfigError; err == nil {
 		t.Errorf("Resources should be invalid in case of version mismatch")
+	}
+}
+
+func TestGetBoardConfigInfo(t *testing.T) {
+	configVersion := "2.1"
+
+	if err := createTestBoardConfigFile(configVersion); err != nil {
+		t.Fatalf("Can't write resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	info, err := rm.GetBoardConfigInfo()
+	if err != nil {
+		t.Fatalf("Can't get board config info: %s", err)
+	}
+
+	if len(info) == 0 {
+		t.Fatalf("Wrong board config info len: %d", len(info))
+	}
+
+	if info[0].Version != configVersion {
+		t.Errorf("Wrong board config version: %s", info[0].Version)
 	}
 }
 
@@ -558,10 +585,10 @@ func createRealBoardConfigFile() (err error) {
 	return nil
 }
 
-func createTestBoardConfigFile() (err error) {
+func createTestBoardConfigFile(version string) (err error) {
 	configContent := `{
 	"formatVersion": 1,
-	"version": "1.0", 
+	"version": "%s", 
 	"devices": [
 		{
 			"name": "random",
@@ -617,7 +644,8 @@ func createTestBoardConfigFile() (err error) {
 	]
 }`
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"),
+		[]byte(fmt.Sprintf(configContent, version)), 0644); err != nil {
 		return err
 	}
 
