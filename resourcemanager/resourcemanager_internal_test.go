@@ -95,9 +95,8 @@ func TestProcessHostDevice(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err != nil {
-		t.Errorf("Detect unavailable device. Error: %s", err)
+	if err = rm.boardConfigError; err != nil {
+		t.Errorf("Board config error: %s", err)
 	}
 
 	var hs []string
@@ -145,9 +144,8 @@ func TestValidBoardConfiguration(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err != nil {
-		t.Errorf("Detect unavailable device. Error: %s", err)
+	if err = rm.boardConfigError; err != nil {
+		t.Errorf("Board config error: %s", err)
 	}
 }
 
@@ -161,9 +159,8 @@ func TestEmptyResourcesConfig(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err != nil {
-		t.Errorf("Resources are invalid. Error: %s", err)
+	if err = rm.boardConfigError; err != nil {
+		t.Errorf("Board config error: %s", err)
 	}
 }
 
@@ -177,8 +174,7 @@ func TestInValidBoardConfiguration(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err == nil {
+	if err = rm.boardConfigError; err == nil {
 		t.Errorf("Can't detect unavailable device")
 	}
 }
@@ -189,19 +185,16 @@ func TestUnavailableResources(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err == nil {
+	if err = rm.boardConfigError; err == nil {
 		t.Errorf("Proceed without resource configuration")
 	}
 
-	err = rm.RequestDevice("random", "service0")
-	if err == nil {
+	if err = rm.RequestDevice("random", "service0"); err == nil {
 		t.Errorf("Proceed without resource configuration")
 	}
 
-	err = rm.ReleaseDevice("random", "service0")
-	if err == nil {
-		t.Errorf("Proceed without resource configuration")
+	if err = rm.ReleaseDevice("random", "service0"); err != nil {
+		t.Errorf("Can't release device: %s", err)
 	}
 }
 
@@ -395,25 +388,18 @@ func TestReleaseNotRequestedDeviceResources(t *testing.T) {
 	}
 
 	// release not requested device
-	err = rm.ReleaseDevice("random", "service0")
-	if err == nil {
-		t.Fatalf("Can release device")
-	} else {
-		log.Debugf("Can't release: %s", err)
+	if err = rm.ReleaseDevice("random", "service0"); err != nil {
+		t.Errorf("Can't release device: %s", err)
 	}
 
 	// release device for not existing service
-	err = rm.ReleaseDevice("null", "service1")
-	if err == nil {
-		t.Fatalf("Can release device")
-	} else {
-		log.Debugf("Can't release: %s", err)
+	if err = rm.ReleaseDevice("null", "service1"); err != nil {
+		t.Errorf("Can't release device: %s", err)
 	}
 
 	// release correct device for proper service
-	err = rm.ReleaseDevice("null", "service0")
-	if err != nil {
-		t.Fatalf("Can't release device: %s", err)
+	if err = rm.ReleaseDevice("null", "service0"); err != nil {
+		t.Errorf("Can't release device: %s", err)
 	}
 }
 
@@ -427,18 +413,12 @@ func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.RequestDevice("some_unavailable_device", "service0")
-	if err == nil {
-		t.Fatalf("Can request unavailable device")
-	} else {
-		log.Debugf("Can't request: %s", err)
+	if err = rm.RequestDevice("some_unavailable_device", "service0"); err == nil {
+		t.Errorf("Can request unavailable device")
 	}
 
-	err = rm.ReleaseDevice("some_unavailable_device", "service0")
-	if err == nil {
-		t.Fatalf("Can release unavailable device")
-	} else {
-		log.Debugf("Can't request: %s", err)
+	if err = rm.ReleaseDevice("some_unavailable_device", "service0"); err != nil {
+		t.Errorf("Can't release device: %s", err)
 	}
 }
 
@@ -448,8 +428,7 @@ func TestResourceConfigNotExist(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err == nil {
+	if err = rm.boardConfigError; err == nil {
 		t.Errorf("Resources should be invalid if config is not exits")
 	}
 }
@@ -464,8 +443,7 @@ func TestResourceConfigInvalidVersion(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	err = rm.AreResourcesValid()
-	if err == nil {
+	if err = rm.boardConfigError; err == nil {
 		t.Errorf("Resources should be invalid in case of version mismatch")
 	}
 }

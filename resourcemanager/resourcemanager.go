@@ -53,7 +53,7 @@ type ResourceManager struct {
 	hostGroups         []string
 	boardConfigFile    string
 	boardConfiguration BoardConfiguration
-	areResourcesValid  error
+	boardConfigError   error
 	sync.Mutex
 	sender Sender
 }
@@ -90,7 +90,7 @@ type BoardResource struct {
 
 // BoardConfiguration resources that are proviced by Cloud for using at AOS services
 type BoardConfiguration struct {
-	FormatVersion uint64           `json:"formatVersion`
+	FormatVersion uint64           `json:"formatVersion"`
 	Version       string           `json:"version"`
 	Devices       []DeviceResource `json:"devices"`
 	Resources     []BoardResource  `json:"resources"`
@@ -119,31 +119,24 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 
 	if resourcemanager.boardConfiguration, err = resourcemanager.parseBoardConfiguration(boardConfigFile); err != nil {
 		log.Errorf("Can't parse resource configuration file: %s", boardConfigFile)
-		resourcemanager.areResourcesValid = err
+		resourcemanager.boardConfigError = err
 		// Continue if board configuration is invalid
 		return resourcemanager, nil
 	}
 
 	if resourcemanager.boardConfiguration.FormatVersion != supportedFormatVersion {
 		log.Errorf("Unsupported board config format version %d != %d", resourcemanager.boardConfiguration.FormatVersion, supportedFormatVersion)
-		resourcemanager.areResourcesValid = errors.New("Unsupported version")
+		resourcemanager.boardConfigError = errors.New("Unsupported version")
 		// Continue if boardConfig is having invalid version
 		return resourcemanager, nil
 	}
 
 	// do validation only if non-zero amount of the devices was provided
 	if len(resourcemanager.boardConfiguration.Devices) != 0 {
-		resourcemanager.areResourcesValid = resourcemanager.validateDeviceResources()
-	} else {
-		resourcemanager.areResourcesValid = nil
+		resourcemanager.boardConfigError = resourcemanager.validateDeviceResources()
 	}
 
 	return resourcemanager, nil
-}
-
-// AreResourcesValid check that available devices from resources configuration with host (real) devices
-func (resourcemanager *ResourceManager) AreResourcesValid() (err error) {
-	return resourcemanager.areResourcesValid
 }
 
 // RequestDeviceResourceByName requests list of device resources for class names
@@ -184,14 +177,15 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 
 	log.Debugf("ResourceManager: RequestDevice(%s, %s)", device, serviceID)
 
-	// check that Unit has restriction on devices
-	// if not sent alert to cloud and error as return
-	if !resourcemanager.isboardConfigurationChecked() {
-		message := errors.New("resource configuration is not provided")
+	// check board configuration
+	// if it has error, send alert to cloud and return error
+	if resourcemanager.boardConfigError != nil {
+		message := fmt.Errorf("resource configuration error: %s", resourcemanager.boardConfigError)
 
 		if resourcemanager.sender != nil {
 			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
 		}
+
 		return message
 	}
 
@@ -253,42 +247,20 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
 
 	log.Debugf("ResourceManager: ReleaseDevice(%s, %s)", device, serviceID)
 
-	// check that Unit has restriction on devices
-	// if not sent alert to cloud and error as return
-	if !resourcemanager.isboardConfigurationChecked() {
-		message := errors.New("resource configuration is not provided")
-
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
-		}
-
-		return message
-	}
-
-	// check that requested device class is contained in available resources
-	if _, err = resourcemanager.getAvailableDeviceByName(device); err != nil {
-		return err
-	}
-
 	// get list of services that are using this device
-	listOfServices := resourcemanager.deviceWithServices[device]
+	listOfServices, ok := resourcemanager.deviceWithServices[device]
+	if !ok || !contains(listOfServices, serviceID) {
+		log.Warnf("Device: %s was not provided for %s service", device, serviceID)
 
-	// check that service has requested this device
-	if contains(listOfServices, serviceID) {
-		log.Debugf("Release Device %s for %s service", device, serviceID)
-
-		// update map of devices
-		// 1. remove serviceID from list of services for device
-		// 2. set updated device's map to devices' class map by key: name (class name of device (alias))
-		resourcemanager.deviceWithServices[device] = removeFromSlice(listOfServices, serviceID)
-	} else {
-		message := fmt.Errorf("device: %s was not provided for %s service", device, serviceID)
-
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
-		}
-		return message
+		return nil
 	}
+
+	log.Debugf("Release Device %s for %s service", device, serviceID)
+
+	// update map of devices
+	// 1. remove serviceID from list of services for device
+	// 2. set updated device's map to devices' class map by key: name (class name of device (alias))
+	resourcemanager.deviceWithServices[device] = removeFromSlice(listOfServices, serviceID)
 
 	return nil
 }
@@ -449,10 +421,6 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 	}
 
 	return nil
-}
-
-func (resourcemanager *ResourceManager) isboardConfigurationChecked() (status bool) {
-	return resourcemanager.areResourcesValid == nil
 }
 
 func (resourcemanager *ResourceManager) getAvailableDeviceByName(
