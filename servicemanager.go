@@ -335,7 +335,7 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 		log.Fatalf("Can't get component list: %s", err)
 	}
 
-	if err = sm.amqp.SendInitialSetup(initialList, initialLayerList, initialComponentList); err != nil {
+	if err = sm.amqp.SendInitialSetup(nil, initialList, initialLayerList, initialComponentList); err != nil {
 		return err
 	}
 

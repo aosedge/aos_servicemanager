@@ -89,6 +89,7 @@ const (
 	PendingStatus   = "pending"
 	RemovedStatus   = "removed"
 	InstalledStatus = "installed"
+	ErrorStatus     = "error"
 )
 
 /*******************************************************************************
@@ -138,6 +139,7 @@ type AOSMessage struct {
 
 // DesiredStatus desired status message
 type DesiredStatus struct {
+	BoardConfig       []byte             `json:"boardConfig"`
 	Services          []byte             `json:"services"`
 	Layers            []byte             `json:"layers"`
 	Components        []byte             `json:"components"`
@@ -306,11 +308,19 @@ type StateRequest struct {
 	Default   bool   `json:"default"`
 }
 
-// UnitStatus untit status structure
+// UnitStatus unit status structure
 type UnitStatus struct {
-	Services   []ServiceInfo   `json:"services"`
-	Layers     []LayerInfo     `json:"layers,omitempty"`
-	Components []ComponentInfo `json:"components"`
+	BoardConfig []BoardConfigInfo `json:"boardConfig"`
+	Services    []ServiceInfo     `json:"services"`
+	Layers      []LayerInfo       `json:"layers,omitempty"`
+	Components  []ComponentInfo   `json:"components"`
+}
+
+// BoardConfigInfo board config information
+type BoardConfigInfo struct {
+	VendorVersion string `json:"vendorVersion"`
+	Status        string `json:"status"`
+	Error         string `json:"error,omitempty"`
 }
 
 // ServiceInfo struct with service information
@@ -359,14 +369,14 @@ type ServiceAlertRules struct {
 	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
 }
 
-// VersionFromCloud commoin struct with version
+// VersionFromCloud common version structure
 type VersionFromCloud struct {
 	AosVersion    uint64 `json:"aosVersion"`
 	VendorVersion string `json:"vendorVersion"`
 	Description   string `json:"description"`
 }
 
-// ServiceInfoFromCloud structure with Encripted Service information
+// ServiceInfoFromCloud decrypted service info
 type ServiceInfoFromCloud struct {
 	ID string `json:"id"`
 	VersionFromCloud
@@ -374,7 +384,7 @@ type ServiceInfoFromCloud struct {
 	DecryptDataStruct
 }
 
-// LayerInfoFromCloud service layer decryption info
+// LayerInfoFromCloud decrypted layer info
 type LayerInfoFromCloud struct {
 	ID     string `json:"id"`
 	Digest string `json:"digest"`
@@ -382,7 +392,7 @@ type LayerInfoFromCloud struct {
 	DecryptDataStruct
 }
 
-// ComponentInfoFromCloud component decryption info
+// ComponentInfoFromCloud decrypted component info
 type ComponentInfoFromCloud struct {
 	ID          string          `json:"id"`
 	Annotations json.RawMessage `json:"annotations"`
@@ -390,8 +400,9 @@ type ComponentInfoFromCloud struct {
 	DecryptDataStruct
 }
 
-// DecodedDesiredStatus decoded Desired configuration
+// DecodedDesiredStatus decoded desired status
 type DecodedDesiredStatus struct {
+	BoardConfig       json.RawMessage
 	Layers            []LayerInfoFromCloud
 	Services          []ServiceInfoFromCloud
 	Components        []ComponentInfoFromCloud
@@ -617,10 +628,13 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 }
 
 // SendInitialSetup sends initial list of available services and layers
-func (handler *AmqpHandler) SendInitialSetup(serviceList []ServiceInfo, layersList []LayerInfo,
+func (handler *AmqpHandler) SendInitialSetup(boardConfigList []BoardConfigInfo, serviceList []ServiceInfo, layersList []LayerInfo,
 	components []ComponentInfo) (err error) {
 	handler.unitStatusMutex.Lock()
 	defer handler.unitStatusMutex.Unlock()
+
+	handler.currentUnitStatus.BoardConfig = make([]BoardConfigInfo, len(boardConfigList))
+	copy(handler.currentUnitStatus.BoardConfig, boardConfigList)
 
 	handler.currentUnitStatus.Services = make([]ServiceInfo, len(serviceList))
 	copy(handler.currentUnitStatus.Services, serviceList)
@@ -672,6 +686,17 @@ func (handler *AmqpHandler) SendComponentStatus(components []ComponentInfo) {
 
 	handler.currentUnitStatus.Components = make([]ComponentInfo, len(components))
 	copy(handler.currentUnitStatus.Components, components)
+
+	handler.unitStatusChanged = true
+}
+
+// SendBoardConfigStatus sends board config status
+func (handler *AmqpHandler) SendBoardConfigStatus(info []BoardConfigInfo) {
+	handler.unitStatusMutex.Lock()
+	defer handler.unitStatusMutex.Unlock()
+
+	handler.currentUnitStatus.BoardConfig = make([]BoardConfigInfo, len(info))
+	copy(handler.currentUnitStatus.BoardConfig, info)
 
 	handler.unitStatusChanged = true
 }
@@ -1081,6 +1106,11 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 				desiredStatus := DecodedDesiredStatus{CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
 
+				if err := handler.decodeDesiredStatusParts(encodedData.BoardConfig, &desiredStatus.BoardConfig); err != nil {
+					log.Errorf("Can't decode board config: %s", err)
+					continue
+				}
+
 				if err := handler.decodeDesiredStatusParts(encodedData.Services, &desiredStatus.Services); err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
@@ -1149,7 +1179,11 @@ func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interfa
 		return err
 	}
 
-	log.WithField("data", result).Debug("Decrypted data")
+	if rawJSON, ok := result.(*json.RawMessage); ok {
+		log.WithField("data", string(*rawJSON)).Debug("Decrypted data")
+	} else {
+		log.WithField("data", result).Debug("Decrypted data")
+	}
 
 	return nil
 }

@@ -262,6 +262,8 @@ func TestReceiveMessages(t *testing.T) {
 		MessageType string
 	}
 
+	initialBoardConfigData := []amqphandler.BoardConfigInfo{{VendorVersion: "1.0", Status: "installed"}}
+
 	initialServiceSetupData := []amqphandler.ServiceInfo{
 		{ID: "service0", AosVersion: 1, Status: "running", Error: "", StateChecksum: "1234567890"},
 		{ID: "service1", AosVersion: 2, Status: "stopped", Error: "crash", StateChecksum: "1234567890"},
@@ -276,7 +278,7 @@ func TestReceiveMessages(t *testing.T) {
 
 	initialComponentSetupData := []amqphandler.ComponentInfo{
 		{ID: "rootfs", Status: "installed", VendorVersion: "1.0"},
-		{ID: "boardConfig", Status: "installed", VendorVersion: "5", AosVersion: 6},
+		{ID: "firmware", Status: "installed", VendorVersion: "5", AosVersion: 6},
 		{ID: "bootloader", Status: "installed", VendorVersion: "100"},
 	}
 
@@ -331,11 +333,11 @@ func TestReceiveMessages(t *testing.T) {
 	testData := []messageDesc{
 		{
 			call: func() error {
-				return amqpHandler.SendInitialSetup(initialServiceSetupData, initialLayersSetupData, initialComponentSetupData)
+				return amqpHandler.SendInitialSetup(initialBoardConfigData, initialServiceSetupData, initialLayersSetupData, initialComponentSetupData)
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
-				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
+				Data: &amqphandler.UnitStatus{BoardConfig: initialBoardConfigData, Services: initialServiceSetupData, Layers: initialLayersSetupData,
 					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
@@ -347,7 +349,7 @@ func TestReceiveMessages(t *testing.T) {
 			},
 			data: amqphandler.AOSMessage{
 				Header: amqphandler.MessageHeader{MessageType: amqphandler.UnitStatusType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
-				Data: &amqphandler.UnitStatus{Services: initialServiceSetupData, Layers: initialLayersSetupData,
+				Data: &amqphandler.UnitStatus{BoardConfig: initialBoardConfigData, Services: initialServiceSetupData, Layers: initialLayersSetupData,
 					Components: initialComponentSetupData}},
 			getDataType: func() interface{} {
 				return &amqphandler.UnitStatus{}
