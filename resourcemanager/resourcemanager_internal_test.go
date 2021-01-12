@@ -18,6 +18,8 @@
 package resourcemanager
 
 import (
+	amqp "aos_servicemanager/amqphandler"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -40,8 +42,11 @@ const STDIN_DEV_PATH = "/dev/stdin"
  * Types
  ******************************************************************************/
 
-// TestSender instance
-type TestSender struct {
+type alertSender struct {
+}
+
+type statusSender struct {
+	boardConfigInfoChannel chan []amqp.BoardConfigInfo
 }
 
 /*******************************************************************************
@@ -49,7 +54,7 @@ type TestSender struct {
  ******************************************************************************/
 
 var tmpDir string
-var testSender *TestSender
+var testAlertSender = &alertSender{}
 
 /*******************************************************************************
  * Init
@@ -87,11 +92,11 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestProcessHostDevice(t *testing.T) {
-	if err := createRealBoardConfigFile(); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -132,15 +137,14 @@ func TestProcessHostDevice(t *testing.T) {
 	if linkName != hs[0] {
 		t.Errorf("Device symlink is not equal. Error: %s", err)
 	}
-
 }
 
 func TestValidBoardConfiguration(t *testing.T) {
-	if err := createRealBoardConfigFile(); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -151,11 +155,11 @@ func TestValidBoardConfiguration(t *testing.T) {
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
-	if err := createEmptyBoardConfigFile(); err != nil {
+	if err := writeTestBoardConfigFile(createEmptyBoardConfigJSON()); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -166,11 +170,11 @@ func TestEmptyResourcesConfig(t *testing.T) {
 }
 
 func TestInValidBoardConfiguration(t *testing.T) {
-	if err := createInValidBoardConfigFile(); err != nil {
+	if err := writeTestBoardConfigFile(createInvalidBoardConfigJSON()); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -181,7 +185,7 @@ func TestInValidBoardConfiguration(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -200,11 +204,11 @@ func TestUnavailableResources(t *testing.T) {
 }
 
 func TestRequestAndReleaseDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -231,11 +235,11 @@ func TestRequestAndReleaseDeviceResources(t *testing.T) {
 }
 
 func TestRequestDeviceResourceByName(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -295,11 +299,11 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 }
 
 func TestRequestBoardResourceByName(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Error("Can't write resource configuration: ", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -329,11 +333,11 @@ func TestRequestBoardResourceByName(t *testing.T) {
 }
 
 func TestRequestLimitDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -374,11 +378,11 @@ func TestRequestLimitDeviceResources(t *testing.T) {
 }
 
 func TestReleaseNotRequestedDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -405,11 +409,11 @@ func TestReleaseNotRequestedDeviceResources(t *testing.T) {
 }
 
 func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
-	if err := createTestBoardConfigFile("1.0"); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -424,7 +428,7 @@ func TestRequestReleaseUnavailableDeviceResources(t *testing.T) {
 }
 
 func TestResourceConfigNotExist(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -435,11 +439,11 @@ func TestResourceConfigNotExist(t *testing.T) {
 }
 
 func TestResourceConfigInvalidVersion(t *testing.T) {
-	if err := createWrongVerisonBoardConfigFile(); err != nil {
+	if err := writeTestBoardConfigFile(createWrongVersionBoardConfigJSON()); err != nil {
 		t.Errorf("Can't write invalid resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -450,13 +454,13 @@ func TestResourceConfigInvalidVersion(t *testing.T) {
 }
 
 func TestGetBoardConfigInfo(t *testing.T) {
-	configVersion := "2.1"
+	vendorVersion := "2.1"
 
-	if err := createTestBoardConfigFile(configVersion); err != nil {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON(vendorVersion)); err != nil {
 		t.Fatalf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -466,12 +470,80 @@ func TestGetBoardConfigInfo(t *testing.T) {
 		t.Fatalf("Can't get board config info: %s", err)
 	}
 
-	if len(info) == 0 {
+	if len(info) != 1 {
 		t.Fatalf("Wrong board config info len: %d", len(info))
 	}
 
-	if info[0].Version != configVersion {
-		t.Errorf("Wrong board config version: %s", info[0].Version)
+	if info[0].VendorVersion != vendorVersion {
+		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
+	}
+}
+
+func TestUpdateBoardConfig(t *testing.T) {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	newVendorVersion := "2.0"
+
+	if err = rm.UpdateBoardConfig(createTestBoardConfigJSON(newVendorVersion)); err != nil {
+		t.Fatalf("Can't update board config: %s", err)
+	}
+
+	info, err := rm.GetBoardConfigInfo()
+	if err != nil {
+		t.Fatalf("Can't get board config info: %s", err)
+	}
+
+	if len(info) != 1 {
+		t.Fatalf("Wrong board config info len: %d", len(info))
+	}
+
+	if info[0].VendorVersion != newVendorVersion {
+		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
+	}
+
+	if info[0].Status != amqp.InstalledStatus {
+		t.Errorf("Wrong board config status: %s", info[0].Status)
+	}
+}
+
+func TestUpdateErrorBoardConfig(t *testing.T) {
+	currentConfigVersion := "1.0"
+
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON(currentConfigVersion)); err != nil {
+		t.Fatalf("Can't write resource configuration")
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	if err = rm.UpdateBoardConfig(createInvalidBoardConfigJSON()); err == nil {
+		t.Errorf("Update should fail")
+	}
+
+	info, err := rm.GetBoardConfigInfo()
+	if err != nil {
+		t.Fatalf("Can't get board config info: %s", err)
+	}
+
+	if len(info) != 1 {
+		t.Fatalf("Wrong board config info len: %d", len(info))
+	}
+
+	if info[0].VendorVersion != currentConfigVersion {
+		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
+	}
+
+	if info[0].Status != amqp.InstalledStatus {
+		t.Errorf("Wrong board config status: %s", info[0].Status)
 	}
 }
 
@@ -498,6 +570,7 @@ func getDevicePathContents(device string) (hostDevices []string, err error) {
 			}
 			return nil
 		})
+
 	return hostDevices, err
 }
 
@@ -521,10 +594,10 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createWrongVerisonBoardConfigFile() (err error) {
-	configContent := `{
+func createWrongVersionBoardConfigJSON() (configJSON json.RawMessage) {
+	return json.RawMessage(`{
 	"formatVersion": 256,
-	"version": "1.0",
+	"vendorVersion": "1.0",
 	"devices": [
 		{
 			"name": "random",
@@ -544,51 +617,13 @@ func createWrongVerisonBoardConfigFile() (err error) {
 			]
 		}
 	]
-}`
-
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board_wrong_version.cfg"), []byte(configContent), 0644); err != nil {
-		return err
-	}
-
-	return nil
+}`)
 }
 
-func createRealBoardConfigFile() (err error) {
-	configContent := `{
+func createTestBoardConfigJSON(version string) (configJSON json.RawMessage) {
+	return json.RawMessage(fmt.Sprintf(`{
 	"formatVersion": 1,
-	"version": "1.0",
-	"devices": [
-		{
-			"name": "random",
-			"sharedCount": 0,
-			"groups": [
-				"root"
-			],
-			"hostDevices": [
-				"/dev/random"
-			]
-		},
-		{
-			"name": "null",
-			"sharedCount": 2,
-			"hostDevices": [
-				"/dev/null"
-			]
-		}
-	]
-}`
-
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func createTestBoardConfigFile(version string) (err error) {
-	configContent := `{
-	"formatVersion": 1,
-	"version": "%s", 
+	"vendorVersion": "%s", 
 	"devices": [
 		{
 			"name": "random",
@@ -642,20 +677,13 @@ func createTestBoardConfigFile(version string) (err error) {
 			"env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
 		}
 	]
-}`
-
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"),
-		[]byte(fmt.Sprintf(configContent, version)), 0644); err != nil {
-		return err
-	}
-
-	return nil
+}`, version))
 }
 
-func createInValidBoardConfigFile() (err error) {
-	configContent := `{
+func createInvalidBoardConfigJSON() (configJSON json.RawMessage) {
+	return json.RawMessage(`{
 	"formatVersion": 1,
-	"version": "1.0",
+	"vendorVersion": "3.5",
 	"devices": [
 		{
 			"name": "some_not_existed_device",
@@ -668,33 +696,33 @@ func createInValidBoardConfigFile() (err error) {
 			]
 		}
 	]
-}`
+}`)
+}
 
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
+func createEmptyBoardConfigJSON() (configJSON json.RawMessage) {
+	return json.RawMessage(`{
+		"formatVersion": 1,
+		"vendorVersion": "1.0",
+		"devices": []
+}`)
+}
+
+func writeTestBoardConfigFile(content []byte) (err error) {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), content, 0644); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func createEmptyBoardConfigFile() (err error) {
-	configContent := `{
-	"formatVersion": 1,
-	"version": "1.0",
-	"devices": []
-}`
-
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(configContent), 0644); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (instance *TestSender) SendValidateResourceAlert(source string, errors map[string][]error) {
+func (sender *alertSender) SendValidateResourceAlert(source string, errors map[string][]error) {
 	log.Debugf("SendValidateResourceAlert source %s", source)
 }
 
-func (instance *TestSender) SendRequestResourceAlert(source string, message string) {
+func (sender *alertSender) SendRequestResourceAlert(source string, message string) {
 	log.Debugf("SendRequestResourceAlert source %s, message %s", source, message)
+}
+
+func (sender *statusSender) SendBoardConfigStatus(info []amqp.BoardConfigInfo) {
+	sender.boardConfigInfoChannel <- info
 }

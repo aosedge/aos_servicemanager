@@ -50,18 +50,19 @@ const supportedFormatVersion = 1
 
 // ResourceManager instance
 type ResourceManager struct {
+	sync.Mutex
+
 	deviceWithServices map[string][]string // [device_name]:[serviceIDs,...]
 	hostDevices        []string
 	hostGroups         []string
 	boardConfigFile    string
 	boardConfiguration BoardConfiguration
 	boardConfigError   error
-	sync.Mutex
-	sender Sender
+	alertSender        AlertSender
 }
 
-// Sender provides sender interface
-type Sender interface {
+// AlertSender provides alert sender interface
+type AlertSender interface {
 	SendValidateResourceAlert(source string, errors map[string][]error)
 	SendRequestResourceAlert(source string, message string)
 }
@@ -93,7 +94,7 @@ type BoardResource struct {
 // BoardConfiguration resources that are proviced by Cloud for using at AOS services
 type BoardConfiguration struct {
 	FormatVersion uint64           `json:"formatVersion"`
-	Version       string           `json:"version"`
+	VendorVersion string           `json:"vendorVersion"`
 	Devices       []DeviceResource `json:"devices"`
 	Resources     []BoardResource  `json:"resources"`
 }
@@ -103,10 +104,12 @@ type BoardConfiguration struct {
  ******************************************************************************/
 
 // New creates new resource manager object
-func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManager, err error) {
+func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New ResourceManager")
 
-	resourcemanager = &ResourceManager{boardConfigFile: boardConfigFile, sender: sender}
+	resourcemanager = &ResourceManager{
+		boardConfigFile: boardConfigFile,
+		alertSender:     alertSender}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
 		return nil, err
@@ -119,24 +122,11 @@ func New(boardConfigFile string, sender Sender) (resourcemanager *ResourceManage
 	// init map with available device names
 	resourcemanager.deviceWithServices = make(map[string][]string)
 
-	if resourcemanager.boardConfiguration, err = resourcemanager.parseBoardConfiguration(boardConfigFile); err != nil {
-		log.Errorf("Can't parse resource configuration file: %s", boardConfigFile)
-		resourcemanager.boardConfigError = err
-		// Continue if board configuration is invalid
-		return resourcemanager, nil
+	if err = resourcemanager.loadBoardConfiguration(); err != nil {
+		log.Errorf("Board configuration error: %s", err)
 	}
 
-	if resourcemanager.boardConfiguration.FormatVersion != supportedFormatVersion {
-		log.Errorf("Unsupported board config format version %d != %d", resourcemanager.boardConfiguration.FormatVersion, supportedFormatVersion)
-		resourcemanager.boardConfigError = errors.New("Unsupported version")
-		// Continue if boardConfig is having invalid version
-		return resourcemanager, nil
-	}
-
-	// do validation only if non-zero amount of the devices was provided
-	if len(resourcemanager.boardConfiguration.Devices) != 0 {
-		resourcemanager.boardConfigError = resourcemanager.validateDeviceResources()
-	}
+	log.WithField("version", resourcemanager.boardConfiguration.VendorVersion).Debug("Board config version")
 
 	return resourcemanager, nil
 }
@@ -149,6 +139,37 @@ func (resourcemanager *ResourceManager) GetBoardConfigInfo() (info []amqp.BoardC
 	info = append(info, resourcemanager.getCurrentBoardConfigInfo())
 
 	return info, nil
+}
+
+// CheckBoardConfig checks board config
+func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON json.RawMessage) (vendorVersion string, err error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	return resourcemanager.checkBoardConfig(configJSON)
+}
+
+// UpdateBoardConfig updates board configuration
+func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON json.RawMessage) (err error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	newVendorVersion, err := resourcemanager.checkBoardConfig(configJSON)
+	if err != nil {
+		return err
+	}
+
+	log.WithField("newVersion", newVendorVersion).Debug("Update board configuration")
+
+	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, configJSON, 0644); err != nil {
+		return err
+	}
+
+	if err = resourcemanager.loadBoardConfiguration(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // RequestDeviceResourceByName requests list of device resources for class names
@@ -194,8 +215,8 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 	if resourcemanager.boardConfigError != nil {
 		message := fmt.Errorf("resource configuration error: %s", resourcemanager.boardConfigError)
 
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		if resourcemanager.alertSender != nil {
+			resourcemanager.alertSender.SendRequestResourceAlert(serviceID, message.Error())
 		}
 
 		return message
@@ -227,9 +248,10 @@ func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID s
 	} else {
 		message := fmt.Errorf("device: %s is unavailable", device)
 
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendRequestResourceAlert(serviceID, message.Error())
+		if resourcemanager.alertSender != nil {
+			resourcemanager.alertSender.SendRequestResourceAlert(serviceID, message.Error())
 		}
+
 		return message
 	}
 
@@ -281,8 +303,26 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
  * Private
  ******************************************************************************/
 
+func (resourcemanager *ResourceManager) checkBoardConfig(configJSON json.RawMessage) (vendorVersion string, err error) {
+	boardConfig := BoardConfiguration{VendorVersion: "unknown"}
+
+	if err = json.Unmarshal(configJSON, &boardConfig); err != nil {
+		return boardConfig.VendorVersion, err
+	}
+
+	if boardConfig.VendorVersion == resourcemanager.boardConfiguration.VendorVersion {
+		return boardConfig.VendorVersion, errors.New("invalid vendor version")
+	}
+
+	if err = resourcemanager.validateBoardConfig(boardConfig); err != nil {
+		return boardConfig.VendorVersion, err
+	}
+
+	return boardConfig.VendorVersion, nil
+}
+
 func (resourcemanager *ResourceManager) getCurrentBoardConfigInfo() (info amqp.BoardConfigInfo) {
-	info.Version = resourcemanager.boardConfiguration.Version
+	info.VendorVersion = resourcemanager.boardConfiguration.VendorVersion
 	info.Status = amqp.InstalledStatus
 
 	if resourcemanager.boardConfigError != nil {
@@ -384,34 +424,49 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 	return hostGroups, nil
 }
 
-func (resourcemanager *ResourceManager) parseBoardConfiguration(boardConfigFile string) (
-	boardConfiguration BoardConfiguration,
-	err error) {
-	resources := BoardConfiguration{}
+func (resourcemanager *ResourceManager) loadBoardConfiguration() (err error) {
+	defer func() {
+		resourcemanager.boardConfigError = err
+	}()
 
-	byteValue, err := ioutil.ReadFile(boardConfigFile)
+	resourcemanager.boardConfiguration = BoardConfiguration{}
+
+	byteValue, err := ioutil.ReadFile(resourcemanager.boardConfigFile)
 	if err != nil {
-		return resources, err
+		return err
 	}
 
-	if err = json.Unmarshal(byteValue, &resources); err != nil {
-		return resources, err
+	if err = json.Unmarshal(byteValue, &resourcemanager.boardConfiguration); err != nil {
+		return err
 	}
 
-	return resources, nil
+	if err = resourcemanager.validateBoardConfig(resourcemanager.boardConfiguration); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfiguration) (err error) {
+	if config.FormatVersion != supportedFormatVersion {
+		return errors.New("unsupported board configuration format version")
+	}
+
+	if err = resourcemanager.validateDeviceResources(config.Devices); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // compare available devices from resources configuration with host (real) devices
-func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
-	resourcemanager.Lock()
-	defer resourcemanager.Unlock()
-
+func (resourcemanager *ResourceManager) validateDeviceResources(devices []DeviceResource) (err error) {
 	log.Debugf("ResourceManager: validateDeviceResources()")
 
 	deviceErrors := make(map[string][]error)
 
 	// compare available device names and additional groups with system ones
-	for _, avaliableDevice := range resourcemanager.boardConfiguration.Devices {
+	for _, avaliableDevice := range devices {
 		// check devices
 		for _, availableHostDevice := range avaliableDevice.HostDevices {
 			if contains(resourcemanager.hostDevices, availableHostDevice) != true {
@@ -437,8 +492,8 @@ func (resourcemanager *ResourceManager) validateDeviceResources() (err error) {
 			}
 		}
 
-		if resourcemanager.sender != nil {
-			resourcemanager.sender.SendValidateResourceAlert("servicemanager", deviceErrors)
+		if resourcemanager.alertSender != nil {
+			resourcemanager.alertSender.SendValidateResourceAlert("servicemanager", deviceErrors)
 		}
 
 		return errors.New("device resources are not valid")

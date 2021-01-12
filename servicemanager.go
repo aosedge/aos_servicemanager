@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
@@ -335,7 +336,13 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 		log.Fatalf("Can't get component list: %s", err)
 	}
 
-	if err = sm.amqp.SendInitialSetup(nil, initialList, initialLayerList, initialComponentList); err != nil {
+	initialBoardConfigInfo, err := sm.resourcemanager.GetBoardConfigInfo()
+	if err != nil {
+		log.Fatalf("Can't get board config info: %s", err)
+	}
+
+	if err = sm.amqp.SendInitialSetup(initialBoardConfigInfo,
+		initialList, initialLayerList, initialComponentList); err != nil {
 		return err
 	}
 
@@ -447,6 +454,37 @@ func (sm *serviceManager) handleChannels() (err error) {
 	}
 }
 
+func (sm *serviceManager) updateBoardConfig(config json.RawMessage) (err error) {
+	newVendorVersion := "unknown"
+
+	defer func() {
+		boardConfigInfo, _ := sm.resourcemanager.GetBoardConfigInfo()
+
+		if err != nil {
+			boardConfigInfo = append(boardConfigInfo, amqp.BoardConfigInfo{
+				VendorVersion: newVendorVersion,
+				Status:        amqp.ErrorStatus,
+				Error:         err.Error(),
+			})
+		}
+
+		sm.amqp.SendBoardConfigStatus(boardConfigInfo)
+	}()
+
+	if newVendorVersion, err = sm.resourcemanager.CheckBoardConfig(config); err != nil {
+		return err
+	}
+
+	sm.launcher.StopServices()
+	defer sm.launcher.StartServices()
+
+	if err = sm.resourcemanager.UpdateBoardConfig(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 	sm.desiredStatusMutex.Lock()
 	if sm.isDesiredStatusInProcessing == true {
@@ -466,8 +504,14 @@ func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 		sm.desiredStatusMutex.Unlock()
 	}()
 
+	if data.BoardConfig != nil {
+		if err := sm.updateBoardConfig(data.BoardConfig); err != nil {
+			log.Error("Can't update board config: ", err)
+		}
+	}
+
 	if err := sm.umCtrl.ProcessDesiredComponents(data.Components, data.CertificateChains, data.Certificates); err != nil {
-		log.Error("Can't process components : ", err)
+		log.Error("Can't process components: ", err)
 	}
 
 	if err := sm.layerMgr.ProcessDesiredLayersList(data.Layers, data.CertificateChains, data.Certificates); err != nil {

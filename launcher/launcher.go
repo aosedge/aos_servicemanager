@@ -379,7 +379,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
 
-	launcher.stopServices()
+	launcher.StopServices()
 
 	launcher.systemd.Close()
 
@@ -481,11 +481,11 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 		return nil
 	}
 
-	launcher.stopServices()
+	launcher.StopServices()
 
 	launcher.users = users
 
-	launcher.startServices()
+	launcher.StartServices()
 
 	if err = launcher.cleanServicesDB(); err != nil {
 		log.Errorf("Error cleaning DB: %s", err)
@@ -627,6 +627,77 @@ func Cleanup(cfg *config.Config) (err error) {
 	}
 
 	return nil
+}
+
+// StartServices starts current users services
+func (launcher *Launcher) StartServices() {
+	log.WithField("users", launcher.users).Debug("Start user services")
+
+	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
+	if err != nil {
+		log.Errorf("Can't start services: %s", err)
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	// Start all services in parallel
+	for _, service := range services {
+		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+			func(id string, data interface{}) {
+				service, ok := data.(Service)
+				if !ok {
+					statusChannel <- errors.New("wrong data type")
+					return
+				}
+
+				statusChannel <- launcher.startService(service)
+			}})
+	}
+
+	// Wait all services are started
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
+}
+
+// StopServices stops current users services
+func (launcher *Launcher) StopServices() {
+	log.WithField("users", launcher.users).Debug("Stop user services")
+
+	var services []Service
+	var err error
+
+	if launcher.users == nil {
+		services, err = launcher.serviceProvider.GetServices()
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+		}
+	} else {
+		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+		}
+	}
+
+	statusChannel := make(chan error, len(services))
+
+	// Stop all services in parallel
+	for _, service := range services {
+		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+			func(id string, data interface{}) {
+				service, ok := data.(Service)
+				if !ok {
+					statusChannel <- errors.New("wrong data type")
+					return
+				}
+				statusChannel <- launcher.stopService(service)
+			}})
+	}
+
+	// Wait all services are stopped
+	for i := 0; i < len(services); i++ {
+		<-statusChannel
+	}
 }
 
 func (state ServiceState) String() string {
@@ -1226,36 +1297,6 @@ func (launcher *Launcher) startService(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) startServices() {
-	log.WithField("users", launcher.users).Debug("Start user services")
-
-	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
-	if err != nil {
-		log.Errorf("Can't start services: %s", err)
-	}
-
-	statusChannel := make(chan error, len(services))
-
-	// Start all services in parallel
-	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
-			func(id string, data interface{}) {
-				service, ok := data.(Service)
-				if !ok {
-					statusChannel <- errors.New("wrong data type")
-					return
-				}
-
-				statusChannel <- launcher.startService(service)
-			}})
-	}
-
-	// Wait all services are started
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-}
-
 func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
 	var devices []Device
 
@@ -1338,45 +1379,6 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 	}
 
 	return retErr
-}
-
-func (launcher *Launcher) stopServices() {
-	log.WithField("users", launcher.users).Debug("Stop user services")
-
-	var services []Service
-	var err error
-
-	if launcher.users == nil {
-		services, err = launcher.serviceProvider.GetServices()
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-		}
-	} else {
-		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-		}
-	}
-
-	statusChannel := make(chan error, len(services))
-
-	// Stop all services in parallel
-	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
-			func(id string, data interface{}) {
-				service, ok := data.(Service)
-				if !ok {
-					statusChannel <- errors.New("wrong data type")
-					return
-				}
-				statusChannel <- launcher.stopService(service)
-			}})
-	}
-
-	// Wait all services are stopped
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
 }
 
 func (launcher *Launcher) restoreService(service Service) (retErr error) {
