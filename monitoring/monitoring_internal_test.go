@@ -637,8 +637,7 @@ func addHostResolvFiles(pathToContainer string) (err error) {
 }
 
 func runContainerCmd(imagePath string, containerID string) (cmd *exec.Cmd, err error) {
-
-	if err = networkManager.AddServiceToNetwork(containerID, "default"); err != nil {
+	if err = networkManager.AddServiceToNetwork(containerID, "default", 0, 0); err != nil {
 		return nil, err
 	}
 
