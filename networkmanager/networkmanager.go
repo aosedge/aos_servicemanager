@@ -115,9 +115,11 @@ type bandwidthNetConf struct {
 func New(cfg *config.Config) (manager *NetworkManager, err error) {
 	log.Debug("Create network manager")
 
-	manager = &NetworkManager{hosts: cfg.Hosts}
+	manager = &NetworkManager{
+		hosts:     cfg.Hosts,
+		cniConfig: cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cfg.WorkingDir, nil),
+	}
 
-	manager.cniConfig = cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cfg.WorkingDir, nil)
 	if manager.ipamSubnetwork, err = newIPam(); err != nil {
 		return nil, err
 	}
@@ -139,28 +141,40 @@ func GetNetNsPathByName(serviceID string) (pathToNetNS string) {
 
 // DeleteNetwork deletes SP network
 func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
 	log.WithFields(log.Fields{"spID": spID}).Debug("Delete network")
 
-	filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spID))
+	networkDir := path.Join(pathToCNINetwork, spID)
+
+	filesServiceID, _ := ioutil.ReadDir(networkDir)
+
 	for _, serviceIDFile := range filesServiceID {
 		if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spID); netErr != nil {
-			err = netErr
+			if err == nil {
+				err = netErr
+			}
 		}
 	}
 
 	if clearErr := manager.postSPNetworkClear(spID); clearErr != nil {
-		err = clearErr
+		if err == nil {
+			err = clearErr
+		}
 	}
+
+	os.RemoveAll(networkDir)
 
 	return err
 }
 
 // AddServiceToNetwork adds service to SP network
 func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingressKbit, egressKbit uint64) (err error) {
-	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
-
 	manager.Lock()
 	defer manager.Unlock()
+
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
 	ipSubnet, exist := manager.ipamSubnetwork.tryToGetExistIPNetFromPool(spID)
 	if !exist {
@@ -176,7 +190,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingre
 	}
 
 	defer func() {
-		if err != nil && !exist {
+		if err != nil {
 			manager.ipamSubnetwork.releaseIPNetPool(spID)
 		}
 	}()
@@ -189,13 +203,11 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingre
 		IfName:      containerIfName,
 	}
 
-	ctx := context.Background()
-	err = manager.cniConfig.CheckNetworkList(ctx, netConfig, runtimeConfig)
-	if err == nil {
+	if err = manager.cniConfig.CheckNetworkList(context.Background(), netConfig, runtimeConfig); err == nil {
 		return fmt.Errorf("service %s already in SP network %s", serviceID, spID)
 	}
 
-	resAdd, err := manager.cniConfig.AddNetworkList(ctx, netConfig, runtimeConfig)
+	resAdd, err := manager.cniConfig.AddNetworkList(context.Background(), netConfig, runtimeConfig)
 	if err != nil {
 		return err
 	}
@@ -213,46 +225,102 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingre
 
 // RemoveServiceFromNetwork removes service from network
 func (manager *NetworkManager) RemoveServiceFromNetwork(serviceID, spID string) (err error) {
-	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service from network")
-
-	defer netns.DeleteNamed(serviceID)
-
-	if result, _ := manager.IsServiceInNetwork(serviceID, spID); !result {
-		log.Warnf("Service %s is not in network %s", serviceID, spID)
-		return nil
-	}
-
 	manager.Lock()
 	defer manager.Unlock()
 
-	netConfigByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
-	if err != nil {
-		return err
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service from network")
+
+	if result, _ := manager.isServiceInNetwork(serviceID, spID); !result {
+		log.Warnf("Service %s is not in network %s", serviceID, spID)
+
+		return nil
 	}
 
-	netConfig, err := cni.ConfListFromBytes(netConfigByte)
-	if err != nil {
-		return err
+	if err = manager.removeServiceFromNetwork(serviceID, spID); err != nil {
+		return nil
 	}
-
-	ctx := context.Background()
-
-	if err = manager.cniConfig.DelNetworkList(ctx, netConfig, runtimeConfig); err != nil {
-		return err
-	}
-
-	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Service successfully removed from network")
 
 	return nil
 }
 
 // IsServiceInNetwork returns true if service belongs to network
 func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (result bool, err error) {
-	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Check present service in network")
-
 	manager.Lock()
 	defer manager.Unlock()
 
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Check present service in network")
+
+	return manager.isServiceInNetwork(serviceID, spID)
+}
+
+// GetServiceIP return service IP address
+func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Get service IP")
+
+	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
+
+	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(netConfig, runtimeConfig)
+
+	if err != nil || cachedResult == nil {
+		return "", err
+	}
+
+	result, err := current.GetResult(cachedResult)
+	if err != nil {
+		return "", err
+	}
+
+	if len(result.IPs) == 0 {
+		return "", fmt.Errorf("error in getting the IP address for the service: %s", serviceID)
+	}
+
+	ip = result.IPs[0].Address.IP.String()
+
+	log.Debugf("IP address %s for service %s", ip, serviceID)
+
+	return ip, nil
+}
+
+// DeleteAllNetworks deletes all networks
+func (manager *NetworkManager) DeleteAllNetworks() (err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	log.Debug("Delete all networks")
+
+	filesSpID, _ := ioutil.ReadDir(pathToCNINetwork)
+
+	for _, spIDFile := range filesSpID {
+		filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spIDFile.Name()))
+
+		for _, serviceIDFile := range filesServiceID {
+			if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spIDFile.Name()); netErr != nil {
+				if err == nil {
+					err = netErr
+				}
+			}
+		}
+
+		if clearErr := manager.postSPNetworkClear(spIDFile.Name()); clearErr != nil {
+			if err == nil {
+				err = clearErr
+			}
+		}
+	}
+
+	os.RemoveAll(pathToCNINetwork)
+
+	return err
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (manager *NetworkManager) isServiceInNetwork(serviceID, spID string) (result bool, err error) {
 	resByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
 	if err != nil {
 		return false, err
@@ -274,62 +342,27 @@ func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (resul
 	return true, nil
 }
 
-// GetServiceIP return service IP address
-func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, err error) {
-	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Get service IP")
+func (manager *NetworkManager) removeServiceFromNetwork(serviceID, spID string) (err error) {
+	defer netns.DeleteNamed(serviceID)
 
-	manager.Lock()
-	defer manager.Unlock()
-
-	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
-
-	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(netConfig, runtimeConfig)
-
-	if err != nil || cachedResult == nil {
-		return "", err
-	}
-
-	result, err := current.GetResult(cachedResult)
+	netConfigByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	if len(result.IPs) == 0 {
-		return "", fmt.Errorf("Error in getting the IP address for the service: %s", serviceID)
+	netConfig, err := cni.ConfListFromBytes(netConfigByte)
+	if err != nil {
+		return err
 	}
 
-	ip = result.IPs[0].Address.IP.String()
+	if err = manager.cniConfig.DelNetworkList(context.Background(), netConfig, runtimeConfig); err != nil {
+		return err
+	}
 
-	log.Debugf("IP address %s for service %s", ip, serviceID)
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Service successfully removed from network")
 
-	return ip, nil
+	return nil
 }
-
-// DeleteAllNetworks deletes all networks
-func (manager *NetworkManager) DeleteAllNetworks() (err error) {
-	log.Debug("Delete all networks")
-
-	filesSpID, _ := ioutil.ReadDir(pathToCNINetwork)
-
-	for _, spIDFile := range filesSpID {
-		filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spIDFile.Name()))
-		for _, serviceIDFile := range filesServiceID {
-			if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spIDFile.Name()); netErr != nil {
-				err = netErr
-			}
-		}
-		if clearErr := manager.postSPNetworkClear(spIDFile.Name()); clearErr != nil {
-			err = clearErr
-		}
-	}
-	os.RemoveAll(pathToCNINetwork)
-
-	return err
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
 
 func (manager *NetworkManager) postSPNetworkClear(spID string) (err error) {
 	manager.ipamSubnetwork.releaseIPNetPool(spID)
@@ -377,10 +410,12 @@ func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, sp
 		return nil
 	}
 
-	if result, _ := manager.IsServiceInNetwork(serviceID, spIDFileName); result {
-		if netErr := manager.RemoveServiceFromNetwork(serviceID, spIDFileName); netErr != nil {
-			return netErr
-		}
+	if result, _ := manager.isServiceInNetwork(serviceID, spIDFileName); !result {
+		return nil
+	}
+
+	if err = manager.removeServiceFromNetwork(serviceID, spIDFileName); err != nil {
+		return err
 	}
 
 	return nil

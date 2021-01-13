@@ -61,17 +61,16 @@ func networkOverlaps(netX *net.IPNet, netY *net.IPNet) (sameIPNet bool) {
 func removeBridgeInterface(spID string) error {
 	br, err := netlink.LinkByName(bridgePrefix + spID)
 	if err != nil {
-		log.Warn("Link not found")
+		log.Warnf("Link %s error: %s", bridgePrefix+spID, err)
+
 		return nil
 	}
 
-	err = netlink.LinkSetDown(br)
-	if err != nil {
+	if err = netlink.LinkSetDown(br); err != nil {
 		return err
 	}
 
-	err = netlink.LinkDel(br)
-	if err != nil {
+	if err = netlink.LinkDel(br); err != nil {
 		return err
 	}
 
