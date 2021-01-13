@@ -351,8 +351,8 @@ func (server *testServer) close() (err error) {
 	return nil
 }
 
-func (server *testServer) CreateKeys(context context.Context, req *pb.CreateKeysReq) (rsp *pb.CreateKeysRsp, err error) {
-	rsp = &pb.CreateKeysRsp{Type: req.Type}
+func (server *testServer) CreateKey(context context.Context, req *pb.CreateKeyReq) (rsp *pb.CreateKeyRsp, err error) {
+	rsp = &pb.CreateKeyRsp{Type: req.Type}
 
 	csr, ok := server.csr[req.Type]
 	if !ok {
@@ -412,8 +412,8 @@ func (server *testServer) SetOwner(context context.Context, req *pb.SetOwnerReq)
 	return rsp, nil
 }
 
-func (server *testServer) GetSystemID(context context.Context, req *empty.Empty) (rsp *pb.GetSystemIDRsp, err error) {
-	rsp = &pb.GetSystemIDRsp{Id: server.systemID}
+func (server *testServer) GetSystemInfo(context context.Context, req *empty.Empty) (rsp *pb.GetSystemInfoRsp, err error) {
+	rsp = &pb.GetSystemInfoRsp{SystemId: server.systemID}
 
 	return rsp, nil
 }

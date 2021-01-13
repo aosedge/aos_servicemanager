@@ -160,9 +160,9 @@ func (client *Client) RenewCertificatesNotification(pwd string, certInfo []amqp.
 		ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 		defer cancel()
 
-		request := &pb.CreateKeysReq{Type: cert.Type, Password: pwd}
+		request := &pb.CreateKeyReq{Type: cert.Type, Password: pwd}
 
-		response, err := client.pbclient.CreateKeys(ctx, request)
+		response, err := client.pbclient.CreateKey(ctx, request)
 		if err != nil {
 			return err
 		}
@@ -266,14 +266,14 @@ func (client *Client) getSystemID() (systemID string, err error) {
 
 	request := &empty.Empty{}
 
-	response, err := client.pbclient.GetSystemID(ctx, request)
+	response, err := client.pbclient.GetSystemInfo(ctx, request)
 	if err != nil {
 		return "", err
 	}
 
-	log.WithFields(log.Fields{"systemID": response.Id}).Debug("Get system ID")
+	log.WithFields(log.Fields{"systemID": response.SystemId}).Debug("Get system ID")
 
-	return response.Id, nil
+	return response.SystemId, nil
 }
 
 func (client *Client) getUsers() (users []string, err error) {
