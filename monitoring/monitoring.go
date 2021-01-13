@@ -746,10 +746,18 @@ func (monitor *Monitor) setupTrafficMonitor() (err error) {
 
 	// We have to count only interned traffic.  Skip local sub networks and netns
 	// bridge network from traffic count.
-	monitor.skipAddresses = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-	if monitor.config.BridgeIP != "" {
-		monitor.skipAddresses += "," + monitor.config.BridgeIP
+
+	skipNetworks := []string{
+		"127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16",
+		"172.16.0.0/12", "172.17.0.0/16", "172.18.0.0/16", "172.19.0.0/16",
+		"172.20.0.0/14", "172.24.0.0/14", "172.28.0.0/14",
 	}
+
+	if monitor.config.BridgeIP != "" {
+		skipNetworks = append(skipNetworks, monitor.config.BridgeIP)
+	}
+
+	monitor.skipAddresses = strings.Join(skipNetworks, ",")
 
 	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {
 		return err
