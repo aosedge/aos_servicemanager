@@ -71,7 +71,7 @@ type tpmPrivateKeyRSA struct {
 // TPMCrypto is a basic type TPM crypto struct
 type TPMCrypto struct {
 	sync.Mutex
-	dev io.ReadWriteCloser
+	dev io.ReadWriter
 }
 
 // tpmCryptoAccessor describes TPM crypto interface
@@ -252,7 +252,7 @@ func (k *tpmPrivateKeyRSA) Sign(rand io.Reader, digest []byte, opts crypto.Signe
 		Hash: hashOpt.hashAlg,
 	}
 
-	sig, err := tpm2.Sign(k.crypt.dev, tpmutil.Handle(k.handle), k.password, digest, scheme)
+	sig, err := tpm2.Sign(k.crypt.dev, tpmutil.Handle(k.handle), k.password, digest, nil, scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func (hash tpmHash) String() (name string) {
  * Private
  ******************************************************************************/
 
-func readPublicKey(dev io.ReadWriteCloser, handle tpmutil.Handle) (tpm2.Public, crypto.PublicKey, error) {
+func readPublicKey(dev io.ReadWriter, handle tpmutil.Handle) (tpm2.Public, crypto.PublicKey, error) {
 	pub, _, _, err := tpm2.ReadPublic(dev, handle)
 	if err != nil {
 		return pub, nil, err
