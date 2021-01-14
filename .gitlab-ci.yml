@@ -24,7 +24,7 @@ test:
     - sudo iptables -t nat -A POSTROUTING -o ens3 -s 172.19.0.0/24 -j MASQUERADE
     - sudo cp ./ci/crt.pem  /etc/ssl/certs/
     - echo "-------   Run Unit tests   -------"
-    - sudo -E /usr/local/go/bin/go test $(/usr/local/go/bin/go list ./... | grep -v "/vendor\|dbushandler\|monitoring") -v -coverprofile .testCoverage.txt
+    - sudo -E /usr/local/go/bin/go test $(/usr/local/go/bin/go list ./... | grep -v "/vendor\|dbushandler\|monitoring") -p=1 -v -coverprofile .testCoverage.txt
     - /usr/local/go/bin/go tool cover -func=.testCoverage.txt
     - sudo rm .testCoverage.txt
     - sudo systemctl stop rabbitmq-server.service --no-block
