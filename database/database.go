@@ -72,70 +72,7 @@ type Database struct {
 
 // New creates new database handle
 func New(name string, migrationPath string, mergedMigrationPath string) (db *Database, err error) {
-	log.WithField("name", name).Debug("Open database")
-
-	// Check and create db path
-	if _, err = os.Stat(filepath.Dir(name)); err != nil {
-		if !os.IsNotExist(err) {
-			return db, err
-		}
-		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
-			return db, err
-		}
-	}
-
-	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
-		name, busyTimeout, journalMode, syncMode))
-	if err != nil {
-		return db, err
-	}
-
-	db = &Database{sqlite}
-	defer func() {
-		if err != nil {
-			db.Close()
-		}
-	}()
-
-	if err = migration.MergeMigrationFiles(migrationPath, mergedMigrationPath); err != nil {
-		return db, err
-	}
-
-	exists, err := db.isTableExist("config")
-	if err != nil {
-		return db, err
-	}
-
-	if !exists {
-		// Set database version if database not exist
-		if err = migration.SetDatabaseVersion(sqlite, migrationPath, dbVersion); err != nil {
-			log.Errorf("Error forcing database version. Err: %s", err)
-			return db, ErrMigrationFailed
-		}
-	} else {
-		if err = migration.DoMigrate(db.sql, mergedMigrationPath, dbVersion); err != nil {
-			log.Errorf("Error during database migration. Err: %s", err)
-			return db, ErrMigrationFailed
-		}
-	}
-
-	if err := db.createConfigTable(); err != nil {
-		return db, err
-	}
-	if err := db.createServiceTable(); err != nil {
-		return db, err
-	}
-	if err := db.createUsersTable(); err != nil {
-		return db, err
-	}
-	if err := db.createTrafficMonitorTable(); err != nil {
-		return db, err
-	}
-	if err := db.createLayersTable(); err != nil {
-		return db, err
-	}
-
-	return db, nil
+	return newDatabase(name, migrationPath, mergedMigrationPath, dbVersion)
 }
 
 // GetOperationVersion returns operation version
@@ -903,6 +840,73 @@ func (db *Database) Close() {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (db *Database, err error) {
+	log.WithField("name", name).Debug("Open database")
+
+	// Check and create db path
+	if _, err = os.Stat(filepath.Dir(name)); err != nil {
+		if !os.IsNotExist(err) {
+			return db, err
+		}
+		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
+			return db, err
+		}
+	}
+
+	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
+		name, busyTimeout, journalMode, syncMode))
+	if err != nil {
+		return db, err
+	}
+
+	db = &Database{sqlite}
+	defer func() {
+		if err != nil {
+			db.Close()
+		}
+	}()
+
+	if err = migration.MergeMigrationFiles(migrationPath, mergedMigrationPath); err != nil {
+		return db, err
+	}
+
+	exists, err := db.isTableExist("config")
+	if err != nil {
+		return db, err
+	}
+
+	if !exists {
+		// Set database version if database not exist
+		if err = migration.SetDatabaseVersion(sqlite, migrationPath, version); err != nil {
+			log.Errorf("Error forcing database version. Err: %s", err)
+			return db, ErrMigrationFailed
+		}
+	} else {
+		if err = migration.DoMigrate(db.sql, mergedMigrationPath, version); err != nil {
+			log.Errorf("Error during database migration. Err: %s", err)
+			return db, ErrMigrationFailed
+		}
+	}
+
+	if err := db.createConfigTable(); err != nil {
+		return db, err
+	}
+	if err := db.createServiceTable(); err != nil {
+		return db, err
+	}
+	if err := db.createUsersTable(); err != nil {
+		return db, err
+	}
+	if err := db.createTrafficMonitorTable(); err != nil {
+		return db, err
+	}
+	if err := db.createLayersTable(); err != nil {
+		return db, err
+	}
+
+	return db, nil
+}
 
 func (db *Database) isTableExist(name string) (result bool, err error) {
 	rows, err := db.sql.Query("SELECT * FROM sqlite_master WHERE name = ? and type='table'", name)
