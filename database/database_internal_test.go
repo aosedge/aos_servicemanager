@@ -18,9 +18,12 @@
 package database
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path"
 	"reflect"
 	"strconv"
 	"sync"
@@ -37,6 +40,7 @@ import (
  * Variables
  ******************************************************************************/
 
+var tmpDir string
 var db *Database
 
 /*******************************************************************************
@@ -59,26 +63,20 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	if err = os.MkdirAll("tmp", 0755); err != nil {
-		log.Fatalf("Error creating service images: %s", err)
+	tmpDir, err = ioutil.TempDir("", "sm_")
+	if err != nil {
+		log.Fatalf("Error create temporary dir: %s", err)
 	}
 
-	if err = os.MkdirAll("tmp/migration", 0755); err != nil {
-		log.Fatalf("Error migration path: %s", err)
-	}
-
-	if err = os.MkdirAll("tmp/mergedMigration", 0755); err != nil {
-		log.Fatalf("Error migration path: %s", err)
-	}
-
-	db, err = New("tmp/test.db", "tmp/migration", "tmp/mergedMigration")
+	dbPath := path.Join(tmpDir, "test.db")
+	db, err = New(dbPath, tmpDir, tmpDir)
 	if err != nil {
 		log.Fatalf("Can't create database: %s", err)
 	}
 
 	ret := m.Run()
 
-	if err = os.RemoveAll("tmp"); err != nil {
+	if err = os.RemoveAll(tmpDir); err != nil {
 		log.Fatalf("Error cleaning up: %s", err)
 	}
 
@@ -875,6 +873,48 @@ func TestLayers(t *testing.T) {
 	}
 }
 
+func TestMigrationToV1(t *testing.T) {
+	migrationDb := path.Join(tmpDir, "test_migration.db")
+	mergedMigrationDir := path.Join(tmpDir, "mergedMigration")
+
+	if err := os.MkdirAll(mergedMigrationDir, 0755); err != nil {
+		t.Fatalf("Error creating merged migration dir: %s", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(mergedMigrationDir); err != nil {
+			t.Fatalf("Error removing merged migration dir: %s", err)
+		}
+	}()
+
+	if err := createDatabaseV0(migrationDb); err != nil {
+		t.Fatalf("Can't create initial database %s", err)
+	}
+
+	// Migration upward
+	db, err := newDatabase(migrationDb, "migration", mergedMigrationDir, 1)
+	if err != nil {
+		t.Fatalf("Can't create database: %s", err)
+	}
+
+	if err = isDatabaseVer1(db.sql); err != nil {
+		t.Fatalf("Error checking db version: %s", err)
+	}
+
+	db.Close()
+
+	// Migration downward
+	db, err = newDatabase(migrationDb, "migration", mergedMigrationDir, 0)
+	if err != nil {
+		t.Fatalf("Can't create database: %s", err)
+	}
+
+	if err = isDatabaseVer0(db.sql); err != nil {
+		t.Fatalf("Error checking db version: %s", err)
+	}
+
+	db.Close()
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -905,4 +945,131 @@ func (db *Database) getUsersList() (usersList [][]string, err error) {
 	}
 
 	return usersList, rows.Err()
+}
+
+func createDir(t *testing.T, name string, errorMessage string) {
+	if err := os.MkdirAll(name, 0755); err != nil {
+		t.Fatalf("%s: %s", errorMessage, err)
+	}
+}
+
+func removeDir(t *testing.T, name string, errorMessage string) {
+	if err := os.RemoveAll(name); err != nil {
+		t.Fatalf("%s: %s", errorMessage, err)
+	}
+}
+
+func createDatabaseV0(name string) (err error) {
+	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
+		name, busyTimeout, journalMode, syncMode))
+	if err != nil {
+		return err
+	}
+	defer sqlite.Close()
+
+	if _, err = sqlite.Exec(
+		`CREATE TABLE config (
+			operationVersion INTEGER,
+			cursor TEXT)`); err != nil {
+		return err
+	}
+
+	if _, err = sqlite.Exec(
+		`INSERT INTO config (
+			operationVersion,
+			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
+		return err
+	}
+
+	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
+															   aosVersion INTEGER,
+															   serviceProvider TEXT,
+															   path TEXT,
+															   unit TEXT,
+															   uid INTEGER,
+															   gid INTEGER,
+															   hostName TEXT,
+															   permissions TEXT,
+															   state INTEGER,
+															   status INTEGER,
+															   startat TIMESTAMP,
+															   ttl INTEGER,
+															   alertRules TEXT,
+															   ulLimit INTEGER,
+															   dlLimit INTEGER,
+															   ulSpeed INTEGER,
+															   dlSpeed INTEGER,
+															   storageLimit INTEGER,
+															   stateLimit INTEGER,
+															   layerList TEXT,
+															   deviceResources TEXT,
+															   boardResources TEXT,
+															   vendorVersion TEXT,
+															   description TEXT)`)
+
+	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
+															serviceid TEXT NOT NULL,
+															storageFolder TEXT,
+															stateCheckSum BLOB,
+															PRIMARY KEY(users, serviceid))`)
+
+	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+																	 time TIMESTAMP,
+																	 value INTEGER)`)
+
+	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
+															 layerId TEXT,
+															 path TEXT,
+															 osVersion TEXT,
+															 vendorVersion TEXT,
+															 description TEXT,
+															 aosVersion INTEGER)`)
+
+	return nil
+}
+
+func isDatabaseVer1(sqlite *sql.DB) (err error) {
+	rows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		if err = rows.Scan(&count); err != nil {
+			return err
+		}
+
+		if count == 0 {
+			return ErrNotExist
+		}
+
+		return nil
+	}
+
+	return ErrNotExist
+}
+
+func isDatabaseVer0(sqlite *sql.DB) (err error) {
+	rows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		if err = rows.Scan(&count); err != nil {
+			return err
+		}
+
+		if count != 0 {
+			return ErrNotExist
+		}
+
+		return nil
+	}
+
+	return ErrNotExist
 }
