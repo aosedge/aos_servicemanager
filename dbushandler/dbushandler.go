@@ -79,7 +79,7 @@ type DBusHandler struct {
 
 // New creates and launch d-bus server
 func New(serviceProvider ServiceProvider) (dbusHandler *DBusHandler, err error) {
-	conn, err := dbus.SessionBus()
+	conn, err := dbus.SystemBus()
 	if err != nil {
 		return dbusHandler, err
 	}
