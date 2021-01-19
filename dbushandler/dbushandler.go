@@ -41,23 +41,20 @@ const (
 const intro = `
 <node>
 	<interface name="com.aos.servicemanager.vis">
+		<annotation name="org.gtk.GDBus.DocString" value="Returns VIS client permission"/>
 		<method name="GetPermissions">
 			<arg name="token" direction="in" type="s">
-				<doc:doc><doc:summary>VIS client token (service id)</doc:summary></doc:doc>
+				<annotation name="org.gtk.GDBus.DocString"
+					value="VIS client token (service id)"/>
 			</arg>
 			<arg name="permissions" direction="out" type="s">
-				<doc:doc><doc:summary>VIS client permissions</doc:summary></doc:doc>
+				<annotation name="org.gtk.GDBus.DocString"
+					value="VIS client permissions"/>
 			</arg>
 			<arg name="status" direction="out" type="s">
-				<doc:doc><doc:summary>Status of getting VIS permissions: OK or error</doc:summary></doc:doc>
+				<annotation name="org.gtk.GDBus.DocString"
+					value="Status of getting VIS permissions: OK or error"/>
 			</arg>
-			<doc:doc>
-				<doc:description>
-				<doc:para>
-					Returns VIS client permission
-				</doc:para>
-				</doc:description>
-			</doc:doc>
 		</method>
 	</interface>` + introspect.IntrospectDataString + `</node> `
 
