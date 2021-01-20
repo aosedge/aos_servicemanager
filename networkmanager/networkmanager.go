@@ -67,8 +67,12 @@ type NetworkManager struct {
 
 // NetworkParams network parameters set for service
 type NetworkParams struct {
-	Hostname string
-	Aliases  []string
+	Hostname           string
+	Aliases            []string
+	IngressKbit        uint64
+	EgressKbit         uint64
+	ExposedPorts       []string
+	AllowedConnections []string
 }
 
 type cniPlugins struct {
@@ -170,7 +174,7 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 }
 
 // AddServiceToNetwork adds service to SP network
-func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingressKbit, egressKbit uint64) (err error) {
+func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, params NetworkParams) (err error) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -195,7 +199,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, ingre
 		}
 	}()
 
-	netConfig := prepareNetworkConfigList(spID, ipSubnet, ingressKbit, egressKbit)
+	netConfig := prepareNetworkConfigList(spID, ipSubnet, &params)
 
 	runtimeConfig := &cni.RuntimeConf{
 		ContainerID: serviceID,
@@ -443,13 +447,13 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	return cniServiceInfo[0], nil
 }
 
-func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet, ingressKbit, egressKbit uint64) (cniNetworkConfig *cni.NetworkConfigList) {
+func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList) {
 	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
 	configBridge := bridgeNetConf{
 		Type:        "bridge",
-		BrName:      bridgePrefix + nameService,
+		BrName:      bridgePrefix + spID,
 		IsGW:        true,
 		IPMasq:      true,
 		HairpinMode: true,
@@ -493,7 +497,7 @@ func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet, ingress
 	}
 
 	networkPlugin := cniPlugins{
-		Name:       nameService,
+		Name:       spID,
 		CNIVersion: cniVersion,
 		Plugins: []interface{}{
 			configBridge,
@@ -501,8 +505,8 @@ func prepareNetworkConfigList(nameService string, subnetwork *net.IPNet, ingress
 		},
 	}
 
-	if ingressKbit > 0 || egressKbit > 0 {
-		bandwith := prepareTrafficControlPlugin(ingressKbit, egressKbit)
+	if params.IngressKbit > 0 || params.EgressKbit > 0 {
+		bandwith := prepareTrafficControlPlugin(params.IngressKbit, params.EgressKbit)
 		if bandwith != nil {
 			networkPlugin.Plugins = append(networkPlugin.Plugins, bandwith)
 			dataBandwith, _ := json.Marshal(bandwith)

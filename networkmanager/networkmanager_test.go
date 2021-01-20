@@ -76,7 +76,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestAddRemoveService(t *testing.T) {
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", 0, 0); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm0", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -109,7 +109,7 @@ func TestInternet(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm1", "network0", 0, 0); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm1", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -129,7 +129,7 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm2", "network0", 0, 0); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm2", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -151,7 +151,7 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm3", "network0", 0, 0); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm3", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -184,7 +184,7 @@ func TestHostName(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm4", "network0", 0, 0); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm4", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 

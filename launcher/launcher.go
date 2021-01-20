@@ -239,7 +239,7 @@ type Sender interface {
 
 // NetworkProvider provides network interface
 type NetworkProvider interface {
-	AddServiceToNetwork(serviceID, spID string, ingressKbit, egressKbit uint64) (err error)
+	AddServiceToNetwork(serviceID, spID string, params networkmanager.NetworkParams) (err error)
 	RemoveServiceFromNetwork(serviceID, spID string) (err error)
 	GetServiceIP(serviceID, spID string) (ip string, err error)
 	DeleteNetwork(spID string) (err error)
@@ -1133,7 +1133,15 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 	}
 
 	if launcher.network != nil {
-		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, service.DownloadSpeed, service.UploadSpeed); err != nil {
+		params := networkmanager.NetworkParams{
+			IngressKbit:        service.DownloadSpeed,
+			EgressKbit:         service.UploadSpeed,
+			ExposedPorts:       service.ExposedPorts,
+			AllowedConnections: service.AllowedConnections,
+			Hostname:           service.HostName,
+		}
+
+		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
 			return err
 		}
 
