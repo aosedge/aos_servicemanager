@@ -1397,9 +1397,10 @@ func TestSpec(t *testing.T) {
 
 func TestSpecFromImageConfig(t *testing.T) {
 	configFilePath := path.Join(testDir, "config.json")
-	_, err := generateSpecFromImageConfig("no_file", configFilePath, "")
+
+	_, err := getImageSpecFromImageConfig("no_file")
 	if err == nil {
-		t.Errorf("Should be error no such file or director")
+		t.Errorf("Should be error no such file or directory")
 	}
 
 	imgConfig, err := generateImageConfig()
@@ -1413,7 +1414,12 @@ func TestSpecFromImageConfig(t *testing.T) {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	_, err = generateSpecFromImageConfig(configFile, configFilePath, "")
+	imageSpec, err := getImageSpecFromImageConfig(configFile)
+	if err != nil {
+		t.Error("Can't parse imageConfig")
+	}
+
+	_, err = generateRuntimeSpec(imageSpec, configFilePath, "")
 	if err == nil {
 		t.Errorf("Should be error unsupported OS in image config")
 	}
@@ -1424,7 +1430,12 @@ func TestSpecFromImageConfig(t *testing.T) {
 		log.Fatalf("Error save OCI Image config %s", err)
 	}
 
-	runtimeSpec, err := generateSpecFromImageConfig(configFile, configFilePath, "")
+	imageSpec, err = getImageSpecFromImageConfig(configFile)
+	if err != nil {
+		t.Error("Can't parse imageConfig")
+	}
+
+	runtimeSpec, err := generateRuntimeSpec(imageSpec, configFilePath, "")
 	if err != nil {
 		t.Errorf("Error generating OCI runtime spec %s", err)
 	}
@@ -2590,7 +2601,9 @@ func generateImageConfig() (config *imagespec.Image, err error) {
 		"os": "Linux",
 		"config": {
 			"ExposedPorts": {
-				"8080/tcp": {}
+				"8080/tcp": {},
+				"8081/udp": {},
+				"900": {}
 			},
 			"Env": [
 				"PATH=/usr/local/sbin",

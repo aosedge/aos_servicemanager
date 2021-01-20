@@ -88,8 +88,9 @@ type aosServiceConfig struct {
 		HostPath      string   `json:"hostPath"`
 		Options       []string `json:"options,omitempty"`
 	} `json:"mounts,omitempty"`
-	Devices   []Device `json:"devices,omitempty"`
-	Resources []string `json:"resources,omitempty"`
+	AllowedConnections map[string]struct{} `json:"AllowedConnections,omitempty"`
+	Devices            []Device            `json:"devices,omitempty"`
+	Resources          []string            `json:"resources,omitempty"`
 }
 
 type serviceSpec struct {
@@ -131,14 +132,17 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 
 	return spec, nil
 }
-
-func generateSpecFromImageConfig(fileImagConfigPath, fileNameRuntimeSpec, netNsPath string) (spec *serviceSpec, err error) {
+func getImageSpecFromImageConfig(fileImageConfigPath string) (spec imagespec.Image, err error) {
 	var imageConfig imagespec.Image
 
-	if err = getJSONFromFile(fileImagConfigPath, &imageConfig); err != nil {
-		return nil, err
+	if err = getJSONFromFile(fileImageConfigPath, &imageConfig); err != nil {
+		return imageConfig, err
 	}
 
+	return imageConfig, nil
+}
+
+func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec, netNsPath string) (spec *serviceSpec, err error) {
 	strOS := strings.ToLower(imageConfig.OS)
 	if strOS != "linux" {
 		return nil, fmt.Errorf("unsupported OS in image config %s", imageConfig.OS)

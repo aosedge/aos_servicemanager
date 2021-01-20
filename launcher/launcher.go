@@ -166,31 +166,33 @@ type Launcher struct {
 
 // Service describes service structure
 type Service struct {
-	ID              string        // service id
-	AosVersion      uint64        // service aosVersion
-	VendorVersion   string        // service vendorVersion
-	ServiceProvider string        // service provider
-	Path            string        // path to service bundle
-	UnitName        string        // systemd unit name
-	UID             uint32        // service userID
-	GID             uint32        // service gid
-	HostName        string        // service host name
-	Permissions     string        // VIS permissions
-	State           ServiceState  // service state
-	Status          ServiceStatus // service status
-	StartAt         time.Time     // time at which service was started
-	TTL             uint64        // expiration service duration in days
-	AlertRules      string        // alert rules in json format
-	UploadSpeed     uint64        // upload traffic speed
-	DownloadSpeed   uint64        // download traffic speed
-	UploadLimit     uint64        // upload traffic limit
-	DownloadLimit   uint64        // download traffic limit
-	StorageLimit    uint64        // storage limit
-	StateLimit      uint64        // state limit
-	Layers          []string      // list layers dir
-	Devices         string        // device resources in json format
-	BoardResources  []string      // list of sw board resources
-	Description     string        // service description
+	ID                 string        // service id
+	AosVersion         uint64        // service aosVersion
+	VendorVersion      string        // service vendorVersion
+	ServiceProvider    string        // service provider
+	Path               string        // path to service bundle
+	UnitName           string        // systemd unit name
+	UID                uint32        // service userID
+	GID                uint32        // service gid
+	HostName           string        // service host name
+	Permissions        string        // VIS permissions
+	State              ServiceState  // service state
+	Status             ServiceStatus // service status
+	StartAt            time.Time     // time at which service was started
+	TTL                uint64        // expiration service duration in days
+	AlertRules         string        // alert rules in json format
+	UploadSpeed        uint64        // upload traffic speed
+	DownloadSpeed      uint64        // download traffic speed
+	UploadLimit        uint64        // upload traffic limit
+	DownloadLimit      uint64        // download traffic limit
+	StorageLimit       uint64        // storage limit
+	StateLimit         uint64        // state limit
+	Layers             []string      // list layers dir
+	Devices            string        // device resources in json format
+	BoardResources     []string      // list of sw board resources
+	Description        string        // service description
+	AllowedConnections []string      // list of the allowed connections to service
+	ExposedPorts       []string      // list of the exposed ports to service
 }
 
 // UsersService describes users service structure
@@ -1584,9 +1586,14 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
+	imageSpec, err := getImageSpecFromImageConfig(imageParts.imageConfigPath)
+	if err != nil {
+		return service, err
+	}
+
 	// generate config.json
 	pathToNetNS := networkmanager.GetNetNsPathByName(serviceInfo.ID)
-	spec, err := generateSpecFromImageConfig(imageParts.imageConfigPath, path.Join(installDir, ocConfigFile), pathToNetNS)
+	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ocConfigFile), pathToNetNS)
 	if err != nil {
 		return service, err
 	}
@@ -1672,6 +1679,17 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	if err = launcher.updateServiceFromAosSrvConfig(&service, aosConfig); err != nil {
 		return service, err
+	}
+
+	// Fill up network parameters
+	service.ExposedPorts = make([]string, 0, len(imageSpec.Config.ExposedPorts))
+	for key := range imageSpec.Config.ExposedPorts {
+		service.ExposedPorts = append(service.ExposedPorts, key)
+	}
+
+	service.AllowedConnections = make([]string, 0, len(aosConfig.AllowedConnections))
+	for key := range aosConfig.AllowedConnections {
+		service.AllowedConnections = append(service.AllowedConnections, key)
 	}
 
 	return service, nil
