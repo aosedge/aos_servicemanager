@@ -116,7 +116,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -132,11 +132,21 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 		return err
 	}
 
+	allowConnectionsText, err := convertListToText(service.AllowedConnections)
+	if err != nil {
+		return err
+	}
+
+	exposedPortsText, err := convertListToText(service.ExposedPorts)
+	if err != nil {
+		return err
+	}
+
 	_, err = stmt.Exec(service.ID, service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
 		service.UID, service.GID, service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
 		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText,
-		service.VendorVersion, service.Description)
+		service.VendorVersion, service.Description, allowConnectionsText, exposedPortsText)
 
 	return err
 }
@@ -148,7 +158,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 								 permissions = ?, state = ?, status = ?, startat = ?,
 								 ttl = ?, alertRules = ?, ulLimit = ?, dlLimit = ?, ulSpeed = ?, dlSpeed = ?,
 								 storageLimit = ?, stateLimit = ?, layerList = ?, deviceResources = ?, 
-								 boardResources = ?, vendorVersion = ?, description =? WHERE id = ?`)
+								 boardResources = ?, vendorVersion = ?, description = ?, allowedConnections = ?, exposedPorts= ? WHERE id = ?`)
 
 	if err != nil {
 		log.Error("erro prepare")
@@ -166,11 +176,21 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 		return err
 	}
 
+	allowConnectionsText, err := convertListToText(service.AllowedConnections)
+	if err != nil {
+		return err
+	}
+
+	exposedPortsText, err := convertListToText(service.ExposedPorts)
+	if err != nil {
+		return err
+	}
+
 	result, err := stmt.Exec(service.AosVersion, service.ServiceProvider, service.Path, service.UnitName, service.UID, service.GID,
 		service.HostName, service.Permissions, service.State, service.Status, service.StartAt, service.TTL,
 		service.AlertRules, service.UploadLimit, service.DownloadLimit, service.UploadSpeed, service.DownloadSpeed,
 		service.StorageLimit, service.StateLimit, layerTextList, service.Devices, boardResourceText,
-		service.VendorVersion, service.Description, service.ID)
+		service.VendorVersion, service.Description, allowConnectionsText, exposedPortsText, service.ID)
 	if err != nil {
 		log.Error("erro exec")
 		return err
@@ -209,14 +229,13 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	}
 	defer stmt.Close()
 
-	var layerListText string
-	var boardResourcesText string
+	var layerListText, boardResourcesText, allowConnectionsText, exposedPortsText string
 
 	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
+		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description, &allowConnectionsText, &exposedPortsText)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -230,6 +249,16 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	}
 
 	service.BoardResources, err = getListfromText(boardResourcesText)
+	if err != nil {
+		return service, err
+	}
+
+	service.AllowedConnections, err = getListfromText(allowConnectionsText)
+	if err != nil {
+		return service, err
+	}
+
+	service.ExposedPorts, err = getListfromText(exposedPortsText)
 
 	return service, err
 }
@@ -244,14 +273,13 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 
 	for rows.Next() {
 		var service launcher.Service
-		var layerListText string
-		var boardResourcesText string
+		var layerListText, boardResourcesText, allowConnectionsText, exposedPortsText string
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description, &allowConnectionsText, &exposedPortsText)
 		if err != nil {
 			return services, err
 		}
@@ -262,6 +290,16 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		}
 
 		service.BoardResources, err = getListfromText(boardResourcesText)
+		if err != nil {
+			return services, err
+		}
+
+		service.AllowedConnections, err = getListfromText(allowConnectionsText)
+		if err != nil {
+			return services, err
+		}
+
+		service.ExposedPorts, err = getListfromText(exposedPortsText)
 		if err != nil {
 			return services, err
 		}
@@ -282,14 +320,13 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 
 	for rows.Next() {
 		var service launcher.Service
-		var layerListText string
-		var boardResourcesText string
+		var layerListText, boardResourcesText, allowConnectionsText, exposedPortsText string
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description, &allowConnectionsText, &exposedPortsText)
 		if err != nil {
 			return services, err
 		}
@@ -300,6 +337,16 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 		}
 
 		service.BoardResources, err = getListfromText(boardResourcesText)
+		if err != nil {
+			return services, err
+		}
+
+		service.AllowedConnections, err = getListfromText(allowConnectionsText)
+		if err != nil {
+			return services, err
+		}
+
+		service.ExposedPorts, err = getListfromText(exposedPortsText)
 		if err != nil {
 			return services, err
 		}
@@ -318,14 +365,13 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	}
 	defer stmt.Close()
 
-	var layerListText string
-	var boardResourcesText string
+	var layerListText, boardResourcesText, allowConnectionsText, exposedPortsText string
 
 	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
 		&service.UnitName, &service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 		&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 		&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
+		&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description, &allowConnectionsText, &exposedPortsText)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
 	}
@@ -339,6 +385,16 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	}
 
 	service.BoardResources, err = getListfromText(boardResourcesText)
+	if err != nil {
+		return service, err
+	}
+
+	service.AllowedConnections, err = getListfromText(allowConnectionsText)
+	if err != nil {
+		return service, err
+	}
+
+	service.ExposedPorts, err = getListfromText(exposedPortsText)
 
 	return service, err
 }
@@ -573,15 +629,13 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 
 	for rows.Next() {
 		var service launcher.Service
-
-		var layerListText string
-		var boardResourcesText string
+		var layerListText, boardResourcesText, allowConnectionsText, exposedPortsText string
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path, &service.UnitName,
 			&service.UID, &service.GID, &service.HostName, &service.Permissions, &service.State, &service.Status,
 			&service.StartAt, &service.TTL, &service.AlertRules, &service.UploadLimit, &service.DownloadLimit,
 			&service.UploadSpeed, &service.DownloadSpeed, &service.StorageLimit, &service.StateLimit, &layerListText,
-			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description)
+			&service.Devices, &boardResourcesText, &service.VendorVersion, &service.Description, &allowConnectionsText, &exposedPortsText)
 		if err != nil {
 			return usersServices, err
 		}
@@ -592,6 +646,16 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		}
 
 		service.BoardResources, err = getListfromText(boardResourcesText)
+		if err != nil {
+			return usersServices, err
+		}
+
+		service.AllowedConnections, err = getListfromText(allowConnectionsText)
+		if err != nil {
+			return usersServices, err
+		}
+
+		service.ExposedPorts, err = getListfromText(exposedPortsText)
 		if err != nil {
 			return usersServices, err
 		}
@@ -978,7 +1042,9 @@ func (db *Database) createServiceTable() (err error) {
 															   deviceResources TEXT,
 															   boardResources TEXT,
 															   vendorVersion TEXT,
-															   description TEXT)`)
+															   description TEXT,
+															   allowedConnections TEXT,
+															   exposedPorts TEXT)`)
 
 	return err
 }
