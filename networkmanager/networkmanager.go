@@ -28,6 +28,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"strings"
 	"sync"
 
 	cni "github.com/containernetworking/cni/libcni"
@@ -51,6 +52,7 @@ const (
 	cniBinPath       = "/opt/cni/bin"
 	pathToCNINetwork = "/var/lib/cni/networks/"
 	cniVersion       = "0.4.0"
+	adminChaniPrefix = "SERVICE_"
 )
 
 /*******************************************************************************
@@ -95,13 +97,6 @@ type bridgeNetConf struct {
 	IPAM         allocator.IPAMConfig `json:"ipam"`
 }
 
-type firewallNetConf struct {
-	Type                   string `json:"type"`
-	Backend                string `json:"backend"`
-	IptablesAdminChainName string `json:"iptablesAdminChainName,omitempty"`
-	FirewalldZone          string `json:"firewalldZone,omitempty"`
-}
-
 type bandwidthNetConf struct {
 	Type         string `json:"type,omitempty"`
 	IngressRate  uint64 `json:"ingressRate,omitempty"`
@@ -109,6 +104,26 @@ type bandwidthNetConf struct {
 
 	EgressRate  uint64 `json:"egressRate,omitempty"`
 	EgressBurst uint64 `json:"egressBurst,omitempty"`
+}
+
+type aosFirewallNetConf struct {
+	Type                   string               `json:"type"`
+	UUID                   string               `json:"uuid"`
+	IptablesAdminChainName string               `json:"iptablesAdminChainName"`
+	AllowPublicConnections bool                 `json:"allowPublicConnections"`
+	InputAccess            []inputAccessConfig  `json:"inputAccess,omitempty"`
+	OutputAccess           []outputAccessConfig `json:"outputAccess,omitempty"`
+}
+
+type inputAccessConfig struct {
+	Port     string `json:"port"`
+	Protocol string `json:"protocol"`
+}
+
+type outputAccessConfig struct {
+	UUID     string `json:"uuid"`
+	Port     string `json:"port"`
+	Protocol string `json:"protocol"`
 }
 
 /*******************************************************************************
@@ -199,7 +214,10 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		}
 	}()
 
-	netConfig := prepareNetworkConfigList(spID, ipSubnet, &params)
+	netConfig, err := prepareNetworkConfigList(serviceID, spID, ipSubnet, &params)
+	if err != nil {
+		return err
+	}
 
 	runtimeConfig := &cni.RuntimeConf{
 		ContainerID: serviceID,
@@ -447,11 +465,12 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	return cniServiceInfo[0], nil
 }
 
-func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList) {
+func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
+	params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList, err error) {
 	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
-	configBridge := bridgeNetConf{
+	configBridge := &bridgeNetConf{
 		Type:        "bridge",
 		BrName:      bridgePrefix + spID,
 		IsGW:        true,
@@ -472,13 +491,7 @@ func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *Networ
 		},
 	}
 
-	firewall := firewallNetConf{
-		Type:    "firewall",
-		Backend: "iptables",
-	}
-
 	dataBridge, _ := json.Marshal(configBridge)
-	dataFirewall, _ := json.Marshal(firewall)
 
 	plugins := []*cni.NetworkConfig{
 		{
@@ -486,13 +499,7 @@ func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *Networ
 				Type: configBridge.Type,
 				IPAM: types.IPAM{Type: configBridge.IPAM.Type},
 			},
-			Bytes: []byte(dataBridge),
-		},
-		{
-			Network: &types.NetConf{
-				Type: firewall.Type,
-			},
-			Bytes: []byte(dataFirewall),
+			Bytes: dataBridge,
 		},
 	}
 
@@ -501,8 +508,56 @@ func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *Networ
 		CNIVersion: cniVersion,
 		Plugins: []interface{}{
 			configBridge,
-			firewall,
 		},
+	}
+
+	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
+		aosFirewall := &aosFirewallNetConf{
+			Type:                   "aos-firewall",
+			UUID:                   serviceID,
+			IptablesAdminChainName: adminChaniPrefix + serviceID,
+			AllowPublicConnections: true,
+		}
+
+		//ExposedPorts format port/protocol
+		for _, exposePort := range params.ExposedPorts {
+			portConfig := strings.Split(exposePort, "/")
+			if len(portConfig) > 2 || len(portConfig) == 0 {
+				return nil, fmt.Errorf("unsupported ExposedPorts format %s", exposePort)
+			}
+
+			input := inputAccessConfig{Port: portConfig[0], Protocol: "tcp"}
+			if len(portConfig) == 2 {
+				input.Protocol = portConfig[1]
+			}
+
+			aosFirewall.InputAccess = append(aosFirewall.InputAccess, input)
+		}
+
+		//AllowedConnections format service-UUID/port/protocol
+		for _, allowConn := range params.AllowedConnections {
+			connConf := strings.Split(allowConn, "/")
+			if len(connConf) > 3 || len(connConf) < 2 {
+				return nil, fmt.Errorf("unsupported AllowedConnections format %s", connConf)
+			}
+
+			output := outputAccessConfig{UUID: connConf[0], Port: connConf[1], Protocol: "tcp"}
+			if len(connConf) == 3 {
+				output.Protocol = connConf[2]
+			}
+
+			aosFirewall.OutputAccess = append(aosFirewall.OutputAccess, output)
+		}
+
+		networkPlugin.Plugins = append(networkPlugin.Plugins, aosFirewall)
+		dataAosFireWall, _ := json.Marshal(aosFirewall)
+		aosFW := &cni.NetworkConfig{
+			Network: &types.NetConf{
+				Type: aosFirewall.Type,
+			},
+			Bytes: dataAosFireWall,
+		}
+		plugins = append(plugins, aosFW)
 	}
 
 	if params.IngressKbit > 0 || params.EgressKbit > 0 {
@@ -527,7 +582,7 @@ func prepareNetworkConfigList(spID string, subnetwork *net.IPNet, params *Networ
 		CNIVersion: networkPlugin.CNIVersion,
 		Plugins:    plugins,
 		Bytes:      []byte(dataNetwork),
-	}
+	}, nil
 }
 
 func prepareTrafficControlPlugin(ingressKbit, egressKbit uint64) (bandwidth *bandwidthNetConf) {
