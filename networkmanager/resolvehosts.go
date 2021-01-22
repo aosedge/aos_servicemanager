@@ -38,46 +38,64 @@ var defaultContent = []config.Host{
 }
 
 /*******************************************************************************
- * Public
+ * Private
  ******************************************************************************/
 
-// WriteHostToHostsFile writes a pairs of hostname and IP address to the hosts file
-func (manager *NetworkManager) WriteHostToHostsFile(pathToEtc string, extraHost config.Host) (err error) {
+func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []config.Host) (err error) {
 	content := bytes.NewBuffer(nil)
 
-	extraHosts := defaultContent
-	if extraHost.Hostname != "" && extraHost.IP != "" {
-		extraHosts = append(extraHosts, extraHost)
-	}
-
-	if err := writeHosts(content, extraHosts); err != nil {
+	if err = writeHosts(content, defaultContent); err != nil {
 		return err
 	}
 
-	if err := writeHosts(content, manager.hosts); err != nil {
+	ownHosts := serviceID
+
+	if hostname != "" {
+		ownHosts = ownHosts + " " + hostname
+	}
+
+	if err = writeHosts(content, append([]config.Host{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(pathToEtc, content.Bytes(), 0644)
-}
-
-// WriteResolveConfFile prepare resolv.conf file
-func (manager *NetworkManager) WriteResolveConfFile(resolvCongPath string) (err error) {
-	// TODO: the correct generation of host resolv.conf will be after dnsmasq implementation
-	if err := ioutil.WriteFile(resolvCongPath, []byte("nameserver 8.8.8.8"), 0644); err != nil {
+	if ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
+func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extraServers []string) (err error) {
+	content := bytes.NewBuffer(nil)
+
+	if err = writeNameServers(content, mainServers); err != nil {
+		return err
+	}
+
+	if err = writeNameServers(content, extraServers); err != nil {
+		return err
+	}
+
+	if ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func writeHosts(w io.Writer, hosts []config.Host) (err error) {
 	for _, host := range hosts {
-		if _, err := fmt.Fprintf(w, "%s\t%s\n", host.IP, host.Hostname); err != nil {
+		if _, err = fmt.Fprintf(w, "%s\t%s\n", host.IP, host.Hostname); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeNameServers(w io.Writer, nameServers []string) (err error) {
+	for _, server := range nameServers {
+		if _, err = fmt.Fprintf(w, "nameserver\t%s\n", server); err != nil {
 			return err
 		}
 	}

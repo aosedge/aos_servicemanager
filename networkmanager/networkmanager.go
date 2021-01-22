@@ -75,6 +75,10 @@ type NetworkParams struct {
 	EgressKbit         uint64
 	ExposedPorts       []string
 	AllowedConnections []string
+	Hosts              []config.Host
+	DNSSevers          []string
+	HostsFilePath      string
+	ResolvConfFilePath string
 }
 
 type cniPlugins struct {
@@ -246,7 +250,25 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		return fmt.Errorf("error getting IP address for service %s", serviceID)
 	}
 
-	log.WithFields(log.Fields{"serviceID": serviceID, "IP": result.IPs[0].Address.IP.String()}).Debug("The service has been added to the network")
+	serviceIP := result.IPs[0].Address.IP.String()
+
+	if params.HostsFilePath != "" {
+		if err = writeHostToHostsFile(params.HostsFilePath, serviceIP,
+			serviceID, params.Hostname, params.Hosts); err != nil {
+			return err
+		}
+	}
+
+	if params.ResolvConfFilePath != "" {
+		if err = writeResolveConfFile(params.ResolvConfFilePath, []string{"8.8.8.8"}, params.DNSSevers); err != nil {
+			return err
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"serviceID": serviceID,
+		"IP":        serviceIP,
+	}).Debug("Service has been added to the network")
 
 	return nil
 }

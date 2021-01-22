@@ -109,7 +109,9 @@ func TestInternet(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm1", "network0", networkmanager.NetworkParams{}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm1", "network0", networkmanager.NetworkParams{
+		ResolvConfFilePath: path.Join(containerPath, "etc", "resolv.conf"),
+	}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -151,19 +153,16 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm3", "network0", networkmanager.NetworkParams{}); err != nil {
-		t.Fatalf("Can't add service to network: %s", err)
-	}
-
-	ip, err := manager.GetServiceIP("servicenm3", "network0")
+	ip, err := manager.GetServiceIP("servicenm2", "network0")
 	if err != nil {
 		t.Fatalf("Can't get ip address from service: %s", err)
 	}
 
-	hostsFilePath := path.Join(container1Path, "etc", "hosts")
-	serviceHost := config.Host{IP: ip, Hostname: "myservicenm0"}
-	if err := manager.WriteHostToHostsFile(hostsFilePath, serviceHost); err != nil {
-		t.Errorf("Error: %s", err)
+	if err := manager.AddServiceToNetwork("servicenm3", "network0", networkmanager.NetworkParams{
+		Hosts:         []config.Host{{IP: ip, Hostname: "myservicenm0"}},
+		HostsFilePath: path.Join(container1Path, "etc", "hosts"),
+	}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
 	}
 
 	if err := runOCIContainer(container1Path, "servicenm3"); err != nil {
@@ -184,19 +183,11 @@ func TestHostName(t *testing.T) {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
-	if err := manager.AddServiceToNetwork("servicenm4", "network0", networkmanager.NetworkParams{}); err != nil {
+	if err := manager.AddServiceToNetwork("servicenm4", "network0", networkmanager.NetworkParams{
+		Hostname:      "myhost",
+		HostsFilePath: path.Join(container0Path, "etc", "hosts"),
+	}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
-	}
-
-	ip, err := manager.GetServiceIP("servicenm4", "network0")
-	if err != nil {
-		t.Fatalf("Can't get ip address from service: %s", err)
-	}
-
-	hostsFilePath := path.Join(container0Path, "etc", "hosts")
-	serviceHost := config.Host{IP: ip, Hostname: "myhost"}
-	if err := manager.WriteHostToHostsFile(hostsFilePath, serviceHost); err != nil {
-		t.Errorf("Error: %s", err)
 	}
 
 	if err := runOCIContainer(container0Path, "servicenm4"); err != nil {
@@ -409,12 +400,11 @@ func addHostResolvFiles(pathToContainer string) (err error) {
 		return err
 	}
 
-	hostsFilePath := path.Join(etcPath, "hosts")
-	if _, err := os.Create(hostsFilePath); err != nil {
+	if _, err = os.Create(path.Join(etcPath, "hosts")); err != nil {
 		return err
 	}
 
-	if err = manager.WriteResolveConfFile(path.Join(etcPath, "resolv.conf")); err != nil {
+	if _, err = os.Create(path.Join(etcPath, "resolv.conf")); err != nil {
 		return err
 	}
 

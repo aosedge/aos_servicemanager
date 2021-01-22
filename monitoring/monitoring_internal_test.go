@@ -620,16 +620,16 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 func addHostResolvFiles(pathToContainer string) (err error) {
 	etcPath := path.Join(pathToContainer, "etc")
-	if err := os.MkdirAll(etcPath, 0755); err != nil {
+
+	if err = os.MkdirAll(etcPath, 0755); err != nil {
 		return err
 	}
 
-	hostsFilePath := path.Join(etcPath, "hosts")
-	if _, err := os.Create(hostsFilePath); err != nil {
+	if _, err = os.Create(path.Join(etcPath, "hosts")); err != nil {
 		return err
 	}
 
-	if err := networkManager.WriteResolveConfFile(path.Join(etcPath, "resolv.conf")); err != nil {
+	if _, err = os.Create(path.Join(etcPath, "resolv.conf")); err != nil {
 		return err
 	}
 
