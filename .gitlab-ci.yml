@@ -15,6 +15,27 @@ build:
     - echo "-------   Start Build   -------"
     - /usr/local/go/bin/go build
 
+install_cni:
+  tags:
+    - sm_ci
+  stage: build
+  script:
+    - mkdir -p $HOME/go/src/
+    - cd $HOME/go/src/
+    - git clone https://${AOS_FIREWALL_TOKEN}@gitpct.epam.com/epmd-aepr/aos_cni_firewall.git
+    - cd $HOME/go/src/aos_cni_firewall/plugins/meta/aos-firewall
+    - /usr/local/go/bin/go build
+    - sudo cp -f $HOME/go/src/aos_cni_firewall/plugins/meta/aos-firewall/aos-firewall /opt/cni/bin
+
+    - cd $HOME/go/src/
+    - git clone https://${AOS_DNS_TOKEN}@gitpct.epam.com/epmd-aepr/aos_cni_dns.git
+    - cd $HOME/go/src/aos_cni_dns/plugins/meta/dnsname/
+    - /usr/local/go/bin/go build
+    - sudo cp -f $HOME/go/src/aos_cni_dns/plugins/meta/dnsname/dnsname /opt/cni/bin
+  after_script:
+    - rm -rf $HOME/go/src/aos_cni_firewall
+    - rm -rf $HOME/go/src/aos_cni_dns
+
 test:
   tags:
     - sm_ci
@@ -39,6 +60,3 @@ dependency:
     - sed -i '/aos_common/d' ./go.mod
     - cyclonedx-go -o /tmp/bom.xml
     - curl -X 'POST' 'https://aos-dependency.westeurope.cloudapp.azure.com/api/v1/bom' -H "X-Api-Key:$DEP_API_KEY" -F 'projectName=aos-servicemanager' -F 'autoCreate=true' -F 'bom=@/tmp/bom.xml'
-
-
-
