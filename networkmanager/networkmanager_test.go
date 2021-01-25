@@ -208,6 +208,62 @@ func TestHostName(t *testing.T) {
 	}
 }
 
+func TestExposedPortAndAllowedConnection(t *testing.T) {
+	serverPort := "9000"
+	containerServerPath := path.Join(tmpDir, "serviceServer")
+	serverServiceID := "serviceServer"
+
+	if err := createOCIContainerWitHttpServer(containerServerPath, serverServiceID, serverPort); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork(serverServiceID, "networkSP1",
+		networkmanager.NetworkParams{ExposedPorts: []string{serverPort}}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	defer manager.DeleteNetwork("networkSP1")
+
+	servIP, err := manager.GetServiceIP(serverServiceID, "networkSP1")
+	if err != nil {
+		t.Fatalf("Can't get ip address from service: %s", err)
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		if err := runOCIContainer(containerServerPath, serverServiceID); err != nil {
+			t.Errorf("Error: %s", err)
+		}
+	}()
+
+	containerClientPath := path.Join(tmpDir, "serviceClient")
+
+	log.Debug("CURL: ", string("curl "+servIP+":"+serverPort+" --connect-timeout 2"))
+
+	if err := createOCIContainer(containerClientPath, "serviceClient", []string{"curl", servIP + ":" + serverPort,
+		"--connect-timeout", "2"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("serviceClient", "networkSP2", networkmanager.NetworkParams{
+		AllowedConnections: []string{serverServiceID + "/" + serverPort}}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	if err := runOCIContainer(containerClientPath, "serviceClient"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	wg.Wait()
+
+	manager.DeleteNetwork("networkSP2")
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -238,6 +294,37 @@ func cleanup() {
 	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp dir: %s", err)
 	}
+}
+
+func createOCIContainerWitHttpServer(imagePath string, containerID string, port string) (err error) {
+	if err = createOCIContainer(imagePath, containerID, []string{"/usr/bin/python3.7", "/httpserver.py"}); err != nil {
+		return err
+	}
+
+	httpServerContent := `#!/usr/bin/python
+
+import threading
+import time
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+class MyServer(threading.Thread):
+	def run(self):
+		self.server = ThreadingHTTPServer(('',` + port + `), SimpleHTTPRequestHandler)
+		self.server.serve_forever()
+	def stop(self):
+		self.server.shutdown()
+
+if __name__ == '__main__':
+	s = MyServer()
+	s.start()
+	time.sleep(5)
+	s.stop()`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "httpserver.py"), []byte(httpServerContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
