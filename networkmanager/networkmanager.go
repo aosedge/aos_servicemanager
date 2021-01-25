@@ -204,13 +204,19 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		}
 	}
 
+	defer func() {
+		if err != nil {
+			manager.ipamSubnetwork.releaseIPNetPool(spID)
+		}
+	}()
+
 	if err = createNetNS(serviceID); err != nil {
 		return err
 	}
 
 	defer func() {
 		if err != nil {
-			manager.ipamSubnetwork.releaseIPNetPool(spID)
+			netns.DeleteNamed(serviceID)
 		}
 	}()
 
