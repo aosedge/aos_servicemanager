@@ -254,6 +254,97 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 	manager.DeleteNetwork("networkSP2")
 }
 
+func TestNetworkDNS(t *testing.T) {
+	container0Path := path.Join(tmpDir, "service0")
+
+	if err := createOCIContainer(container0Path, "service0", []string{"sleep", "10"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", "network0", networkmanager.NetworkParams{
+		Hostname: "myhost",
+		Aliases:  []string{"alias1"},
+	}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		if err := runOCIContainer(container0Path, "service0"); err != nil {
+			t.Errorf("Error: %s", err)
+		}
+	}()
+
+	container1Path := path.Join(tmpDir, "service1")
+
+	hostNames := []string{
+		"service0", "service0.network0",
+		"myhost",
+		"myhost.network0",
+		"alias1",
+		"alias1.network0",
+	}
+
+	// Other SP network
+
+	for _, hostName := range hostNames {
+		if err := createOCIContainer(container1Path, "service1", []string{"ping", hostName, "-c1"}); err != nil {
+			t.Fatalf("Can't create service container: %s", err)
+		}
+
+		if err := manager.AddServiceToNetwork("service1", "network1", networkmanager.NetworkParams{
+			ResolvConfFilePath: path.Join(container1Path, "etc", "resolv.conf"),
+		}); err != nil {
+			t.Fatalf("Can't add service to network: %s", err)
+		}
+
+		if err := runOCIContainer(container1Path, "service1"); err != nil {
+			t.Errorf("Error: %s", err)
+		}
+
+		if err := manager.RemoveServiceFromNetwork("service1", "network1"); err != nil {
+			t.Fatalf("Can't remove service from network: %s", err)
+		}
+	}
+
+	// Same SP network
+
+	for _, hostName := range hostNames {
+		if err := createOCIContainer(container1Path, "service1", []string{"ping", hostName, "-c1"}); err != nil {
+			t.Fatalf("Can't create service container: %s", err)
+		}
+
+		if err := manager.AddServiceToNetwork("service1", "network0", networkmanager.NetworkParams{
+			ResolvConfFilePath: path.Join(container1Path, "etc", "resolv.conf"),
+		}); err != nil {
+			t.Fatalf("Can't add service to network: %s", err)
+		}
+
+		if err := runOCIContainer(container1Path, "service1"); err != nil {
+			t.Errorf("Error: %s", err)
+		}
+
+		if err := manager.RemoveServiceFromNetwork("service1", "network0"); err != nil {
+			t.Fatalf("Can't remove service from network: %s", err)
+		}
+	}
+
+	wg.Wait()
+
+	if err := manager.DeleteNetwork("network0"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+
+	if err := manager.DeleteNetwork("network1"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/

@@ -120,6 +120,12 @@ type aosFirewallNetConf struct {
 	OutputAccess           []outputAccessConfig `json:"outputAccess,omitempty"`
 }
 
+type aosDNSNetConf struct {
+	Type         string          `json:"type"`
+	DomainName   string          `json:"domainName,omitempty"`
+	Capabilities map[string]bool `json:"capabilities,omitempty"`
+}
+
 type inputAccessConfig struct {
 	Port     string `json:"port"`
 	Protocol string `json:"protocol"`
@@ -234,7 +240,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		return err
 	}
 
-	runtimeConfig, err := prepareRuntimeConfig(serviceID)
+	runtimeConfig, err := prepareRuntimeConfig(serviceID, spID, params.Hostname, params.Aliases)
 	if err != nil {
 		return err
 	}
@@ -273,7 +279,13 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 	}
 
 	if params.ResolvConfFilePath != "" {
-		if err = writeResolveConfFile(params.ResolvConfFilePath, []string{"8.8.8.8"}, params.DNSSevers); err != nil {
+		mainServers := []string{"8.8.8.8"}
+
+		if len(result.DNS.Nameservers) != 0 {
+			mainServers = result.DNS.Nameservers
+		}
+
+		if err = writeResolveConfFile(params.ResolvConfFilePath, mainServers, params.DNSSevers); err != nil {
 			return err
 		}
 	}
@@ -569,6 +581,16 @@ func getBandwidthPluginConfig(ingressKbit, egressKbit uint64) (config json.RawMe
 	return json.Marshal(bandwidth)
 }
 
+func getDNSPluginConfig(spID string) (config json.RawMessage, err error) {
+	configDNS := &aosDNSNetConf{
+		Type:         "dnsname",
+		DomainName:   spID,
+		Capabilities: map[string]bool{"aliases": true},
+	}
+
+	return json.Marshal(configDNS)
+}
+
 func getRuntimeNetConfig(serviceID, spID string) (networkingConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf) {
 	networkingConfig = &cni.NetworkConfigList{
 		Name:       spID,
@@ -584,12 +606,27 @@ func getRuntimeNetConfig(serviceID, spID string) (networkingConfig *cni.NetworkC
 	return networkingConfig, runtimeConfig
 }
 
-func prepareRuntimeConfig(serviceID string) (runtimeConfig *cni.RuntimeConf, err error) {
-	return &cni.RuntimeConf{
+func prepareRuntimeConfig(serviceID, spID, hostname string, aliases []string) (runtimeConfig *cni.RuntimeConf, err error) {
+	runtimeConfig = &cni.RuntimeConf{
 		ContainerID: serviceID,
 		NetNS:       GetNetNsPathByName(serviceID),
 		IfName:      serviceIfName,
-	}, nil
+		Args: [][2]string{
+			{"IgnoreUnknown", "1"},
+			{"K8S_POD_NAME", serviceID},
+		},
+		CapabilityArgs: make(map[string]interface{}),
+	}
+
+	if hostname != "" {
+		aliases = append([]string{hostname}, aliases...)
+	}
+
+	if len(aliases) != 0 {
+		runtimeConfig.CapabilityArgs["aliases"] = map[string][]string{spID: aliases}
+	}
+
+	return runtimeConfig, nil
 }
 
 func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
@@ -626,6 +663,15 @@ func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
 
 		networkConfig.Plugins = append(networkConfig.Plugins, bandwidthConfig)
 	}
+
+	// DNS
+
+	dnsConfig, err := getDNSPluginConfig(spID)
+	if err != nil {
+		return nil, err
+	}
+
+	networkConfig.Plugins = append(networkConfig.Plugins, dnsConfig)
 
 	networkConfigBytes, err := json.Marshal(networkConfig)
 	if err != nil {
