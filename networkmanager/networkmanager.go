@@ -31,10 +31,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containernetworking/cni/libcni"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/allocator"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netns"
 
@@ -47,7 +49,7 @@ import (
 
 const (
 	bridgePrefix     = "br-"
-	containerIfName  = "eth0"
+	serviceIfName    = "eth0"
 	pathToNetNs      = "/run/netns"
 	cniBinPath       = "/opt/cni/bin"
 	pathToCNINetwork = "/var/lib/cni/networks/"
@@ -61,10 +63,10 @@ const (
 
 // NetworkManager network manager instance
 type NetworkManager struct {
+	sync.Mutex
 	cniConfig      *cni.CNIConfig
 	ipamSubnetwork *ipSubnetwork
 	hosts          []config.Host
-	sync.Mutex
 }
 
 // NetworkParams network parameters set for service
@@ -81,33 +83,32 @@ type NetworkParams struct {
 	ResolvConfFilePath string
 }
 
-type cniPlugins struct {
-	Name       string        `json:"name"`
-	CNIVersion string        `json:"cniVersion"`
-	Plugins    []interface{} `json:"plugins"`
+type cniNetwork struct {
+	Name       string            `json:"name"`
+	CNIVersion string            `json:"cniVersion"`
+	Plugins    []json.RawMessage `json:"plugins"`
 }
 
 type bridgeNetConf struct {
-	Type         string               `json:"type"`
-	BrName       string               `json:"bridge"`
-	IsGW         bool                 `json:"isGateway"`
-	IsDefaultGW  bool                 `json:"isDefaultGateway,omitempty"`
-	ForceAddress bool                 `json:"forceAddress,omitempty"`
-	IPMasq       bool                 `json:"ipMasq"`
-	MTU          int                  `json:"mtu,omitempty"`
-	HairpinMode  bool                 `json:"hairpinMode"`
-	PromiscMode  bool                 `json:"promiscMode,omitempty"`
-	Vlan         int                  `json:"vlan,omitempty"`
-	IPAM         allocator.IPAMConfig `json:"ipam"`
+	Type             string               `json:"type"`
+	Bridge           string               `json:"bridge"`
+	IsGateway        bool                 `json:"isGateway"`
+	IsDefaultGateway bool                 `json:"isDefaultGateway,omitempty"`
+	ForceAddress     bool                 `json:"forceAddress,omitempty"`
+	IPMasq           bool                 `json:"ipMasq"`
+	MTU              int                  `json:"mtu,omitempty"`
+	HairpinMode      bool                 `json:"hairpinMode"`
+	PromiscMode      bool                 `json:"promiscMode,omitempty"`
+	Vlan             int                  `json:"vlan,omitempty"`
+	IPAM             allocator.IPAMConfig `json:"ipam"`
 }
 
 type bandwidthNetConf struct {
 	Type         string `json:"type,omitempty"`
 	IngressRate  uint64 `json:"ingressRate,omitempty"`
 	IngressBurst uint64 `json:"ingressBurst,omitempty"`
-
-	EgressRate  uint64 `json:"egressRate,omitempty"`
-	EgressBurst uint64 `json:"egressBurst,omitempty"`
+	EgressRate   uint64 `json:"egressRate,omitempty"`
+	EgressBurst  uint64 `json:"egressBurst,omitempty"`
 }
 
 type aosFirewallNetConf struct {
@@ -199,6 +200,10 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
+	if err = manager.isServiceInNetwork(serviceID, spID); err == nil {
+		return err
+	}
+
 	ipSubnet, exist := manager.ipamSubnetwork.tryToGetExistIPNetFromPool(spID)
 	if !exist {
 		if ipSubnet, err = checkExistNetInterface(bridgePrefix + spID); err != nil {
@@ -229,14 +234,13 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		return err
 	}
 
-	runtimeConfig := &cni.RuntimeConf{
-		ContainerID: serviceID,
-		NetNS:       path.Join(pathToNetNs, serviceID),
-		IfName:      containerIfName,
+	runtimeConfig, err := prepareRuntimeConfig(serviceID)
+	if err != nil {
+		return err
 	}
 
-	if err = manager.cniConfig.CheckNetworkList(context.Background(), netConfig, runtimeConfig); err == nil {
-		return fmt.Errorf("service %s already in SP network %s", serviceID, spID)
+	if _, err = manager.cniConfig.ValidateNetworkList(context.Background(), netConfig); err != nil {
+		return err
 	}
 
 	resAdd, err := manager.cniConfig.AddNetworkList(context.Background(), netConfig, runtimeConfig)
@@ -244,7 +248,16 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		return err
 	}
 
-	result, _ := current.GetResult(resAdd)
+	defer func() {
+		if err != nil {
+			manager.cniConfig.DelNetworkList(context.Background(), netConfig, runtimeConfig)
+		}
+	}()
+
+	result, err := current.GetResult(resAdd)
+	if err != nil {
+		return err
+	}
 
 	if len(result.IPs) == 0 {
 		return fmt.Errorf("error getting IP address for service %s", serviceID)
@@ -280,21 +293,19 @@ func (manager *NetworkManager) RemoveServiceFromNetwork(serviceID, spID string) 
 
 	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service from network")
 
-	if result, _ := manager.isServiceInNetwork(serviceID, spID); !result {
-		log.Warnf("Service %s is not in network %s", serviceID, spID)
-
-		return nil
+	if err = manager.isServiceInNetwork(serviceID, spID); err != nil {
+		return err
 	}
 
 	if err = manager.removeServiceFromNetwork(serviceID, spID); err != nil {
-		return nil
+		return err
 	}
 
 	return nil
 }
 
 // IsServiceInNetwork returns true if service belongs to network
-func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (result bool, err error) {
+func (manager *NetworkManager) IsServiceInNetwork(serviceID, spID string) (err error) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -310,12 +321,13 @@ func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, 
 
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Get service IP")
 
-	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
-
-	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(netConfig, runtimeConfig)
-
-	if err != nil || cachedResult == nil {
+	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(getRuntimeNetConfig(serviceID, spID))
+	if err != nil {
 		return "", err
+	}
+
+	if cachedResult == nil {
+		return "", fmt.Errorf("service %s not found in network %s", serviceID, spID)
 	}
 
 	result, err := current.GetResult(cachedResult)
@@ -370,42 +382,38 @@ func (manager *NetworkManager) DeleteAllNetworks() (err error) {
  * Private
  ******************************************************************************/
 
-func (manager *NetworkManager) isServiceInNetwork(serviceID, spID string) (result bool, err error) {
-	resByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
+func (manager *NetworkManager) isServiceInNetwork(serviceID, spID string) (err error) {
+	cachedResult, err := manager.cniConfig.GetNetworkListCachedResult(getRuntimeNetConfig(serviceID, spID))
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	if resByte == nil {
-		return false, fmt.Errorf("Service is not in network")
+	if cachedResult == nil {
+		return errors.Errorf("service %s is not in network %s", serviceID, spID)
 	}
 
-	netConfig, err := cni.ConfListFromBytes(resByte)
-
-	ctx := context.Background()
-	err = manager.cniConfig.CheckNetworkList(ctx, netConfig, runtimeConfig)
-
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return nil
 }
 
 func (manager *NetworkManager) removeServiceFromNetwork(serviceID, spID string) (err error) {
 	defer netns.DeleteNamed(serviceID)
 
-	netConfigByte, runtimeConfig, err := manager.getCNICachedResult(serviceID, spID)
+	networkConfig, runtimeConfig := getRuntimeNetConfig(serviceID, spID)
+
+	confBytes, runtimeConfig, err := manager.cniConfig.GetNetworkListCachedConfig(networkConfig, runtimeConfig)
 	if err != nil {
 		return err
 	}
 
-	netConfig, err := cni.ConfListFromBytes(netConfigByte)
-	if err != nil {
+	if confBytes == nil {
+		return fmt.Errorf("service %s not found in network %s", serviceID, spID)
+	}
+
+	if networkConfig, err = libcni.ConfListFromBytes(confBytes); err != nil {
 		return err
 	}
 
-	if err = manager.cniConfig.DelNetworkList(context.Background(), netConfig, runtimeConfig); err != nil {
+	if err = manager.cniConfig.DelNetworkList(context.Background(), networkConfig, runtimeConfig); err != nil {
 		return err
 	}
 
@@ -424,29 +432,7 @@ func (manager *NetworkManager) postSPNetworkClear(spID string) (err error) {
 	return nil
 }
 
-func (manager *NetworkManager) getCNICachedResult(serviceID, spID string) (cachedConfig []byte, runtimeConfig *cni.RuntimeConf, err error) {
-	runtimeConfig, netConfig := getRuntimeNetConfig(serviceID, spID)
-	cachedConfig, _, err = manager.cniConfig.GetNetworkListCachedConfig(netConfig, runtimeConfig)
-
-	return cachedConfig, runtimeConfig, err
-}
-
-func getRuntimeNetConfig(serviceID, spID string) (*cni.RuntimeConf, *cni.NetworkConfigList) {
-	runtimeConfig := &cni.RuntimeConf{
-		ContainerID: serviceID,
-		NetNS:       path.Join(pathToNetNs, serviceID),
-		IfName:      containerIfName,
-	}
-
-	networkingConfig := &cni.NetworkConfigList{
-		Name:       spID,
-		CNIVersion: cniVersion,
-	}
-
-	return runtimeConfig, networkingConfig
-}
-
-func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, spIDFileName string) error {
+func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, spIDFileName string) (err error) {
 	// skipped files
 	lockFileName := "lock"
 	reservedFileName := "last_reserved_ip.0"
@@ -460,7 +446,7 @@ func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, sp
 		return nil
 	}
 
-	if result, _ := manager.isServiceInNetwork(serviceID, spIDFileName); !result {
+	if err = manager.isServiceInNetwork(serviceID, spIDFileName); err != nil {
 		return nil
 	}
 
@@ -482,7 +468,7 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	var cniServiceInfo []string
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line != containerIfName {
+		if line != serviceIfName {
 			cniServiceInfo = append(cniServiceInfo, line)
 		}
 	}
@@ -493,15 +479,14 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	return cniServiceInfo[0], nil
 }
 
-func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
-	params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList, err error) {
+func getBridgePluginConfig(spID string, subnetwork *net.IPNet) (config json.RawMessage, err error) {
 	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
 	configBridge := &bridgeNetConf{
 		Type:        "bridge",
-		BrName:      bridgePrefix + spID,
-		IsGW:        true,
+		Bridge:      bridgePrefix + spID,
+		IsGateway:   true,
 		IPMasq:      true,
 		HairpinMode: true,
 		IPAM: allocator.IPAMConfig{
@@ -519,106 +504,52 @@ func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
 		},
 	}
 
-	dataBridge, _ := json.Marshal(configBridge)
-
-	plugins := []*cni.NetworkConfig{
-		{
-			Network: &types.NetConf{
-				Type: configBridge.Type,
-				IPAM: types.IPAM{Type: configBridge.IPAM.Type},
-			},
-			Bytes: dataBridge,
-		},
-	}
-
-	networkPlugin := cniPlugins{
-		Name:       spID,
-		CNIVersion: cniVersion,
-		Plugins: []interface{}{
-			configBridge,
-		},
-	}
-
-	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
-		aosFirewall := &aosFirewallNetConf{
-			Type:                   "aos-firewall",
-			UUID:                   serviceID,
-			IptablesAdminChainName: adminChaniPrefix + serviceID,
-			AllowPublicConnections: true,
-		}
-
-		//ExposedPorts format port/protocol
-		for _, exposePort := range params.ExposedPorts {
-			portConfig := strings.Split(exposePort, "/")
-			if len(portConfig) > 2 || len(portConfig) == 0 {
-				return nil, fmt.Errorf("unsupported ExposedPorts format %s", exposePort)
-			}
-
-			input := inputAccessConfig{Port: portConfig[0], Protocol: "tcp"}
-			if len(portConfig) == 2 {
-				input.Protocol = portConfig[1]
-			}
-
-			aosFirewall.InputAccess = append(aosFirewall.InputAccess, input)
-		}
-
-		//AllowedConnections format service-UUID/port/protocol
-		for _, allowConn := range params.AllowedConnections {
-			connConf := strings.Split(allowConn, "/")
-			if len(connConf) > 3 || len(connConf) < 2 {
-				return nil, fmt.Errorf("unsupported AllowedConnections format %s", connConf)
-			}
-
-			output := outputAccessConfig{UUID: connConf[0], Port: connConf[1], Protocol: "tcp"}
-			if len(connConf) == 3 {
-				output.Protocol = connConf[2]
-			}
-
-			aosFirewall.OutputAccess = append(aosFirewall.OutputAccess, output)
-		}
-
-		networkPlugin.Plugins = append(networkPlugin.Plugins, aosFirewall)
-		dataAosFireWall, _ := json.Marshal(aosFirewall)
-		aosFW := &cni.NetworkConfig{
-			Network: &types.NetConf{
-				Type: aosFirewall.Type,
-			},
-			Bytes: dataAosFireWall,
-		}
-		plugins = append(plugins, aosFW)
-	}
-
-	if params.IngressKbit > 0 || params.EgressKbit > 0 {
-		bandwith := prepareTrafficControlPlugin(params.IngressKbit, params.EgressKbit)
-		if bandwith != nil {
-			networkPlugin.Plugins = append(networkPlugin.Plugins, bandwith)
-			dataBandwith, _ := json.Marshal(bandwith)
-			tc := &cni.NetworkConfig{
-				Network: &types.NetConf{
-					Type: bandwith.Type,
-				},
-				Bytes: []byte(dataBandwith),
-			}
-			plugins = append(plugins, tc)
-		}
-
-	}
-	dataNetwork, _ := json.Marshal(networkPlugin)
-
-	return &cni.NetworkConfigList{
-		Name:       networkPlugin.Name,
-		CNIVersion: networkPlugin.CNIVersion,
-		Plugins:    plugins,
-		Bytes:      []byte(dataNetwork),
-	}, nil
+	return json.Marshal(configBridge)
 }
 
-func prepareTrafficControlPlugin(ingressKbit, egressKbit uint64) (bandwidth *bandwidthNetConf) {
-	if ingressKbit == 0 && egressKbit == 0 {
-		return nil
+func getFirewallPluginConfig(serviceID string, exposedPorts, allowedConnections []string) (config json.RawMessage, err error) {
+	aosFirewall := &aosFirewallNetConf{
+		Type:                   "aos-firewall",
+		UUID:                   serviceID,
+		IptablesAdminChainName: adminChaniPrefix + serviceID,
+		AllowPublicConnections: true,
 	}
 
-	bandwidth = &bandwidthNetConf{
+	// ExposedPorts format port/protocol
+	for _, exposePort := range exposedPorts {
+		portConfig := strings.Split(exposePort, "/")
+		if len(portConfig) > 2 || len(portConfig) == 0 {
+			return nil, fmt.Errorf("unsupported ExposedPorts format %s", exposePort)
+		}
+
+		input := inputAccessConfig{Port: portConfig[0], Protocol: "tcp"}
+		if len(portConfig) == 2 {
+			input.Protocol = portConfig[1]
+		}
+
+		aosFirewall.InputAccess = append(aosFirewall.InputAccess, input)
+	}
+
+	// AllowedConnections format service-UUID/port/protocol
+	for _, allowConn := range allowedConnections {
+		connConf := strings.Split(allowConn, "/")
+		if len(connConf) > 3 || len(connConf) < 2 {
+			return nil, fmt.Errorf("unsupported AllowedConnections format %s", connConf)
+		}
+
+		output := outputAccessConfig{UUID: connConf[0], Port: connConf[1], Protocol: "tcp"}
+		if len(connConf) == 3 {
+			output.Protocol = connConf[2]
+		}
+
+		aosFirewall.OutputAccess = append(aosFirewall.OutputAccess, output)
+	}
+
+	return json.Marshal(aosFirewall)
+}
+
+func getBandwidthPluginConfig(ingressKbit, egressKbit uint64) (config json.RawMessage, err error) {
+	bandwidth := &bandwidthNetConf{
 		Type: "bandwidth",
 	}
 
@@ -635,5 +566,71 @@ func prepareTrafficControlPlugin(ingressKbit, egressKbit uint64) (bandwidth *ban
 		bandwidth.EgressBurst = burst
 	}
 
-	return bandwidth
+	return json.Marshal(bandwidth)
+}
+
+func getRuntimeNetConfig(serviceID, spID string) (networkingConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf) {
+	networkingConfig = &cni.NetworkConfigList{
+		Name:       spID,
+		CNIVersion: cniVersion,
+	}
+
+	runtimeConfig = &cni.RuntimeConf{
+		ContainerID: serviceID,
+		NetNS:       path.Join(pathToNetNs, serviceID),
+		IfName:      serviceIfName,
+	}
+
+	return networkingConfig, runtimeConfig
+}
+
+func prepareRuntimeConfig(serviceID string) (runtimeConfig *cni.RuntimeConf, err error) {
+	return &cni.RuntimeConf{
+		ContainerID: serviceID,
+		NetNS:       GetNetNsPathByName(serviceID),
+		IfName:      serviceIfName,
+	}, nil
+}
+
+func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
+	params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList, err error) {
+	networkConfig := cniNetwork{Name: spID, CNIVersion: cniVersion}
+
+	// Bridge
+
+	bridgeConfig, err := getBridgePluginConfig(spID, subnetwork)
+	if err != nil {
+		return nil, err
+	}
+
+	networkConfig.Plugins = append(networkConfig.Plugins, bridgeConfig)
+
+	// Firewall
+
+	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
+		firefallConfig, err := getFirewallPluginConfig(serviceID, params.ExposedPorts, params.AllowedConnections)
+		if err != nil {
+			return nil, err
+		}
+
+		networkConfig.Plugins = append(networkConfig.Plugins, firefallConfig)
+	}
+
+	// Bandwidth
+
+	if params.IngressKbit > 0 || params.EgressKbit > 0 {
+		bandwidthConfig, err := getBandwidthPluginConfig(params.IngressKbit, params.EgressKbit)
+		if err != nil {
+			return nil, err
+		}
+
+		networkConfig.Plugins = append(networkConfig.Plugins, bandwidthConfig)
+	}
+
+	networkConfigBytes, err := json.Marshal(networkConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return cni.ConfListFromBytes(networkConfigBytes)
 }

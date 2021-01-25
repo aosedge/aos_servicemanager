@@ -80,8 +80,7 @@ func TestAddRemoveService(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	result, err := manager.IsServiceInNetwork("servicenm0", "network0")
-	if err != nil && !result {
+	if err := manager.IsServiceInNetwork("servicenm0", "network0"); err != nil {
 		t.Errorf("Service should be in network %s", err)
 	}
 
@@ -93,7 +92,7 @@ func TestAddRemoveService(t *testing.T) {
 		t.Fatalf("Can't remove service from network: %s", err)
 	}
 
-	if result, _ := manager.IsServiceInNetwork("servicenm0", "network0"); result {
+	if err := manager.IsServiceInNetwork("servicenm0", "network0"); err == nil {
 		t.Error("Service should not be in network")
 	}
 

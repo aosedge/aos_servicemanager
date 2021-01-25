@@ -27,7 +27,6 @@ import (
 	"syscall"
 
 	"github.com/apparentlymart/go-cidr/cidr"
-	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -58,11 +57,9 @@ func networkOverlaps(netX *net.IPNet, netY *net.IPNet) (sameIPNet bool) {
 	return netX.Contains(netY.IP) || netY.Contains(netX.IP)
 }
 
-func removeBridgeInterface(spID string) error {
+func removeBridgeInterface(spID string) (err error) {
 	br, err := netlink.LinkByName(bridgePrefix + spID)
 	if err != nil {
-		log.Warnf("Link %s error: %s", bridgePrefix+spID, err)
-
 		return nil
 	}
 
@@ -77,8 +74,8 @@ func removeBridgeInterface(spID string) error {
 	return nil
 }
 
-func createNetNS(name string) error {
-	if _, err := os.Stat(path.Join(pathToNetNs, name)); os.IsNotExist(err) {
+func createNetNS(name string) (err error) {
+	if _, err = os.Stat(path.Join(pathToNetNs, name)); os.IsNotExist(err) {
 		origin, err := netns.Get()
 		if err != nil {
 			return err
@@ -97,7 +94,7 @@ func createNetNS(name string) error {
 			return err
 		}
 
-		if err := netlink.LinkSetUp(lo); err != nil {
+		if err = netlink.LinkSetUp(lo); err != nil {
 			return err
 		}
 	}
