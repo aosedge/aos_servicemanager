@@ -25,7 +25,10 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
@@ -212,8 +215,6 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 
 	containerClientPath := path.Join(tmpDir, "serviceClient")
 
-	log.Debug("CURL: ", string("curl "+servIP+":"+serverPort+" --connect-timeout 2"))
-
 	if err := createOCIContainer(containerClientPath, "serviceClient", []string{"curl", servIP + ":" + serverPort,
 		"--connect-timeout", "2"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
@@ -320,6 +321,82 @@ func TestNetworkDNS(t *testing.T) {
 	}
 
 	if err := manager.DeleteNetwork("network1"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+}
+
+func TestBandwidth(t *testing.T) {
+	container0Path := path.Join(tmpDir, "service0")
+
+	var setULSpeed uint64 = 1000
+	var setDLSpeed uint64 = 4000
+
+	if err := createOCIContainer(container0Path, "service0", []string{"iperf", "-s"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("service0", "network0", networkmanager.NetworkParams{
+		IngressKbit: setDLSpeed,
+		EgressKbit:  setULSpeed,
+	}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	go runOCIContainer(container0Path, "service0")
+
+	ip, err := manager.GetServiceIP("service0", "network0")
+	if err != nil {
+		t.Fatalf("Can't get ip address from service: %s", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	output, err := exec.Command("iperf", "-c", ip, "-d", "-r", "-t5", "-yc").CombinedOutput()
+	if err != nil {
+		t.Fatalf("iperf failed: %s", err)
+	}
+
+	ulSpeed := -1.0
+	dlSpeed := -1.0
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		result := strings.Split(line, ",")
+		if len(result) >= 9 {
+			if result[4] == "5001" {
+				value, err := strconv.ParseFloat(result[8], 64)
+				if err != nil {
+					t.Errorf("Can't parse ul speed: %s", err)
+					continue
+				}
+				dlSpeed = value / 1000
+			} else {
+				value, err := strconv.ParseFloat(result[8], 64)
+				if err != nil {
+					t.Errorf("Can't parse ul speed: %s", err)
+					continue
+				}
+				ulSpeed = value / 1000
+			}
+		}
+	}
+
+	if ulSpeed < 0.0 || dlSpeed < 0.0 {
+		t.Error("Can't determine UL/DL speed")
+	}
+
+	// Max delte 2%
+	delta := 1.02
+
+	if ulSpeed > float64(setULSpeed)*delta || dlSpeed > float64(setDLSpeed)*delta {
+		t.Errorf("Speed limit exceeds expected level: DL %0.2f, UL %0.2f", dlSpeed, ulSpeed)
+	}
+
+	if err := killOCIContainer("service0"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	if err := manager.DeleteNetwork("network0"); err != nil {
 		t.Fatalf("Can't Delete network: %s", err)
 	}
 }

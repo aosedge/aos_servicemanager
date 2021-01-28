@@ -64,10 +64,6 @@ type pythonImage struct {
 	version   int
 }
 
-// Generates test image with iperf server
-type iperfImage struct {
-}
-
 // Generates test image with ftp server
 type ftpImage struct {
 	ftpDir       string
@@ -596,94 +592,6 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	var status amqp.ServiceInfo
 	if status = <-sender.statusChannel; status.Error == "" {
 		t.Fatalf("SM can remove service when device resource is not released")
-	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
-}
-
-func TestNetworkSpeed(t *testing.T) {
-	sender := newTestSender()
-
-	launcher, err := newTestLauncher(new(iperfImage), sender, nil, networkProvider)
-	if err != nil {
-		t.Fatalf("Can't create launcher: %s", err)
-	}
-	defer launcher.Close()
-
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
-		t.Fatalf("Can't set users: %s", err)
-	}
-
-	numServices := 2
-
-	for i := 0; i < numServices; i++ {
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i)}, chains, certs)
-	}
-
-	for i := 0; i < numServices; i++ {
-		if status := <-sender.statusChannel; status.Error != "" {
-			t.Errorf("%s, service ID %s, aosVersion: %d", status.Error, status.ID, status.AosVersion)
-		}
-	}
-
-	for i := 0; i < numServices; i++ {
-		serviceID := fmt.Sprintf("service%d", i)
-
-		service, err := launcher.serviceProvider.GetService(serviceID)
-		if err != nil {
-			t.Errorf("Can't get service: %s", err)
-			continue
-		}
-
-		addr, err := networkProvider.GetServiceIP(service.ID, service.ServiceProvider)
-		if err != nil {
-			t.Errorf("Can't get ip address: %s", err)
-			continue
-		}
-
-		output, err := exec.Command("iperf", "-c"+addr, "-d", "-r", "-t2", "-yc").Output()
-		if err != nil {
-			t.Errorf("Iperf failed: %s", err)
-			continue
-		}
-
-		ulSpeed := -1
-		dlSpeed := -1
-
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			result := strings.Split(line, ",")
-			if len(result) >= 9 {
-				if result[4] == "5001" {
-					value, err := strconv.ParseInt(result[8], 10, 64)
-					if err != nil {
-						t.Errorf("Can't parse ul speed: %s", err)
-						continue
-					}
-					dlSpeed = int(value) / 1000
-				} else {
-					value, err := strconv.ParseUint(result[8], 10, 64)
-					if err != nil {
-						t.Errorf("Can't parse ul speed: %s", err)
-						continue
-					}
-					ulSpeed = int(value) / 1000
-				}
-			}
-		}
-
-		if ulSpeed == -1 || dlSpeed == -1 {
-			t.Error("Can't determine ul/dl speed")
-		}
-
-		deltaDownload := (8192 * 0.2) / 10 // 2%
-		deltaUpload := (4096 * 0.2) / 10   // 2%
-
-		if ulSpeed > int(4096+deltaUpload) || dlSpeed > int(8192+deltaDownload) {
-			t.Errorf("Speed limit exceeds: dl %d, ul %d", dlSpeed, ulSpeed)
-		}
 	}
 
 	if err := launcher.RemoveAllServices(); err != nil {
@@ -1726,75 +1634,6 @@ func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", downloader.serviceID,
 		fmt.Sprintf("%d", downloader.version)}
-
-	dataImgSpec, err := json.Marshal(ociImgSpec)
-	if err != nil {
-		return outputFile, err
-	}
-
-	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
-	if err != nil {
-		return outputFile, err
-	}
-
-	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
-		return outputFile, err
-	}
-
-	imageFile, err := ioutil.TempFile("", "aos_")
-	if err != nil {
-		return outputFile, err
-	}
-	outputFile = imageFile.Name()
-	imageFile.Close()
-
-	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, err
-	}
-
-	return outputFile, nil
-}
-
-func (downloader iperfImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
-	imageDir, err := ioutil.TempDir("", "aos_")
-	if err != nil {
-		log.Error("Can't create image dir : ", err)
-		return outputFile, err
-	}
-	defer os.RemoveAll(imageDir)
-
-	// create dir
-	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, err
-	}
-
-	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
-	if err != nil {
-		return outputFile, err
-	}
-
-	var uploadSpeed uint64 = 4096
-	var downloadSpeed uint64 = 8192
-
-	aosSrvConfig := generateAosSrvConfig()
-	aosSrvConfig.Quotas.UploadSpeed = &uploadSpeed
-	aosSrvConfig.Quotas.DownloadSpeed = &downloadSpeed
-	aosSrvConfig.Devices = []Device{{Name: "random", Permissions: "rwm"}}
-
-	data, err := json.Marshal(aosSrvConfig)
-	if err != nil {
-		return outputFile, err
-	}
-
-	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
-	if err != nil {
-		return outputFile, err
-	}
-
-	ociImgSpec := imagespec.Image{}
-	ociImgSpec.OS = "Linux"
-	ociImgSpec.Config.Cmd = []string{"iperf", "-s"}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
