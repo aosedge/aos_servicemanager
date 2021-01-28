@@ -25,7 +25,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"sync"
 	"testing"
 
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
@@ -126,7 +125,7 @@ func TestInternet(t *testing.T) {
 func TestInterServiceConnection(t *testing.T) {
 	container0Path := path.Join(tmpDir, "servicenm2")
 
-	if err := createOCIContainer(container0Path, "servicenm2", []string{"sleep", "12"}); err != nil {
+	if err := createOCIContainer(container0Path, "servicenm2", []string{"sleep", "infinity"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
@@ -134,17 +133,7 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
-		if err := runOCIContainer(container0Path, "servicenm2"); err != nil {
-			t.Errorf("Error: %s", err)
-		}
-	}()
+	go runOCIContainer(container0Path, "servicenm2")
 
 	container1Path := path.Join(tmpDir, "servicenm3")
 
@@ -168,7 +157,9 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Errorf("Error: %s", err)
 	}
 
-	wg.Wait()
+	if err := killOCIContainer("servicenm2"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
 
 	if err := manager.DeleteNetwork("network0"); err != nil {
 		t.Fatalf("Can't Delete network: %s", err)
@@ -212,24 +203,12 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	defer manager.DeleteNetwork("networkSP1")
-
 	servIP, err := manager.GetServiceIP(serverServiceID, "networkSP1")
 	if err != nil {
 		t.Fatalf("Can't get ip address from service: %s", err)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
-		if err := runOCIContainer(containerServerPath, serverServiceID); err != nil {
-			t.Errorf("Error: %s", err)
-		}
-	}()
+	go runOCIContainer(containerServerPath, serverServiceID)
 
 	containerClientPath := path.Join(tmpDir, "serviceClient")
 
@@ -249,15 +228,23 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 		t.Errorf("Error: %s", err)
 	}
 
-	wg.Wait()
+	if err := killOCIContainer("serviceServer"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
 
-	manager.DeleteNetwork("networkSP2")
+	if err := manager.DeleteNetwork("networkSP1"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
+
+	if err := manager.DeleteNetwork("networkSP2"); err != nil {
+		t.Fatalf("Can't Delete network: %s", err)
+	}
 }
 
 func TestNetworkDNS(t *testing.T) {
 	container0Path := path.Join(tmpDir, "service0")
 
-	if err := createOCIContainer(container0Path, "service0", []string{"sleep", "10"}); err != nil {
+	if err := createOCIContainer(container0Path, "service0", []string{"sleep", "infinity"}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
@@ -268,17 +255,7 @@ func TestNetworkDNS(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
-		if err := runOCIContainer(container0Path, "service0"); err != nil {
-			t.Errorf("Error: %s", err)
-		}
-	}()
+	go runOCIContainer(container0Path, "service0")
 
 	container1Path := path.Join(tmpDir, "service1")
 
@@ -334,7 +311,9 @@ func TestNetworkDNS(t *testing.T) {
 		}
 	}
 
-	wg.Wait()
+	if err := killOCIContainer("service0"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
 
 	if err := manager.DeleteNetwork("network0"); err != nil {
 		t.Fatalf("Can't Delete network: %s", err)
@@ -397,9 +376,7 @@ class MyServer(threading.Thread):
 
 if __name__ == '__main__':
 	s = MyServer()
-	s.start()
-	time.sleep(5)
-	s.stop()`
+	s.start()`
 
 	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "httpserver.py"), []byte(httpServerContent), 0644); err != nil {
 		return err
@@ -477,6 +454,15 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 func runOCIContainer(imagePath string, containerID string) (err error) {
 	output, err := exec.Command("runc", "run", "-b", imagePath, containerID).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("message: %s, err: %s", string(output), err)
+	}
+
+	return nil
+}
+
+func killOCIContainer(containerID string) (err error) {
+	output, err := exec.Command("runc", "delete", "-f", containerID).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("message: %s, err: %s", string(output), err)
 	}
