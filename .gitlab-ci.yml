@@ -41,6 +41,7 @@ test:
     - sm_ci
   stage: test
   script:
+    - sudo iptables -P FORWARD ACCEPT
     - sudo systemctl start rabbitmq-server.service
     - sudo cp ./ci/crt.pem  /etc/ssl/certs/
     - echo "-------   Run Unit tests   -------"
