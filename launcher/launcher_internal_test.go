@@ -167,7 +167,7 @@ func TestMain(m *testing.M) {
 func TestInstallRemove(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -236,7 +236,7 @@ func TestInstallRemove(t *testing.T) {
 func TestRemoveAllServices(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -285,7 +285,7 @@ func TestRemoveAllServices(t *testing.T) {
 func TestCheckServicesConsistency(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -337,7 +337,7 @@ func TestCheckServicesConsistency(t *testing.T) {
 func TestAutoStart(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -367,7 +367,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -414,7 +414,7 @@ func TestAutoStart(t *testing.T) {
 func TestErrors(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -463,7 +463,7 @@ func TestUpdate(t *testing.T) {
 	sender := newTestSender()
 	imageDownloader := new(pythonImage)
 
-	launcher, err := newTestLauncher(imageDownloader, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(imageDownloader, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -540,7 +540,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 	deviceManager.isValid = false
 
 	// create launcher instance
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -560,7 +560,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -593,7 +593,7 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 func TestVisPermissions(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -626,7 +626,7 @@ func TestVisPermissions(t *testing.T) {
 func TestUsersServices(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -730,7 +730,7 @@ func TestUsersServices(t *testing.T) {
 func TestServiceTTL(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -792,7 +792,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, monitor, networkProvider)
+	launcher, err := newTestLauncher(new(pythonImage), sender, monitor)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -858,7 +858,7 @@ func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
 
 	// Set limit for 2 files + some buffer
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -930,7 +930,7 @@ func TestServiceStorage(t *testing.T) {
 func TestServiceState(t *testing.T) {
 	sender := newTestSender()
 
-	launcher, err := newTestLauncher(&ftpImage{"/", 1024 * 24, 256, 0, nil}, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(&ftpImage{"/", 1024 * 24, 256, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1083,7 +1083,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1114,7 +1114,7 @@ func TestTmpDir(t *testing.T) {
 
 	// Test tmp limit
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil, networkProvider); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1152,7 +1152,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil, networkProvider); err != nil {
+	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1383,7 +1383,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	digests := []digest.Digest{digest.NewDigestFromBytes(digest.SHA256, []byte(testString))}
 
-	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil, networkProvider)
+	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1423,7 +1423,7 @@ func TestServiceWithLayers(t *testing.T) {
 }
 
 func TestSetServiceResources(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create test launcher: %s", err)
 	}
@@ -1469,7 +1469,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	// set fake resource system to valid state (UT emulation)
 	deviceManager.isValid = true
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1508,7 +1508,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), sender, nil, nil)
+	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1562,10 +1562,10 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 func newTestLauncher(
 	downloader downloader, sender Sender,
-	monitor ServiceMonitor, network NetworkProvider) (launcher *Launcher, err error) {
+	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
 		DefaultServiceTTL: 30}, downloader,
-		sender, &serviceProvider, &layerProviderForTest, monitor, network, &deviceManager)
+		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager)
 	if err != nil {
 		return nil, err
 	}
@@ -2131,7 +2131,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil, nil)
+	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
 	}
