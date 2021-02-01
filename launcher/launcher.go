@@ -241,6 +241,7 @@ type Sender interface {
 type NetworkProvider interface {
 	AddServiceToNetwork(serviceID, spID string, params networkmanager.NetworkParams) (err error)
 	RemoveServiceFromNetwork(serviceID, spID string) (err error)
+	IsServiceInNetwork(serviceID, spID string) (err error)
 	GetServiceIP(serviceID, spID string) (ip string, err error)
 	DeleteNetwork(spID string) (err error)
 }
@@ -1317,11 +1318,13 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 	}
 
 	if launcher.network != nil {
-		if err := launcher.network.RemoveServiceFromNetwork(
-			service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
-			if retErr == nil {
-				log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
-				retErr = err
+		if err := launcher.network.IsServiceInNetwork(service.ID, service.ServiceProvider); err == nil {
+			if err := launcher.network.RemoveServiceFromNetwork(
+				service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
+				if retErr == nil {
+					log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
+					retErr = err
+				}
 			}
 		}
 	}
