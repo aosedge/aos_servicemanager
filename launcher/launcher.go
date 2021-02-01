@@ -358,6 +358,11 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		return nil, err
 	}
 
+	// Create storage dir
+	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
+		return nil, err
+	}
+
 	return launcher, nil
 }
 
@@ -917,11 +922,6 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 	servicePath := path.Join(launcher.config.WorkingDir, serviceDir)
 	// Create services dir if needed
 	if err = os.MkdirAll(servicePath, 0755); err != nil {
-		return err
-	}
-
-	// Create storage dir if needed
-	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
 		return err
 	}
 
