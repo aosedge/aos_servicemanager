@@ -1571,8 +1571,14 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
+	pathToNetNS := ""
+
+	if launcher.network != nil {
+		pathToNetNS = networkmanager.GetNetNsPathByName(serviceInfo.ID)
+	}
+
 	// generate config.json
-	pathToNetNS := networkmanager.GetNetNsPathByName(serviceInfo.ID)
+
 	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ocConfigFile), pathToNetNS)
 	if err != nil {
 		return service, err
