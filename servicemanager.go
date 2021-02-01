@@ -305,21 +305,19 @@ func (sm *serviceManager) close() {
 	}
 }
 
-func (sm *serviceManager) sendInitialSetup() (err error) {
-	if sm.launcher.CheckServicesConsistency() != nil || sm.layerMgr.CheckLayersConsistency() != nil {
-		if err := launcher.Cleanup(sm.cfg); err != nil {
-			log.Errorf("Can't cleanup launcher: %s", err)
-		}
-
-		if err := sm.launcher.RemoveAllServices(); err != nil {
-			log.Errorf("Can't cleanup launcher: %s", err)
-		}
-
-		if err := sm.layerMgr.Cleanup(); err != nil {
-			log.Errorf("Can't cleanup layermanager: %s", err)
-		}
+func (sm *serviceManager) checkConsistency() (err error) {
+	if err = sm.launcher.CheckServicesConsistency(); err != nil {
+		return err
 	}
 
+	if err = sm.layerMgr.CheckLayersConsistency(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (sm *serviceManager) sendInitialSetup() (err error) {
 	initialList, err := sm.launcher.GetServicesInfo()
 	if err != nil {
 		log.Fatalf("Can't get services: %s", err)
@@ -578,13 +576,30 @@ func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
 	sm.launcher.FinishProcessingLayers()
 }
 
-func (sm *serviceManager) run() {
+func (sm *serviceManager) run() (err error) {
 	for {
 		var orgNames []string
-		var err error
 
 		if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
 			log.Fatalf("Can't set users: %s", err)
+		}
+
+		if err = sm.checkConsistency(); err != nil {
+			log.Errorf("Consistency error: %s. Cleanup...", err)
+
+			sm.launcher.Close()
+			sm.launcher = nil
+
+			if launcherErr := launcher.Cleanup(sm.cfg); err != nil {
+				log.Errorf("Can't cleanup launcher: %s", launcherErr)
+			}
+
+			if layerErr := sm.layerMgr.Cleanup(); err != nil {
+				log.Errorf("Can't cleanup layermanager: %s", layerErr)
+			}
+
+			// close service manager it will be restarted by systemd
+			return err
 		}
 
 		// Get organization names from certificate and use it as discovery URL
@@ -684,5 +699,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	sm.run()
+	if err = sm.run(); err != nil {
+		os.Exit(1)
+	}
 }
