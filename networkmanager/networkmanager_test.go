@@ -78,6 +78,8 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestAddRemoveService(t *testing.T) {
+	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+
 	if err := manager.AddServiceToNetwork("servicenm0", "network0", networkmanager.NetworkParams{}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
@@ -97,13 +99,11 @@ func TestAddRemoveService(t *testing.T) {
 	if err := manager.IsServiceInNetwork("servicenm0", "network0"); err == nil {
 		t.Error("Service should not be in network")
 	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestInternet(t *testing.T) {
+	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+
 	containerPath := path.Join(tmpDir, "servicenm1")
 
 	if err := createOCIContainer(containerPath, "servicenm1", []string{"ping", "google.com", "-c10", "-w15"}); err != nil {
@@ -126,6 +126,8 @@ func TestInternet(t *testing.T) {
 }
 
 func TestInterServiceConnection(t *testing.T) {
+	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+
 	container0Path := path.Join(tmpDir, "servicenm2")
 
 	if err := createOCIContainer(container0Path, "servicenm2", []string{"sleep", "infinity"}); err != nil {
@@ -163,13 +165,11 @@ func TestInterServiceConnection(t *testing.T) {
 	if err := killOCIContainer("servicenm2"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestHostName(t *testing.T) {
+	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+
 	container0Path := path.Join(tmpDir, "servicenm4")
 
 	if err := createOCIContainer(container0Path, "servicenm4", []string{"ping", "myhost", "-c10", "-w15"}); err != nil {
@@ -186,13 +186,14 @@ func TestHostName(t *testing.T) {
 	if err := runOCIContainer(container0Path, "servicenm4"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestExposedPortAndAllowedConnection(t *testing.T) {
+	t.Cleanup(func() {
+		manager.DeleteNetwork("networkSP1")
+		manager.DeleteNetwork("networkSP2")
+	})
+
 	serverPort := "9000"
 	containerServerPath := path.Join(tmpDir, "serviceServer")
 	serverServiceID := "serviceServer"
@@ -213,6 +214,8 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 
 	go runOCIContainer(containerServerPath, serverServiceID)
 
+	time.Sleep(1 * time.Second)
+
 	containerClientPath := path.Join(tmpDir, "serviceClient")
 
 	if err := createOCIContainer(containerClientPath, "serviceClient", []string{"curl", servIP + ":" + serverPort,
@@ -232,17 +235,14 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 	if err := killOCIContainer("serviceServer"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := manager.DeleteNetwork("networkSP1"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
-
-	if err := manager.DeleteNetwork("networkSP2"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestNetworkDNS(t *testing.T) {
+	t.Cleanup(func() {
+		manager.DeleteNetwork("network0")
+		manager.DeleteNetwork("network1")
+	})
+
 	container0Path := path.Join(tmpDir, "service0")
 
 	if err := createOCIContainer(container0Path, "service0", []string{"sleep", "infinity"}); err != nil {
@@ -315,17 +315,11 @@ func TestNetworkDNS(t *testing.T) {
 	if err := killOCIContainer("service0"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
-
-	if err := manager.DeleteNetwork("network1"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestBandwidth(t *testing.T) {
+	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+
 	container0Path := path.Join(tmpDir, "service0")
 
 	var setULSpeed uint64 = 1000
@@ -394,10 +388,6 @@ func TestBandwidth(t *testing.T) {
 
 	if err := killOCIContainer("service0"); err != nil {
 		t.Errorf("Error: %s", err)
-	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
 	}
 }
 
