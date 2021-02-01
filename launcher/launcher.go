@@ -1180,14 +1180,22 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
-	//Update Devices in spec
-	_, err = launcher.setDevices(spec, devices)
-	if err != nil {
+	// clear spec before adding devices
+	if err = spec.clearDeviceData(); err != nil {
 		return err
 	}
 
-	err = launcher.setServiceResources(spec, service.BoardResources)
-	if err != nil {
+	if err = spec.clearAdditionalGroup(); err != nil {
+		return err
+	}
+
+	// Update Devices in spec
+	if err = launcher.setDevices(spec, devices); err != nil {
+		return err
+	}
+
+	// Update Resources in spec
+	if err = launcher.setServiceResources(spec, service.BoardResources); err != nil {
 		return err
 	}
 
@@ -1466,47 +1474,33 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	return nil
 }
 
-func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (deviceBytes []byte, err error) {
+func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (err error) {
 	// get devices from aos service configuration
 	// and get all resource information for device from device manager
 	// and add groups and host devices for class device
 
-	// clear spec before adding devices
-	if err = spec.clearDeviceData(); err != nil {
-		return []byte{}, err
-	}
-
-	if err = spec.clearAdditionalGroup(); err != nil {
-		return []byte{}, err
-	}
-
 	for _, device := range devices {
 		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
 		if err != nil {
-			return []byte{}, err
+			return err
 		}
 
 		for _, hostDevice := range deviceResource.HostDevices {
 			// use absolute path from host devices and permissions from aos configuration
 			if err = spec.addHostDevice(Device{hostDevice, device.Permissions}); err != nil {
-				return []byte{}, err
+				return err
 			}
 		}
 
 		for _, group := range deviceResource.Groups {
 			if err = spec.addAdditionalGroup(group); err != nil {
-				return []byte{}, err
+				return err
 			}
 		}
 
 	}
 
-	deviceBytes, err = json.Marshal(devices)
-	if err != nil {
-		return []byte{}, err
-	}
-
-	return deviceBytes, nil
+	return nil
 }
 
 func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []string) (err error) {
@@ -1609,16 +1603,6 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	spec.setUserUIDGID(uid, gid)
 
-	deviceResourcesForService, err := launcher.setDevices(spec, aosConfig.Devices)
-	if err != nil {
-		return service, err
-	}
-
-	err = launcher.setServiceResources(spec, aosConfig.Resources)
-	if err != nil {
-		return service, err
-	}
-
 	if err = spec.setRootfs(serviceMergedDir); err != nil {
 		return service, err
 	}
@@ -1638,6 +1622,11 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
+	devices, err := json.Marshal(aosConfig.Devices)
+	if err != nil {
+		return service, err
+	}
+
 	service = Service{
 		ID:             serviceInfo.ID,
 		AosVersion:     serviceInfo.AosVersion,
@@ -1650,7 +1639,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		State:          stateInit,
 		Status:         statusOk,
 		AlertRules:     string(alertRules),
-		Devices:        string(deviceResourcesForService),
+		Devices:        string(devices),
 		BoardResources: aosConfig.Resources,
 	}
 
