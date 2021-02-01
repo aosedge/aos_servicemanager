@@ -171,7 +171,10 @@ func TestInstallRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -227,10 +230,6 @@ func TestInstallRemove(t *testing.T) {
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
-	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
 
@@ -290,7 +289,10 @@ func TestCheckServicesConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -330,10 +332,6 @@ func TestCheckServicesConsistency(t *testing.T) {
 	if err = launcher.CheckServicesConsistency(); err == nil {
 		t.Error("Expected services to be inconsistent")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestAutoStart(t *testing.T) {
@@ -343,6 +341,10 @@ func TestAutoStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -369,7 +371,6 @@ func TestAutoStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -408,10 +409,6 @@ func TestAutoStart(t *testing.T) {
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestErrors(t *testing.T) {
@@ -421,7 +418,10 @@ func TestErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -457,10 +457,6 @@ func TestErrors(t *testing.T) {
 	} else if services[0].AosVersion != 6 {
 		t.Errorf("Wrong service version")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestUpdate(t *testing.T) {
@@ -471,7 +467,10 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -532,10 +531,6 @@ func TestUpdate(t *testing.T) {
 			t.Fatalf("Wrong service content: %s", message)
 		}
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestDeviceManagementNotValidOnStartup(t *testing.T) {
@@ -549,11 +544,11 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-
-	defer func() {
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
-	}()
+	})
 
 	// run stored service configuration. In case if service is invalid we do not start services,
 	// but return no error.
@@ -569,11 +564,11 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-
-	defer func() {
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
-	}()
+	})
 
 	// run stored service configuration only in case system resources are valid
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
@@ -593,10 +588,6 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	if status = <-sender.statusChannel; status.Error == "" {
 		t.Fatalf("SM can remove service when device resource is not released")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestVisPermissions(t *testing.T) {
@@ -606,7 +597,10 @@ func TestVisPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -627,10 +621,6 @@ func TestVisPermissions(t *testing.T) {
 	if service.Permissions != `{"*": "rw", "123": "rw"}` {
 		t.Fatalf("Permissions mismatch")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestUsersServices(t *testing.T) {
@@ -640,7 +630,10 @@ func TestUsersServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	numUsers := 3
 	numServices := 3
@@ -732,10 +725,6 @@ func TestUsersServices(t *testing.T) {
 			t.Fatalf("Wrong running services count")
 		}
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestServiceTTL(t *testing.T) {
@@ -745,7 +734,10 @@ func TestServiceTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	numServices := 3
 
@@ -804,7 +796,10 @@ func TestServiceMonitoring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"user0"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -857,10 +852,6 @@ func TestServiceMonitoring(t *testing.T) {
 	case <-time.After(2000 * time.Millisecond):
 		t.Errorf("Waiting for service monitor timeout")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestServiceStorage(t *testing.T) {
@@ -871,7 +862,10 @@ func TestServiceStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -931,10 +925,6 @@ func TestServiceStorage(t *testing.T) {
 	if err := ftp.Stor("test3.dat", bytes.NewReader(bigTestData)); err == nil {
 		t.Errorf("Unexpected nil error")
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestServiceState(t *testing.T) {
@@ -944,7 +934,10 @@ func TestServiceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -1083,10 +1076,6 @@ func TestServiceState(t *testing.T) {
 
 		response.Close()
 	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
 }
 
 func TestTmpDir(t *testing.T) {
@@ -1098,6 +1087,10 @@ func TestTmpDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -1180,12 +1173,6 @@ func TestTmpDir(t *testing.T) {
 	}
 
 	ftp.Quit()
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
-	}
-
-	launcher.Close()
 }
 
 func TestSpec(t *testing.T) {
@@ -1444,9 +1431,7 @@ func TestSetServiceResources(t *testing.T) {
 	spec := &serviceSpec{runtimeFileName: "fileName", ocSpec: *specconv.Example()}
 
 	spec.ocSpec.Process.Env = []string{"ENV1", "ENV2=HELLO"}
-	spec.ocSpec.Mounts = []runtimespec.Mount{runtimespec.Mount{Destination: "/orig1",
-		Source: "/orig2"},
-	}
+	spec.ocSpec.Mounts = []runtimespec.Mount{{Destination: "/orig1", Source: "/orig2"}}
 	spec.ocSpec.Process.User.AdditionalGids = []uint32{1000}
 
 	if err := launcher.setServiceResources(spec, []string{"dbus", "wifi"}); err != nil {
@@ -1459,10 +1444,10 @@ func TestSetServiceResources(t *testing.T) {
 	}
 
 	etalonMounts := []runtimespec.Mount{
-		runtimespec.Mount{
+		{
 			Destination: "/orig1",
 			Source:      "/orig2"},
-		runtimespec.Mount{
+		{
 			Destination: "/destination",
 			Source:      "/source",
 			Type:        "bind",
@@ -1488,6 +1473,11 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		deviceManager.isValid = true
+		launcher.Close()
+	})
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -1516,17 +1506,12 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	// set fake resource system to valid state (UT emulation)
 	deviceManager.isValid = false
 
-	defer func() {
-		deviceManager.isValid = true
-	}()
-
 	time.Sleep(time.Second * 2)
 
 	launcher, err = newTestLauncher(new(pythonImage), sender, nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
-	defer launcher.Close()
 
 	if err = launcher.SetUsers([]string{"User1"}); err != nil {
 		t.Fatalf("Can't set users: %s", err)
@@ -1568,10 +1553,6 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	}
 	if len(services) != 0 {
 		t.Errorf("Wrong service quantity")
-	}
-
-	if err := launcher.RemoveAllServices(); err != nil {
-		t.Errorf("Can't cleanup all services: %s", err)
 	}
 }
 
