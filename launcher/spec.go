@@ -401,7 +401,7 @@ func (spec *serviceSpec) createPrestartHook(path string, args []string) (err err
 		spec.ocSpec.Hooks = &runtimespec.Hooks{}
 	}
 
-	spec.ocSpec.Hooks.Prestart = []runtimespec.Hook{runtimespec.Hook{Path: path, Args: args}}
+	spec.ocSpec.Hooks.Prestart = []runtimespec.Hook{{Path: path, Args: args}}
 
 	return nil
 }
