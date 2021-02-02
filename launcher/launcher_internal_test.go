@@ -687,7 +687,7 @@ func TestUsersServices(t *testing.T) {
 		}
 
 		if count != numServices {
-			t.Fatalf("Wrong running services count")
+			t.Fatalf("Wrong running services count: %d", count)
 		}
 	}
 
@@ -722,7 +722,7 @@ func TestUsersServices(t *testing.T) {
 		}
 
 		if count != numServices {
-			t.Fatalf("Wrong running services count")
+			t.Fatalf("Wrong running services count: %d", count)
 		}
 	}
 }
