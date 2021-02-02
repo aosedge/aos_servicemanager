@@ -80,24 +80,48 @@ func TestMain(m *testing.M) {
 func TestAddRemoveService(t *testing.T) {
 	t.Cleanup(func() { manager.DeleteNetwork("network0") })
 
-	if err := manager.AddServiceToNetwork("servicenm0", "network0", networkmanager.NetworkParams{}); err != nil {
-		t.Fatalf("Can't add service to network: %s", err)
+	numServices := 10
+
+	statusChannel := make(chan error, numServices)
+
+	for i := 0; i < numServices; i++ {
+		go func(serviceID string) {
+			statusChannel <- manager.AddServiceToNetwork(serviceID, "network0", networkmanager.NetworkParams{})
+		}(fmt.Sprintf("service%d", i))
 	}
 
-	if err := manager.IsServiceInNetwork("servicenm0", "network0"); err != nil {
-		t.Errorf("Service should be in network %s", err)
+	for i := 0; i < numServices; i++ {
+		if err := <-statusChannel; err != nil {
+			t.Errorf("Can't add service to network: %s", err)
+		}
 	}
 
-	if _, err := manager.GetServiceIP("servicenm0", "network0"); err != nil {
-		t.Errorf("Can't get service ip: %s", err)
+	for i := 0; i < numServices; i++ {
+		if err := manager.IsServiceInNetwork(fmt.Sprintf("service%d", i), "network0"); err != nil {
+			t.Errorf("Service should be in network: %s", err)
+		}
+
+		if _, err := manager.GetServiceIP(fmt.Sprintf("service%d", i), "network0"); err != nil {
+			t.Errorf("Can't get service ip: %s", err)
+		}
 	}
 
-	if err := manager.RemoveServiceFromNetwork("servicenm0", "network0"); err != nil {
-		t.Fatalf("Can't remove service from network: %s", err)
+	for i := 0; i < numServices; i++ {
+		go func(serviceID string) {
+			statusChannel <- manager.RemoveServiceFromNetwork(serviceID, "network0")
+		}(fmt.Sprintf("service%d", i))
 	}
 
-	if err := manager.IsServiceInNetwork("servicenm0", "network0"); err == nil {
-		t.Error("Service should not be in network")
+	for i := 0; i < numServices; i++ {
+		if err := <-statusChannel; err != nil {
+			t.Errorf("Can't remove service from network: %s", err)
+		}
+	}
+
+	for i := 0; i < numServices; i++ {
+		if err := manager.IsServiceInNetwork(fmt.Sprintf("service%d", i), "network0"); err == nil {
+			t.Error("Service should not be in network")
+		}
 	}
 }
 
