@@ -496,13 +496,20 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 	statusChannel := make(chan error, len(services))
 
 	for _, service := range services {
-		go func(service Service) {
-			err := launcher.removeService(service)
-			if err != nil {
-				log.Errorf("Can't remove service %s: %s", service.ID, err)
-			}
-			statusChannel <- err
-		}(service)
+		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+			func(id string, data interface{}) {
+				service, ok := data.(Service)
+				if !ok {
+					statusChannel <- errors.New("wrong data type")
+					return
+				}
+
+				if err = launcher.removeService(service); err != nil {
+					log.Errorf("Can't remove service %s: %s", service.ID, err)
+				}
+
+				statusChannel <- err
+			}})
 	}
 
 	// Wait all services are deleted
@@ -642,7 +649,11 @@ func (launcher *Launcher) StartServices() {
 					return
 				}
 
-				statusChannel <- launcher.startService(service)
+				if err = launcher.startService(service); err != nil {
+					log.Errorf("Can't start service %s: %s", service.ID, err)
+				}
+
+				statusChannel <- err
 			}})
 	}
 
@@ -682,7 +693,12 @@ func (launcher *Launcher) StopServices() {
 					statusChannel <- errors.New("wrong data type")
 					return
 				}
-				statusChannel <- launcher.stopService(service)
+
+				if err = launcher.stopService(service); err != nil {
+					log.Errorf("Can't stop service %s: %s", service.ID, err)
+				}
+
+				statusChannel <- err
 			}})
 	}
 
