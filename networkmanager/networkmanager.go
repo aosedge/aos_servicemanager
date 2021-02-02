@@ -54,7 +54,7 @@ const (
 	cniBinPath       = "/opt/cni/bin"
 	pathToCNINetwork = "/var/lib/cni/networks/"
 	cniVersion       = "0.4.0"
-	adminChaniPrefix = "SERVICE_"
+	adminChainPrefix = "SERVICE_"
 )
 
 /*******************************************************************************
@@ -523,7 +523,7 @@ func getFirewallPluginConfig(serviceID string, exposedPorts, allowedConnections 
 	aosFirewall := &aosFirewallNetConf{
 		Type:                   "aos-firewall",
 		UUID:                   serviceID,
-		IptablesAdminChainName: adminChaniPrefix + serviceID,
+		IptablesAdminChainName: adminChainPrefix + serviceID,
 		AllowPublicConnections: true,
 	}
 
