@@ -222,13 +222,6 @@ The configuration file has JSON format. Following is JSON schema:
                 }
             }
         },
-        "identifier": {
-            "description": "Identifier parameters",
-            "type": "object",
-            "required": [
-                "module"
-            ]
-        },
         "hostBinds": {
             "description": "The list of host directories/files which should be mounted to the service",
             "type": "array",

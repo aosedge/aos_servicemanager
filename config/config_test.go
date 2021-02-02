@@ -86,13 +86,6 @@ func createConfigFile() (err error) {
 		"maxOfflineMessages": 32,
 		"filter": ["(test)", "(regexp)"]
 	},
-	"identifier": {
-		"type" : "identifier",
-		 "config" : {
-				"param1": "testParam",
-				"param2": 123
-		  }
-	},
 	"hostBinds": ["dir0", "dir1", "dir2"],
 	"hosts": [{
 			"ip": "127.0.0.1",
@@ -350,36 +343,6 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	if !reflect.DeepEqual(config.Alerts.Filter, filter) {
 		t.Errorf("Wrong filter value: %v", config.Alerts.Filter)
-	}
-}
-
-func TestGetIdentification(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if config.Identifier.Type != "identifier" {
-		t.Errorf("Wrong Identifier.Type: %v", config.Identifier.Type)
-	}
-
-	type Params struct {
-		Param1 string
-		Param2 int
-	}
-
-	var params Params
-
-	if err = json.Unmarshal(config.Identifier.Config, &params); err != nil {
-		t.Errorf("Can't parse identifier params: %s", err)
-	}
-
-	if params.Param1 != "testParam" {
-		t.Errorf("Wrong param1: %v", params.Param1)
-	}
-
-	if params.Param2 != 123 {
-		t.Errorf("Wrong param2: %v", params.Param2)
 	}
 }
 
