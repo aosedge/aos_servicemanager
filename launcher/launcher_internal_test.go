@@ -663,8 +663,6 @@ func TestUsersServices(t *testing.T) {
 			}
 		}
 
-		time.Sleep(time.Second * 2)
-
 		services, err = launcher.serviceProvider.GetServices()
 		if err != nil {
 			t.Fatalf("Can't get services: %s", err)
@@ -697,8 +695,6 @@ func TestUsersServices(t *testing.T) {
 		if err = launcher.SetUsers(users); err != nil {
 			t.Fatalf("Can't set users: %s", err)
 		}
-
-		time.Sleep(time.Second * 2)
 
 		services, err := launcher.serviceProvider.GetServices()
 		if err != nil {
