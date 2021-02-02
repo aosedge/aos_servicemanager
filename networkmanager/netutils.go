@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"runtime"
 	"syscall"
 
 	"github.com/apparentlymart/go-cidr/cidr"
@@ -76,6 +77,9 @@ func removeBridgeInterface(spID string) (err error) {
 
 func createNetNS(name string) (err error) {
 	if _, err = os.Stat(path.Join(pathToNetNs, name)); os.IsNotExist(err) {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
 		origin, err := netns.Get()
 		if err != nil {
 			return err
