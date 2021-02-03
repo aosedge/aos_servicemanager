@@ -403,8 +403,8 @@ func TestBandwidth(t *testing.T) {
 		t.Error("Can't determine UL/DL speed")
 	}
 
-	// Max delte 2%
-	delta := 1.02
+	// Max delta 5%
+	delta := 1.05
 
 	if ulSpeed > float64(setULSpeed)*delta || dlSpeed > float64(setDLSpeed)*delta {
 		t.Errorf("Speed limit exceeds expected level: DL %0.2f, UL %0.2f", dlSpeed, ulSpeed)
