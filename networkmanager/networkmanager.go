@@ -147,7 +147,7 @@ func New(cfg *config.Config) (manager *NetworkManager, err error) {
 
 	manager = &NetworkManager{
 		hosts:     cfg.Hosts,
-		cniConfig: cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cfg.WorkingDir, nil),
+		cniConfig: cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, path.Join(cfg.WorkingDir, "cni"), nil),
 	}
 
 	if manager.ipamSubnetwork, err = newIPam(); err != nil {
