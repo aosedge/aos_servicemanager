@@ -52,7 +52,6 @@ const (
 	serviceIfName    = "eth0"
 	pathToNetNs      = "/run/netns"
 	cniBinPath       = "/opt/cni/bin"
-	pathToCNINetwork = "/var/lib/cni/networks/"
 	cniVersion       = "0.4.0"
 	adminChainPrefix = "SERVICE_"
 )
@@ -67,6 +66,7 @@ type NetworkManager struct {
 	cniConfig      *cni.CNIConfig
 	ipamSubnetwork *ipSubnetwork
 	hosts          []config.Host
+	networkDir     string
 }
 
 // NetworkParams network parameters set for service
@@ -145,9 +145,12 @@ type outputAccessConfig struct {
 func New(cfg *config.Config) (manager *NetworkManager, err error) {
 	log.Debug("Create network manager")
 
+	cniDir := path.Join(cfg.WorkingDir, "cni")
+
 	manager = &NetworkManager{
-		hosts:     cfg.Hosts,
-		cniConfig: cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, path.Join(cfg.WorkingDir, "cni"), nil),
+		hosts:      cfg.Hosts,
+		cniConfig:  cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cniDir, nil),
+		networkDir: path.Join(cniDir, "networks"),
 	}
 
 	if manager.ipamSubnetwork, err = newIPam(); err != nil {
@@ -176,9 +179,12 @@ func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
 
 	log.WithFields(log.Fields{"spID": spID}).Debug("Delete network")
 
-	networkDir := path.Join(pathToCNINetwork, spID)
+	networkDir := path.Join(manager.networkDir, spID)
 
-	filesServiceID, _ := ioutil.ReadDir(networkDir)
+	filesServiceID, err := ioutil.ReadDir(networkDir)
+	if err != nil {
+		return err
+	}
 
 	for _, serviceIDFile := range filesServiceID {
 		if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spID); netErr != nil {
@@ -235,7 +241,7 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		}
 	}()
 
-	netConfig, err := prepareNetworkConfigList(serviceID, spID, ipSubnet, &params)
+	netConfig, err := prepareNetworkConfigList(manager.networkDir, serviceID, spID, ipSubnet, &params)
 	if err != nil {
 		return err
 	}
@@ -365,10 +371,10 @@ func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 
 	log.Debug("Delete all networks")
 
-	filesSpID, _ := ioutil.ReadDir(pathToCNINetwork)
+	filesSpID, _ := ioutil.ReadDir(manager.networkDir)
 
 	for _, spIDFile := range filesSpID {
-		filesServiceID, _ := ioutil.ReadDir(path.Join(pathToCNINetwork, spIDFile.Name()))
+		filesServiceID, _ := ioutil.ReadDir(path.Join(manager.networkDir, spIDFile.Name()))
 
 		for _, serviceIDFile := range filesServiceID {
 			if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spIDFile.Name()); netErr != nil {
@@ -385,7 +391,7 @@ func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 		}
 	}
 
-	os.RemoveAll(pathToCNINetwork)
+	os.RemoveAll(manager.networkDir)
 
 	return err
 }
@@ -453,7 +459,7 @@ func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, sp
 		return nil
 	}
 
-	serviceID, err := readServiceIDFromFile(path.Join(pathToCNINetwork, spIDFileName, serviceIDFileName))
+	serviceID, err := readServiceIDFromFile(path.Join(manager.networkDir, spIDFileName, serviceIDFileName))
 	if err != nil {
 		return nil
 	}
@@ -491,7 +497,7 @@ func readServiceIDFromFile(pathToServiceID string) (serviceID string, err error)
 	return cniServiceInfo[0], nil
 }
 
-func getBridgePluginConfig(spID string, subnetwork *net.IPNet) (config json.RawMessage, err error) {
+func getBridgePluginConfig(networkDir, spID string, subnetwork *net.IPNet) (config json.RawMessage, err error) {
 	minIPRange, maxIPRange := getIPAddressRange(subnetwork)
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
@@ -502,7 +508,8 @@ func getBridgePluginConfig(spID string, subnetwork *net.IPNet) (config json.RawM
 		IPMasq:      true,
 		HairpinMode: true,
 		IPAM: allocator.IPAMConfig{
-			Type: "host-local",
+			DataDir: networkDir,
+			Type:    "host-local",
 			Range: &allocator.Range{
 				RangeStart: minIPRange,
 				RangeEnd:   maxIPRange,
@@ -629,13 +636,13 @@ func prepareRuntimeConfig(serviceID, spID, hostname string, aliases []string) (r
 	return runtimeConfig, nil
 }
 
-func prepareNetworkConfigList(serviceID, spID string, subnetwork *net.IPNet,
+func prepareNetworkConfigList(networkDir, serviceID, spID string, subnetwork *net.IPNet,
 	params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList, err error) {
 	networkConfig := cniNetwork{Name: spID, CNIVersion: cniVersion}
 
 	// Bridge
 
-	bridgeConfig, err := getBridgePluginConfig(spID, subnetwork)
+	bridgeConfig, err := getBridgePluginConfig(networkDir, spID, subnetwork)
 	if err != nil {
 		return nil, err
 	}
