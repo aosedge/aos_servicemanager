@@ -696,7 +696,7 @@ func main() {
 
 		sm.close()
 
-		os.Exit(1)
+		os.Exit(0)
 	}()
 
 	if err = sm.run(); err != nil {
