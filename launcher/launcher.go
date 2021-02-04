@@ -1557,7 +1557,7 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
-	uid, gid, err := launcher.getUIDGIDForService(service.ID)
+	uid, gid, err := launcher.getUIDGIDForService(serviceInfo.ID)
 	if err != nil {
 		return service, err
 	}
