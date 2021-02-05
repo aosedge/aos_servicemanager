@@ -402,7 +402,7 @@ func (spec *serviceSpec) createPrestartHook(path string, args []string) (err err
 	return nil
 }
 
-func addDevice(hostDevice Device) (device *runtimespec.LinuxDevice, err error) {
+func addDevice(hostDevice Device, uid, gid uint32) (device *runtimespec.LinuxDevice, err error) {
 	log.WithFields(log.Fields{"device": hostDevice.Name}).Debug("Add device")
 
 	var stat unix.Stat_t
@@ -415,20 +415,32 @@ func addDevice(hostDevice Device) (device *runtimespec.LinuxDevice, err error) {
 		return nil, errNotDevice
 	}
 
-	devType := ""
+	var (
+		devType string
+		mode    os.FileMode
+	)
 
 	switch {
 	case stat.Mode&unix.S_IFBLK == unix.S_IFBLK:
 		devType = "b"
+		mode = unix.S_IFBLK
 	case stat.Mode&unix.S_IFCHR == unix.S_IFCHR:
 		devType = "c"
+		mode = unix.S_IFCHR
 	case stat.Mode&unix.S_IFIFO == unix.S_IFIFO:
 		devType = "p"
+		mode = unix.S_IFIFO
 	default:
 		return nil, errNotDevice
 	}
 
-	mode := os.FileMode(stat.Mode)
+	if strings.Contains(hostDevice.Permissions, "r") {
+		mode = mode | unix.S_IRUSR
+	}
+
+	if strings.Contains(hostDevice.Permissions, "w") {
+		mode = mode | unix.S_IWUSR
+	}
 
 	return &runtimespec.LinuxDevice{
 		Type:     devType,
@@ -436,12 +448,12 @@ func addDevice(hostDevice Device) (device *runtimespec.LinuxDevice, err error) {
 		Major:    int64(unix.Major(stat.Rdev)),
 		Minor:    int64(unix.Minor(stat.Rdev)),
 		FileMode: &mode,
-		UID:      &stat.Uid,
-		GID:      &stat.Gid,
+		UID:      &uid,
+		GID:      &gid,
 	}, nil
 }
 
-func addDevices(hostDevice Device) (devices []runtimespec.LinuxDevice, err error) {
+func addDevices(hostDevice Device, uid, gid uint32) (devices []runtimespec.LinuxDevice, err error) {
 	stat, err := os.Stat(hostDevice.Name)
 	if err != nil {
 		return nil, err
@@ -464,7 +476,7 @@ func addDevices(hostDevice Device) (devices []runtimespec.LinuxDevice, err error
 			default:
 				dirDevice := Device{Name: path.Join(hostDevice.Name, file.Name()),
 					Permissions: hostDevice.Permissions}
-				dirDevices, err := addDevices(dirDevice)
+				dirDevices, err := addDevices(dirDevice, uid, gid)
 				if err != nil {
 					return nil, err
 				}
@@ -481,7 +493,7 @@ func addDevices(hostDevice Device) (devices []runtimespec.LinuxDevice, err error
 		return devices, nil
 
 	default:
-		device, err := addDevice(hostDevice)
+		device, err := addDevice(hostDevice, uid, gid)
 		if err != nil {
 			if err == errNotDevice {
 				log.WithField("device", hostDevice.Name).Warnf("Device skipped as not a device node")
@@ -501,7 +513,7 @@ func addDevices(hostDevice Device) (devices []runtimespec.LinuxDevice, err error
 func (spec *serviceSpec) addHostDevice(hostDevice Device) (err error) {
 	log.WithFields(log.Fields{"device": hostDevice.Name}).Debug("Add host device")
 
-	specDevices, err := addDevices(hostDevice)
+	specDevices, err := addDevices(hostDevice, spec.ocSpec.Process.User.UID, spec.ocSpec.Process.User.UID)
 	if err != nil {
 		return err
 	}
