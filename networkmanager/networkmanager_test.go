@@ -125,6 +125,37 @@ func TestAddRemoveService(t *testing.T) {
 	}
 }
 
+func TestDeleteAllNetworks(t *testing.T) {
+	t.Cleanup(func() {
+		manager.DeleteAllNetworks()
+	})
+
+	numNetworks := 3
+	numServices := 3
+
+	for j := 0; j < numNetworks; j++ {
+		for i := 0; i < numServices; i++ {
+			if err := manager.AddServiceToNetwork(fmt.Sprintf("service%d%d", j, i),
+				fmt.Sprintf("network%d", j), networkmanager.NetworkParams{}); err != nil {
+				t.Fatalf("Can't add service to network: %s", err)
+			}
+		}
+	}
+
+	if err := manager.DeleteAllNetworks(); err != nil {
+		t.Fatalf("Can't delete all networks: %s", err)
+	}
+
+	for j := 0; j < numNetworks; j++ {
+		for i := 0; i < numServices; i++ {
+			if err := manager.IsServiceInNetwork(fmt.Sprintf("service%d%d", j, i),
+				fmt.Sprintf("network%d", j)); err == nil {
+				t.Fatalf("Service should not be in network: %s", err)
+			}
+		}
+	}
+}
+
 func TestInternet(t *testing.T) {
 	t.Cleanup(func() { manager.DeleteNetwork("network0") })
 

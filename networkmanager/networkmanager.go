@@ -138,6 +138,12 @@ type outputAccessConfig struct {
 }
 
 /*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var skipNetworkFileNames = []string{"lock", "last_reserved_ip.0"}
+
+/*******************************************************************************
  * Public
  ******************************************************************************/
 
@@ -170,39 +176,6 @@ func (manager *NetworkManager) Close() (err error) {
 // GetNetNsPathByName get path to service network namespace
 func GetNetNsPathByName(serviceID string) (pathToNetNS string) {
 	return path.Join(pathToNetNs, serviceID)
-}
-
-// DeleteNetwork deletes SP network
-func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
-	manager.Lock()
-	defer manager.Unlock()
-
-	log.WithFields(log.Fields{"spID": spID}).Debug("Delete network")
-
-	networkDir := path.Join(manager.networkDir, spID)
-
-	filesServiceID, err := ioutil.ReadDir(networkDir)
-	if err != nil {
-		return err
-	}
-
-	for _, serviceIDFile := range filesServiceID {
-		if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spID); netErr != nil {
-			if err == nil {
-				err = netErr
-			}
-		}
-	}
-
-	if clearErr := manager.postSPNetworkClear(spID); clearErr != nil {
-		if err == nil {
-			err = clearErr
-		}
-	}
-
-	os.RemoveAll(networkDir)
-
-	return err
 }
 
 // AddServiceToNetwork adds service to SP network
@@ -364,6 +337,14 @@ func (manager *NetworkManager) GetServiceIP(serviceID, spID string) (ip string, 
 	return ip, nil
 }
 
+// DeleteNetwork deletes SP network
+func (manager *NetworkManager) DeleteNetwork(spID string) (err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	return manager.deleteNetwork(spID)
+}
+
 // DeleteAllNetworks deletes all networks
 func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 	manager.Lock()
@@ -371,22 +352,17 @@ func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 
 	log.Debug("Delete all networks")
 
-	filesSpID, _ := ioutil.ReadDir(manager.networkDir)
+	filesSpID, err := ioutil.ReadDir(manager.networkDir)
+	if err != nil {
+		return nil
+	}
 
 	for _, spIDFile := range filesSpID {
-		filesServiceID, _ := ioutil.ReadDir(path.Join(manager.networkDir, spIDFile.Name()))
+		if networkErr := manager.deleteNetwork(spIDFile.Name()); networkErr != nil {
+			log.Errorf("Can't delete network: %s", err)
 
-		for _, serviceIDFile := range filesServiceID {
-			if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spIDFile.Name()); netErr != nil {
-				if err == nil {
-					err = netErr
-				}
-			}
-		}
-
-		if clearErr := manager.postSPNetworkClear(spIDFile.Name()); clearErr != nil {
 			if err == nil {
-				err = clearErr
+				err = networkErr
 			}
 		}
 	}
@@ -409,6 +385,49 @@ func (manager *NetworkManager) isServiceInNetwork(serviceID, spID string) (err e
 	if cachedResult == nil {
 		return errors.Errorf("service %s is not in network %s", serviceID, spID)
 	}
+
+	return nil
+}
+
+func (manager *NetworkManager) deleteNetwork(spID string) (err error) {
+	log.WithFields(log.Fields{"spID": spID}).Debug("Delete network")
+
+	networkDir := path.Join(manager.networkDir, spID)
+
+	filesServiceID, err := ioutil.ReadDir(networkDir)
+	if err != nil {
+		return err
+	}
+
+	for _, serviceIDFile := range filesServiceID {
+		skip := false
+
+		for _, skipFile := range skipNetworkFileNames {
+			if serviceIDFile.Name() == skipFile {
+				skip = true
+
+				break
+			}
+		}
+
+		if skip {
+			continue
+		}
+
+		if netErr := manager.tryRemoveServiceFromNetwork(serviceIDFile.Name(), spID); netErr != nil {
+			if err == nil {
+				err = netErr
+			}
+		}
+	}
+
+	if clearErr := manager.postSPNetworkClear(spID); clearErr != nil {
+		if err == nil {
+			err = clearErr
+		}
+	}
+
+	os.RemoveAll(networkDir)
 
 	return nil
 }
@@ -451,14 +470,6 @@ func (manager *NetworkManager) postSPNetworkClear(spID string) (err error) {
 }
 
 func (manager *NetworkManager) tryRemoveServiceFromNetwork(serviceIDFileName, spIDFileName string) (err error) {
-	// skipped files
-	lockFileName := "lock"
-	reservedFileName := "last_reserved_ip.0"
-
-	if serviceIDFileName == reservedFileName || serviceIDFileName == lockFileName {
-		return nil
-	}
-
 	serviceID, err := readServiceIDFromFile(path.Join(manager.networkDir, spIDFileName, serviceIDFileName))
 	if err != nil {
 		return nil
