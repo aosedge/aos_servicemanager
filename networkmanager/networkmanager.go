@@ -236,16 +236,18 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		return err
 	}
 
+	defer func() {
+		if err != nil {
+			if err := manager.cniConfig.DelNetworkList(context.Background(), netConfig, runtimeConfig); err != nil {
+				log.Errorf("Can't delete network list: %s", err)
+			}
+		}
+	}()
+
 	resAdd, err := manager.cniConfig.AddNetworkList(context.Background(), netConfig, runtimeConfig)
 	if err != nil {
 		return err
 	}
-
-	defer func() {
-		if err != nil {
-			manager.cniConfig.DelNetworkList(context.Background(), netConfig, runtimeConfig)
-		}
-	}()
 
 	result, err := current.GetResult(resAdd)
 	if err != nil {
