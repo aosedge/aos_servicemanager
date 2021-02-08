@@ -163,6 +163,14 @@ func New(cfg *config.Config) (manager *NetworkManager, err error) {
 		return nil, err
 	}
 
+	if err = manager.DeleteAllNetworks(); err != nil {
+		log.Errorf("Can't delete all networks: %s", err)
+	}
+
+	if err = os.RemoveAll(cniDir); err != nil {
+		return nil, err
+	}
+
 	return manager, nil
 }
 
