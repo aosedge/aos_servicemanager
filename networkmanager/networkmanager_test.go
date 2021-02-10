@@ -174,14 +174,13 @@ func TestInternet(t *testing.T) {
 	if err := runOCIContainer(containerPath, "servicenm1"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := manager.DeleteNetwork("network0"); err != nil {
-		t.Fatalf("Can't Delete network: %s", err)
-	}
 }
 
 func TestInterServiceConnection(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() {
+		killOCIContainer("servicenm2")
+		manager.DeleteNetwork("network0")
+	})
 
 	container0Path := path.Join(tmpDir, "servicenm2")
 
@@ -216,10 +215,6 @@ func TestInterServiceConnection(t *testing.T) {
 	if err := runOCIContainer(container1Path, "servicenm3"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := killOCIContainer("servicenm2"); err != nil {
-		t.Errorf("Error: %s", err)
-	}
 }
 
 func TestHostName(t *testing.T) {
@@ -245,6 +240,7 @@ func TestHostName(t *testing.T) {
 
 func TestExposedPortAndAllowedConnection(t *testing.T) {
 	t.Cleanup(func() {
+		killOCIContainer("serviceServer")
 		manager.DeleteNetwork("networkSP1")
 		manager.DeleteNetwork("networkSP2")
 	})
@@ -286,14 +282,11 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 	if err := runOCIContainer(containerClientPath, "serviceClient"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
-
-	if err := killOCIContainer("serviceServer"); err != nil {
-		t.Errorf("Error: %s", err)
-	}
 }
 
 func TestNetworkDNS(t *testing.T) {
 	t.Cleanup(func() {
+		killOCIContainer("service0")
 		manager.DeleteNetwork("network0")
 		manager.DeleteNetwork("network1")
 	})
@@ -315,15 +308,13 @@ func TestNetworkDNS(t *testing.T) {
 
 	container1Path := path.Join(tmpDir, "service1")
 
+	// Other SP network
+
 	hostNames := []string{
-		"service0", "service0.network0",
-		"myhost",
+		"service0.network0",
 		"myhost.network0",
-		"alias1",
 		"alias1.network0",
 	}
-
-	// Other SP network
 
 	for _, hostName := range hostNames {
 		if err := createOCIContainer(container1Path, "service1", []string{"ping", hostName, "-c1"}); err != nil {
@@ -343,6 +334,12 @@ func TestNetworkDNS(t *testing.T) {
 		if err := manager.RemoveServiceFromNetwork("service1", "network1"); err != nil {
 			t.Fatalf("Can't remove service from network: %s", err)
 		}
+	}
+
+	hostNames = []string{
+		"service0", "service0.network0",
+		"myhost", "myhost.network0",
+		"alias1", "alias1.network0",
 	}
 
 	// Same SP network
@@ -366,14 +363,13 @@ func TestNetworkDNS(t *testing.T) {
 			t.Fatalf("Can't remove service from network: %s", err)
 		}
 	}
-
-	if err := killOCIContainer("service0"); err != nil {
-		t.Errorf("Error: %s", err)
-	}
 }
 
 func TestBandwidth(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() {
+		killOCIContainer("service0")
+		manager.DeleteNetwork("network0")
+	})
 
 	container0Path := path.Join(tmpDir, "service0")
 
@@ -439,10 +435,6 @@ func TestBandwidth(t *testing.T) {
 
 	if ulSpeed > float64(setULSpeed)*delta || dlSpeed > float64(setDLSpeed)*delta {
 		t.Errorf("Speed limit exceeds expected level: DL %0.2f, UL %0.2f", dlSpeed, ulSpeed)
-	}
-
-	if err := killOCIContainer("service0"); err != nil {
-		t.Errorf("Error: %s", err)
 	}
 }
 
