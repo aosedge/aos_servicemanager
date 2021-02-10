@@ -122,6 +122,7 @@ type aosFirewallNetConf struct {
 
 type aosDNSNetConf struct {
 	Type         string          `json:"type"`
+	MultiDomain  bool            `json:"multiDomain,omitempty"`
 	DomainName   string          `json:"domainName,omitempty"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
 }
@@ -612,6 +613,7 @@ func getBandwidthPluginConfig(ingressKbit, egressKbit uint64) (config json.RawMe
 func getDNSPluginConfig(spID string) (config json.RawMessage, err error) {
 	configDNS := &aosDNSNetConf{
 		Type:         "dnsname",
+		MultiDomain:  true,
 		DomainName:   spID,
 		Capabilities: map[string]bool{"aliases": true},
 	}
