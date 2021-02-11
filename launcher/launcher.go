@@ -1158,6 +1158,10 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 			ResolvConfFilePath: path.Join(service.Path, serviceMountPointsDir, networkFiles[1]),
 		}
 
+		if params.Hosts, err = launcher.getHostsFromResources(service.BoardResources); err != nil {
+			return err
+		}
+
 		for _, networkFile := range networkFiles {
 			if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
 				return err
@@ -1545,6 +1549,19 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 	}
 
 	return nil
+}
+
+func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []config.Host, err error) {
+	for _, resource := range resources {
+		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
+		if err != nil {
+			return hosts, err
+		}
+
+		hosts = append(hosts, boardResource.Hosts...)
+	}
+
+	return hosts, nil
 }
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,

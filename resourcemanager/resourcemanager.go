@@ -34,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
 )
 
 /*******************************************************************************
@@ -89,6 +90,7 @@ type BoardResource struct {
 	Groups []string          `json:"groups,omitempty"`
 	Mounts []FileSystemMount `json:"mounts,omitempty"`
 	Env    []string          `json:"env,omitempty"`
+	Hosts  []config.Host     `json:"hosts,omitempty"`
 }
 
 // BoardConfiguration resources that are proviced by Cloud for using at AOS services
