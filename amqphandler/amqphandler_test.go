@@ -394,7 +394,7 @@ func TestReceiveMessages(t *testing.T) {
 				return amqpHandler.SendServiceLog(pushServiceLogData)
 			},
 			data: amqphandler.AOSMessage{
-				Header: amqphandler.MessageHeader{MessageType: amqphandler.PushServiceLogType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.PushLogType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
 				Data: &amqphandler.PushServiceLog{
 					LogID:     pushServiceLogData.LogID,
 					PartCount: pushServiceLogData.PartCount,

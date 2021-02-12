@@ -68,7 +68,7 @@ const (
 	AlertsType                              = "alerts"
 	MonitoringDataType                      = "monitoringData"
 	NewStateType                            = "newState"
-	PushServiceLogType                      = "pushServiceLog"
+	PushLogType                             = "pushLog"
 	StateRequestType                        = "stateRequest"
 	UnitStatusType                          = "unitStatus"
 	IssueUnitCertificatesRequestType        = "issueUnitCertificates"
@@ -733,7 +733,7 @@ func (handler *AmqpHandler) SendStateRequest(serviceID string, defaultState bool
 
 // SendServiceLog sends service logs
 func (handler *AmqpHandler) SendServiceLog(serviceLog PushServiceLog) (err error) {
-	serviceLogMsg := handler.createAosMessage(PushServiceLogType, serviceLog)
+	serviceLogMsg := handler.createAosMessage(PushLogType, serviceLog)
 
 	handler.sendChannel <- Message{"", serviceLogMsg}
 
