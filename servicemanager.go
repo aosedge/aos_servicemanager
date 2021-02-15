@@ -403,6 +403,13 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 
 		sm.logging.GetServiceCrashLog(*data)
 
+	case *amqp.RequestSystemLog:
+		log.WithFields(log.Fields{
+			"from": data.From,
+			"till": data.Till}).Info("Receive request system log")
+
+		sm.logging.GetSystemLog(*data)
+
 	case *amqp.RenewCertificatesNotificationWithPwd:
 		log.Info("Receive renew certificates notification")
 

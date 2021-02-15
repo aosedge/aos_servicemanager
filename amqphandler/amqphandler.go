@@ -55,6 +55,7 @@ const (
 	DesiredStatusType                 = "desiredStatus"
 	RequestServiceCrashLogType        = "requestServiceCrashLog"
 	RequestServiceLogType             = "requestServiceLog"
+	RequestSystemLogType              = "requestSystemLog"
 	ServiceDiscoveryType              = "serviceDiscovery"
 	StateAcceptanceType               = "stateAcceptance"
 	UpdateStateType                   = "updateState"
@@ -159,6 +160,13 @@ type RequestServiceLog struct {
 	LogID     string     `json:"logID"`
 	From      *time.Time `json:"from"`
 	Till      *time.Time `json:"till"`
+}
+
+// RequestSystemLog request system log message
+type RequestSystemLog struct {
+	LogID string     `json:"logID"`
+	From  *time.Time `json:"from"`
+	Till  *time.Time `json:"till"`
 }
 
 // StateAcceptance state acceptance message
@@ -527,6 +535,7 @@ var messageMap = map[string]func() interface{}{
 	DesiredStatusType:                 func() interface{} { return &DesiredStatus{} },
 	RequestServiceCrashLogType:        func() interface{} { return &RequestServiceCrashLog{} },
 	RequestServiceLogType:             func() interface{} { return &RequestServiceLog{} },
+	RequestSystemLogType:              func() interface{} { return &RequestSystemLog{} },
 	StateAcceptanceType:               func() interface{} { return &StateAcceptance{} },
 	UpdateStateType:                   func() interface{} { return &UpdateState{} },
 	RenewCertificatesNotificationType: func() interface{} { return &RenewCertificatesNotification{} },

@@ -201,6 +201,10 @@ func TestSendMessages(t *testing.T) {
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestServiceCrashLogType, Version: amqphandler.ProtocolVersion},
 			Data:   &amqphandler.RequestServiceCrashLog{ServiceID: "service3", LogID: uuid.New().String()},
 		},
+		{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestSystemLogType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.RequestSystemLog{LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
+		},
 	}
 
 	for _, message := range testData {
