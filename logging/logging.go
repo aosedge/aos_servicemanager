@@ -113,6 +113,22 @@ func (instance *Logging) GetServiceCrashLog(request amqp.RequestServiceCrashLog)
 	go instance.getServiceCrashLog(request)
 }
 
+// GetSystemLog returns system log
+func (instance *Logging) GetSystemLog(request amqp.RequestSystemLog) {
+	log.WithFields(log.Fields{
+		"logID":    request.LogID,
+		"dateFrom": request.From,
+		"dateTill": request.Till}).Debug("Get system log")
+
+	logRequest := getLogRequest{
+		logID: request.LogID,
+		from:  request.From,
+		till:  request.Till,
+	}
+
+	go instance.getLog(logRequest)
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -120,14 +121,15 @@ func TestGetServiceLog(t *testing.T) {
 		From:      &from,
 		Till:      &till})
 
-	checkReceivedLog(t, logging.LogChannel, from, till)
+	checkReceivedLog(t, logging.LogChannel, &from, &till)
 
 	logging.GetServiceLog(amqp.RequestServiceLog{
 		ServiceID: "logservice0",
 		LogID:     "log0",
 		From:      &from})
 
-	checkReceivedLog(t, logging.LogChannel, from, time.Now())
+	currentTime := time.Now()
+	checkReceivedLog(t, logging.LogChannel, &from, &currentTime)
 }
 
 func TestGetWrongServiceLog(t *testing.T) {
@@ -155,6 +157,34 @@ func TestGetWrongServiceLog(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		log.Errorf("Receive log timeout")
 	}
+}
+
+func TestGetSystemLog(t *testing.T) {
+	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	if err != nil {
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer logging.Close()
+
+	from := time.Now()
+
+	for i := 0; i < 20; i++ {
+		cmd := exec.Command("logger", "Hello World")
+		if err := cmd.Run(); err != nil {
+			t.Error(err)
+		}
+	}
+
+	time.Sleep(7 * time.Second)
+
+	till := from.Add(5 * time.Second)
+
+	logging.GetSystemLog(amqp.RequestSystemLog{
+		LogID: "log10",
+		From:  &from,
+		Till:  &till})
+
+	checkReceivedLog(t, logging.LogChannel, nil, nil)
 }
 
 func TestGetEmptyLog(t *testing.T) {
@@ -212,7 +242,7 @@ func TestGetServiceCrashLog(t *testing.T) {
 		ServiceID: "logservice3",
 		LogID:     "log2"})
 
-	checkReceivedLog(t, logging.LogChannel, from, till)
+	checkReceivedLog(t, logging.LogChannel, &from, &till)
 }
 
 func TestMaxPartCountLog(t *testing.T) {
@@ -420,7 +450,7 @@ func getTimeRange(logData string) (from, till time.Time, err error) {
 	return from, till, nil
 }
 
-func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, till time.Time) {
+func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, till *time.Time) {
 	receivedLog := ""
 
 	for {
@@ -451,17 +481,21 @@ func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, t
 			receivedLog += string(data)
 
 			if *result.Part == *result.PartCount {
+				if from == nil || till == nil {
+					return
+				}
+
 				logFrom, logTill, err := getTimeRange(receivedLog)
 				if err != nil {
 					t.Errorf("Can't get log time range: %s", err)
 					return
 				}
 
-				if logFrom.Before(from) {
+				if logFrom.Before(*from) {
 					t.Error("Log range out of requested")
 				}
 
-				if logTill.After(till) {
+				if logTill.After(*till) {
 					t.Error("Log range out of requested")
 				}
 
