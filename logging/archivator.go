@@ -65,10 +65,6 @@ func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize, maxPartCo
 }
 
 func (instance *archivator) addLog(message string) (err error) {
-	log.WithFields(log.Fields{
-		"partSize": instance.partSize + uint64(len(message)),
-		"message":  message}).Debug("Archivate log")
-
 	if instance.partCount >= instance.maxPartCount {
 		return errMaxPartCount
 	}

@@ -59,6 +59,13 @@ type Logging struct {
 	config          config.Logging
 }
 
+type getLogRequest struct {
+	serviceID string
+	logID     string
+	from      *time.Time
+	till      *time.Time
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -87,7 +94,14 @@ func (instance *Logging) GetServiceLog(request amqp.RequestServiceLog) {
 		"dateFrom":  request.From,
 		"dateTill":  request.Till}).Debug("Get service log")
 
-	go instance.getServiceLog(request)
+	logRequest := getLogRequest{
+		serviceID: request.ServiceID,
+		logID:     request.LogID,
+		from:      request.From,
+		till:      request.Till,
+	}
+
+	go instance.getLog(logRequest)
 }
 
 // GetServiceCrashLog returns service crash log
@@ -103,7 +117,7 @@ func (instance *Logging) GetServiceCrashLog(request amqp.RequestServiceCrashLog)
  * Private
  ******************************************************************************/
 
-func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
+func (instance *Logging) getLog(request getLogRequest) {
 	var err error
 
 	// error handling
@@ -113,19 +127,9 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 
 			log.Error(errorStr)
 
-			response := amqp.PushServiceLog{
-				LogID: request.LogID,
-				Error: &errorStr}
-			instance.LogChannel <- response
+			instance.sendErrorResponse(errorStr, request.logID)
 		}
 	}()
-
-	var service launcher.Service
-
-	service, err = instance.serviceProvider.GetService(request.ServiceID)
-	if err != nil {
-		panic("Can't get service")
-	}
 
 	var journal *sdjournal.Journal
 
@@ -135,24 +139,18 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 	}
 	defer journal.Close()
 
-	if err = journal.AddMatch(serviceField + "=" + service.UnitName); err != nil {
+	if _, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID); err != nil {
 		panic("Can't add filter")
 	}
 
-	if request.From != nil {
-		if err = journal.SeekRealtimeUsec(uint64(request.From.UnixNano() / 1000)); err != nil {
-			panic("Can't seek log")
-		}
-	} else {
-		if err = journal.SeekHead(); err != nil {
-			panic("Can't seek log")
-		}
+	if err = instance.seekToTime(journal, request.from); err != nil {
+		panic("Can't seek log")
 	}
 
 	var tillRealtime uint64
 
-	if request.Till != nil {
-		tillRealtime = uint64(request.Till.UnixNano() / 1000)
+	if request.till != nil {
+		tillRealtime = uint64(request.till.UnixNano() / 1000)
 	}
 
 	var archInstance *archivator
@@ -191,11 +189,12 @@ func (instance *Logging) getServiceLog(request amqp.RequestServiceLog) {
 				log.Warn(err)
 				break
 			}
+
 			panic("Can't archive log")
 		}
 	}
 
-	if err = archInstance.sendLog(request.LogID); err != nil {
+	if err = archInstance.sendLog(request.logID); err != nil {
 		panic("Can't send log")
 	}
 }
@@ -210,19 +209,9 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 			log.Error(errorStr)
 
-			response := amqp.PushServiceLog{
-				LogID: request.LogID,
-				Error: &errorStr}
-			instance.LogChannel <- response
+			instance.sendErrorResponse(errorStr, request.LogID)
 		}
 	}()
-
-	var service launcher.Service
-
-	service, err = instance.serviceProvider.GetService(request.ServiceID)
-	if err != nil {
-		panic("Can't get service")
-	}
 
 	var journal *sdjournal.Journal
 
@@ -232,7 +221,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 	}
 	defer journal.Close()
 
-	if err = journal.AddMatch(unitField + "=" + service.UnitName); err != nil {
+	if _, err = instance.addServiceIDFilter(journal, unitField, request.ServiceID); err != nil {
 		panic("Can't add filter")
 	}
 
@@ -289,7 +278,10 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			panic("Can't add filter")
 		}
 
-		if err = journal.AddMatch(serviceField + "=" + service.UnitName); err != nil {
+		var unitName string
+
+		unitName, err = instance.addServiceIDFilter(journal, serviceField, request.ServiceID)
+		if err != nil {
 			panic("Can't add filter")
 		}
 
@@ -315,7 +307,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 				break
 			}
 
-			if serviceName, ok := logEntry.Fields[serviceField]; ok && service.UnitName == serviceName {
+			if serviceName, ok := logEntry.Fields[serviceField]; ok && unitName == serviceName {
 				if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
 					panic("Can't archive log")
 				}
@@ -326,4 +318,38 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 	if err = archInstance.sendLog(request.LogID); err != nil {
 		panic("Can't send log")
 	}
+}
+
+func (instance *Logging) sendErrorResponse(errorStr, logID string) {
+	response := amqp.PushServiceLog{
+		LogID: logID,
+		Error: &errorStr}
+
+	instance.LogChannel <- response
+}
+
+func (instance *Logging) addServiceIDFilter(journal *sdjournal.Journal,
+	fieldName, serviceID string) (unitName string, err error) {
+	if serviceID == "" {
+		return unitName, nil
+	}
+
+	service, err := instance.serviceProvider.GetService(serviceID)
+	if err != nil {
+		return unitName, nil
+	}
+
+	if err = journal.AddMatch(fieldName + "=" + service.UnitName); err != nil {
+		return unitName, err
+	}
+
+	return service.UnitName, nil
+}
+
+func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time) (err error) {
+	if from != nil {
+		return journal.SeekRealtimeUsec(uint64(from.UnixNano() / 1000))
+	}
+
+	return journal.SeekHead()
 }
