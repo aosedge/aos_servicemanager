@@ -54,14 +54,12 @@ var tpmSupportHashFunc = map[crypto.Hash]struct {
  * Types
  ******************************************************************************/
 
-type tpmHandle uint32
-
 // TPMHash based on crypto.Hash
 type tpmHash crypto.Hash
 
 // tpmPrivateKeyRSA provides a TPM crypto interface
 type tpmPrivateKeyRSA struct {
-	handle   tpmHandle
+	handle   tpmutil.Handle
 	pub      crypto.PublicKey
 	crypt    *TPMCrypto
 	password string
@@ -77,7 +75,7 @@ type TPMCrypto struct {
 // tpmCryptoAccessor describes TPM crypto interface
 type tpmCryptoAccessor interface {
 	Open(path string) (err error)
-	CreateRSAPrimaryKey(handle tpmHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (crypto.PublicKey, error)
+	CreateRSAPrimaryKey(handle tpmutil.Handle, parentPW, ownerPW string, attr tpm2.KeyProp) (crypto.PublicKey, error)
 }
 
 /*******************************************************************************
@@ -107,7 +105,7 @@ func (tpm *TPMCrypto) Open(path string) (err error) {
 }
 
 // CreateRSAPrimaryKey generates a primary RSA key and makes it persistent under the given handle.
-func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle tpmHandle, parentPW, ownerPW string, attr tpm2.KeyProp) (pubKey crypto.PublicKey, err error) {
+func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle tpmutil.Handle, parentPW, ownerPW string, attr tpm2.KeyProp) (pubKey crypto.PublicKey, err error) {
 	tpm.Lock()
 	defer tpm.Unlock()
 
@@ -136,7 +134,7 @@ func (tpm *TPMCrypto) CreateRSAPrimaryKey(handle tpmHandle, parentPW, ownerPW st
 }
 
 // ExternalLoadRSAPrivateKey uses only for testing handshake with TPM
-func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (tpmHandle, error) {
+func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (handle tpmutil.Handle, err error) {
 	tpm.Lock()
 	defer tpm.Unlock()
 
@@ -156,12 +154,11 @@ func (tpm *TPMCrypto) ExternalLoadRSAPrivateKey(private *rsa.PrivateKey) (tpmHan
 		Sensitive: private.Primes[0].Bytes(),
 	}
 
-	h, _, err := tpm2.LoadExternal(tpm.dev, public, tpmPrivate, tpm2.HandleNull)
-	if err != nil {
+	if handle, _, err = tpm2.LoadExternal(tpm.dev, public, tpmPrivate, tpm2.HandleNull); err != nil {
 		return 0, err
 	}
 
-	return tpmHandle(h), nil
+	return handle, nil
 }
 
 // Public returns the public part of the key
@@ -339,7 +336,7 @@ func readPublicKey(dev io.ReadWriter, handle tpmutil.Handle) (tpm2.Public, crypt
 }
 
 // loadTpmPrivateKey load private tmp key
-func loadTpmPrivateKey(tpmInterface string, handel tpmHandle) (tpmPrivKey *tpmPrivateKeyRSA, err error) {
+func loadTpmPrivateKey(tpmInterface string, handle tpmutil.Handle) (tpmPrivKey *tpmPrivateKeyRSA, err error) {
 	tpmCrypto := &TPMCrypto{}
 
 	err = tpmCrypto.Open(tpmInterface)
@@ -347,7 +344,7 @@ func loadTpmPrivateKey(tpmInterface string, handel tpmHandle) (tpmPrivKey *tpmPr
 		return tpmPrivKey, err
 	}
 
-	tpmPrivKey = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: handel, hashAlg: crypto.SHA256}
+	tpmPrivKey = &tpmPrivateKeyRSA{crypt: tpmCrypto, handle: handle, hashAlg: crypto.SHA256}
 
 	err = tpmPrivKey.Create()
 	if err != nil {

@@ -39,6 +39,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/go-tpm/tpmutil"
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/config"
@@ -594,14 +595,12 @@ func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.P
 		return loadKey(keyBytes)
 
 	case "tpm":
-		result, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
+		handle, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
 		if err != nil {
 			return nil, err
 		}
 
-		handle := tpmHandle(result)
-
-		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, handle)
+		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, tpmutil.Handle(handle))
 	}
 
 	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURL.Scheme)
