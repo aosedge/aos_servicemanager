@@ -18,48 +18,9 @@
 package fcrypt
 
 import (
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
-	"fmt"
-	"io/ioutil"
-	"net/url"
 	"strings"
 )
-
-/*******************************************************************************
- * Public
- ******************************************************************************/
-
-// GetCrtSerialByURL get certificate serial by URL
-func GetCrtSerialByURL(crtURL string) (serial string, err error) {
-	urlVal, err := url.Parse(crtURL)
-	if err != nil {
-		return "", err
-	}
-
-	if urlVal.Scheme != "file" {
-		return "", errors.New("wrong certificate scheme")
-	}
-
-	pemCrt, err := ioutil.ReadFile(urlVal.Path)
-	if err != nil {
-		return "", err
-	}
-
-	block, _ := pem.Decode(pemCrt)
-
-	if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-		return "", errors.New("invalid PEM Block")
-	}
-
-	x509Crt, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%X", x509Crt.SerialNumber), nil
-}
 
 /*******************************************************************************
  * Private

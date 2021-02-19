@@ -396,7 +396,7 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	case *amqp.IssuedUnitCertificates:
 		log.Info("Receive issued unit certificates")
 
-		if err = sm.iam.InstallCertificates(data.Certificates); err != nil {
+		if err = sm.iam.InstallCertificates(data.Certificates, sm.crypt); err != nil {
 			log.Errorf("Can't install certificates: %s", err)
 		}
 

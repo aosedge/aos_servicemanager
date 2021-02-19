@@ -19,7 +19,9 @@ package iamclient_test
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/url"
@@ -33,6 +35,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -63,6 +66,9 @@ type testServer struct {
 type testSender struct {
 	csr    map[string]string
 	serial map[string]string
+}
+
+type testCertProvider struct {
 }
 
 /*******************************************************************************
@@ -277,14 +283,14 @@ KzpDMr/kcScwzmmNcN8aLp31TSRVee64QrK7yF3YJxL+rA==
 		{Type: "offline", CertificateChain: "offlineCert"},
 	}
 
-	if err = client.InstallCertificates(certInfo); err != nil {
+	if err = client.InstallCertificates(certInfo, &testCertProvider{}); err != nil {
 		t.Fatalf("Can't process install certificates request: %s", err)
 	}
 
 	serial := map[string]string{"online": "1", "offline": "2"}
 
 	if !reflect.DeepEqual(serial, sender.serial) {
-		t.Errorf("Wrong sender CSR: %v", sender.serial)
+		t.Errorf("Wrong certificate serials: %v", sender.serial)
 	}
 }
 
@@ -458,4 +464,25 @@ func (sender *testSender) SendInstallCertificatesConfirmation(confirmations []am
 	}
 
 	return nil
+}
+
+func (provider *testCertProvider) GetCertSerial(certURLStr string) (serial string, err error) {
+	certURL, err := url.Parse(certURLStr)
+	if err != nil {
+		return "", err
+	}
+
+	var certs []*x509.Certificate
+
+	switch certURL.Scheme {
+	case cryptutils.SchemeFile:
+		if certs, err = cryptutils.LoadCertificate(certURL.Path); err != nil {
+			return "", err
+		}
+
+	default:
+		return "", fmt.Errorf("unsupported schema %s for certificate", certURL.Scheme)
+	}
+
+	return fmt.Sprintf("%X", certs[0].SerialNumber), nil
 }

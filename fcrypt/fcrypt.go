@@ -179,6 +179,16 @@ func (ctx *CryptoContext) GetOrganization() (names []string, err error) {
 	return certs[0].Subject.Organization, nil
 }
 
+// GetCertSerial returns certificate serial number
+func (ctx *CryptoContext) GetCertSerial(certURL string) (serial string, err error) {
+	certs, err := ctx.loadCertificateByURL(certURL)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%X", certs[0].SerialNumber), nil
+}
+
 // CreateSignContext creates sign context
 func (ctx *CryptoContext) CreateSignContext() (signContext SignContextInterface, err error) {
 	if ctx == nil || ctx.rootCertPool == nil {

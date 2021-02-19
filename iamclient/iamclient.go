@@ -33,7 +33,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/fcrypt"
 )
 
 /*******************************************************************************
@@ -71,6 +70,11 @@ type Client struct {
 type Sender interface {
 	SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error)
 	SendInstallCertificatesConfirmation(confirmations []amqp.CertificateConfirmation) (err error)
+}
+
+// CertificateProvider provides certificate info
+type CertificateProvider interface {
+	GetCertSerial(certURL string) (serial string, err error)
 }
 
 /*******************************************************************************
@@ -182,7 +186,8 @@ func (client *Client) RenewCertificatesNotification(pwd string, certInfo []amqp.
 }
 
 // InstallCertificates applies new issued certificates
-func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificatesInfo) (err error) {
+func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificatesInfo,
+	certProvider CertificateProvider) (err error) {
 	var confirmations []amqp.CertificateConfirmation
 
 	for _, cert := range certInfo {
@@ -196,7 +201,7 @@ func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificates
 
 		response, err := client.pbclient.ApplyCert(ctx, request)
 		if err == nil {
-			certConfirmation.Serial, err = fcrypt.GetCrtSerialByURL(response.CertUrl)
+			certConfirmation.Serial, err = certProvider.GetCertSerial(response.CertUrl)
 		}
 
 		if err == nil {
