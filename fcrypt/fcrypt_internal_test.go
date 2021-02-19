@@ -1046,27 +1046,24 @@ func TestVerifySignOfComponent(t *testing.T) {
 	}
 }
 
-func TestGetCertificateOrganizations(t *testing.T) {
-	var names []string
-	var err error
-
-	certProvider := testCertificateProvider{certPath: path.Join(tmpDir, certificates[0].Name)}
-
-	if _, err = GetCertificateOrganizations(&certProvider); err == nil {
-		log.Error("Expected error because the certificate doesn't have organizations")
+func TestGetCertificateOrganization(t *testing.T) {
+	ctx, err := New(config.Crypt{}, &testCertificateProvider{certPath: path.Join(tmpDir, certificates[1].Name)})
+	if err != nil {
+		t.Fatalf("Can't create crypto context: %s", err)
 	}
+	defer ctx.Close()
 
-	certProvider = testCertificateProvider{certPath: path.Join(tmpDir, certificates[1].Name)}
-	if names, err = GetCertificateOrganizations(&certProvider); err != nil {
-		log.Fatalf("Get organization name error: %s", err)
+	names, err := ctx.GetOrganization()
+	if err != nil {
+		t.Fatalf("Can't get organization: %s", err)
 	}
 
 	if len(names) != 1 {
-		log.Error("Number of organizations doesn't equal one")
+		t.Fatalf("Wrong organization names count: %d", len(names))
 	}
 
-	if names[0] == "" {
-		log.Error("Organization name is empty")
+	if names[0] != "staging-fusion.westeurope.cloudapp.azure.com" {
+		t.Fatalf("Wrong organization name: %s", names[0])
 	}
 }
 

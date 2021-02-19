@@ -610,7 +610,7 @@ func (sm *serviceManager) run() (err error) {
 		}
 
 		// Get organization names from certificate and use it as discovery URL
-		if orgNames, err = fcrypt.GetCertificateOrganizations(sm.iam); err != nil {
+		if orgNames, err = sm.crypt.GetOrganization(); err != nil {
 			log.Warningf("Organization name will be taken from config file: %s", err)
 		} else {
 			// We use the first member of organization list

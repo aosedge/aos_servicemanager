@@ -160,6 +160,25 @@ func (ctx *CryptoContext) Close() (err error) {
 	return nil
 }
 
+// GetOrganization returns online certificate origanizarion names
+func (ctx *CryptoContext) GetOrganization() (names []string, err error) {
+	certURLStr, _, err := ctx.certProvider.GetCertificate(onlineCertificate, nil, "")
+	if err != nil {
+		return nil, err
+	}
+
+	certs, err := ctx.loadCertificateByURL(certURLStr)
+	if err != nil {
+		return nil, err
+	}
+
+	if certs[0].Subject.Organization == nil {
+		return nil, errors.New("online certificate does not have organizations")
+	}
+
+	return certs[0].Subject.Organization, nil
+}
+
 // CreateSignContext creates sign context
 func (ctx *CryptoContext) CreateSignContext() (signContext SignContextInterface, err error) {
 	if ctx == nil || ctx.rootCertPool == nil {

@@ -31,40 +31,6 @@ import (
  * Public
  ******************************************************************************/
 
-// GetCertificateOrganizations gives a list of certificate organizations
-func GetCertificateOrganizations(provider CertificateProvider) (names []string, err error) {
-	certURLStr, _, err := provider.GetCertificate(onlineCertificate, nil, "")
-	if err != nil {
-		return names, err
-	}
-
-	certURL, err := url.Parse(certURLStr)
-	if err != nil {
-		return names, err
-	}
-
-	if certURL.Scheme != "file" {
-		return names, errors.New("Expect to have file for online cert")
-	}
-
-	certRaw, err := ioutil.ReadFile(certURL.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	certPemData, _ := pem.Decode(certRaw)
-	cert, err := x509.ParseCertificate(certPemData.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	if cert.Subject.Organization == nil {
-		return nil, errors.New("certificate does not have organizations")
-	}
-
-	return cert.Subject.Organization, nil
-}
-
 // GetCrtSerialByURL get certificate serial by URL
 func GetCrtSerialByURL(crtURL string) (serial string, err error) {
 	urlVal, err := url.Parse(crtURL)
