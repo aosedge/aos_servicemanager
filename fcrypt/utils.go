@@ -28,14 +28,6 @@ import (
 )
 
 /*******************************************************************************
- * Consts
- ******************************************************************************/
-
-const (
-	certDERIdent = "CERTIFICATE"
-)
-
-/*******************************************************************************
  * Public
  ******************************************************************************/
 
@@ -73,7 +65,7 @@ func GetCertificateOrganizations(provider CertificateProvider) (names []string, 
 	return cert.Subject.Organization, nil
 }
 
-// GetCrtSerialByURL get cerificate  serial by URL
+// GetCrtSerialByURL get certificate serial by URL
 func GetCrtSerialByURL(crtURL string) (serial string, err error) {
 	urlVal, err := url.Parse(crtURL)
 	if err != nil {
@@ -109,11 +101,13 @@ func GetCrtSerialByURL(crtURL string) (serial string, err error) {
 
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
+
 	if l%blocklen != 0 {
 		return nil, errors.New("padding error")
 	}
 
 	pl := int(in[l-1])
+
 	if pl < 1 || pl > blocklen {
 		return nil, errors.New("padding error")
 	}
@@ -135,6 +129,7 @@ func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
 	} else {
 		algName = ""
 	}
+
 	if len(algNamesSlice) >= 2 {
 		modeName = algNamesSlice[1]
 	} else {
@@ -153,11 +148,13 @@ func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
 func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
 	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
 	algNamesSlice := strings.Split(algString, "/")
+
 	if len(algNamesSlice) >= 1 {
 		algName = algNamesSlice[0]
 	} else {
 		algName = ""
 	}
+
 	if len(algNamesSlice) >= 2 {
 		hashName = algNamesSlice[1]
 	} else {
@@ -177,8 +174,10 @@ func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
 	switch strings.ToUpper(algName) {
 	case "AES128":
 		return 16, 16, nil
+
 	case "AES192":
 		return 24, 16, nil
+
 	case "AES256":
 		return 32, 16, nil
 

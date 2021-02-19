@@ -808,13 +808,13 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 	if len(chipperContex.key) != len(clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key len")
 	}
+
 	if !bytes.Equal(chipperContex.key, clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key")
 	}
 }
 
 func TestDecryptSessionKeyOAEP(t *testing.T) {
-
 	// For testing only
 	iv, err := hex.DecodeString(UsedIV)
 	if err != nil {
@@ -911,6 +911,7 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 	if len(chipperContex.key) != len(clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key len")
 	}
+
 	// Key should be different
 	if bytes.Equal(chipperContex.key, clearAesKey) {
 		t.Fatalf("Error decrypt key: invalid key")
@@ -923,6 +924,7 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error decode IV: '%v'", err)
 	}
+
 	encryptedKey, err := base64.StdEncoding.DecodeString(EncryptedKeyOaep)
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
@@ -943,8 +945,8 @@ func TestInvalidSessionKeyOAEP(t *testing.T) {
 	keyInfo.SessionIV = iv
 	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
 	keyInfo.AsymmetricAlgName = "RSA/OAEP"
-	_, err = ctx.ImportSessionKey(keyInfo)
-	if err == nil {
+
+	if _, err = ctx.ImportSessionKey(keyInfo); err == nil {
 		t.Fatalf("Error decode key: decrypt should raise error")
 	}
 }
@@ -1027,7 +1029,6 @@ func TestVerifySignOfComponent(t *testing.T) {
 	}
 
 	for _, data := range upgradeMetadata.Data {
-
 		tmpFile, err := ioutil.TempFile(os.TempDir(), "aos_update-")
 		if err != nil {
 			t.Fatal("Cannot create temporary file", err)
@@ -1063,6 +1064,7 @@ func TestGetCertificateOrganizations(t *testing.T) {
 	if len(names) != 1 {
 		log.Error("Number of organizations doesn't equal one")
 	}
+
 	if names[0] == "" {
 		log.Error("Organization name is empty")
 	}
