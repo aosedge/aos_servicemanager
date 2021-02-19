@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"strconv"
@@ -138,17 +137,7 @@ func New(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, e
 	}
 
 	if conf.CACert != "" {
-		// Load CA cert
-		rootCAPEM, err := ioutil.ReadFile(conf.CACert)
-		if err != nil {
-			log.Errorf("error reading CA certificate (%s): %s", conf.CACert, err)
-			return nil, err
-		}
-
-		ctx.rootCertPool = x509.NewCertPool()
-		if !ctx.rootCertPool.AppendCertsFromPEM(rootCAPEM) {
-			err = errors.New("invalid or empty CA file")
-			log.Errorf("error appending CA certificate (%s): %s", conf.CACert, err)
+		if ctx.rootCertPool, err = cryptutils.GetCaCertPool(conf.CACert); err != nil {
 			return nil, err
 		}
 	}
@@ -203,11 +192,6 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return cfg, errors.New("Expect to have file for online cert")
 	}
 
-	caCertPool, err := getCaCertPool(ctx.cryptConfig.CACert)
-	if err != nil {
-		return nil, err
-	}
-
 	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
 		return cfg, err
@@ -247,7 +231,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return cfg, fmt.Errorf("Receive unsupported schema = %s for private key", keyURL.Scheme)
 	}
 
-	cfg.RootCAs = caCertPool
+	cfg.RootCAs = ctx.rootCertPool
 	cfg.Certificates = []tls.Certificate{cert}
 	cfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) (err error) {
 		return nil
