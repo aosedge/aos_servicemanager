@@ -25,8 +25,6 @@ import (
 	"io/ioutil"
 	"net/url"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
 /*******************************************************************************
@@ -109,32 +107,6 @@ func GetCrtSerialByURL(crtURL string) (serial string, err error) {
  * Private
  ******************************************************************************/
 
-func loadClientCertificate(file string) (certificates [][]byte, err error) {
-	certPEMBlock, err := ioutil.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		var certDERBlock *pem.Block
-
-		certDERBlock, certPEMBlock = pem.Decode(certPEMBlock)
-		if certDERBlock == nil {
-			break
-		}
-
-		if certDERBlock.Type == certDERIdent {
-			certificates = append(certificates, certDERBlock.Bytes)
-		}
-	}
-
-	if len(certificates) == 0 {
-		return nil, errors.New("client certificate does not exist")
-	}
-
-	return certificates, nil
-}
-
 func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
 	if l%blocklen != 0 {
@@ -213,17 +185,4 @@ func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
 	default:
 		return 0, 0, errors.New("unsupported symmetric algorithm")
 	}
-}
-
-func getCaCertPool(rootCaFilePath string) (*x509.CertPool, error) {
-	// Load CA cert
-	caCert, err := ioutil.ReadFile(rootCaFilePath)
-	if err != nil {
-		log.Errorf("Error reading CA certificate: %s", err)
-		return nil, err
-	}
-
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-	return caCertPool, nil
 }

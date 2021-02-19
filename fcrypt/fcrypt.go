@@ -201,7 +201,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 	case "tpm":
 		log.Debug("TLS config uses TPM engine")
 
-		clientCert, err := loadClientCertificate(certURL.Path)
+		clientCert, err := ctx.loadCertificateByURL(certURLStr)
 		if err != nil {
 			return cfg, err
 		}
@@ -211,7 +211,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 			return cfg, err
 		}
 
-		cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: clientCert}
+		cert = tls.Certificate{PrivateKey: onlinePrivate, Certificate: getRawCertificate(clientCert)}
 
 		// Important. TPM module only supports SHA1 and SHA-256 hash algorithms with PKCS1 padding scheme
 		cert.SupportedSignatureAlgorithms = []tls.SignatureScheme{
@@ -614,6 +614,31 @@ func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.
 
 	default:
 		return nil, fmt.Errorf("unsupported schema %s for private key", keyURL.Scheme)
+	}
+}
+
+func getRawCertificate(certs []*x509.Certificate) (rawCerts [][]byte) {
+	rawCerts = make([][]byte, 0, len(certs))
+
+	for _, cert := range certs {
+		rawCerts = append(rawCerts, cert.Raw)
+	}
+
+	return rawCerts
+}
+
+func (ctx *CryptoContext) loadCertificateByURL(certURLStr string) (certs []*x509.Certificate, err error) {
+	certURL, err := url.Parse(certURLStr)
+	if err != nil {
+		return nil, err
+	}
+
+	switch certURL.Scheme {
+	case cryptutils.SchemeFile:
+		return cryptutils.LoadCertificate(certURL.Path)
+
+	default:
+		return nil, fmt.Errorf("unsupported schema %s for certificate", certURL.Scheme)
 	}
 }
 
