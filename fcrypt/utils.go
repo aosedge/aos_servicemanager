@@ -18,9 +18,6 @@
 package fcrypt
 
 import (
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -181,22 +178,6 @@ func decodeAlgNames(algString string) (algName, modeName, paddingName string) {
 	return algName, modeName, paddingName
 }
 
-func loadKey(keyBytes []byte) (crypto.PrivateKey, error) {
-	var err error
-	var key crypto.PrivateKey
-
-	if key, err = decodePrivateKey(keyBytes); err != nil {
-		return nil, err
-	}
-
-	switch key := key.(type) {
-	case *rsa.PrivateKey:
-		return key, nil
-	default: // can be only  *ecdsa.PrivateKey after decodePrivateKey
-		return nil, errors.New("ECDSA private key not yet supported")
-	}
-}
-
 func decodeSignAlgNames(algString string) (algName, hashName, paddingName string) {
 	// alg string example: RSA/SHA256/PKCS1v1_5 or RSA/SHA256
 	algNamesSlice := strings.Split(algString, "/")
@@ -218,44 +199,6 @@ func decodeSignAlgNames(algString string) (algName, hashName, paddingName string
 	}
 
 	return algName, hashName, paddingName
-}
-
-func decodePrivateKey(bytes []byte) (crypto.PrivateKey, error) {
-	var der []byte
-
-	// Try to parse data as PEM. Ignore the rest of the data
-	// ToDo: add support private key and certificate in the same file
-	block, _ := pem.Decode(bytes)
-
-	if block != nil {
-		// bytes is PEM
-		der = block.Bytes
-	} else {
-		der = bytes
-	}
-
-	// Try to load key as PKCS1 container
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// Try to load key as PKCS8 container
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey:
-			return key, nil
-		default:
-			return nil, errors.New("found unsupported private key type in PKCS8 container")
-		}
-	}
-
-	// Try to parse as PCKS8 EC private key
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-
-	// This is not a private key
-	return nil, errors.New("failed to parse private key")
 }
 
 func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {

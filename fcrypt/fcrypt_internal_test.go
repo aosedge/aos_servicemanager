@@ -764,8 +764,8 @@ func TestInvalidParams(t *testing.T) {
 }
 
 func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
-
 	// For testing only
+
 	iv, err := hex.DecodeString(UsedIV)
 	if err != nil {
 		t.Fatalf("Error decode IV: '%v'", err)
@@ -780,13 +780,11 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error decode key: '%v'", err)
 	}
+
 	// End of: For testing only
 
-	// Create or use context
-	conf := config.Crypt{}
-	certProvider := testCertificateProvider{keyPath: vehicle1OfflineKeyPath}
-
-	ctx, err := New(conf, &certProvider)
+	// Create and use context
+	ctx, err := New(config.Crypt{}, &testCertificateProvider{keyPath: vehicle1OfflineKeyPath})
 	if err != nil {
 		t.Fatalf("Error creating context: '%v'", err)
 	}
@@ -799,12 +797,12 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 
 	sessionKey, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
-		t.Errorf("Error decode key: '%v'", err)
+		t.Fatalf("Error decode key: '%v'", err)
 	}
 
 	chipperContex, ok := sessionKey.(*SymmetricCipherContext)
 	if !ok {
-		t.Errorf("Can't cast to SymmetricCipherContext")
+		t.Fatalf("Can't cast to SymmetricCipherContext")
 	}
 
 	if len(chipperContex.key) != len(clearAesKey) {

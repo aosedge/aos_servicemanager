@@ -296,12 +296,19 @@ func (sm *serviceManager) close() {
 		sm.db.Close()
 	}
 
+	// Close downloader
 	if sm.downloader != nil {
 		sm.downloader.Close()
 	}
 
+	// Close D-Bus
 	if sm.dbus != nil {
 		sm.dbus.Close()
+	}
+
+	// Close crypto context
+	if sm.crypt != nil {
+		sm.crypt.Close()
 	}
 }
 

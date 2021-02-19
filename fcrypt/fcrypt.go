@@ -39,8 +39,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/tpmkey"
 
 	"aos_servicemanager/config"
 )
@@ -75,7 +78,7 @@ type CryptoSessionKeyInfo struct {
 type CryptoContext struct {
 	cryptConfig  config.Crypt
 	rootCertPool *x509.CertPool
-
+	tpmDevice    io.ReadWriteCloser
 	certProvider CertificateProvider
 }
 
@@ -150,10 +153,30 @@ func New(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, e
 		}
 	}
 
+	if conf.TpmDevice != "" {
+		if ctx.tpmDevice, err = tpm2.OpenTPM(conf.TpmDevice); err != nil {
+			return nil, err
+		}
+	}
+
 	return ctx, nil
 }
 
-func (ctx *CryptoContext) CreateSignContext() (SignContextInterface, error) {
+// Close closes crypto context
+func (ctx *CryptoContext) Close() (err error) {
+	if ctx.tpmDevice != nil {
+		if tpmErr := ctx.tpmDevice.Close(); tpmErr != nil {
+			if err == nil {
+				err = tpmErr
+			}
+		}
+	}
+
+	return nil
+}
+
+// CreateSignContext creates sign context
+func (ctx *CryptoContext) CreateSignContext() (signContext SignContextInterface, err error) {
 	if ctx == nil || ctx.rootCertPool == nil {
 		return nil, errors.New("asymmetric context not initialized")
 	}
@@ -199,7 +222,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 			return cfg, err
 		}
 
-		onlinePrivate, err := ctx.loadPrivateKeyByURL(keyURL)
+		onlinePrivate, err := ctx.loadPrivateKeyByURL(keyURLStr)
 		if err != nil {
 			return cfg, err
 		}
@@ -277,7 +300,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		return nil, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
+	privKey, err := ctx.loadPrivateKeyByURL(keyURLStr)
 	if err != nil {
 		log.Error("Cant load private key ", err)
 		return symContext, err
@@ -583,27 +606,31 @@ func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File
  * Private
  ******************************************************************************/
 
-// LoadOfflineKey function loads offline from url
-func (ctx *CryptoContext) loadPrivateKeyByURL(keyURL *url.URL) (privKey crypto.PrivateKey, err error) {
+func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.PrivateKey, err error) {
+	keyURL, err := url.Parse(keyURLStr)
+	if err != nil {
+		return nil, err
+	}
+
 	switch keyURL.Scheme {
-	case "file":
-		keyBytes, err := ioutil.ReadFile(keyURL.Path)
-		if err != nil {
-			return privKey, fmt.Errorf("error reading offline private key from file: %s", err)
+	case cryptutils.SchemeFile:
+		return cryptutils.LoadKey(keyURL.Path)
+
+	case cryptutils.SchemeTPM:
+		if ctx.tpmDevice == nil {
+			return nil, fmt.Errorf("TPM device is not configured")
 		}
 
-		return loadKey(keyBytes)
-
-	case "tpm":
 		handle, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
 		if err != nil {
 			return nil, err
 		}
 
-		return loadTpmPrivateKey(ctx.cryptConfig.TpmDevice, tpmutil.Handle(handle))
-	}
+		return tpmkey.CreateFromPersistent(ctx.tpmDevice, tpmutil.Handle(handle))
 
-	return nil, fmt.Errorf("Unsupported schema %s for private Key", keyURL.Scheme)
+	default:
+		return nil, fmt.Errorf("unsupported schema %s for private key", keyURL.Scheme)
+	}
 }
 
 func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key []byte, err error) {
@@ -617,31 +644,17 @@ func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key 
 		return key, err
 	}
 
-	keyURL, err := url.Parse(keyURLStr)
+	privKey, err := ctx.loadPrivateKeyByURL(keyURLStr)
 	if err != nil {
 		return key, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURL(keyURL)
-	if err != nil {
-		return key, err
+	decryptor, ok := privKey.(crypto.Decrypter)
+	if !ok {
+		return nil, errors.New("private key doesn't have a decryption suite")
 	}
 
-	switch keyWithType := privKey.(type) {
-	case *rsa.PrivateKey, *tpmPrivateKeyRSA:
-		decryptor, ok := keyWithType.(crypto.Decrypter)
-		if !ok {
-			return nil, errors.New("private key doesn't have a decryption suite")
-		}
-
-		key, err := decryptCMSKey(&keyInfo, decryptor)
-		if err != nil {
-			return nil, err
-		}
-		return key, nil
-	default:
-		return nil, fmt.Errorf("%T private key not yet supported", keyWithType)
-	}
+	return decryptCMSKey(&keyInfo, decryptor)
 }
 
 func (ctx *SymmetricCipherContext) generateKeyAndIV(algString string) error {
