@@ -57,7 +57,7 @@ func newServer(cfg *config.Config, ch chan umCtrlInternalMsg, insecure bool) (se
 	var opts []grpc.ServerOption
 
 	if insecure == false {
-		tlsConfig, err := cryptutils.GetServerTLSConfig(cfg.Crypt.CACert, cfg.CertStorage)
+		tlsConfig, err := cryptutils.GetServerMutualTLSConfig(cfg.Crypt.CACert, cfg.CertStorage)
 		if err != nil {
 			return nil, err
 		}
