@@ -1176,7 +1176,7 @@ func TestSpec(t *testing.T) {
 		t.Fatalf("Can't generate service spec: %s", err)
 	}
 
-	spec, err := loadServiceSpec(path.Join(testDir, ocConfigFile))
+	spec, err := loadServiceSpec(path.Join(testDir, ociRuntimeConfigFile))
 	if err != nil {
 		t.Fatalf("Can't load service spec: %s", err)
 	}

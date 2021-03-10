@@ -20,6 +20,7 @@ package utils
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 
@@ -35,6 +36,25 @@ func UnpackTarImage(source, destination string) (err error) {
 	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar image")
 
 	return unTarFromFile(source, destination)
+}
+
+// CopyFile copies file content
+func CopyFile(source, destination string) (err error) {
+	sourceFile, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	desFile, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	defer desFile.Close()
+
+	_, err = io.Copy(desFile, sourceFile)
+
+	return err
 }
 
 /*******************************************************************************

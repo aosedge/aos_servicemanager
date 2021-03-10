@@ -78,7 +78,9 @@ const (
 
 	runcName = "runc" // runc file name
 
-	ocConfigFile = "config.json"
+	ociRuntimeConfigFile = "config.json"
+	ociImageConfigFile   = "image.json"
+	aosServiceConfigFile = "service.json"
 )
 
 const (
@@ -1183,7 +1185,7 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 }
 
 func (launcher *Launcher) prestartService(service Service) (err error) {
-	spec, err := loadServiceSpec(path.Join(service.Path, ocConfigFile))
+	spec, err := loadServiceSpec(path.Join(service.Path, ociRuntimeConfigFile))
 	if err != nil {
 		return err
 	}
@@ -1576,6 +1578,22 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
+	if err := utils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir, manifestFileName)); err != nil {
+		return service, err
+	}
+
+	if err := utils.CopyFile(imageParts.imageConfigPath, path.Join(installDir, ociImageConfigFile)); err != nil {
+		return service, err
+	}
+
+	if err := utils.CopyFile(imageParts.aosSrvConfigPath, path.Join(installDir, aosServiceConfigFile)); err != nil {
+		if !os.IsNotExist(err) {
+			return service, err
+		}
+
+		log.Debug("Service without aos service configuration")
+	}
+
 	rootfsDir := path.Join(installDir, serviceRootfsDir)
 
 	// unpack rootfs layer
@@ -1606,7 +1624,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	// generate config.json
 
-	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ocConfigFile), pathToNetNS)
+	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ociRuntimeConfigFile), pathToNetNS)
 	if err != nil {
 		return service, err
 	}
