@@ -460,7 +460,12 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 			return info, err
 		}
 
-		if service.StateLimit != 0 {
+		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+		if err != nil {
+			return info, err
+		}
+
+		if aosConfig.GetStateLimit() != 0 {
 			info[i].StateChecksum = hex.EncodeToString(userService.StateChecksum)
 		}
 	}
@@ -1042,7 +1047,14 @@ func (launcher *Launcher) doUpdateState(id string, data interface{}) {
 		return
 	}
 
-	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum); err != nil {
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		log.Errorf("Can't get aos service config: %s", err)
+		return
+	}
+
+	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum,
+		aosConfig.GetStateLimit()); err != nil {
 		log.Errorf("Can't update state: %s", err)
 		return
 	}
@@ -1168,12 +1180,12 @@ func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Servic
 	}
 
 	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service,
-		aosSrvConf.Quotas.StorageLimit, aosSrvConf.Quotas.StateLimit)
+		aosSrvConf.GetStorageLimit(), aosSrvConf.GetStateLimit())
 	if err != nil {
 		return err
 	}
 
-	if aosSrvConf.Quotas.StateLimit > 0 {
+	if aosSrvConf.GetStateLimit() > 0 {
 		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
 			return err
 		}
@@ -1379,7 +1391,12 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 		}
 	}
 
-	if err := launcher.storageHandler.StopStateWatching(launcher.users, service); err != nil {
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
+	if err := launcher.storageHandler.StopStateWatching(launcher.users, service, aosConfig.GetStateLimit()); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
 			retErr = err
@@ -1449,7 +1466,12 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 		}
 	}
 
-	if err := platform.SetUserFSQuota(launcher.config.StorageDir, service.StorageLimit,
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
+	if err := platform.SetUserFSQuota(launcher.config.StorageDir, aosConfig.GetStorageLimit(),
 		service.UID, service.GID); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
@@ -1765,8 +1787,13 @@ func (launcher *Launcher) addService(service Service) (err error) {
 	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir,
-		service.StorageLimit+service.StateLimit, service.UID, service.GID); err != nil {
+		aosConfig.GetStorageLimit()+aosConfig.GetStateLimit(), service.UID, service.GID); err != nil {
 		return err
 	}
 
@@ -1832,7 +1859,12 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return err
 	}
 
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newService.StorageLimit,
+	aosNewConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir, aosNewConfig.GetStorageLimit(),
 		newService.UID, newService.GID); err != nil {
 		return err
 	}

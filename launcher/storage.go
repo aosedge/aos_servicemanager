@@ -114,21 +114,22 @@ func (handler *storageHandler) Close() {
 	handler.watcher.Close()
 }
 
-func (handler *storageHandler) PrepareStorageFolder(users []string, service Service) (storageFolder string, err error) {
+func (handler *storageHandler) PrepareStorageFolder(users []string, service Service,
+	storageLimit, stateLimit uint64) (storageFolder string, err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
 	log.WithFields(log.Fields{
 		"serviceID":    service.ID,
-		"storageLimit": service.StorageLimit,
-		"stateLimit":   service.StateLimit}).Debug("Mount storage folder")
+		"storageLimit": storageLimit,
+		"stateLimit":   stateLimit}).Debug("Mount storage folder")
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return "", err
 	}
 
-	if service.StorageLimit == 0 {
+	if storageLimit == 0 {
 		if usersService.StorageFolder != "" {
 			os.RemoveAll(usersService.StorageFolder)
 		}
@@ -166,7 +167,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 		log.WithFields(log.Fields{"folder": usersService.StorageFolder, "serviceID": service.ID}).Debug("Create storage folder")
 	}
 
-	if service.StateLimit == 0 {
+	if stateLimit == 0 {
 		if _, err = os.Stat(path.Join(usersService.StorageFolder, stateFile)); err != nil {
 			if !os.IsNotExist(err) {
 				return "", err
@@ -178,7 +179,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 		}
 	}
 
-	if service.StateLimit > 0 {
+	if stateLimit > 0 {
 		if err = createStateFile(path.Join(usersService.StorageFolder, stateFile), service.UID, service.GID); err != nil {
 			return "", err
 		}
@@ -191,11 +192,11 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	return usersService.StorageFolder, nil
 }
 
-func (handler *storageHandler) StopStateWatching(users []string, service Service) (err error) {
+func (handler *storageHandler) StopStateWatching(users []string, service Service, stateLimit uint64) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
-	if service.StateLimit == 0 {
+	if stateLimit == 0 {
 		return nil
 	}
 
@@ -236,22 +237,22 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 	return errors.New("correlation ID not found")
 }
 
-func (handler *storageHandler) UpdateState(users []string, service Service,
-	state, checksum string) (err error) {
+func (handler *storageHandler) UpdateState(users []string, service Service, state, checksum string,
+	stateLimit uint64) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
 	log.WithFields(log.Fields{
 		"serviceID":  service.ID,
 		"checksum":   checksum,
-		"stateLimit": service.StateLimit,
+		"stateLimit": stateLimit,
 		"stateSize":  len(state)}).Debug("Update state")
 
 	if err = checkChecksum(state, checksum); err != nil {
 		return err
 	}
 
-	if len(state) > int(service.StateLimit) {
+	if len(state) > int(stateLimit) {
 		return errors.New("state is too big")
 	}
 

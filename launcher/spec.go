@@ -105,6 +105,26 @@ type serviceSpec struct {
 var errNotDevice = errors.New("not a device")
 
 /*******************************************************************************
+ * Public
+ ******************************************************************************/
+
+func (config *aosServiceConfig) GetStateLimit() uint64 {
+	if config.Quotas.StateLimit == nil {
+		return 0
+	}
+
+	return *config.Quotas.StateLimit
+}
+
+func (config *aosServiceConfig) GetStorageLimit() uint64 {
+	if config.Quotas.StorageLimit == nil {
+		return 0
+	}
+
+	return *config.Quotas.StorageLimit
+}
+
+/*******************************************************************************
  * Private
  ******************************************************************************/
 
