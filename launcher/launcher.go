@@ -1138,6 +1138,21 @@ func (launcher *Launcher) umountRootfs(service Service) (err error) {
 	return nil
 }
 
+func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, service Service,
+	aosSrvConf *aosServiceConfig) (err error) {
+	// Update Devices in spec
+	if err = launcher.setDevices(spec, aosSrvConf.Devices); err != nil {
+		return err
+	}
+
+	// Update Resources in spec
+	if err = launcher.setServiceResources(spec, aosSrvConf.Resources); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Service,
 	aosSrvConf *aosServiceConfig, imageSpec *imagespec.Image) (err error) {
 	networkFiles := []string{"/etc/hosts", "/etc/resolv.conf"}
@@ -1231,17 +1246,11 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 
 	spec.setUserUIDGID(service.UID, service.GID)
 
-	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
+	if err = spec.applyAosServiceConfig(aosConfig); err != nil {
 		return err
 	}
 
-	// Update Devices in spec
-	if err = launcher.setDevices(spec, devices); err != nil {
-		return err
-	}
-
-	// Update Resources in spec
-	if err = launcher.setServiceResources(spec, service.BoardResources); err != nil {
+	if err := launcher.applyDevicesAndResources(spec, service, &aosConfig); err != nil {
 		return err
 	}
 

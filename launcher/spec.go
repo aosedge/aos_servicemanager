@@ -180,7 +180,7 @@ func getAosServiceConfig(path string) (serviceConfig aosServiceConfig, err error
 	return serviceConfig, nil
 }
 
-func (spec *serviceSpec) applyAosServiceConfig(aosConfig aosServiceConfig) (err error) {
+func (spec *serviceSpec) applyAosServiceConfig(aosConfig *aosServiceConfig) (err error) {
 	if aosConfig.Hostname != nil {
 		spec.ocSpec.Hostname = *aosConfig.Hostname
 	}
