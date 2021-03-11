@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -1137,48 +1138,68 @@ func (launcher *Launcher) umountRootfs(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err error) {
+func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Service,
+	aosSrvConf *aosServiceConfig, imageSpec *imagespec.Image) (err error) {
 	networkFiles := []string{"/etc/hosts", "/etc/resolv.conf"}
 
-	if launcher.network == nil {
-		for _, networkFile := range networkFiles {
-			spec.removeBindMount(networkFile)
-			os.RemoveAll(path.Join(service.Path, serviceMountPointsDir, networkFile))
+	if netNsPath := networkmanager.GetNetNsPathByName(service.ID); netNsPath != "" {
+		for i, ns := range spec.ocSpec.Linux.Namespaces {
+			switch ns.Type {
+			case runtimespec.NetworkNamespace:
+				spec.ocSpec.Linux.Namespaces[i].Path = netNsPath
+			}
 		}
-
-		return nil
 	}
 
-	if launcher.network != nil {
-		params := networkmanager.NetworkParams{
-			IngressKbit:        service.DownloadSpeed,
-			EgressKbit:         service.UploadSpeed,
-			ExposedPorts:       service.ExposedPorts,
-			AllowedConnections: service.AllowedConnections,
-			Hostname:           service.HostName,
-			HostsFilePath:      path.Join(service.Path, serviceMountPointsDir, networkFiles[0]),
-			ResolvConfFilePath: path.Join(service.Path, serviceMountPointsDir, networkFiles[1]),
-		}
+	params := networkmanager.NetworkParams{
+		HostsFilePath:      path.Join(service.Path, serviceMountPointsDir, networkFiles[0]),
+		ResolvConfFilePath: path.Join(service.Path, serviceMountPointsDir, networkFiles[1]),
+	}
 
-		if params.Hosts, err = launcher.getHostsFromResources(service.BoardResources); err != nil {
+	if aosSrvConf.Quotas.DownloadSpeed != nil {
+		params.IngressKbit = *aosSrvConf.Quotas.DownloadSpeed
+	}
+
+	if aosSrvConf.Quotas.UploadSpeed != nil {
+		params.EgressKbit = *aosSrvConf.Quotas.UploadSpeed
+	}
+
+	if aosSrvConf.Hostname != nil {
+		params.Hostname = *aosSrvConf.Hostname
+	}
+
+	params.ExposedPorts = make([]string, 0, len(imageSpec.Config.ExposedPorts))
+	for key := range imageSpec.Config.ExposedPorts {
+		params.ExposedPorts = append(params.ExposedPorts, key)
+	}
+
+	params.AllowedConnections = make([]string, 0, len(aosSrvConf.AllowedConnections))
+	for key := range aosSrvConf.AllowedConnections {
+		params.AllowedConnections = append(params.AllowedConnections, key)
+	}
+
+	if aosSrvConf.Hostname != nil {
+		params.Hostname = *aosSrvConf.Hostname
+	}
+
+	if params.Hosts, err = launcher.getHostsFromResources(aosSrvConf.Resources); err != nil {
+		return err
+	}
+
+	for _, networkFile := range networkFiles {
+		if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
 			return err
 		}
 
-		for _, networkFile := range networkFiles {
-			if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
-				return err
-			}
-
-			file, err := os.Create(path.Join(service.Path, serviceMountPointsDir, networkFile))
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-		}
-
-		if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
+		file, err := os.Create(path.Join(service.Path, serviceMountPointsDir, networkFile))
+		if err != nil {
 			return err
 		}
+		defer file.Close()
+	}
+
+	if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
+		return err
 	}
 
 	return nil
@@ -1208,7 +1229,7 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		}
 	}()
 
-        spec.setUserUIDGID(service.UID, service.GID)
+	spec.setUserUIDGID(service.UID, service.GID)
 
 	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
 		return err
@@ -1224,8 +1245,10 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
-	if err = launcher.updateNetwork(spec, service); err != nil {
-		return err
+	if launcher.network != nil {
+		if err = launcher.applyNetworkSettings(spec, service, &aosConfig, &imageSpec); err != nil {
+			return err
+		}
 	}
 
 	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)

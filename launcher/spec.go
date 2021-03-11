@@ -353,22 +353,6 @@ func (spec *serviceSpec) addMount(newMount runtimespec.Mount) (err error) {
 	return nil
 }
 
-func (spec *serviceSpec) removeBindMount(destination string) (err error) {
-	var mounts []runtimespec.Mount
-
-	for _, mount := range spec.ocSpec.Mounts {
-		if mount.Destination == destination {
-			continue
-		}
-
-		mounts = append(mounts, mount)
-	}
-
-	spec.ocSpec.Mounts = mounts
-
-	return nil
-}
-
 func (spec *serviceSpec) setUserUIDGID(uid, gid uint32) {
 	spec.ocSpec.Process.User.UID = uid
 	spec.ocSpec.Process.User.GID = gid
