@@ -177,7 +177,13 @@ func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec, netNs
 
 func getAosServiceConfig(path string) (serviceConfig aosServiceConfig, err error) {
 	if err = getJSONFromFile(path, &serviceConfig); err != nil {
-		return serviceConfig, err
+		if !os.IsNotExist(err) {
+			return serviceConfig, err
+		}
+	}
+
+	if serviceConfig.ServiceProvider == "" {
+		serviceConfig.ServiceProvider = defaultServiceProvider
 	}
 
 	return serviceConfig, nil

@@ -1638,7 +1638,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}()
 
 	aosConfig, err := getAosServiceConfig(imageParts.aosSrvConfigPath)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		return service, err
 	}
 
@@ -2038,9 +2038,6 @@ func (launcher *Launcher) updateServiceFromAosSrvConfig(service *Service, aosSrv
 	}
 
 	service.ServiceProvider = aosSrvConfig.ServiceProvider
-	if service.ServiceProvider == "" {
-		service.ServiceProvider = defaultServiceProvider
-	}
 
 	return nil
 }
