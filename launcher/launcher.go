@@ -1185,7 +1185,18 @@ func (launcher *Launcher) updateNetwork(spec *serviceSpec, service Service) (err
 }
 
 func (launcher *Launcher) prestartService(service Service) (err error) {
-	spec, err := loadServiceSpec(path.Join(service.Path, ociRuntimeConfigFile))
+	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
+	if err != nil {
+		return err
+	}
+
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
+	// generate config.json
+	spec, err := generateRuntimeSpec(imageSpec, path.Join(service.Path, ociRuntimeConfigFile))
 	if err != nil {
 		return err
 	}
@@ -1197,17 +1208,9 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		}
 	}()
 
-	var devices []Device
+        spec.setUserUIDGID(service.UID, service.GID)
+
 	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
-		return err
-	}
-
-	// clear spec before adding devices
-	if err = spec.clearDeviceData(); err != nil {
-		return err
-	}
-
-	if err = spec.clearAdditionalGroup(); err != nil {
 		return err
 	}
 
@@ -1616,15 +1619,9 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, err
 	}
 
-	pathToNetNS := ""
-
-	if launcher.network != nil {
-		pathToNetNS = networkmanager.GetNetNsPathByName(serviceInfo.ID)
-	}
-
 	// generate config.json
 
-	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ociRuntimeConfigFile), pathToNetNS)
+	spec, err := generateRuntimeSpec(imageSpec, path.Join(installDir, ociImageConfigFile))
 	if err != nil {
 		return service, err
 	}

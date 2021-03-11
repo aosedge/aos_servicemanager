@@ -142,7 +142,7 @@ func getImageSpecFromImageConfig(fileImageConfigPath string) (spec imagespec.Ima
 	return imageConfig, nil
 }
 
-func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec, netNsPath string) (spec *serviceSpec, err error) {
+func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec string) (spec *serviceSpec, err error) {
 	strOS := strings.ToLower(imageConfig.OS)
 	if strOS != "linux" {
 		return nil, fmt.Errorf("unsupported OS in image config %s", imageConfig.OS)
@@ -161,15 +161,6 @@ func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec, netNs
 	spec.ocSpec.Process.Cwd = imageConfig.Config.WorkingDir
 	if spec.ocSpec.Process.Cwd == "" {
 		spec.ocSpec.Process.Cwd = "/"
-	}
-
-	if netNsPath != "" {
-		for i, ns := range spec.ocSpec.Linux.Namespaces {
-			switch ns.Type {
-			case runtimespec.NetworkNamespace:
-				spec.ocSpec.Linux.Namespaces[i].Path = netNsPath
-			}
-		}
 	}
 
 	return spec, nil
@@ -568,19 +559,6 @@ func (spec *serviceSpec) addAdditionalGroup(groupName string) (err error) {
 	}
 
 	spec.ocSpec.Process.User.AdditionalGids = append(spec.ocSpec.Process.User.AdditionalGids, gid)
-
-	return nil
-}
-
-func (spec *serviceSpec) clearDeviceData() (err error) {
-	spec.ocSpec.Linux.Devices = nil
-	spec.ocSpec.Linux.Resources.Devices = nil
-
-	return nil
-}
-
-func (spec *serviceSpec) clearAdditionalGroup() (err error) {
-	spec.ocSpec.Process.User.AdditionalGids = nil
 
 	return nil
 }
