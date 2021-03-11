@@ -1153,6 +1153,39 @@ func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, service Se
 	return nil
 }
 
+func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Service,
+	aosSrvConf *aosServiceConfig) (err error) {
+	if err = spec.bindHostDirs(launcher.config.WorkingDir); err != nil {
+		return err
+	}
+
+	if err = spec.setRootfs(serviceMergedDir); err != nil {
+		return err
+	}
+
+	if err = launcher.createMountPoints(service.Path, spec); err != nil {
+		return err
+	}
+
+	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service,
+		aosSrvConf.Quotas.StorageLimit, aosSrvConf.Quotas.StateLimit)
+	if err != nil {
+		return err
+	}
+
+	if aosSrvConf.Quotas.StateLimit > 0 {
+		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
+			return err
+		}
+	}
+
+	if err = launcher.mountRootfs(service, storageFolder); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Service,
 	aosSrvConf *aosServiceConfig, imageSpec *imagespec.Image) (err error) {
 	networkFiles := []string{"/etc/hosts", "/etc/resolv.conf"}
@@ -1254,25 +1287,14 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
+	if err := launcher.prepareServiceRootfs(spec, service, &aosConfig); err != nil {
+		return err
+	}
+
 	if launcher.network != nil {
 		if err = launcher.applyNetworkSettings(spec, service, &aosConfig, &imageSpec); err != nil {
 			return err
 		}
-	}
-
-	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service)
-	if err != nil {
-		return err
-	}
-
-	if service.StateLimit > 0 {
-		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
-			return err
-		}
-	}
-
-	if err = launcher.mountRootfs(service, storageFolder); err != nil {
-		return err
 	}
 
 	if err = launcher.requestDeviceResources(service); err != nil {
