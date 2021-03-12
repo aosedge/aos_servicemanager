@@ -1297,7 +1297,7 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		}
 	}
 
-	if err = launcher.requestDeviceResources(service); err != nil {
+	if err = launcher.requestDeviceResources(service, aosConfig.Devices); err != nil {
 		return err
 	}
 
@@ -1321,12 +1321,7 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) requestDeviceResources(service Service) (err error) {
-	var devices []Device
-	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
-		return err
-	}
-
+func (launcher *Launcher) requestDeviceResources(service Service, devices []Device) (err error) {
 	for _, device := range devices {
 		log.Debugf("Request device %s, for %s service", device.Name, service.ID)
 
@@ -1364,13 +1359,7 @@ func (launcher *Launcher) startService(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) releaseDeviceResources(service Service) (err error) {
-	var devices []Device
-
-	if err := json.Unmarshal([]byte(service.Devices), &devices); err != nil {
-		return err
-	}
-
+func (launcher *Launcher) releaseDeviceResources(service Service, devices []Device) (err error) {
 	for _, device := range devices {
 		log.Debugf("Release device %s, for %s service", device.Name, service.ID)
 
@@ -1397,7 +1386,7 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 		}
 	}
 
-	if err := launcher.releaseDeviceResources(service); err != nil {
+	if err := launcher.releaseDeviceResources(service, aosConfig.Devices); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't release devices: %s", err)
 			retErr = err
