@@ -613,12 +613,12 @@ func TestVisPermissions(t *testing.T) {
 		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
 	}
 
-	service, ok := serviceProvider.services["service0"]
-	if !ok {
-		t.Fatalf("Service not found")
+	permissions, err := launcher.GetServicePermissions("service0")
+	if err != nil {
+		t.Fatalf("Permissions not found")
 	}
 
-	if service.Permissions != `{"*": "rw", "123": "rw"}` {
+	if permissions != `{"*": "rw", "123": "rw"}` {
 		t.Fatalf("Permissions mismatch")
 	}
 }
@@ -1310,7 +1310,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 		t.Error("Can't parse imageConfig")
 	}
 
-	_, err = generateRuntimeSpec(imageSpec, configFilePath, "")
+	_, err = generateRuntimeSpec(imageSpec, configFilePath)
 	if err == nil {
 		t.Errorf("Should be error unsupported OS in image config")
 	}
@@ -1326,7 +1326,7 @@ func TestSpecFromImageConfig(t *testing.T) {
 		t.Error("Can't parse imageConfig")
 	}
 
-	runtimeSpec, err := generateRuntimeSpec(imageSpec, configFilePath, "")
+	runtimeSpec, err := generateRuntimeSpec(imageSpec, configFilePath)
 	if err != nil {
 		t.Errorf("Error generating OCI runtime spec %s", err)
 	}
@@ -1839,7 +1839,12 @@ func (serviceProvider *testServiceProvider) GetServiceProviderServices(spID stri
 	defer serviceProvider.Unlock()
 
 	for _, servicePtr := range serviceProvider.services {
-		if servicePtr.ServiceProvider == spID {
+		aosConfig, err := getAosServiceConfig(path.Join(servicePtr.Path, aosServiceConfigFile))
+		if err != nil {
+			return services, err
+		}
+
+		if aosConfig.ServiceProvider == spID {
 			services = append(services, *servicePtr)
 		}
 	}
@@ -2391,7 +2396,12 @@ func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.Ser
 		return nil, err
 	}
 
-	ip, err := networkProvider.GetServiceIP(service.ID, service.ServiceProvider)
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return nil, err
+	}
+
+	ip, err := networkProvider.GetServiceIP(service.ID, aosConfig.ServiceProvider)
 	if err != nil {
 		return nil, err
 	}
