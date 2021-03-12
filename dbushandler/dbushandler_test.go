@@ -19,7 +19,6 @@ package dbushandler_test
 
 import (
 	"aos_servicemanager/dbushandler"
-	"aos_servicemanager/launcher"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -34,15 +33,15 @@ import (
  * Types
  ******************************************************************************/
 
-type testServiceProvider struct {
-	services map[string]*launcher.Service
+type testPermissionProvider struct {
+	permissions map[string]string
 }
 
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var serviceProvider = &testServiceProvider{services: make(map[string]*launcher.Service)}
+var permissionProvider = &testPermissionProvider{permissions: make(map[string]string)}
 
 /*******************************************************************************
  * Init
@@ -62,7 +61,7 @@ func init() {
  ******************************************************************************/
 
 func TestMain(m *testing.M) {
-	dbus, err := dbushandler.New(serviceProvider)
+	dbus, err := dbushandler.New(permissionProvider)
 	if err != nil {
 		log.Fatalf("Can't create D-Bus handler: %s", err)
 	}
@@ -79,8 +78,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetPermission(t *testing.T) {
-	serviceProvider.services["Service1"] = &launcher.Service{ID: "Service1",
-		Permissions: `{"*": "rw", "123": "rw"}`}
+	permissionProvider.permissions["Service1"] = `{"*": "rw", "123": "rw"}`
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -137,11 +135,11 @@ func TestIntrospect(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
-	s, ok := serviceProvider.services[serviceID]
+func (permissionProvider *testPermissionProvider) GetServicePermissions(serviceID string) (permission string, err error) {
+	permission, ok := permissionProvider.permissions[serviceID]
 	if !ok {
-		return service, fmt.Errorf("service %s does not exist", serviceID)
+		return "", fmt.Errorf("service %s does not exist", serviceID)
 	}
 
-	return *s, nil
+	return permission, nil
 }

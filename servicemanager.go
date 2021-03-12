@@ -247,7 +247,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	// Create D-Bus handler
 
 	if cfg.EnableDBusServer {
-		if sm.dbus, err = dbushandler.New(sm.db); err != nil {
+		if sm.dbus, err = dbushandler.New(sm.launcher); err != nil {
 			return sm, err
 		}
 	}

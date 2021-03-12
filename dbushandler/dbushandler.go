@@ -23,8 +23,6 @@ import (
 	"github.com/godbus/dbus"
 	"github.com/godbus/dbus/introspect"
 	log "github.com/sirupsen/logrus"
-
-	"aos_servicemanager/launcher"
 )
 
 /*******************************************************************************
@@ -62,15 +60,15 @@ const intro = `
  * Types
  ******************************************************************************/
 
-// ServiceProvider provides service info
-type ServiceProvider interface {
-	GetService(serviceID string) (service launcher.Service, err error)
+// PermissionProvider provides service permissions
+type PermissionProvider interface {
+	GetServicePermissions(serviceID string) (permissions string, err error)
 }
 
 // DBusHandler d-bus interface structure
 type DBusHandler struct {
-	serviceProvider ServiceProvider
-	dbusConn        *dbus.Conn
+	permissionProvider PermissionProvider
+	dbusConn           *dbus.Conn
 }
 
 /*******************************************************************************
@@ -78,7 +76,7 @@ type DBusHandler struct {
  ******************************************************************************/
 
 // New creates and launch d-bus server
-func New(serviceProvider ServiceProvider) (dbusHandler *DBusHandler, err error) {
+func New(permissionProvider PermissionProvider) (dbusHandler *DBusHandler, err error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return dbusHandler, err
@@ -94,7 +92,7 @@ func New(serviceProvider ServiceProvider) (dbusHandler *DBusHandler, err error) 
 
 	log.Debug("Start D-Bus server")
 
-	server := DBusHandler{dbusConn: conn, serviceProvider: serviceProvider}
+	server := DBusHandler{dbusConn: conn, permissionProvider: permissionProvider}
 
 	conn.Export(server, ObjectPath, InterfaceName)
 	conn.Export(introspect.Introspectable(intro), ObjectPath,
@@ -126,12 +124,12 @@ func (dbusHandler *DBusHandler) Close() (err error) {
 
 // GetPermission get permossion d-bus method
 func (dbusHandler DBusHandler) GetPermission(token string) (result, status string, dbusErr *dbus.Error) {
-	service, err := dbusHandler.serviceProvider.GetService(token)
+	permissions, err := dbusHandler.permissionProvider.GetServicePermissions(token)
 	if err != nil {
 		return "", err.Error(), nil
 	}
 
-	log.WithFields(log.Fields{"token": token, "perm": service.Permissions}).Debug("Get permissions")
+	log.WithFields(log.Fields{"token": token, "perm": permissions}).Debug("Get permissions")
 
-	return service.Permissions, "OK", nil
+	return permissions, "OK", nil
 }

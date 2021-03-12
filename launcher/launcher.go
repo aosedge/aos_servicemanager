@@ -716,6 +716,21 @@ func (launcher *Launcher) StopServices() {
 	}
 }
 
+//GetServicePermissions return service permissions
+func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
+	service, err := launcher.serviceProvider.GetService(serviceID)
+	if err != nil {
+		return "", err
+	}
+
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return "", err
+	}
+
+	return aosConfig.Quotas.VisPermissions, nil
+}
+
 func (state ServiceState) String() string {
 	return [...]string{"Init", "Running", "Stopped"}[state]
 }
