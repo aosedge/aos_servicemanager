@@ -2052,14 +2052,27 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 			}
 		}
 
-		if err = launcher.monitor.StartMonitorService(service.ID, monitoring.ServiceMonitoringConfig{
-			ServiceDir:    service.Path,
-			IPAddress:     ipAddress,
-			UID:           service.UID,
-			GID:           service.GID,
-			UploadLimit:   uint64(service.UploadLimit),
-			DownloadLimit: uint64(service.DownloadLimit),
-			ServiceRules:  &rules}); err != nil {
+		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+		if err != nil {
+			return err
+		}
+
+		monitoringConfig := monitoring.ServiceMonitoringConfig{
+			ServiceDir:   service.Path,
+			IPAddress:    ipAddress,
+			UID:          service.UID,
+			GID:          service.GID,
+			ServiceRules: &rules}
+
+		if aosConfig.Quotas.UploadLimit != nil {
+			monitoringConfig.UploadLimit = *aosConfig.Quotas.UploadLimit
+		}
+
+		if aosConfig.Quotas.DownloadLimit != nil {
+			monitoringConfig.DownloadLimit = *aosConfig.Quotas.DownloadLimit
+		}
+
+		if err = launcher.monitor.StartMonitorService(service.ID, monitoringConfig); err != nil {
 			return err
 		}
 
