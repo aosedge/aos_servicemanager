@@ -2192,7 +2192,18 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 			continue
 		}
 
-		if service.StartAt.Add(time.Hour*24*time.Duration(service.TTL)).Before(now) == true {
+		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+		if err != nil {
+			return err
+		}
+
+		ttl := launcher.config.DefaultServiceTTL
+
+		if aosConfig.ServiceTTL != nil {
+			ttl = *aosConfig.ServiceTTL
+		}
+
+		if service.StartAt.Add(time.Hour*24*time.Duration(ttl)).Before(now) == true {
 			servicesToBeRemoved++
 
 			go func(service Service) {
