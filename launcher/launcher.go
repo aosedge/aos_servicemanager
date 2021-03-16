@@ -344,10 +344,6 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		return nil, err
 	}
 
-	if err = launcher.addServicesToSystemd(); err != nil {
-		return nil, err
-	}
-
 	// Create storage dir
 	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
 		return nil, err
@@ -465,6 +461,10 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	if isUsersEqual(launcher.users, users) {
 		return nil
+	}
+
+	if err = launcher.addUserServicesToSystemd(users); err != nil {
+		return err
 	}
 
 	launcher.StopServices()
@@ -729,8 +729,8 @@ func (status ServiceStatus) String() string {
  * Private
  ******************************************************************************/
 
-func (launcher *Launcher) addServicesToSystemd() (err error) {
-	services, err := launcher.serviceProvider.GetServices()
+func (launcher *Launcher) addUserServicesToSystemd(users []string) (err error) {
+	services, err := launcher.serviceProvider.GetUsersServices(users)
 	if err != nil {
 		return err
 	}
