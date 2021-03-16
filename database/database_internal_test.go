@@ -91,9 +91,10 @@ func TestMain(m *testing.M) {
 
 func TestAddService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
+		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0, StartAt: time.Now().UTC(),
+		AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -117,17 +118,18 @@ func TestAddService(t *testing.T) {
 
 func TestUpdateService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = launcher.Service{"service1", 2, "", "new_sp", "to/new_service1", "new_service1.service", 5001, 5001, "new_host",
-		`{"*":"rw", "new":"r"}`, 1, 1, time.Now().UTC().Add(time.Hour * 10), 0, "{}", 123, 456, 342, 696, 789, 1024,
-		[]string{"path1", "path2"}, "", []string{"dbus"}, "", []string{"service10/1000/tcp"}, []string{"1002/udp"}}
+	service1 = launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	// UpdateService
 	err = db.UpdateService(service1)
@@ -162,9 +164,10 @@ func TestNotExistService(t *testing.T) {
 
 func TestSetServiceStatus(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -190,9 +193,10 @@ func TestSetServiceStatus(t *testing.T) {
 }
 
 func TestSetServiceState(t *testing.T) {
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -218,9 +222,10 @@ func TestSetServiceState(t *testing.T) {
 }
 
 func TestSetServiceStartTime(t *testing.T) {
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, `{"*":"rw"}`, "host", 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -248,9 +253,10 @@ func TestSetServiceStartTime(t *testing.T) {
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -269,18 +275,20 @@ func TestRemoveService(t *testing.T) {
 
 func TestGetServices(t *testing.T) {
 	// Add service 1
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 2
-	service2 := launcher.Service{"service2", 1, "", "sp1", "to/service2", "service2.service", 5002, 5002, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -306,79 +314,38 @@ func TestGetServices(t *testing.T) {
 	}
 }
 
-func TestSetGetDevicesAtService(t *testing.T) {
-	deviceNames := []string{"gpu0", "mic0", "camera0"}
-	deviceNamesForService, err := json.Marshal(deviceNames)
-	if err != nil {
-		t.Errorf("Can't convert device resources to text view: %s", err)
-	}
-
-	// Add service 1
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, string(deviceNamesForService), []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
-	err = db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// GetServices
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if !reflect.DeepEqual(service, service1) {
-		t.Error("service1 doesn't match stored one")
-	}
-
-	var storedDeviceNames []string
-	if err := json.Unmarshal([]byte(service.Devices), &storedDeviceNames); err != nil {
-		t.Errorf("Can't convert text view to device resources: %s", err)
-	}
-
-	if reflect.DeepEqual(deviceNames, storedDeviceNames) != true {
-		t.Errorf("Stored device resources are not equal to requested")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
 func TestGetServiceProviderServices(t *testing.T) {
 	// Add service 1
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 2
-	service2 := launcher.Service{"service2", 1, "", "sp1", "to/service2", "service2.service", 5002, 5002, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1002/udp"}}
+	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 3
-	service3 := launcher.Service{"service3", 1, "", "sp2", "to/service3", "service3.service", 5003, 5003, "host3", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1003/udp"}}
+	service3 := launcher.Service{ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
+		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service3)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 4
-	service4 := launcher.Service{"service4", 1, "", "sp2", "to/service4", "service4.service", 5004, 5004, "host4", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1004/udp"}}
+	service4 := launcher.Service{ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
+		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service4)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -420,17 +387,17 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 func TestAddUsersService(t *testing.T) {
 	// Add services
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service2 := launcher.Service{"service2", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service2)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
@@ -732,9 +699,10 @@ func TestCursor(t *testing.T) {
 
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{"service1", 1, "", "sp1", "to/service1", "service1.service", 5001, 5001, "host1", `{"*":"rw"}`, 0, 0,
-		time.Now().UTC(), 0, "", 0, 0, 0, 0, 0, 0, []string{"path1", "path2"}, "", []string{"dbus", "bluez"}, "",
-		[]string{"service10/1000/tcp"}, []string{"1001/udp"}}
+	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
