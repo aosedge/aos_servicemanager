@@ -1085,12 +1085,6 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 		return err
 	}
 
-	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
-		if err = launcher.updateMonitoring(service, state); err != nil {
-			log.WithField("id", id).Error("Can't update monitoring: ", err)
-		}
-	}
-
 	if service.State != state {
 		log.WithField("id", id).Debugf("Set service state: %s", state)
 
@@ -1282,13 +1276,8 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 	return nil
 }
 
-func (launcher *Launcher) prestartService(service Service) (err error) {
+func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
 	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
-	if err != nil {
-		return err
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
 		return err
 	}
@@ -1312,16 +1301,16 @@ func (launcher *Launcher) prestartService(service Service) (err error) {
 		return err
 	}
 
-	if err := launcher.applyDevicesAndResources(spec, service, &aosConfig); err != nil {
+	if err := launcher.applyDevicesAndResources(spec, service, aosConfig); err != nil {
 		return err
 	}
 
-	if err := launcher.prepareServiceRootfs(spec, service, &aosConfig); err != nil {
+	if err := launcher.prepareServiceRootfs(spec, service, aosConfig); err != nil {
 		return err
 	}
 
 	if launcher.network != nil {
-		if err = launcher.applyNetworkSettings(spec, service, &aosConfig, &imageSpec); err != nil {
+		if err = launcher.applyNetworkSettings(spec, service, aosConfig, &imageSpec); err != nil {
 			return err
 		}
 	}
@@ -1363,7 +1352,12 @@ func (launcher *Launcher) requestDeviceResources(service Service, devices []Devi
 }
 
 func (launcher *Launcher) startService(service Service) (err error) {
-	if err = launcher.prestartService(service); err != nil {
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
+	if err = launcher.prestartService(service, &aosConfig); err != nil {
 		return err
 	}
 
@@ -1374,6 +1368,12 @@ func (launcher *Launcher) startService(service Service) (err error) {
 	status := <-channel
 
 	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Start service")
+
+	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
+		if err = launcher.updateMonitoring(service, stateRunning, &aosConfig); err != nil {
+			log.WithField("id", service.ID).Error("Can't update monitoring: ", err)
+		}
+	}
 
 	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
@@ -1400,17 +1400,12 @@ func (launcher *Launcher) releaseDeviceResources(service Service, devices []Devi
 	return nil
 }
 
-func (launcher *Launcher) poststopService(service Service) (retErr error) {
+func (launcher *Launcher) poststopService(service Service, aosConfig *aosServiceConfig) (retErr error) {
 	if err := launcher.umountRootfs(service); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't umount rootfs: %s", err)
 			retErr = err
 		}
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return err
 	}
 
 	if err := launcher.storageHandler.StopStateWatching(launcher.users, service, aosConfig.GetStateLimit()); err != nil {
@@ -1443,6 +1438,11 @@ func (launcher *Launcher) poststopService(service Service) (retErr error) {
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
 	launcher.services.Delete(service.UnitName)
 
 	channel := make(chan string)
@@ -1456,10 +1456,16 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 		log.WithFields(log.Fields{"id": service.ID, "status": status}).Debug("Stop service")
 	}
 
-	if err := launcher.poststopService(service); err != nil {
+	if err := launcher.poststopService(service, &aosConfig); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't perform post stop: %s", err)
 			retErr = err
+		}
+	}
+
+	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
+		if err = launcher.updateMonitoring(service, stateStopped, &aosConfig); err != nil {
+			log.WithField("id", service.ID).Error("Can't update monitoring: ", err)
 		}
 	}
 
@@ -1797,6 +1803,11 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		}
 	}()
 
+	newAosConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
+	if err != nil {
+		return err
+	}
+
 	launcher.services.Delete(oldService.UnitName)
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
@@ -1807,12 +1818,7 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return err
 	}
 
-	aosNewConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
-	if err != nil {
-		return err
-	}
-
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir, aosNewConfig.GetStorageLimit(),
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
 		newService.UID, newService.GID); err != nil {
 		return err
 	}
@@ -1983,7 +1989,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 	return err
 }
 
-func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) (err error) {
+func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, aosConfig *aosServiceConfig) (err error) {
 	switch state {
 	case stateRunning:
 		var rules amqp.ServiceAlertRules
@@ -1998,11 +2004,6 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState) 
 			if ipAddress, err = launcher.network.GetServiceIP(service.ID, service.ServiceProvider); err != nil {
 				return err
 			}
-		}
-
-		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-		if err != nil {
-			return err
 		}
 
 		monitoringConfig := monitoring.ServiceMonitoringConfig{
