@@ -405,6 +405,11 @@ func (manager *NetworkManager) deleteNetwork(spID string) (err error) {
 
 	networkDir := path.Join(manager.networkDir, spID)
 
+	if _, err := os.Stat(networkDir); err != nil {
+		log.WithFields(log.Fields{"spID": spID}).Warn("Network doesn't exist")
+		return nil
+	}
+
 	filesServiceID, err := ioutil.ReadDir(networkDir)
 	if err != nil {
 		return err
