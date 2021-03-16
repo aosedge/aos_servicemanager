@@ -130,6 +130,8 @@ const defaultServiceProvider = "default"
 const uidRangeBegin = 5000
 const uidRangeEnd = 10000
 
+const errNotLoaded = "not loaded"
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -1447,7 +1449,9 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(service.UnitName, "replace", channel); err != nil {
-		if retErr == nil {
+		if strings.Contains(err.Error(), errNotLoaded) {
+			log.WithField("id", service.ID).Warn("Service not loaded")
+		} else {
 			log.WithField("id", service.ID).Errorf("Can't stop systemd unit: %s", err)
 			retErr = err
 		}
