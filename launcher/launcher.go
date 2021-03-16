@@ -409,16 +409,19 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 		return err
 	}
 
-	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
+	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
 		return err
 	}
 
 	for _, service := range services {
-		// Checking if Service path exists
-		if fi, err := os.Stat(service.Path); err != nil || !fi.Mode().IsDir() {
-			log.Errorf("Unable to get access to Service data on storage: %s", err)
-			return err
+		if err := launcher.isServiceValid(service); err != nil {
+			log.WithField("id", service.ID).Errorf("Service is invalid: %s", err.Error())
+
+			//try to remove only corrupted service
+			if err := launcher.removeService(service); err != nil {
+				return fmt.Errorf("can't remove corrupted service: %s", err.Error())
+			}
 		}
 	}
 
@@ -2168,4 +2171,28 @@ func (launcher *Launcher) getUIDGIDForService(serviceID string) (uid, gid uint32
 	}
 
 	return uid, gid, errors.New("No free UID GUID in system")
+}
+
+func (launcher *Launcher) isServiceValid(service Service) (err error) {
+	//check service folder
+	if fi, err := os.Stat(service.Path); os.IsNotExist(err) || !fi.Mode().IsDir() {
+		return fmt.Errorf("service folder %s doesn't exist", service.Path)
+	}
+
+	//check image manifest
+	if _, err = os.Stat(path.Join(service.Path, manifestFileName)); os.IsNotExist(err) {
+		return fmt.Errorf("image manifest file %s doesn't exist", path.Join(service.Path, manifestFileName))
+	}
+
+	//check image specification
+	if _, err = os.Stat(path.Join(service.Path, ociImageConfigFile)); os.IsNotExist(err) {
+		return fmt.Errorf("image specification file %s doesn't exist", path.Join(service.Path, ociImageConfigFile))
+	}
+
+	//check service file
+	if _, err = os.Stat(path.Join(service.Path, service.UnitName)); os.IsNotExist(err) {
+		return fmt.Errorf("service file %s doesn't exist", path.Join(service.Path, service.UnitName))
+	}
+
+	return nil
 }

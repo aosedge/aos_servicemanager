@@ -252,6 +252,23 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
+	if err = sm.checkConsistency(); err != nil {
+		log.Errorf("Consistency error: %s. Cleanup...", err)
+
+		sm.launcher.Close()
+		sm.launcher = nil
+
+		if launcherErr := launcher.Cleanup(sm.cfg); err != nil {
+			log.Errorf("Can't cleanup launcher: %s", launcherErr)
+		}
+
+		if layerErr := sm.layerMgr.Cleanup(); err != nil {
+			log.Errorf("Can't cleanup layermanager: %s", layerErr)
+		}
+
+		return sm, err
+	}
+
 	return sm, nil
 }
 
@@ -589,24 +606,6 @@ func (sm *serviceManager) run() (err error) {
 
 		if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
 			log.Fatalf("Can't set users: %s", err)
-		}
-
-		if err = sm.checkConsistency(); err != nil {
-			log.Errorf("Consistency error: %s. Cleanup...", err)
-
-			sm.launcher.Close()
-			sm.launcher = nil
-
-			if launcherErr := launcher.Cleanup(sm.cfg); err != nil {
-				log.Errorf("Can't cleanup launcher: %s", launcherErr)
-			}
-
-			if layerErr := sm.layerMgr.Cleanup(); err != nil {
-				log.Errorf("Can't cleanup layermanager: %s", layerErr)
-			}
-
-			// close service manager it will be restarted by systemd
-			return err
 		}
 
 		// Get organization names from certificate and use it as discovery URL
