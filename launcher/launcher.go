@@ -1124,7 +1124,7 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 	return nil
 }
 
-func (launcher *Launcher) mountRootfs(service Service, storageFolder string) (err error) {
+func (launcher *Launcher) mountRootfs(service Service, storageFolder string, layers []string) (err error) {
 	mergedDir := path.Join(service.Path, serviceMergedDir)
 
 	// create merged dir
@@ -1142,7 +1142,7 @@ func (launcher *Launcher) mountRootfs(service Service, storageFolder string) (er
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service rootfs")
 
 	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir), path.Join(service.Path, serviceRootfsDir)}
-	layerDirs = append(layerDirs, service.Layers...)
+	layerDirs = append(layerDirs, layers...)
 	layerDirs = append(layerDirs, path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir))
 	layerDirs = append(layerDirs, string("/"))
 
@@ -1206,7 +1206,23 @@ func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Servic
 		}
 	}
 
-	if err = launcher.mountRootfs(service, storageFolder); err != nil {
+	imageParts, err := getImageParts(service.Path)
+	if err != nil {
+		return err
+	}
+
+	layers := make([]string, 0, len(imageParts.layersDigest))
+
+	for _, layerDigest := range imageParts.layersDigest {
+		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
+		if err != nil {
+			return err
+		}
+
+		layers = append(layers, layerPath)
+	}
+
+	if err = launcher.mountRootfs(service, storageFolder, layers); err != nil {
 		return err
 	}
 
