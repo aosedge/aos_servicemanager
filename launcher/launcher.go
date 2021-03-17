@@ -1721,25 +1721,23 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	}
 
 	service = Service{
-		ID:            serviceInfo.ID,
-		AosVersion:    serviceInfo.AosVersion,
-		VendorVersion: serviceInfo.VendorVersion,
-		Description:   serviceInfo.Description,
-		Path:          installDir,
-		UnitName:      serviceName,
-		UID:           uid,
-		GID:           gid,
-		State:         stateInit,
-		Status:        statusOk,
-		AlertRules:    string(alertRules),
+		ID:              serviceInfo.ID,
+		AosVersion:      serviceInfo.AosVersion,
+		VendorVersion:   serviceInfo.VendorVersion,
+		Description:     serviceInfo.Description,
+		ServiceProvider: serviceInfo.ProviderID,
+		Path:            installDir,
+		UnitName:        serviceName,
+		UID:             uid,
+		GID:             gid,
+		State:           stateInit,
+		Status:          statusOk,
+		AlertRules:      string(alertRules),
 	}
 
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return service, err
+	if service.ServiceProvider == "" {
+		service.ServiceProvider = defaultServiceProvider
 	}
-
-	service.ServiceProvider = aosConfig.ServiceProvider
 
 	return service, nil
 }

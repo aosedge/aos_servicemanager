@@ -62,13 +62,12 @@ type Device struct {
 }
 
 type aosServiceConfig struct {
-	Created         time.Time          `json:"created"`
-	Author          string             `json:"author"`
-	ServiceProvider string             `json:"serviceProvider"`
-	Hostname        *string            `json:"hostname,omitempty"`
-	Sysctl          *map[string]string `json:"sysctl,omitempty"`
-	ServiceTTL      *uint64            `json:"serviceTTL,omitempty"`
-	Quotas          struct {
+	Created    time.Time          `json:"created"`
+	Author     string             `json:"author"`
+	Hostname   *string            `json:"hostname,omitempty"`
+	Sysctl     *map[string]string `json:"sysctl,omitempty"`
+	ServiceTTL *uint64            `json:"serviceTTL,omitempty"`
+	Quotas     struct {
 		StateLimit     *uint64 `json:"stateLimit,omitempty"`
 		StorageLimit   *uint64 `json:"storageLimit,omitempty"`
 		UploadSpeed    *uint64 `json:"uploadSpeed,omitempty"`
@@ -191,10 +190,6 @@ func getAosServiceConfig(path string) (serviceConfig aosServiceConfig, err error
 		if !os.IsNotExist(err) {
 			return serviceConfig, err
 		}
-	}
-
-	if serviceConfig.ServiceProvider == "" {
-		serviceConfig.ServiceProvider = defaultServiceProvider
 	}
 
 	return serviceConfig, nil
