@@ -378,7 +378,8 @@ type VersionFromCloud struct {
 
 // ServiceInfoFromCloud decrypted service info
 type ServiceInfoFromCloud struct {
-	ID string `json:"id"`
+	ID         string `json:"id"`
+	ProviderID string `json:"providerId"`
 	VersionFromCloud
 	AlertRules *ServiceAlertRules `json:"alertRules,omitempty"`
 	DecryptDataStruct
