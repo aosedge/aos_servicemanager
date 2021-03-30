@@ -39,6 +39,7 @@ require (
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
 	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210419204235-b2840a5bdae2
+	gitpct.epam.com/epmd-aepr/aos_service_api v0.0.0-20210303110813-435faf66224c
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 	golang.org/x/sys v0.0.0-20201207223542-d4d67f95c62d
 	google.golang.org/grpc v1.35.0
