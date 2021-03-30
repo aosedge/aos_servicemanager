@@ -59,8 +59,9 @@ type Client struct {
 	systemID string
 	users    []string
 
-	connection *grpc.ClientConn
-	pbclient   pb.IAManagerClient
+	connection     *grpc.ClientConn
+	pbclient       pb.IAManagerClient
+	pbclientPublic pb.IAManagerPublicClient
 
 	closeChannel        chan struct{}
 	usersChangedChannel chan []string
@@ -120,6 +121,7 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	}
 
 	client.pbclient = pb.NewIAManagerClient(client.connection)
+	client.pbclientPublic = pb.NewIAManagerPublicClient(client.connection)
 
 	log.Debug("Connected to IAM")
 
@@ -225,6 +227,62 @@ func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificates
 	}
 
 	return nil
+}
+
+// RegisterService registers new service with permissions and create secret
+func (client *Client) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error) {
+	log.WithField("serviceID", serviceID).Debug("Register service")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	reqPermissions := make(map[string]*pb.Permissions)
+	for key, value := range permissions {
+		reqPermissions[key] = &pb.Permissions{Permissions: value}
+	}
+
+	req := &pb.RegisterServiceReq{ServiceId: serviceID, Permissions: reqPermissions}
+
+	response, err := client.pbclient.RegisterService(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	return response.Secret, nil
+}
+
+// UnregisterService unregisters service
+func (client *Client) UnregisterService(serviceID string) (err error) {
+	log.WithField("serviceID", serviceID).Debug("Unregister service")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	req := &pb.UnregisterServiceReq{ServiceId: serviceID}
+
+	_, err = client.pbclient.UnregisterService(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// GetPermissions gets permissions by secret and functional server ID
+func (client *Client) GetPermissions(secret, funcServerID string) (serviceID string, permissions map[string]string, err error) {
+	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	req := &pb.GetPermissionsReq{Secret: secret, FunctionalServerId: funcServerID}
+
+	response, err := client.pbclientPublic.GetPermissions(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return response.ServiceId, response.Permissions.Permissions, nil
 }
 
 // GetCertificate gets certificate by issuer
