@@ -78,6 +78,8 @@ const (
 
 	runcName = "runc" // runc file name
 
+	aosSecretEnv = "SERVICE_SECRET"
+
 	ociRuntimeConfigFile = "config.json"
 	ociImageConfigFile   = "image.json"
 	aosServiceConfigFile = "service.json"
@@ -146,14 +148,15 @@ type Launcher struct {
 	// NewStateChannel used to notify about new service state
 	NewStateChannel chan NewState
 
-	sender          Sender
-	serviceProvider ServiceProvider
-	monitor         ServiceMonitor
-	network         NetworkProvider
-	devicemanager   DeviceManagement
-	systemd         *dbus.Conn
-	config          *config.Config
-	layerProvider   layerProvider
+	sender           Sender
+	serviceProvider  ServiceProvider
+	monitor          ServiceMonitor
+	network          NetworkProvider
+	serviceRegistrar ServiceRegistrar
+	devicemanager    DeviceManagement
+	systemd          *dbus.Conn
+	config           *config.Config
+	layerProvider    layerProvider
 
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
@@ -213,6 +216,12 @@ type ServiceProvider interface {
 	GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
+}
+
+// ServiceRegistrar provides API to register/unregister service
+type ServiceRegistrar interface {
+	RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error)
+	UnregisterService(serviceID string) (err error)
 }
 
 // ServiceMonitor provides API to start/stop service monitoring
@@ -287,7 +296,7 @@ type serviceInfoToInstall struct {
 
 // New creates new launcher object
 func New(config *config.Config, downloader downloader, sender Sender, serviceProvider ServiceProvider,
-	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement) (launcher *Launcher, err error) {
+	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement, serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
@@ -300,6 +309,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		network:         network,
 		devicemanager:   devicemanager,
 		services:        make(map[string]string),
+		serviceRegistrar: serviceRegistrar,
 	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -1281,6 +1291,34 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 	return nil
 }
 
+func (launcher *Launcher) registerService(spec *serviceSpec, service Service,
+	aosSrvConf *aosServiceConfig) (err error) {
+	if aosSrvConf.Quotas.Permissions == nil {
+		return nil
+	}
+
+	secret, err := launcher.serviceRegistrar.RegisterService(service.ID, aosSrvConf.Quotas.Permissions)
+	if err != nil {
+		return err
+	}
+
+	spec.mergeEnv([]string{aosSecretEnv + "=" + secret})
+
+	return nil
+}
+
+func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServiceConfig) (err error) {
+	if aosSrvConf.Quotas.Permissions == nil {
+		return nil
+	}
+
+	if err := launcher.serviceRegistrar.UnregisterService(service.ID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
 	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
 	if err != nil {
@@ -1307,6 +1345,10 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 	}
 
 	if err := launcher.applyDevicesAndResources(spec, service, aosConfig); err != nil {
+		return err
+	}
+
+	if err := launcher.registerService(spec, service, aosConfig); err != nil {
 		return err
 	}
 
@@ -1429,6 +1471,13 @@ func (launcher *Launcher) poststopService(service Service, aosConfig *aosService
 	if err := launcher.releaseDeviceResources(service, aosConfig.Devices); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't release devices: %s", err)
+			retErr = err
+		}
+	}
+
+	if err := launcher.unregisterService(service, aosConfig); err != nil {
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't unregister service: %s", err)
 			retErr = err
 		}
 	}

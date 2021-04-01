@@ -242,7 +242,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager, sm.iam); err != nil {
 		return sm, err
 	}
 

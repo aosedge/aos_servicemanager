@@ -55,6 +55,12 @@ import (
 )
 
 /*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const secretService = "secret1"
+
+/*******************************************************************************
  * Types
  ******************************************************************************/
 
@@ -105,6 +111,12 @@ type testServiceProvider struct {
 type testLayerProvider struct {
 }
 
+type pythonAOSSecretImage struct {
+}
+
+type testPermissionsProvider struct {
+}
+
 type testDeviceManager struct {
 	sync.Mutex
 	isValid bool
@@ -118,6 +130,7 @@ type fakeFcrypt struct {
  ******************************************************************************/
 
 var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
+var permProvider = testPermissionsProvider{}
 var layerProviderForTest = testLayerProvider{}
 var networkProvider *networkmanager.NetworkManager
 
@@ -534,6 +547,58 @@ func TestUpdate(t *testing.T) {
 		if message != "service0, version: 1" {
 			t.Fatalf("Wrong service content: %s", message)
 		}
+	}
+}
+
+func TestAOSSecret(t *testing.T) {
+	sender := newTestSender()
+	imageDownloader := new(pythonAOSSecretImage)
+
+	launcher, err := newTestLauncher(imageDownloader, sender, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	serverAddr, err := net.ResolveUDPAddr("udp", ":10001")
+	if err != nil {
+		t.Fatalf("Can't create resolve UDP address: %s", err)
+	}
+
+	serverConn, err := net.ListenUDP("udp", serverAddr)
+	if err != nil {
+		t.Fatalf("Can't listen UDP: %s", err)
+	}
+	defer serverConn.Close()
+
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
+		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)
+
+	if status := <-sender.statusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s, version: %d", status.Error, status.ID, status.AosVersion)
+	}
+
+	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
+		t.Fatalf("Can't set read deadline: %s", err)
+	}
+
+	buf := make([]byte, 1024)
+
+	n, _, err := serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	}
+
+	message := string(buf[:n])
+	if message != secretService {
+		t.Fatalf("Wrong service content: %s", message)
 	}
 }
 
@@ -1569,7 +1634,7 @@ func newTestLauncher(
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
 		DefaultServiceTTL: 30}, downloader,
-		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager)
+		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -1712,6 +1777,75 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest,
 		&fsDigest, downloader.layersDigest); err != nil {
+		return outputFile, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputFile, err
+	}
+	outputFile = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputFile); err != nil {
+		return outputFile, err
+	}
+
+	return outputFile, nil
+}
+
+func (downloader pythonAOSSecretImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
+	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputFile, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputFile, err
+	}
+
+	if err := generatePythonContentReadAOSSecret(imageDir); err != nil {
+		return outputFile, err
+	}
+
+	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
+	if err != nil {
+		return outputFile, err
+	}
+
+	aosSrvConfig := generateAosSrvConfig()
+	aosSrvConfig.Quotas.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
+
+	data, err := json.Marshal(aosSrvConfig)
+	if err != nil {
+		return outputFile, err
+	}
+
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
+	if err != nil {
+		return outputFile, err
+	}
+
+	ociImgSpec := imagespec.Image{}
+	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py"}
+
+	dataImgSpec, err := json.Marshal(ociImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
+	if err != nil {
+		return outputFile, err
+	}
+
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
 		return outputFile, err
 	}
 
@@ -2108,6 +2242,14 @@ func (deviceManager *testDeviceManager) RequestBoardResourceByName(name string) 
 	}
 }
 
+func (perm *testPermissionsProvider) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error) {
+	return secretService, nil
+}
+
+func (perm *testPermissionsProvider) UnregisterService(serviceID string) (err error) {
+	return nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -2269,6 +2411,28 @@ server.serve_forever()`
 	if err := ioutil.WriteFile(
 		path.Join(imagePath, "rootfs", "home", "service.py"),
 		[]byte(fmt.Sprintf(serviceContent, ftpDir, ftpDir)), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generatePythonContentReadAOSSecret(imagePath string) (err error) {
+	serviceContent := `#!/usr/bin/python
+
+import time
+import socket
+import sys
+import netifaces
+import os
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+message = os.getenv('SERVICE_SECRET', '')
+
+sock.sendto(str.encode(message), (netifaces.gateways()['default'][netifaces.AF_INET][0], 10001))
+sock.close()`
+
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
 		return err
 	}
 
