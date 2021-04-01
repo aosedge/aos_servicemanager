@@ -68,18 +68,18 @@ type aosServiceConfig struct {
 	Sysctl     *map[string]string `json:"sysctl,omitempty"`
 	ServiceTTL *uint64            `json:"serviceTTL,omitempty"`
 	Quotas     struct {
-		StateLimit     *uint64 `json:"stateLimit,omitempty"`
-		StorageLimit   *uint64 `json:"storageLimit,omitempty"`
-		UploadSpeed    *uint64 `json:"uploadSpeed,omitempty"`
-		DownloadSpeed  *uint64 `json:"downloadSpeed,omitempty"`
-		UploadLimit    *uint64 `json:"uploadLimit,omitempty"`
-		DownloadLimit  *uint64 `json:"downloadLimit,omitempty"`
-		RAMLimit       *int64  `json:"ramLimit,omitempty"`
-		PidsLimit      *int64  `json:"pidsLimit,omitempty"`
-		NoFileLimit    *uint64 `json:"noFileLimit,omitempty"`
-		CPULimit       *uint64 `json:"cpuLimit,omitempty"`
-		TmpLimit       *uint64 `json:"tmpLimit,omitempty"`
-		VisPermissions string  `json:"visPermissions,omitempty"`
+		StateLimit    *uint64                      `json:"stateLimit,omitempty"`
+		StorageLimit  *uint64                      `json:"storageLimit,omitempty"`
+		UploadSpeed   *uint64                      `json:"uploadSpeed,omitempty"`
+		DownloadSpeed *uint64                      `json:"downloadSpeed,omitempty"`
+		UploadLimit   *uint64                      `json:"uploadLimit,omitempty"`
+		DownloadLimit *uint64                      `json:"downloadLimit,omitempty"`
+		RAMLimit      *int64                       `json:"ramLimit,omitempty"`
+		PidsLimit     *int64                       `json:"pidsLimit,omitempty"`
+		NoFileLimit   *uint64                      `json:"noFileLimit,omitempty"`
+		CPULimit      *uint64                      `json:"cpuLimit,omitempty"`
+		TmpLimit      *uint64                      `json:"tmpLimit,omitempty"`
+		Permissions   map[string]map[string]string `json:"permissions,omitempty"`
 	} `json:"quotas"`
 	Mounts *[]struct {
 		ContainerPath string   `json:"containerPath"`

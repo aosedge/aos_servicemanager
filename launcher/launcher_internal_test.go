@@ -622,8 +622,8 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Permissions not found")
 	}
 
-	if permissions != `{"*": "rw", "123": "rw"}` {
-		t.Fatalf("Permissions mismatch")
+	if permissions != `{"systemCore":{"*":"rw","123":"rw"}}` {
+		t.Fatalf("Permissions mismatch %s", permissions)
 	}
 }
 
@@ -1601,7 +1601,7 @@ func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
-	aosSrvConfig.Quotas.VisPermissions = `{"*": "rw", "123": "rw"}`
+	aosSrvConfig.Quotas.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
 	aosSrvConfig.Devices = []Device{{Name: "random", Permissions: "rwm"}}
 
 	data, err := json.Marshal(aosSrvConfig)

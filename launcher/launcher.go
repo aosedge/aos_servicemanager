@@ -719,7 +719,13 @@ func (launcher *Launcher) GetServicePermissions(serviceID string) (permission st
 		return "", err
 	}
 
-	return aosConfig.Quotas.VisPermissions, nil
+	// TODO: delete this functionality after adding a functional vis server
+	jsonPermissions, err := json.Marshal(aosConfig.Quotas.Permissions)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonPermissions), nil
 }
 
 func (state ServiceState) String() string {
