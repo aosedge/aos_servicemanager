@@ -439,11 +439,16 @@ func getTimeRange(logData string) (from, till time.Time, err error) {
 	if len(list) < 2 || len(list[0]) < 37 || len(list[len(list)-2]) < 37 {
 		return from, till, errors.New("bad log data")
 	}
-	if from, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", list[0][1:36]); err != nil {
+
+	fromLog := list[0][strings.IndexByte(list[0], '['):]
+
+	if from, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", fromLog[1:36]); err != nil {
 		return from, till, err
 	}
 
-	if till, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", list[len(list)-2][1:36]); err != nil {
+	tillLog := list[len(list)-2][strings.IndexByte(list[len(list)-2], '['):]
+
+	if till, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", tillLog[1:36]); err != nil {
 		return from, till, err
 	}
 

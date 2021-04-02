@@ -200,7 +200,7 @@ func (instance *Logging) getLog(request getLogRequest) {
 			break
 		}
 
-		if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
+		if err = archInstance.addLog(createLogString(logEntry)); err != nil {
 			if err == errMaxPartCount {
 				log.Warn(err)
 				break
@@ -271,8 +271,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 				log.WithFields(log.Fields{
 					"serviceID": request.ServiceID,
-					"time": time.Unix(int64(logEntry.RealtimeTimestamp/1000000),
-						int64((logEntry.RealtimeTimestamp%1000000))*1000)}).Debug("Crash detected")
+					"time":      getLogDate(logEntry)}).Debug("Crash detected")
 			}
 		} else {
 			if strings.HasPrefix(logEntry.Fields["MESSAGE"], "Started") {
@@ -324,7 +323,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			}
 
 			if serviceName, ok := logEntry.Fields[serviceField]; ok && unitName == serviceName {
-				if err = archInstance.addLog(logEntry.Fields["MESSAGE"] + "\n"); err != nil {
+				if err = archInstance.addLog(createLogString(logEntry)); err != nil {
 					panic("Can't archive log")
 				}
 			}
@@ -368,4 +367,12 @@ func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time)
 	}
 
 	return journal.SeekHead()
+}
+
+func createLogString(entry *sdjournal.JournalEntry) (logStr string) {
+	return fmt.Sprintf("%s %s \n", getLogDate(entry), entry.Fields["MESSAGE"])
+}
+
+func getLogDate(entry *sdjournal.JournalEntry) (date time.Time) {
+	return time.Unix(int64(entry.RealtimeTimestamp/1000000), int64((entry.RealtimeTimestamp%1000000))*1000)
 }
