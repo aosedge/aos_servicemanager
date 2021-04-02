@@ -864,10 +864,14 @@ func (umCtrl *UmController) processStartRevertState(e *fsm.Event) {
 
 	for i := range umCtrl.connections {
 		log.Debug(len(umCtrl.connections[i].updatePackages))
-		if len(umCtrl.connections[i].updatePackages) > 0 {
+		if len(umCtrl.connections[i].updatePackages) > 0 || umCtrl.connections[i].state == umFailed {
 			if umCtrl.connections[i].handler == nil {
 				log.Warnf("Connection to um %s closed", umCtrl.connections[i].umID)
 				return
+			}
+
+			if len(umCtrl.connections[i].updatePackages) == 0 {
+				log.Warnf("No update components but UM %s is in failure state", umCtrl.connections[i].umID)
 			}
 
 			if err := umCtrl.connections[i].handler.StartRevert(); err == nil {
