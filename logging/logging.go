@@ -155,8 +155,14 @@ func (instance *Logging) getLog(request getLogRequest) {
 	}
 	defer journal.Close()
 
-	if _, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID); err != nil {
-		panic("Can't add filter")
+	needUnitField := true
+
+	if request.serviceID != "" {
+		needUnitField = false
+
+		if _, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID); err != nil {
+			panic("Can't add filter")
+		}
 	}
 
 	if err = instance.seekToTime(journal, request.from); err != nil {
@@ -200,7 +206,7 @@ func (instance *Logging) getLog(request getLogRequest) {
 			break
 		}
 
-		if err = archInstance.addLog(createLogString(logEntry)); err != nil {
+		if err = archInstance.addLog(createLogString(logEntry, needUnitField)); err != nil {
 			if err == errMaxPartCount {
 				log.Warn(err)
 				break
@@ -323,7 +329,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			}
 
 			if serviceName, ok := logEntry.Fields[serviceField]; ok && unitName == serviceName {
-				if err = archInstance.addLog(createLogString(logEntry)); err != nil {
+				if err = archInstance.addLog(createLogString(logEntry, false)); err != nil {
 					panic("Can't archive log")
 				}
 			}
@@ -369,8 +375,13 @@ func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time)
 	return journal.SeekHead()
 }
 
-func createLogString(entry *sdjournal.JournalEntry) (logStr string) {
-	return fmt.Sprintf("%s %s \n", getLogDate(entry), entry.Fields["MESSAGE"])
+func createLogString(entry *sdjournal.JournalEntry, addUnit bool) (logStr string) {
+	if addUnit {
+		return fmt.Sprintf("%s %s %s \n", getLogDate(entry), entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT],
+			entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
+	}
+
+	return fmt.Sprintf("%s %s \n", getLogDate(entry), entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
 }
 
 func getLogDate(entry *sdjournal.JournalEntry) (date time.Time) {
