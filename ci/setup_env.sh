@@ -39,13 +39,11 @@ sudo apt install libsystemd-dev dbus-x11 make iperf libssl-dev rabbitmq-server -
 sudo systemctl stop rabbitmq-server
 sudo systemctl disable rabbitmq-server
 
--echo "Install wondershaper"
--cd /tmp
--git clone  https://github.com/magnific0/wondershaper.git
--cd wondershaper
--sudo make install
-
 echo "Install python3.7 and libs"
 sudo apt install python3-pip  -y
 sudo -H pip3 install pyftpdlib
 sudo apt install python3.7
+
+echo "Install Whitesource"
+sudo apt install default-jre -y
+sudo curl -L https://unified-agent.s3.amazonaws.com/wss-unified-agent.jar --output /usr/bin/wss-unified-agent.jar
