@@ -1,7 +1,7 @@
 stages:
   - build
   - test
-  - cyclonedx
+  - dependency
 
 after_script:  
    - cd $CI_PROJECT_DIR
@@ -50,14 +50,12 @@ test:
     - sudo rm .testCoverage.txt
     - sudo systemctl stop rabbitmq-server.service --no-block
 
-dependency:
+whitesource:
   only:
-    refs: 
+    refs:
      - master
   tags:
     - sm_ci
-  stage: cyclonedx
+  stage: dependency
   script:
-    - sed -i '/aos_common/d' ./go.mod
-    - cyclonedx-go -o /tmp/bom.xml
-    - curl -X 'POST' 'https://aos-dependency.westeurope.cloudapp.azure.com/api/v1/bom' -H "X-Api-Key:$DEP_API_KEY" -F 'projectName=aos-servicemanager' -F 'autoCreate=true' -F 'bom=@/tmp/bom.xml'
+    - java -jar /usr/bin/wss-unified-agent.jar -apiKey $WSS_API_KEY -projectToken $WSS_SM_TOKEN -userKey $WSS_USER_KEY  -c ./ci/wss-sm.conf -d ./ -scanComment $CI_COMMIT_SHORT_SHA
