@@ -79,7 +79,6 @@ type aosServiceConfig struct {
 		NoFileLimit   *uint64                      `json:"noFileLimit,omitempty"`
 		CPULimit      *uint64                      `json:"cpuLimit,omitempty"`
 		TmpLimit      *uint64                      `json:"tmpLimit,omitempty"`
-		Permissions   map[string]map[string]string `json:"permissions,omitempty"`
 	} `json:"quotas"`
 	Mounts *[]struct {
 		ContainerPath string   `json:"containerPath"`
@@ -90,6 +89,7 @@ type aosServiceConfig struct {
 	AllowedConnections map[string]struct{} `json:"AllowedConnections,omitempty"`
 	Devices            []Device            `json:"devices,omitempty"`
 	Resources          []string            `json:"resources,omitempty"`
+	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
 }
 
 type serviceSpec struct {

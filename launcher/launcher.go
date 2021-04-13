@@ -730,7 +730,7 @@ func (launcher *Launcher) GetServicePermissions(serviceID string) (permission st
 	}
 
 	// TODO: delete this functionality after adding a functional vis server
-	jsonPermissions, err := json.Marshal(aosConfig.Quotas.Permissions)
+	jsonPermissions, err := json.Marshal(aosConfig.Permissions)
 	if err != nil {
 		return "", err
 	}
@@ -1293,11 +1293,11 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 
 func (launcher *Launcher) registerService(spec *serviceSpec, service Service,
 	aosSrvConf *aosServiceConfig) (err error) {
-	if aosSrvConf.Quotas.Permissions == nil {
+	if aosSrvConf.Permissions == nil {
 		return nil
 	}
 
-	secret, err := launcher.serviceRegistrar.RegisterService(service.ID, aosSrvConf.Quotas.Permissions)
+	secret, err := launcher.serviceRegistrar.RegisterService(service.ID, aosSrvConf.Permissions)
 	if err != nil {
 		return err
 	}
@@ -1308,7 +1308,7 @@ func (launcher *Launcher) registerService(spec *serviceSpec, service Service,
 }
 
 func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServiceConfig) (err error) {
-	if aosSrvConf.Quotas.Permissions == nil {
+	if aosSrvConf.Permissions == nil {
 		return nil
 	}
 

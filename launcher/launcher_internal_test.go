@@ -1666,7 +1666,7 @@ func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
-	aosSrvConfig.Quotas.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
+	aosSrvConfig.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
 	aosSrvConfig.Devices = []Device{{Name: "random", Permissions: "rwm"}}
 
 	data, err := json.Marshal(aosSrvConfig)
@@ -1818,7 +1818,7 @@ func (downloader pythonAOSSecretImage) DownloadAndDecrypt(packageInfo amqp.Decry
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
-	aosSrvConfig.Quotas.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
+	aosSrvConfig.Permissions = map[string]map[string]string{"systemCore": {"*": "rw", "123": "rw"}}
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
