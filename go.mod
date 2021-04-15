@@ -8,7 +8,7 @@ require (
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/cavaliercoder/grab v2.0.0+incompatible
-	github.com/containernetworking/cni v0.8.0
+	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.9.0
 	github.com/coreos/go-iptables v0.5.0
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f

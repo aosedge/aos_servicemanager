@@ -13,7 +13,7 @@ github.com/apparentlymart/go-cidr/cidr
 # github.com/cavaliercoder/grab v2.0.0+incompatible
 ## explicit
 github.com/cavaliercoder/grab
-# github.com/containernetworking/cni v0.8.0
+# github.com/containernetworking/cni v0.8.1
 ## explicit
 github.com/containernetworking/cni/libcni
 github.com/containernetworking/cni/pkg/invoke
