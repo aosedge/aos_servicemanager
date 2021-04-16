@@ -1437,12 +1437,15 @@ func (launcher *Launcher) poststopService(service Service, aosConfig *aosService
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
+	launcher.services.Delete(service.UnitName)
+
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
-		return err
+		if retErr == nil {
+			log.WithField("id", service.ID).Errorf("Can't get service config: %s", err)
+			retErr = err
+		}
 	}
-
-	launcher.services.Delete(service.UnitName)
 
 	channel := make(chan string)
 	if _, err := launcher.systemd.StopUnit(service.UnitName, "replace", channel); err != nil {
