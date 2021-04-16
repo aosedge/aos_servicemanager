@@ -32,7 +32,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -163,7 +162,7 @@ type Launcher struct {
 
 	users []string
 
-	services sync.Map
+	services map[string]string
 
 	serviceTemplate string
 	runcPath        string
@@ -300,6 +299,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		monitor:         monitor,
 		network:         network,
 		devicemanager:   devicemanager,
+		services:        make(map[string]string),
 	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -1351,6 +1351,12 @@ func (launcher *Launcher) requestDeviceResources(service Service, devices []Devi
 }
 
 func (launcher *Launcher) startService(service Service) (err error) {
+	if _, ok := launcher.services[service.ID]; ok {
+		log.WithFields(log.Fields{"name": service.UnitName}).Warn("Service already started")
+
+		return nil
+	}
+
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
 		return err
@@ -1382,7 +1388,7 @@ func (launcher *Launcher) startService(service Service) (err error) {
 		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
 	}
 
-	launcher.services.Store(service.UnitName, service.ID)
+	launcher.services[service.ID] = service.UnitName
 
 	return nil
 }
@@ -1437,8 +1443,6 @@ func (launcher *Launcher) poststopService(service Service, aosConfig *aosService
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
-	launcher.services.Delete(service.UnitName)
-
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
 		if retErr == nil {
@@ -1479,6 +1483,8 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 			retErr = err
 		}
 	}
+
+	delete(launcher.services, service.ID)
 
 	return retErr
 }
@@ -1809,8 +1815,6 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 	if err != nil {
 		return err
 	}
-
-	launcher.services.Delete(oldService.UnitName)
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
 		return err
