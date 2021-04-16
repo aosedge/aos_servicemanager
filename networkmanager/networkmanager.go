@@ -195,6 +195,8 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 	log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Debug("Add service to network")
 
 	if err = manager.isServiceInNetwork(serviceID, spID); err == nil {
+		log.WithFields(log.Fields{"serviceID": serviceID, "spID": spID}).Warn("Service already in the network")
+
 		return err
 	}
 
@@ -296,6 +298,8 @@ func (manager *NetworkManager) RemoveServiceFromNetwork(serviceID, spID string) 
 	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service from network")
 
 	if err = manager.isServiceInNetwork(serviceID, spID); err != nil {
+		log.WithFields(log.Fields{"serviceID": serviceID}).Warn("Service is not in network")
+
 		return err
 	}
 
