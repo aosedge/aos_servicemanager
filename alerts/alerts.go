@@ -437,23 +437,24 @@ func (instance *Alerts) processJournal() (err error) {
 
 		var version *uint64
 		source := "system"
+		unit := entry.Fields["_SYSTEMD_UNIT"]
 
-		if entry.Fields["_SYSTEMD_UNIT"] == "init.scope" {
+		if unit == "init.scope" {
+			unit = entry.Fields["UNIT"]
+		}
+
+		if strings.HasPrefix(unit, "aos") {
 			if priority, err := strconv.Atoi(entry.Fields["PRIORITY"]); err != nil || priority > 4 {
 				continue
 			}
 
-			unit := entry.Fields["UNIT"]
-
-			if strings.HasPrefix(unit, "aos") {
-				service, err := instance.serviceProvider.GetServiceByUnitName(unit)
-				if err != nil {
-					continue
-				}
-
-				source = service.ID
-				version = &service.AosVersion
+			service, err := instance.serviceProvider.GetServiceByUnitName(unit)
+			if err != nil {
+				continue
 			}
+
+			source = service.ID
+			version = &service.AosVersion
 		}
 
 		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
