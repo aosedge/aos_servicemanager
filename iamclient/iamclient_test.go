@@ -446,6 +446,14 @@ func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAMa
 	}
 }
 
+func (server *testServer) RegisterService(context context.Context, req *pb.RegisterServiceReq) (rsp *pb.RegisterServiceRsp, err error) {
+	return rsp, nil
+}
+
+func (server *testServer) UnregisterService(context context.Context, req *pb.UnregisterServiceReq) (rsp *empty.Empty, err error) {
+	return rsp, nil
+}
+
 func (sender *testSender) SendIssueUnitCertificatesRequest(requests []amqp.CertificateRequest) (err error) {
 	sender.csr = make(map[string]string)
 
