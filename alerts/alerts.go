@@ -440,14 +440,14 @@ func (instance *Alerts) processJournal() (err error) {
 		unit := entry.Fields["_SYSTEMD_UNIT"]
 
 		if unit == "init.scope" {
-			unit = entry.Fields["UNIT"]
-		}
-
-		if strings.HasPrefix(unit, "aos") {
 			if priority, err := strconv.Atoi(entry.Fields["PRIORITY"]); err != nil || priority > 4 {
 				continue
 			}
 
+			unit = entry.Fields["UNIT"]
+		}
+
+		if strings.HasPrefix(unit, "aos") {
 			service, err := instance.serviceProvider.GetServiceByUnitName(unit)
 			if err != nil {
 				continue
