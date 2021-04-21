@@ -11,6 +11,7 @@ require (
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.9.0
 	github.com/coreos/go-iptables v0.5.0
+	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f
 	github.com/coreos/go-systemd/v22 v22.1.0
 	github.com/docker/docker v17.12.1-ce+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.4.7
@@ -37,7 +38,7 @@ require (
 	github.com/streadway/amqp v1.0.0
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210309075749-eb42f75086f2
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210419204235-b2840a5bdae2
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 	golang.org/x/sys v0.0.0-20201207223542-d4d67f95c62d
 	google.golang.org/grpc v1.35.0

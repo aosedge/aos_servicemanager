@@ -4,6 +4,8 @@ option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
 
 import "google/protobuf/empty.proto";
 
+import "iamanagercommon.proto";
+
 package iamanager;
 
 service IAManager {
@@ -18,6 +20,8 @@ service IAManager {
     rpc SetUsers(SetUsersReq) returns (google.protobuf.Empty) {}
     rpc GetUsers(google.protobuf.Empty) returns (GetUsersRsp) {}
     rpc SubscribeUsersChanged(google.protobuf.Empty) returns (stream UsersChangedNtf) {}
+    rpc RegisterService(RegisterServiceReq) returns (RegisterServiceRsp) {}
+    rpc UnregisterService(UnregisterServiceReq) returns (google.protobuf.Empty) {}
 }
 
 message GetCertTypesRsp {
@@ -80,4 +84,17 @@ message GetUsersRsp {
 
 message UsersChangedNtf {
     repeated string users = 1;
+}
+
+message RegisterServiceReq {
+    string service_id = 1;
+    map<string, Permissions> permissions = 2;
+}
+
+message RegisterServiceRsp {
+    string secret = 1;
+}
+
+message UnregisterServiceReq {
+    string service_id = 1;
 }

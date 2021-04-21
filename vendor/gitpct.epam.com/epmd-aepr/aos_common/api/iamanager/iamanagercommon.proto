@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
+
+package iamanager;
+
+message Permissions {
+    map<string, string> permissions = 1;
+}

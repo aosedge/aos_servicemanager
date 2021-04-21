@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
+
+import "iamanagercommon.proto";
+
+package iamanager;
+
+service IAManagerPublic {
+    rpc GetPermissions(GetPermissionsReq) returns (GetPermissionsRsp) {}
+}
+
+message GetPermissionsReq {
+    string secret = 1;
+    string functional_server_id = 2;
+}
+
+message GetPermissionsRsp {
+    string service_id = 1;
+    Permissions permissions = 2;
+}

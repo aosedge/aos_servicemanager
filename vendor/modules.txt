@@ -33,6 +33,9 @@ github.com/containernetworking/plugins/plugins/ipam/host-local/backend/allocator
 # github.com/coreos/go-iptables v0.5.0
 ## explicit
 github.com/coreos/go-iptables/iptables
+# github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f
+## explicit
+github.com/coreos/go-systemd/journal
 # github.com/coreos/go-systemd/v22 v22.1.0
 ## explicit
 github.com/coreos/go-systemd/v22/dbus
@@ -160,7 +163,7 @@ github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
 ## explicit
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210309075749-eb42f75086f2
+# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210419204235-b2840a5bdae2
 ## explicit
 gitpct.epam.com/epmd-aepr/aos_common/api/iamanager
 gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager
@@ -173,6 +176,7 @@ gitpct.epam.com/epmd-aepr/aos_common/utils/tpmkey
 ## explicit
 golang.org/x/crypto/sha3
 # golang.org/x/net v0.0.0-20201029221708-28c70e62bb1d
+golang.org/x/net/context
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
