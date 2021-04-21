@@ -129,7 +129,7 @@ func TestAlertProcessor(t *testing.T) {
 }
 
 func TestPeriodicReport(t *testing.T) {
-	sendDuration := 1 * time.Second
+	sendDuration := 2 * time.Second
 
 	monitor, err := New(&config.Config{
 		WorkingDir: ".",
