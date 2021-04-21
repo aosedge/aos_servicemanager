@@ -24,13 +24,14 @@ import (
 	"log/syslog"
 	"os"
 	"path"
-	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/coreos/go-systemd/journal"
 	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +82,8 @@ var errTimeout = errors.New("timeout")
 
 var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
 var cursorStorage testCursorStorage
+
+var tmpDir string
 
 /*******************************************************************************
  * Main
@@ -644,23 +647,33 @@ func TestGetDowloadsStatusAlerts(t *testing.T) {
 func TestGetServiceManagerAlerts(t *testing.T) {
 	const numMessages = 5
 
+	messages := make([]string, 0, numMessages)
+
+	for i := 0; i < numMessages; i++ {
+		messages = append(messages, uuid.New().String())
+	}
+
+	command := fmt.Sprintf("/usr/bin/systemd-cat -p3 /bin/bash -c 'for message in %s ; do echo $message ; done'", strings.Join(messages, " "))
+
+	if err := createSystemdUnit("oneshot", command,
+		path.Join(tmpDir, "aos-servicemanager.service")); err != nil {
+		t.Fatalf("Can't create systemd unit: %s", err)
+	}
+
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
 		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
+		MaxMessageSize:     2048,
 		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
 
-	messages := make([]string, 0, numMessages)
-
-	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-		log.Error(messages[len(messages)-1])
+	if err = startSystemdUnit("aos-servicemanager.service"); err != nil {
+		t.Fatalf("Can't start systemd unit: %s", err)
 	}
 
-	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "servicemanager", nil, messages); err != nil {
+	if err = waitAlerts(alertsHandler.AlertsChannel, 5*time.Second, amqp.AlertTagAosCore, "aos-servicemanager.service", nil, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -682,8 +695,8 @@ func TestAlertsMaxMessageSize(t *testing.T) {
 	defer alertsHandler.Close()
 
 	for i := 0; i < numMessages; i++ {
-		// One message size is: timestamp 24 + tag "aosCore" 7 + source "servicemanager" 14 + uuid 36 = 81
-		log.Error(uuid.New().String())
+		// One message size is: timestamp 24 + tag "system" 6 + source "servicemanager" 14 + uuid 36 = 80
+		journal.Send(uuid.New().String(), journal.PriErr, nil)
 	}
 
 	select {
@@ -709,11 +722,8 @@ func TestAlertsMaxOfflineMessages(t *testing.T) {
 	}
 	defer alertsHandler.Close()
 
-	messages := make([]string, 0, numMessages)
-
 	for i := 0; i < numMessages; i++ {
-		messages = append(messages, uuid.New().String())
-		log.Error(messages[len(messages)-1])
+		journal.Send(uuid.New().String(), journal.PriErr, nil)
 		time.Sleep(1500 * time.Millisecond)
 	}
 
@@ -745,11 +755,8 @@ func TestDuplicateAlerts(t *testing.T) {
 	}
 	defer alertsHandler.Close()
 
-	messages := make([]string, 0, numMessages)
-
 	for i := 0; i < numMessages; i++ {
-		messages = append(messages, "This is error message")
-		log.Error(messages[len(messages)-1])
+		journal.Send("This is error message", journal.PriErr, nil)
 	}
 
 	select {
@@ -876,9 +883,11 @@ func (cursorStorage *testCursorStorage) GetJournalCursor() (cursor string, err e
  ******************************************************************************/
 
 func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
+	tmpDir, err = ioutil.TempDir("", "sm_")
+	if err != nil {
+		log.Fatalf("Error create temporary dir: %s", err)
 	}
+
 	if systemd, err = dbus.NewSystemConnection(); err != nil {
 		return err
 	}
@@ -899,8 +908,8 @@ func cleanup() {
 
 	systemd.Close()
 
-	if err := os.RemoveAll("tmp"); err != nil {
-		log.Errorf("Can't remove tmp folder: %s", err)
+	if err := os.RemoveAll(tmpDir); err != nil {
+		log.Errorf("Error removing tmp dir: %s", err)
 	}
 }
 
@@ -965,20 +974,6 @@ func waitAlerts(alertsChannel <-chan amqp.Alerts, timeout time.Duration, tag, so
 }
 
 func createService(serviceID string) (err error) {
-	serviceContent := `[Unit]
-	Description=AOS Service
-	After=network.target
-	
-	[Service]
-	Type=simple
-	Restart=always
-	RestartSec=1
-	ExecStart=/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'
-	
-	[Install]
-	WantedBy=multi-user.target
-`
-
 	serviceName := "aos_" + serviceID + ".service"
 
 	if _, ok := serviceProvider.services[serviceID]; ok {
@@ -987,10 +982,35 @@ func createService(serviceID string) (err error) {
 
 	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
 
-	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
-	if err != nil {
+	if err = createSystemdUnit("simple",
+		`/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'`, path.Join(tmpDir, serviceName)); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func startService(serviceID string) (err error) {
+	if err = startSystemdUnit("aos_" + serviceID + ".service"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createSystemdUnit(serviceType, command, fileName string) (err error) {
+	serviceTemplate := `[Unit]
+	After=network.target
+	
+	[Service]
+	Type=%s
+	ExecStart=%s
+	
+	[Install]
+	WantedBy=multi-user.target
+`
+
+	serviceContent := fmt.Sprintf(serviceTemplate, serviceType, command)
 
 	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0644); err != nil {
 		return err
@@ -1007,10 +1027,10 @@ func createService(serviceID string) (err error) {
 	return nil
 }
 
-func startService(serviceID string) (err error) {
+func startSystemdUnit(name string) (err error) {
 	channel := make(chan string)
 
-	if _, err = systemd.RestartUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+	if _, err = systemd.RestartUnit(name, "replace", channel); err != nil {
 		return err
 	}
 
