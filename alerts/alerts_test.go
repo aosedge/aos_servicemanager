@@ -368,10 +368,10 @@ func TestGetValidateResourceAlerts(t *testing.T) {
 	message2[device3] = []error{error3, error4}
 
 	validateAlerts := []validateAlert{
-		validateAlert{"alertservice2", message1},
-		validateAlert{"alertservice2", message2},
-		validateAlert{"system", message1},
-		validateAlert{"system", message2}}
+		{"alertservice2", message1},
+		{"alertservice2", message2},
+		{"system", message1},
+		{"system", message2}}
 
 	for _, alert := range validateAlerts {
 		alertsHandler.SendValidateResourceAlert(alert.source, alert.message)
@@ -445,10 +445,10 @@ func TestGetRequestResourceAlerts(t *testing.T) {
 	message2 := "device: test234 is unavailable"
 
 	requestAlerts := []requestAlert{
-		requestAlert{"alertservice3", message1},
-		requestAlert{"alertservice3", message2},
-		requestAlert{"system", message1},
-		requestAlert{"system", message2}}
+		{"alertservice3", message1},
+		{"alertservice3", message2},
+		{"system", message1},
+		{"system", message2}}
 
 	for _, alert := range requestAlerts {
 		alertsHandler.SendRequestResourceAlert(alert.source, alert.message)
