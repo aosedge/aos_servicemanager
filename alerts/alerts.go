@@ -437,10 +437,10 @@ func (instance *Alerts) processJournal() (err error) {
 
 		var version *uint64
 		source := "system"
-		unit := entry.Fields["_SYSTEMD_UNIT"]
+		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
 		if unit == "init.scope" {
-			if priority, err := strconv.Atoi(entry.Fields["PRIORITY"]); err != nil || priority > 4 {
+			if priority, err := strconv.Atoi(entry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY]); err != nil || priority > 4 {
 				continue
 			}
 
@@ -460,12 +460,12 @@ func (instance *Alerts) processJournal() (err error) {
 		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
 			int64((entry.RealtimeTimestamp%1000000)*1000))
 
-		log.WithFields(log.Fields{"time": t, "message": entry.Fields["MESSAGE"]}).Debug("System alert")
+		log.WithFields(log.Fields{"time": t, "message": entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}).Debug("System alert")
 
 		skipsend := false
 
 		for _, substr := range instance.filterRegexp {
-			skipsend = substr.MatchString(entry.Fields["MESSAGE"])
+			skipsend = substr.MatchString(entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
 
 			if skipsend {
 				break
@@ -478,7 +478,7 @@ func (instance *Alerts) processJournal() (err error) {
 				Tag:        amqp.AlertTagSystemError,
 				Source:     source,
 				AosVersion: version,
-				Payload:    amqp.SystemAlert{Message: entry.Fields["MESSAGE"]}})
+				Payload:    amqp.SystemAlert{Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}})
 		}
 	}
 }
