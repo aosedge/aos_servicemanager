@@ -763,6 +763,81 @@ func TestDuplicateAlerts(t *testing.T) {
 	}
 }
 
+func TestMessageFilter(t *testing.T) {
+	const numMessages = 3
+
+	filter := []string{"test", "regexp"}
+
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32,
+		Filter:             filter}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
+	if err != nil {
+		t.Fatalf("Can't create syslog: %s", err)
+	}
+	defer sysLog.Close()
+
+	validMessage := "message should not be filterout"
+	messages := []string{"test mesage to filterout", validMessage, "regexp mesage to filterout"}
+
+	for _, msg := range messages {
+		if err = sysLog.Crit(msg); err != nil {
+			t.Errorf("Can't write to syslog: %s", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	foundCount := 0
+
+	for i := 0; i < 3; i++ {
+		err := waitResult(alertsHandler.AlertsChannel, 1*time.Second,
+			func(alert amqp.AlertItem) (success bool, err error) {
+				systemAlert, ok := (alert.Payload.(amqp.SystemAlert))
+				if !ok {
+					return false, errors.New("wrong alert type")
+				}
+
+				if systemAlert.Message != validMessage {
+					return false, errors.New("Receive unexpected alert mesage")
+				}
+				return true, nil
+			})
+
+		if err == nil {
+			foundCount++
+			continue
+		}
+
+		if err != errTimeout {
+			t.Errorf("Result failed: %s", err)
+		}
+	}
+
+	if foundCount != 1 {
+		t.Errorf("Incorrect count of received alerts count = %d", foundCount)
+	}
+}
+
+func TestWrongFilter(t *testing.T) {
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		SendPeriod:         config.Duration{Duration: 1 * time.Second},
+		MaxMessageSize:     1024,
+		MaxOfflineMessages: 32,
+		Filter:             []string{"", "*(test)^"}}}, &serviceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -958,81 +1033,6 @@ func stopService(serviceID string) (err error) {
 
 func crashService(serviceID string) {
 	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
-}
-
-func TestMessageFilter(t *testing.T) {
-	const numMessages = 3
-
-	filter := []string{"test", "regexp"}
-
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32,
-		Filter:             filter}}, &serviceProvider, &cursorStorage)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
-	if err != nil {
-		t.Fatalf("Can't create syslog: %s", err)
-	}
-	defer sysLog.Close()
-
-	validMessage := "message should not be filterout"
-	messages := []string{"test mesage to filterout", validMessage, "regexp mesage to filterout"}
-
-	for _, msg := range messages {
-		if err = sysLog.Crit(msg); err != nil {
-			t.Errorf("Can't write to syslog: %s", err)
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	foundCount := 0
-
-	for i := 0; i < 3; i++ {
-		err := waitResult(alertsHandler.AlertsChannel, 1*time.Second,
-			func(alert amqp.AlertItem) (success bool, err error) {
-				systemAlert, ok := (alert.Payload.(amqp.SystemAlert))
-				if !ok {
-					return false, errors.New("wrong alert type")
-				}
-
-				if systemAlert.Message != validMessage {
-					return false, errors.New("Receive unexpected alert mesage")
-				}
-				return true, nil
-			})
-
-		if err == nil {
-			foundCount++
-			continue
-		}
-
-		if err != errTimeout {
-			t.Errorf("Result failed: %s", err)
-		}
-	}
-
-	if foundCount != 1 {
-		t.Errorf("Incorrect count of received alerts count = %d", foundCount)
-	}
-}
-
-func TestWrongFilter(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
-		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
-		MaxOfflineMessages: 32,
-		Filter:             []string{"", "*(test)^"}}}, &serviceProvider, &cursorStorage)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
 }
 
 func compareValidateAlerts(first validateAlert, second validateAlert) (result bool) {
