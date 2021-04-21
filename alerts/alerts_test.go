@@ -271,7 +271,7 @@ func TestGetServiceError(t *testing.T) {
 func TestGetResourceAlerts(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
 		SendPeriod:         config.Duration{Duration: 1 * time.Second},
-		MaxMessageSize:     1024,
+		MaxMessageSize:     2048,
 		MaxOfflineMessages: 32}}, &serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -290,13 +290,13 @@ func TestGetResourceAlerts(t *testing.T) {
 	}
 
 	resourceAlerts := []resourceAlert{
-		resourceAlert{"alertservice1", "cpu", time.Now(), 89},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 90},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 91},
-		resourceAlert{"alertservice1", "cpu", time.Now(), 92},
-		resourceAlert{"system", "ram", time.Now(), 93},
-		resourceAlert{"system", "ram", time.Now(), 1500},
-		resourceAlert{"system", "ram", time.Now(), 1600}}
+		{"alertservice1", "cpu", time.Now(), 89},
+		{"alertservice1", "cpu", time.Now(), 90},
+		{"alertservice1", "cpu", time.Now(), 91},
+		{"alertservice1", "cpu", time.Now(), 92},
+		{"system", "ram", time.Now(), 93},
+		{"system", "ram", time.Now(), 1500},
+		{"system", "ram", time.Now(), 1600}}
 
 	for _, alert := range resourceAlerts {
 		alertsHandler.SendResourceAlert(alert.source, alert.resource, alert.time, alert.value)

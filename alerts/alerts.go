@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"code.cloudfoundry.org/bytefmt"
@@ -44,6 +45,7 @@ import (
 
 const (
 	alertsDataAllocSize = 10
+	waitJournalTimeout  = 1 * time.Second
 )
 
 /*******************************************************************************
@@ -79,7 +81,6 @@ type Alerts struct {
 	sync.Mutex
 
 	journal      *sdjournal.Journal
-	cursor       string
 	ticker       *time.Ticker
 	closeChannel chan bool
 }
@@ -386,22 +387,31 @@ func (instance *Alerts) setupJournal() (err error) {
 		if _, err = instance.journal.Next(); err != nil {
 			return err
 		}
-
-		instance.cursor = cursor
 	}
 
 	go func() {
+		result := sdjournal.SD_JOURNAL_APPEND
+
 		for {
 			select {
 			case <-instance.ticker.C:
-				if err = instance.processJournal(); err != nil {
-					log.Errorf("Journal process error: %s", err)
+				if err = instance.sendAlerts(); err != nil {
+					log.Errorf("Send alerts error: %s", err)
 				}
-
-				instance.sendAlerts()
 
 			case <-instance.closeChannel:
 				return
+
+			default:
+				if result != sdjournal.SD_JOURNAL_NOP {
+					if err = instance.processJournal(); err != nil {
+						log.Errorf("Journal process error: %s", err)
+					}
+				}
+
+				if result = instance.journal.Wait(waitJournalTimeout); result < 0 {
+					log.Errorf("Wait journal error: %s", syscall.Errno(-result))
+				}
 			}
 		}
 	}()
@@ -410,8 +420,6 @@ func (instance *Alerts) setupJournal() (err error) {
 }
 
 func (instance *Alerts) processJournal() (err error) {
-	currentCursor := instance.cursor
-
 	for {
 		count, err := instance.journal.Next()
 		if err != nil {
@@ -419,12 +427,6 @@ func (instance *Alerts) processJournal() (err error) {
 		}
 
 		if count == 0 {
-			if currentCursor != instance.cursor {
-				if err = instance.cursorStorage.SetJournalCursor(currentCursor); err != nil {
-					return err
-				}
-			}
-
 			return nil
 		}
 
@@ -432,8 +434,6 @@ func (instance *Alerts) processJournal() (err error) {
 		if err != nil {
 			return err
 		}
-
-		currentCursor = entry.Cursor
 
 		var version *uint64
 		source := "system"
@@ -503,7 +503,7 @@ func (instance *Alerts) addAlert(item amqp.AlertItem) {
 	}
 }
 
-func (instance *Alerts) sendAlerts() {
+func (instance *Alerts) sendAlerts() (err error) {
 	instance.Lock()
 	defer instance.Unlock()
 
@@ -525,5 +525,24 @@ func (instance *Alerts) sendAlerts() {
 		instance.skippedAlerts = 0
 		instance.duplicatedAlerts = 0
 		instance.alertsSize = 0
+
+		if err = instance.storeCurrentCursor(); err != nil {
+			return err
+		}
 	}
+
+	return nil
+}
+
+func (instance *Alerts) storeCurrentCursor() (err error) {
+	cursor, err := instance.journal.GetCursor()
+	if err != nil {
+		return err
+	}
+
+	if err = instance.cursorStorage.SetJournalCursor(cursor); err != nil {
+		return err
+	}
+
+	return nil
 }
