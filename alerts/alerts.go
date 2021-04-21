@@ -21,7 +21,6 @@ package alerts
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -101,6 +100,12 @@ type DownloadAlertStatus struct {
 // ErrDisabled indicates that alerts is disable in the config
 var ErrDisabled = errors.New("alerts is disabled")
 
+var aosServices = []string{
+	"aos-servicemanager.service",
+	"aos-updatemanager.service",
+	"aos-iamanager.service",
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -142,8 +147,6 @@ func New(config *config.Config,
 	if err = instance.setupJournal(); err != nil {
 		return nil, err
 	}
-
-	log.AddHook(instance)
 
 	return instance, nil
 }
@@ -239,28 +242,6 @@ func (instance *Alerts) SendRequestResourceAlert(source string, message string) 
 		AosVersion: version,
 		Payload: amqp.SystemAlert{
 			Message: message}})
-}
-
-// Levels returns log levels which should be hooked (log Hook interface)
-func (instance *Alerts) Levels() (levels []log.Level) {
-	return []log.Level{log.ErrorLevel, log.FatalLevel, log.PanicLevel}
-}
-
-// Fire called to hook selected log (log hook interface)
-func (instance *Alerts) Fire(entry *log.Entry) (err error) {
-	message := entry.Message
-
-	for field, value := range entry.Data {
-		message = message + fmt.Sprintf(" %s=%v", field, value)
-	}
-
-	instance.addAlert(amqp.AlertItem{
-		Timestamp: entry.Time,
-		Tag:       amqp.AlertTagAosCore,
-		Source:    "servicemanager",
-		Payload:   amqp.SystemAlert{Message: message}})
-
-	return nil
 }
 
 // SendDownloadStartedStatusAlert sends download started status alert
@@ -437,6 +418,7 @@ func (instance *Alerts) processJournal() (err error) {
 
 		var version *uint64
 		source := "system"
+		tag := amqp.AlertTagSystemError
 		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
 		if unit == "init.scope" {
@@ -449,18 +431,21 @@ func (instance *Alerts) processJournal() (err error) {
 
 		if strings.HasPrefix(unit, "aos") {
 			service, err := instance.serviceProvider.GetServiceByUnitName(unit)
-			if err != nil {
-				continue
+			if err == nil {
+				source = service.ID
+				version = &service.AosVersion
+			} else {
+				for _, aosService := range aosServices {
+					if unit == aosService {
+						source = unit
+						tag = amqp.AlertTagAosCore
+					}
+				}
 			}
-
-			source = service.ID
-			version = &service.AosVersion
 		}
 
 		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
 			int64((entry.RealtimeTimestamp%1000000)*1000))
-
-		log.WithFields(log.Fields{"time": t, "message": entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}).Debug("System alert")
 
 		skipsend := false
 
@@ -473,9 +458,16 @@ func (instance *Alerts) processJournal() (err error) {
 		}
 
 		if !skipsend {
+			log.WithFields(log.Fields{
+				"time":    t,
+				"message": entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
+				"tag":     tag,
+				"source":  source,
+			}).Debug("System alert")
+
 			instance.addAlert(amqp.AlertItem{
 				Timestamp:  t,
-				Tag:        amqp.AlertTagSystemError,
+				Tag:        tag,
 				Source:     source,
 				AosVersion: version,
 				Payload:    amqp.SystemAlert{Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}})

@@ -19,8 +19,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"os/signal"
@@ -30,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
 
 	"aos_servicemanager/alerts"
@@ -80,6 +83,10 @@ type serviceManager struct {
 
 	isDesiredStatusInProcessing bool
 	desiredStatusMutex          sync.Mutex
+}
+
+type journalHook struct {
+	severityMap map[log.Level]journal.Priority
 }
 
 /*******************************************************************************
@@ -656,6 +663,46 @@ func (sm *serviceManager) run() (err error) {
 	}
 }
 
+func newJournalHook() (hook *journalHook) {
+	hook = &journalHook{
+		severityMap: map[log.Level]journal.Priority{
+			log.DebugLevel: journal.PriDebug,
+			log.InfoLevel:  journal.PriInfo,
+			log.WarnLevel:  journal.PriWarning,
+			log.ErrorLevel: journal.PriErr,
+			log.FatalLevel: journal.PriCrit,
+			log.PanicLevel: journal.PriEmerg,
+		}}
+
+	return hook
+}
+
+func (hook *journalHook) Fire(entry *log.Entry) (err error) {
+	if entry == nil {
+		return errors.New("log entry is nil")
+	}
+
+	logMessage, err := entry.String()
+	if err != nil {
+		return err
+	}
+
+	err = journal.Print(hook.severityMap[entry.Level], logMessage)
+
+	return err
+}
+
+func (hook *journalHook) Levels() []log.Level {
+	return []log.Level{
+		log.PanicLevel,
+		log.FatalLevel,
+		log.ErrorLevel,
+		log.WarnLevel,
+		log.InfoLevel,
+		log.DebugLevel,
+	}
+}
+
 /*******************************************************************************
  * Main
  ******************************************************************************/
@@ -666,6 +713,7 @@ func main() {
 	strLogLevel := flag.String("v", "info", `log level: "debug", "info", "warn", "error", "fatal", "panic"`)
 	doCleanup := flag.Bool("reset", false, `Removes all services, wipes services and storages and remove DB`)
 	showVersion := flag.Bool("version", false, `Show service manager version`)
+	useJournal := flag.Bool("j", false, "output logs to systemd journal")
 
 	flag.Parse()
 
@@ -673,6 +721,14 @@ func main() {
 	if *showVersion {
 		fmt.Printf("Version: %s\n", GitSummary)
 		return
+	}
+
+	// Set log output
+	if *useJournal {
+		log.AddHook(newJournalHook())
+		log.SetOutput(ioutil.Discard)
+	} else {
+		log.SetOutput(os.Stdout)
 	}
 
 	// Set log level
