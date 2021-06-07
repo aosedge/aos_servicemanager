@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ThalesIgnite/crypto11"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
 	log "github.com/sirupsen/logrus"
@@ -73,9 +74,11 @@ type CryptoSessionKeyInfo struct {
 
 // CryptoContext crypto context
 type CryptoContext struct {
-	rootCertPool *x509.CertPool
-	tpmDevice    io.ReadWriteCloser
-	certProvider CertificateProvider
+	rootCertPool  *x509.CertPool
+	tpmDevice     io.ReadWriteCloser
+	pkcs11Ctx     map[pkcs11Descriptor]*crypto11.Context
+	pkcs11Library string
+	certProvider  CertificateProvider
 }
 
 // SymmetricContextInterface interface for SymmetricCipherContext
@@ -123,6 +126,11 @@ type certificateChainInfo struct {
 	fingerprints []string
 }
 
+type pkcs11Descriptor struct {
+	library string
+	token   string
+}
+
 /*******************************************************************************
  * Public
  ******************************************************************************/
@@ -130,7 +138,10 @@ type certificateChainInfo struct {
 // New create context for crypto operations
 func New(conf config.Crypt, provider CertificateProvider) (ctx *CryptoContext, err error) {
 	// Create context
-	ctx = &CryptoContext{certProvider: provider}
+	ctx = &CryptoContext{
+		certProvider:  provider,
+		pkcs11Ctx:     make(map[pkcs11Descriptor]*crypto11.Context),
+		pkcs11Library: conf.Pkcs11Library}
 
 	if conf.CACert != "" {
 		if ctx.rootCertPool, err = cryptutils.GetCaCertPool(conf.CACert); err != nil {
@@ -157,7 +168,19 @@ func (ctx *CryptoContext) Close() (err error) {
 		}
 	}
 
-	return nil
+	for pkcs11Desc, pkcs11ctx := range ctx.pkcs11Ctx {
+		log.WithFields(log.Fields{"library": pkcs11Desc.library, "token": pkcs11Desc.token}).Debug("Close PKCS11 context")
+
+		if pkcs11Err := pkcs11ctx.Close(); pkcs11Err != nil {
+			log.WithFields(log.Fields{"library": pkcs11Desc.library, "token": pkcs11Desc.token}).Errorf("Can't PKCS11 context: %s", err)
+
+			if err == nil {
+				err = pkcs11Err
+			}
+		}
+	}
+
+	return err
 }
 
 // GetOrganization returns online certificate origanizarion names
@@ -532,6 +555,30 @@ func (ctx *SymmetricCipherContext) DecryptFile(encryptedFile, clearFile *os.File
  * Private
  ******************************************************************************/
 
+func (ctx *CryptoContext) loadPkcs11PrivateKey(keyURL *url.URL) (key crypto.PrivateKey, err error) {
+	library, token, label, id, userPin, err := parsePkcs11Url(keyURL)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithFields(log.Fields{"label": label, "id": id}).Debug("Load PKCS11 certificate")
+
+	pkcs11Ctx, err := ctx.getPkcs11Context(library, token, userPin)
+	if err != nil {
+		return nil, err
+	}
+
+	if key, err = pkcs11Ctx.FindKeyPair([]byte(id), []byte(label)); err != nil {
+		return nil, err
+	}
+
+	if key == nil {
+		return nil, fmt.Errorf("private key label: %s, id: %s not found", label, id)
+	}
+
+	return key, nil
+}
+
 func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.PrivateKey, err error) {
 	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
@@ -554,6 +601,9 @@ func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.
 
 		return tpmkey.CreateFromPersistent(ctx.tpmDevice, tpmutil.Handle(handle))
 
+	case cryptutils.SchemePKCS11:
+		return ctx.loadPkcs11PrivateKey(keyURL)
+
 	default:
 		return nil, fmt.Errorf("unsupported schema %s for private key", keyURL.Scheme)
 	}
@@ -569,6 +619,101 @@ func getRawCertificate(certs []*x509.Certificate) (rawCerts [][]byte) {
 	return rawCerts
 }
 
+func parsePkcs11Url(pkcs11Url *url.URL) (library, token, label, id, userPin string, err error) {
+	opaqueValues, err := url.ParseQuery(pkcs11Url.Opaque)
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+
+	for name, item := range opaqueValues {
+		if len(item) == 0 {
+			continue
+		}
+
+		switch name {
+		case "token":
+			token = item[0]
+
+		case "object":
+			label = item[0]
+
+		case "id":
+			id = item[0]
+		}
+	}
+
+	query := pkcs11Url.Query()
+
+	for name, item := range query {
+		if len(item) == 0 {
+			continue
+		}
+
+		switch name {
+		case "module-path":
+			library = item[0]
+
+		case "pin-value":
+			userPin = item[0]
+		}
+	}
+
+	return library, token, label, id, userPin, nil
+}
+
+func (ctx *CryptoContext) getPkcs11Context(library, token, userPin string) (pkcs11Ctx *crypto11.Context, err error) {
+	log.WithFields(log.Fields{"library": library, "token": token}).Debug("Get PKCS11 context")
+
+	if library == "" && ctx.pkcs11Library == "" {
+		return nil, errors.New("PKCS11 library is not defined")
+	}
+
+	if library == "" {
+		library = ctx.pkcs11Library
+	}
+
+	var (
+		ok         bool
+		pkcs11Desc = pkcs11Descriptor{library: library, token: token}
+	)
+
+	if pkcs11Ctx, ok = ctx.pkcs11Ctx[pkcs11Desc]; !ok {
+		log.WithFields(log.Fields{"library": library, "token": token}).Debug("Create PKCS11 context")
+
+		if pkcs11Ctx, err = crypto11.Configure(&crypto11.Config{Path: library, TokenLabel: token, Pin: userPin}); err != nil {
+			return nil, err
+		}
+
+		ctx.pkcs11Ctx[pkcs11Desc] = pkcs11Ctx
+	}
+
+	return pkcs11Ctx, nil
+}
+
+func (ctx *CryptoContext) loadPkcs11Certificate(certURL *url.URL) (certs []*x509.Certificate, err error) {
+	library, token, label, id, userPin, err := parsePkcs11Url(certURL)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WithFields(log.Fields{"label": label, "id": id}).Debug("Load PKCS11 certificate")
+
+	pkcs11Ctx, err := ctx.getPkcs11Context(library, token, userPin)
+	if err != nil {
+		return nil, err
+	}
+
+	if certs, err = pkcs11Ctx.FindCertificateChain([]byte(id), []byte(label), nil); err != nil {
+		return nil, err
+	}
+
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("certificate chain label: %s, id: %s not found", label, id)
+	}
+
+	return certs, nil
+}
+
 func (ctx *CryptoContext) loadCertificateByURL(certURLStr string) (certs []*x509.Certificate, err error) {
 	certURL, err := url.Parse(certURLStr)
 	if err != nil {
@@ -578,6 +723,9 @@ func (ctx *CryptoContext) loadCertificateByURL(certURLStr string) (certs []*x509
 	switch certURL.Scheme {
 	case cryptutils.SchemeFile:
 		return cryptutils.LoadCertificate(certURL.Path)
+
+	case cryptutils.SchemePKCS11:
+		return ctx.loadPkcs11Certificate(certURL)
 
 	default:
 		return nil, fmt.Errorf("unsupported schema %s for certificate", certURL.Scheme)
