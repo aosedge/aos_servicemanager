@@ -32,8 +32,9 @@ import (
 
 // Crypt configuration structure with crypto attributes
 type Crypt struct {
-	CACert    string `json:"CACert"`
-	TpmDevice string `json:"tpmDevice,omitempty"`
+	CACert        string `json:"CACert"`
+	TpmDevice     string `json:"tpmDevice,omitempty"`
+	Pkcs11Library string `json:"pkcs11Library,omitempty"`
 }
 
 // UmController configuration for update controller
