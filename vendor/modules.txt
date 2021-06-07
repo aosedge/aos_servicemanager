@@ -172,9 +172,6 @@ gitpct.epam.com/epmd-aepr/aos_common/image
 gitpct.epam.com/epmd-aepr/aos_common/migration
 gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils
 gitpct.epam.com/epmd-aepr/aos_common/utils/tpmkey
-# gitpct.epam.com/epmd-aepr/aos_service_api v0.0.0-20210303110813-435faf66224c
-## explicit
-gitpct.epam.com/epmd-aepr/aos_service_api/api/systemcore
 # golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 ## explicit
 golang.org/x/crypto/sha3
