@@ -42,7 +42,7 @@ require (
 	github.com/streadway/amqp v1.0.0
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210524132411-918d2305a9a0
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210607165638-ed151c401daf
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 	golang.org/x/sys v0.0.0-20201207223542-d4d67f95c62d
 	google.golang.org/grpc v1.35.0

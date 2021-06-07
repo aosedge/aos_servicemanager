@@ -153,13 +153,8 @@ func GetServerTLSConfig(certStorageDir string) (config *tls.Config, err error) {
 	return config, nil
 }
 
-// LoadKey loads key from file
-func LoadKey(fileName string) (key crypto.PrivateKey, err error) {
-	data, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		return nil, err
-	}
-
+// PEMToX509Key parses PEM data to x509 key structures
+func PEMToX509Key(data []byte) (key crypto.PrivateKey, err error) {
 	block, _ := pem.Decode(data)
 	if err != nil {
 		return nil, err
@@ -189,6 +184,20 @@ func LoadKey(fileName string) (key crypto.PrivateKey, err error) {
 		if key, err = parseKey(data); err != nil {
 			return nil, err
 		}
+	}
+
+	return key, nil
+}
+
+// LoadKey loads key from file
+func LoadKey(fileName string) (key crypto.PrivateKey, err error) {
+	data, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	if key, err = PEMToX509Key(data); err != nil {
+		return nil, err
 	}
 
 	return key, nil
