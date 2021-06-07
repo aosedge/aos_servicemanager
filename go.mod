@@ -2,9 +2,12 @@ module aos_servicemanager
 
 go 1.14
 
+replace github.com/ThalesIgnite/crypto11 => github.com/xen-troops/crypto11 v1.2.5-0.20210607075540-0b6da74b5450
+
 require (
 	code.cloudfoundry.org/bytefmt v0.0.0-20200131002437-cf55d5288a48
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
+	github.com/ThalesIgnite/crypto11 v1.2.4
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/cavaliercoder/grab v2.0.0+incompatible
@@ -26,6 +29,7 @@ require (
 	github.com/jlaffaye/ftp v0.0.0-20201112195030-9aae4d151126
 	github.com/looplab/fsm v0.2.0
 	github.com/mattn/go-sqlite3 v1.14.6
+	github.com/miekg/pkcs11 v1.0.3-0.20190429190417-a667d056470f // indirect
 	github.com/moby/sys/mount v0.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
