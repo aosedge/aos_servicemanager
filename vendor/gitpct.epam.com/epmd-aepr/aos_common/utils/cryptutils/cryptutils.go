@@ -58,8 +58,9 @@ const (
 
 // URL schemes
 const (
-	SchemeFile = "file"
-	SchemeTPM  = "tpm"
+	SchemeFile   = "file"
+	SchemeTPM    = "tpm"
+	SchemePKCS11 = "pkcs11"
 )
 
 /*******************************************************************************
