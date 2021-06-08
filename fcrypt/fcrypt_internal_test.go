@@ -19,13 +19,19 @@ package fcrypt
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
+	"reflect"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
@@ -39,6 +45,17 @@ import (
  ******************************************************************************/
 
 const tmpDir = `/tmp/aos`
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const (
+	pkcs11LibPath = "/usr/lib/softhsm/libsofthsm2.so"
+	pkcs11DBPath  = "/var/lib/softhsm/tokens/"
+	pkcs11Pin     = "1234"
+	pkcs11Token   = "aos"
+)
 
 /*******************************************************************************
  * Types
@@ -518,10 +535,18 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Can't setup file storage: %s", err)
 	}
 
+	if err = setupPkcs11Storage(); err != nil {
+		log.Fatalf("Can't setup PKCS11 storage: %s", err)
+	}
+
 	ret := m.Run()
 
 	if err = clearFileStorage(); err != nil {
 		log.Fatalf("Can't clear file storage: %s", err)
+	}
+
+	if err = clearPkcs11Storage(); err != nil {
+		log.Fatalf("Can't clear PKCS11 storage: %s", err)
 	}
 
 	os.Exit(ret)
@@ -735,34 +760,47 @@ func TestDecryptSessionKeyPkcs1v15(t *testing.T) {
 
 	// End of: For testing only
 
-	// Create and use context
-	ctx, err := New(config.Crypt{}, &testCertificateProvider{keyURL: keyNameToFileURL("offline1")})
-	if err != nil {
-		t.Fatalf("Error creating context: '%v'", err)
+	certName := "offline1"
+
+	testCertProviders := []*testCertificateProvider{
+		{keyURL: keyNameToFileURL(certName)},
+		{keyURL: nameToPkcs11URL(certName)},
 	}
 
-	var keyInfo CryptoSessionKeyInfo
-	keyInfo.SessionKey = encryptedKey
-	keyInfo.SessionIV = iv
-	keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
-	keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
+	for _, certProvider := range testCertProviders {
+		// Create and use context
+		ctx, err := New(config.Crypt{}, certProvider)
+		if err != nil {
+			t.Fatalf("Error creating context: '%v'", err)
+		}
 
-	sessionKey, err := ctx.ImportSessionKey(keyInfo)
-	if err != nil {
-		t.Fatalf("Error decode key: '%v'", err)
-	}
+		var keyInfo CryptoSessionKeyInfo
+		keyInfo.SessionKey = encryptedKey
+		keyInfo.SessionIV = iv
+		keyInfo.SymmetricAlgName = "AES128/CBC/PKCS7PADDING"
+		keyInfo.AsymmetricAlgName = "RSA/PKCS1v1_5"
 
-	chipperContex, ok := sessionKey.(*SymmetricCipherContext)
-	if !ok {
-		t.Fatalf("Can't cast to SymmetricCipherContext")
-	}
+		sessionKey, err := ctx.ImportSessionKey(keyInfo)
+		if err != nil {
+			t.Fatalf("Error decode key: '%v'", err)
+		}
 
-	if len(chipperContex.key) != len(clearAesKey) {
-		t.Fatalf("Error decrypt key: invalid key len")
-	}
+		chipperContex, ok := sessionKey.(*SymmetricCipherContext)
+		if !ok {
+			t.Fatalf("Can't cast to SymmetricCipherContext")
+		}
 
-	if !bytes.Equal(chipperContex.key, clearAesKey) {
-		t.Fatalf("Error decrypt key: invalid key")
+		if len(chipperContex.key) != len(clearAesKey) {
+			t.Fatalf("Error decrypt key: invalid key len")
+		}
+
+		if !bytes.Equal(chipperContex.key, clearAesKey) {
+			t.Fatalf("Error decrypt key: invalid key")
+		}
+
+		if err = ctx.Close(); err != nil {
+			t.Fatalf("Can't close crypto context: %s", err)
+		}
 	}
 }
 
@@ -852,7 +890,7 @@ func TestInvalidSessionKeyPkcs1v15(t *testing.T) {
 
 	ctxSym, err := ctx.ImportSessionKey(keyInfo)
 	if err != nil {
-		t.Fatalf("Error decode key: '%v'", err)
+		t.Fatalf("Error importing key: '%v'", err)
 	}
 
 	chipperContex, ok := ctxSym.(*SymmetricCipherContext)
@@ -1005,23 +1043,35 @@ func TestVerifySignOfComponent(t *testing.T) {
 }
 
 func TestGetCertificateOrganization(t *testing.T) {
-	ctx, err := New(config.Crypt{}, &testCertificateProvider{certURL: certNameToFileURL("online")})
-	if err != nil {
-		t.Fatalf("Can't create crypto context: %s", err)
-	}
-	defer ctx.Close()
+	certName := "online"
 
-	names, err := ctx.GetOrganization()
-	if err != nil {
-		t.Fatalf("Can't get organization: %s", err)
+	testCertProviders := []*testCertificateProvider{
+		{certURL: certNameToFileURL(certName)},
+		{certURL: nameToPkcs11URL(certName)},
 	}
 
-	if len(names) != 1 {
-		t.Fatalf("Wrong organization names count: %d", len(names))
-	}
+	for _, certProvider := range testCertProviders {
+		ctx, err := New(config.Crypt{}, certProvider)
+		if err != nil {
+			t.Fatalf("Can't create crypto context: %s", err)
+		}
 
-	if names[0] != "staging-fusion.westeurope.cloudapp.azure.com" {
-		t.Fatalf("Wrong organization name: %s", names[0])
+		names, err := ctx.GetOrganization()
+		if err != nil {
+			t.Fatalf("Can't get organization: %s", err)
+		}
+
+		if len(names) != 1 {
+			t.Fatalf("Wrong organization names count: %d", len(names))
+		}
+
+		if names[0] != "staging-fusion.westeurope.cloudapp.azure.com" {
+			t.Fatalf("Wrong organization name: %s", names[0])
+		}
+
+		if err = ctx.Close(); err != nil {
+			t.Fatalf("Can't close crypto context: %s", err)
+		}
 	}
 }
 
@@ -1039,6 +1089,11 @@ func certNameToFileURL(name string) (file string) {
 
 func keyNameToFileURL(name string) (file string) {
 	return cryptutils.SchemeFile + "://" + path.Join(tmpDir, "key_"+name+".pem")
+}
+
+func nameToPkcs11URL(name string) (file string) {
+	return cryptutils.SchemePKCS11 + ":" + fmt.Sprintf("token=%s;id=%s?module-path=%s&pin-value=%s",
+		pkcs11Token, name, pkcs11LibPath, pkcs11Pin)
 }
 
 func setupFileStorage() (err error) {
@@ -1071,6 +1126,124 @@ func setupFileStorage() (err error) {
 
 func clearFileStorage() (err error) {
 	if err = os.RemoveAll(tmpDir); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func execPkcs11Tool(args ...string) (err error) {
+	if output, err := exec.Command("pkcs11-tool", append([]string{
+		"--module", pkcs11LibPath}, args...)...).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
+}
+
+func pkcs11ImportCert(name string, data []byte) (err error) {
+	certs, err := cryptutils.PEMToX509Cert(data)
+	if err != nil {
+		return err
+	}
+
+	fileName := path.Join(tmpDir, "data.tmp")
+
+	id := name
+
+	for i, cert := range certs {
+		if err := ioutil.WriteFile(fileName, cert.Raw, 0644); err != nil {
+			return err
+		}
+
+		if err = execPkcs11Tool("--token-label", pkcs11Token, "--login", "--pin", pkcs11Pin,
+			"--write-object", fileName, "--type", "cert", "--id", hex.EncodeToString([]byte(id))); err != nil {
+			return err
+		}
+
+		id = fmt.Sprintf("%s_%d", name, i)
+	}
+
+	return nil
+}
+
+func pkcs11ImportKey(name string, data []byte) (err error) {
+	key, err := cryptutils.PEMToX509Key(data)
+	if err != nil {
+		return err
+	}
+
+	switch privateKey := key.(type) {
+	case *rsa.PrivateKey:
+		data = x509.MarshalPKCS1PrivateKey(privateKey)
+
+	case *ecdsa.PrivateKey:
+		if data, err = x509.MarshalECPrivateKey(privateKey); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("unsupported key type: %v", reflect.TypeOf(privateKey))
+	}
+
+	fileName := path.Join(tmpDir, "data.tmp")
+
+	if err := ioutil.WriteFile(fileName, data, 0644); err != nil {
+		return err
+	}
+
+	if err = execPkcs11Tool("--token-label", pkcs11Token, "--login", "--pin", pkcs11Pin,
+		"--write-object", fileName, "--type", "privkey", "--id", hex.EncodeToString([]byte(name))); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func initPkcs11Slot() (err error) {
+	if err = execPkcs11Tool("--init-token", "--label", pkcs11Token, "--so-pin", "0000"); err != nil {
+		return err
+	}
+
+	if err = execPkcs11Tool("--token-label", pkcs11Token, "--so-pin", "0000", "--init-pin", "--pin", pkcs11Pin); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setupPkcs11Storage() (err error) {
+	if err = clearPkcs11Storage(); err != nil {
+		return err
+	}
+
+	if err = initPkcs11Slot(); err != nil {
+		return err
+	}
+
+	for name, certData := range testCerts {
+		if certData.cert != nil {
+			if err = pkcs11ImportCert(name, certData.cert); err != nil {
+				return err
+			}
+		}
+
+		if certData.key != nil {
+			if err = pkcs11ImportKey(name, certData.key); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func clearPkcs11Storage() (err error) {
+	if err = os.RemoveAll(pkcs11DBPath); err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(pkcs11DBPath, 0755); err != nil {
 		return err
 	}
 
