@@ -235,7 +235,7 @@ func (ctx *CryptoContext) GetTLSConfig() (cfg *tls.Config, err error) {
 		return nil, err
 	}
 
-	onlinePrivate, err := ctx.loadPrivateKeyByURL(keyURLStr)
+	onlinePrivate, _, err := ctx.loadPrivateKeyByURL(keyURLStr)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +286,7 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 		return nil, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURL(keyURLStr)
+	privKey, supportPKCS1v15SessionKey, err := ctx.loadPrivateKeyByURL(keyURLStr)
 	if err != nil {
 		log.Errorf("Cant load private key: %s", err)
 
@@ -307,6 +307,10 @@ func (ctx *CryptoContext) ImportSessionKey(keyInfo CryptoSessionKeyInfo) (symCon
 
 	switch strings.ToUpper(keyInfo.AsymmetricAlgName) {
 	case "RSA/PKCS1V1_5":
+		if !supportPKCS1v15SessionKey {
+			keySize = 0
+		}
+
 		opts = &rsa.PKCS1v15DecryptOptions{SessionKeyLen: keySize}
 
 	case "RSA/OAEP":
@@ -579,34 +583,46 @@ func (ctx *CryptoContext) loadPkcs11PrivateKey(keyURL *url.URL) (key crypto.Priv
 	return key, nil
 }
 
-func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.PrivateKey, err error) {
+func (ctx *CryptoContext) loadPrivateKeyByURL(keyURLStr string) (privKey crypto.PrivateKey,
+	supportPKCS1v15SessionKey bool, err error) {
 	keyURL, err := url.Parse(keyURLStr)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	switch keyURL.Scheme {
 	case cryptutils.SchemeFile:
-		return cryptutils.LoadKey(keyURL.Path)
+		if privKey, err = cryptutils.LoadKey(keyURL.Path); err != nil {
+			return nil, false, err
+		}
+
+		supportPKCS1v15SessionKey = true
 
 	case cryptutils.SchemeTPM:
 		if ctx.tpmDevice == nil {
-			return nil, fmt.Errorf("TPM device is not configured")
+			return nil, false, fmt.Errorf("TPM device is not configured")
 		}
 
-		handle, err := strconv.ParseUint(keyURL.Hostname(), 0, 32)
-		if err != nil {
-			return nil, err
+		var handle uint64
+
+		if handle, err = strconv.ParseUint(keyURL.Hostname(), 0, 32); err != nil {
+			return nil, false, err
 		}
 
-		return tpmkey.CreateFromPersistent(ctx.tpmDevice, tpmutil.Handle(handle))
+		if privKey, err = tpmkey.CreateFromPersistent(ctx.tpmDevice, tpmutil.Handle(handle)); err != nil {
+			return nil, false, err
+		}
 
 	case cryptutils.SchemePKCS11:
-		return ctx.loadPkcs11PrivateKey(keyURL)
+		if privKey, err = ctx.loadPkcs11PrivateKey(keyURL); err != nil {
+			return nil, false, err
+		}
 
 	default:
-		return nil, fmt.Errorf("unsupported schema %s for private key", keyURL.Scheme)
+		return nil, false, fmt.Errorf("unsupported schema %s for private key", keyURL.Scheme)
 	}
+
+	return privKey, supportPKCS1v15SessionKey, nil
 }
 
 func getRawCertificate(certs []*x509.Certificate) (rawCerts [][]byte) {
@@ -743,7 +759,7 @@ func (ctx *CryptoContext) getKeyForEnvelope(keyInfo keyTransRecipientInfo) (key 
 		return key, err
 	}
 
-	privKey, err := ctx.loadPrivateKeyByURL(keyURLStr)
+	privKey, _, err := ctx.loadPrivateKeyByURL(keyURLStr)
 	if err != nil {
 		return key, err
 	}
