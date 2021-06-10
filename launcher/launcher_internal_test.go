@@ -2331,7 +2331,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: testDir}); err != nil {
+	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: testDir}, nil); err != nil {
 		return err
 	}
 

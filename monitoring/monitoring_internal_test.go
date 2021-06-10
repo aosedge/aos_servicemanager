@@ -137,7 +137,7 @@ func TestPeriodicReport(t *testing.T) {
 			MaxOfflineMessages: 10,
 			SendPeriod:         config.Duration{Duration: sendDuration},
 			PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		&trafficStorage, nil)
+		nil, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -203,9 +203,9 @@ func TestSystemAlerts(t *testing.T) {
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
 					MaxThreshold: 0}}},
-		&trafficStorage, &testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
+		&testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
 			alertMap[resource] = alertMap[resource] + 1
-		}})
+		}}, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -244,20 +244,20 @@ func TestServices(t *testing.T) {
 				MaxOfflineMessages: 10,
 				SendPeriod:         config.Duration{Duration: sendDuration},
 				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		&trafficStorage, &testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
+		&testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
 			alertMap[resource] = alertMap[resource] + 1
-		}})
+		}}, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
 	defer monitor.Close()
 
-	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1")
+	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1", 0, 0)
 	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
-	cmd2, err := runContainerCmd(path.Join(tmpDir, "service2"), "service2")
+	cmd2, err := runContainerCmd(path.Join(tmpDir, "service2"), "service2", 0, 0)
 	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
@@ -397,18 +397,20 @@ func TestTrafficLimit(t *testing.T) {
 				MaxOfflineMessages: 256,
 				SendPeriod:         config.Duration{Duration: sendDuration},
 				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		&trafficStorage, nil)
+		nil, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
 	defer monitor.Close()
 
-	monitor.trafficPeriod = MinutePeriod
+	if err := networkManager.SetTrafficPeriod(MinutePeriod); err != nil {
+		t.Errorf("Can't set traffic period: %s", err)
+	}
 
 	// wait for beginning of next minute
 	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
 
-	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1")
+	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1", 300, 300)
 	if err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
@@ -423,12 +425,10 @@ func TestTrafficLimit(t *testing.T) {
 
 	err = monitor.StartMonitorService("Service1",
 		ServiceMonitoringConfig{
-			ServiceDir:    "tmp/service1",
-			IPAddress:     ipAddress,
-			UID:           5001,
-			GID:           5001,
-			UploadLimit:   300,
-			DownloadLimit: 300})
+			ServiceDir: "tmp/service1",
+			IPAddress:  ipAddress,
+			UID:        5001,
+			GID:        5001})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
@@ -447,7 +447,7 @@ func TestTrafficLimit(t *testing.T) {
 
 	// Start again
 
-	if cmd1, err = runContainerCmd(path.Join(tmpDir, "service1"), "service1"); err != nil {
+	if cmd1, err = runContainerCmd(path.Join(tmpDir, "service1"), "service1", 2000, 2000); err != nil {
 		t.Fatalf("Can't start service: %s", err)
 	}
 
@@ -458,14 +458,12 @@ func TestTrafficLimit(t *testing.T) {
 	// Wait while .ip amd .pid files are created
 	time.Sleep(1 * time.Second)
 
-	err = monitor.StartMonitorService("Service1",
+	err = monitor.StartMonitorService("service1",
 		ServiceMonitoringConfig{
-			ServiceDir:    "tmp/service1",
-			IPAddress:     ipAddress,
-			UID:           5001,
-			GID:           5001,
-			UploadLimit:   2000,
-			DownloadLimit: 2000})
+			ServiceDir: "tmp/service1",
+			IPAddress:  ipAddress,
+			UID:        5001,
+			GID:        5001})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
@@ -526,7 +524,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if networkManager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}); err != nil {
+	if networkManager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, &trafficStorage); err != nil {
 		return err
 	}
 
@@ -636,8 +634,12 @@ func addHostResolvFiles(pathToContainer string) (err error) {
 	return nil
 }
 
-func runContainerCmd(imagePath string, containerID string) (cmd *exec.Cmd, err error) {
-	if err = networkManager.AddServiceToNetwork(containerID, "default", networkmanager.NetworkParams{}); err != nil {
+func runContainerCmd(imagePath string, containerID string, downloadLimit, uploadLimit uint64) (cmd *exec.Cmd, err error) {
+	err = networkManager.AddServiceToNetwork(containerID, "default",
+		networkmanager.NetworkParams{
+			DownloadLimit: downloadLimit,
+			UploadLimit:   uploadLimit})
+	if err != nil {
 		return nil, err
 	}
 

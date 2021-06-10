@@ -63,10 +63,11 @@ const (
 // NetworkManager network manager instance
 type NetworkManager struct {
 	sync.Mutex
-	cniConfig      *cni.CNIConfig
-	ipamSubnetwork *ipSubnetwork
-	hosts          []config.Host
-	networkDir     string
+	cniConfig         *cni.CNIConfig
+	ipamSubnetwork    *ipSubnetwork
+	hosts             []config.Host
+	networkDir        string
+	trafficMonitoring *trafficMonitoring
 }
 
 // NetworkParams network parameters set for service
@@ -81,6 +82,8 @@ type NetworkParams struct {
 	DNSSevers          []string
 	HostsFilePath      string
 	ResolvConfFilePath string
+	UploadLimit        uint64
+	DownloadLimit      uint64
 }
 
 type cniNetwork struct {
@@ -149,7 +152,7 @@ var skipNetworkFileNames = []string{"lock", "last_reserved_ip.0"}
  ******************************************************************************/
 
 // New creates network manager instance
-func New(cfg *config.Config) (manager *NetworkManager, err error) {
+func New(cfg *config.Config, trafficStorage TrafficStorage) (manager *NetworkManager, err error) {
 	log.Debug("Create network manager")
 
 	cniDir := path.Join(cfg.WorkingDir, "cni")
@@ -172,12 +175,25 @@ func New(cfg *config.Config) (manager *NetworkManager, err error) {
 		return nil, err
 	}
 
+	if trafficStorage != nil {
+		manager.trafficMonitoring, err = newTrafficMonitor(trafficStorage)
+		if err != nil {
+			return manager, err
+		}
+	} else {
+		log.Warn("Can't initialize traffic monitoring: storage is nil")
+	}
+
 	return manager, nil
 }
 
 // Close closes network manager instance
 func (manager *NetworkManager) Close() (err error) {
 	log.Debug("Close network manager")
+
+	if manager.trafficMonitoring != nil {
+		manager.trafficMonitoring.deleteAllTrafficChains()
+	}
 
 	return nil
 }
@@ -282,6 +298,12 @@ func (manager *NetworkManager) AddServiceToNetwork(serviceID, spID string, param
 		}
 	}
 
+	if manager.trafficMonitoring != nil {
+		if err = manager.trafficMonitoring.startTrafficMonitor(serviceID, serviceIP, params.DownloadLimit, params.UploadLimit); err != nil {
+			return err
+		}
+	}
+
 	log.WithFields(log.Fields{
 		"serviceID": serviceID,
 		"IP":        serviceIP,
@@ -301,6 +323,12 @@ func (manager *NetworkManager) RemoveServiceFromNetwork(serviceID, spID string) 
 		log.WithFields(log.Fields{"serviceID": serviceID}).Warn("Service is not in network")
 
 		return err
+	}
+
+	if manager.trafficMonitoring != nil {
+		if err = manager.trafficMonitoring.stopMonitorServiceTraffic(serviceID); err != nil {
+			return err
+		}
 	}
 
 	if err = manager.removeServiceFromNetwork(serviceID, spID); err != nil {
@@ -385,6 +413,69 @@ func (manager *NetworkManager) DeleteAllNetworks() (err error) {
 	os.RemoveAll(manager.networkDir)
 
 	return err
+}
+
+func (manager *NetworkManager) GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error) {
+	if manager.trafficMonitoring == nil {
+		return 0, 0, errors.New("traffic monitoring is disabled")
+	}
+
+	if err = manager.trafficMonitoring.processTrafficMonitor(); err != nil {
+		return 0, 0, err
+	}
+
+	inputTrafficData, ok := manager.trafficMonitoring.trafficMap[manager.trafficMonitoring.inChain]
+	if !ok {
+		return 0, 0, errors.New("chain for input system traffic is not found")
+	}
+
+	outputTrafficData, ok := manager.trafficMonitoring.trafficMap[manager.trafficMonitoring.outChain]
+	if !ok {
+		return inputTrafficData.currentValue, 0, errors.New("chain for output system traffic is not found")
+	}
+
+	return inputTrafficData.currentValue, outputTrafficData.currentValue, nil
+}
+
+func (manager *NetworkManager) GetServiceTraffic(serviceID string) (inputTraffic, outputTraffic uint64, err error) {
+	if manager.trafficMonitoring == nil {
+		return 0, 0, errors.New("traffic monitoring is disabled")
+	}
+
+	serviceChains, ok := manager.trafficMonitoring.serviceChainsMap[serviceID]
+	if !ok {
+		return 0, 0, errors.Errorf("chain for service %s is not found", serviceID)
+	}
+
+	if err = manager.trafficMonitoring.processTrafficMonitor(); err != nil {
+		return 0, 0, err
+	}
+
+	inTrafficData, ok := manager.trafficMonitoring.trafficMap[serviceChains.inChain]
+	if !ok {
+		return 0, 0, errors.Errorf("input chain %s for service %s is not found", serviceChains.inChain, serviceID)
+	}
+
+	outTrafficData, ok := manager.trafficMonitoring.trafficMap[serviceChains.outChain]
+	if !ok {
+		return inTrafficData.currentValue, 0, errors.Errorf("output chain %s for service %s is not found", serviceChains.outChain, serviceID)
+	}
+
+	return inTrafficData.currentValue, outTrafficData.currentValue, nil
+}
+
+func (manager *NetworkManager) SetTrafficPeriod(period int) error {
+	if manager.trafficMonitoring == nil {
+		return errors.New("traffic monitoring is disabled")
+	}
+
+	if period < MinutePeriod || period > YearPeriod {
+		return errors.New("failed to set traffic period, unexpected value")
+	}
+
+	manager.trafficMonitoring.trafficPeriod = period
+
+	return nil
 }
 
 /*******************************************************************************
@@ -472,6 +563,12 @@ func (manager *NetworkManager) removeServiceFromNetwork(serviceID, spID string) 
 
 	if err = manager.cniConfig.DelNetworkList(context.Background(), networkConfig, runtimeConfig); err != nil {
 		return err
+	}
+
+	if manager.trafficMonitoring != nil {
+		if err = manager.trafficMonitoring.stopMonitorServiceTraffic(serviceID); err != nil {
+			return err
+		}
 	}
 
 	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Service successfully removed from network")

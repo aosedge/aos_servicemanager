@@ -301,15 +301,15 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
-		config:          config,
-		downloader:      downloader,
-		sender:          sender,
-		serviceProvider: serviceProvider,
-		layerProvider:   layerProvider,
-		monitor:         monitor,
-		network:         network,
-		devicemanager:   devicemanager,
-		services:        make(map[string]string),
+		config:           config,
+		downloader:       downloader,
+		sender:           sender,
+		serviceProvider:  serviceProvider,
+		layerProvider:    layerProvider,
+		monitor:          monitor,
+		network:          network,
+		devicemanager:    devicemanager,
+		services:         make(map[string]string),
 		serviceRegistrar: serviceRegistrar,
 	}
 
@@ -1257,6 +1257,14 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 		params.EgressKbit = *aosSrvConf.Quotas.UploadSpeed
 	}
 
+	if aosSrvConf.Quotas.UploadLimit != nil {
+		params.UploadLimit = *aosSrvConf.Quotas.UploadLimit
+	}
+
+	if aosSrvConf.Quotas.DownloadLimit != nil {
+		params.DownloadLimit = *aosSrvConf.Quotas.DownloadLimit
+	}
+
 	if aosSrvConf.Hostname != nil {
 		params.Hostname = *aosSrvConf.Hostname
 	}
@@ -2084,14 +2092,6 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 			UID:          service.UID,
 			GID:          service.GID,
 			ServiceRules: &rules}
-
-		if aosConfig.Quotas.UploadLimit != nil {
-			monitoringConfig.UploadLimit = *aosConfig.Quotas.UploadLimit
-		}
-
-		if aosConfig.Quotas.DownloadLimit != nil {
-			monitoringConfig.DownloadLimit = *aosConfig.Quotas.DownloadLimit
-		}
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoringConfig); err != nil {
 			return err

@@ -65,7 +65,6 @@ func createConfigFile() (err error) {
 		"sendPeriod": "00:05:00",
 		"pollPeriod": "00:00:01",
 		"maxOfflineMessages": 25,
-		"BridgeIP": "192.168.0.0/24",
 		"ram": {
 			"minTimeout": "00:00:10",
 			"minThreshold": 10,
@@ -303,10 +302,6 @@ func TestGetMonitoringConfig(t *testing.T) {
 
 	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
 		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
-	}
-
-	if config.Monitoring.BridgeIP != "192.168.0.0/24" {
-		t.Errorf("Wrong value: %s", config.Monitoring.BridgeIP)
 	}
 }
 

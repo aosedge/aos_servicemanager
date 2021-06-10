@@ -70,7 +70,6 @@ type Monitoring struct {
 	SendPeriod         Duration   `json:"sendPeriod"`
 	PollPeriod         Duration   `json:"pollPeriod"`
 	MaxOfflineMessages int        `json:"maxOfflineMessages"`
-	BridgeIP           string     `json:"bridgeIP"`
 	RAM                *AlertRule `json:"ram"`
 	CPU                *AlertRule `json:"cpu"`
 	UsedDisk           *AlertRule `json:"usedDisk"`
@@ -145,8 +144,7 @@ func New(fileName string) (config *Config, err error) {
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},
 			PollPeriod:         Duration{10 * time.Second},
-			MaxOfflineMessages: 25,
-			BridgeIP:           "172.19.0.0/16"},
+			MaxOfflineMessages: 25},
 		Logging: Logging{
 			MaxPartSize:  524288,
 			MaxPartCount: 20},

@@ -141,11 +141,6 @@ The configuration file has JSON format. Following is JSON schema:
                     "minimum": 0,
                     "default": 25
                 },
-                "bridgeIP": {
-                    "description": "Specifies bridge subnet to count as local traffic. Should be set if bridge subnet is not in local segment",
-                    "type": "string",
-                    "default": "172.19.0.0/16"
-                },
                 "ram": {
                     "description": "RAM alert rules",
                     "$ref": "#/definitions/alertRule"

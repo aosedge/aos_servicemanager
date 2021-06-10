@@ -125,7 +125,7 @@ func cleanup(cfg *config.Config, dbFile string) {
 
 	log.Debug("Delete networks")
 
-	network, err := networkmanager.New(cfg)
+	network, err := networkmanager.New(cfg, nil)
 	if err != nil {
 		log.Errorf("Can't create network: %s", err)
 	}
@@ -217,12 +217,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create network
-	if sm.network, err = networkmanager.New(cfg); err != nil {
+	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 		return sm, err
 	}
 
 	// Create monitor
-	if sm.monitor, err = monitoring.New(cfg, sm.db, sm.alerts); err != nil {
+	if sm.monitor, err = monitoring.New(cfg, sm.alerts, sm.network); err != nil {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
 		} else {

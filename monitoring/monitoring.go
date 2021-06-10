@@ -27,11 +27,9 @@ import (
 	"path"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/load"
@@ -61,31 +59,21 @@ const (
  * Types
  ******************************************************************************/
 
-// TrafficStorage provides API to create, remove or access monitoring data
-type TrafficStorage interface {
-	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
-	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
-	RemoveTrafficMonitorData(chain string) (err error)
-}
-
 // ResourceAlertSender interface to send resource alerts
 type ResourceAlertSender interface {
 	SendResourceAlert(source, resource string, time time.Time, value uint64)
+}
+
+type TrafficMonitoring interface {
+	GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error)
+	GetServiceTraffic(serviceID string) (inputTraffic, outputTraffic uint64, err error)
 }
 
 // Monitor instance
 type Monitor struct {
 	DataChannel chan amqp.MonitoringData
 
-	trafficStorage TrafficStorage
 	resourceAlerts ResourceAlertSender
-
-	iptables      *iptables.IPTables
-	trafficPeriod int
-	skipAddresses string
-	inChain       string
-	outChain      string
-	trafficMap    map[string]*trafficMonitoring
 
 	config     config.Monitoring
 	workingDir string
@@ -100,18 +88,17 @@ type Monitor struct {
 
 	alertProcessors *list.List
 
-	serviceMap map[string]*serviceMonitoring
+	serviceMap        map[string]*serviceMonitoring
+	trafficMonitoring TrafficMonitoring
 }
 
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
-	ServiceDir    string
-	IPAddress     string
-	UID           uint32
-	GID           uint32
-	UploadLimit   uint64
-	DownloadLimit uint64
-	ServiceRules  *amqp.ServiceAlertRules
+	ServiceDir   string
+	IPAddress    string
+	UID          uint32
+	GID          uint32
+	ServiceRules *amqp.ServiceAlertRules
 }
 
 type trafficMonitoring struct {
@@ -128,8 +115,6 @@ type serviceMonitoring struct {
 	serviceDir             string
 	uid                    uint32
 	gid                    uint32
-	inChain                string
-	outChain               string
 	monitoringData         amqp.ServiceMonitoringData
 	alertProcessorElements []*list.Element
 }
@@ -146,15 +131,14 @@ var ErrDisabled = errors.New("monitoring is disabled")
  ******************************************************************************/
 
 // New creates new monitor instance
-func New(config *config.Config, trafficStorage TrafficStorage,
-	resourceAlerts ResourceAlertSender) (monitor *Monitor, err error) {
+func New(config *config.Config, resourceAlerts ResourceAlertSender, trafficMonitoring TrafficMonitoring) (monitor *Monitor, err error) {
 	log.Debug("Create monitor")
 
 	if config.Monitoring.Disabled {
 		return nil, ErrDisabled
 	}
 
-	monitor = &Monitor{trafficStorage: trafficStorage, resourceAlerts: resourceAlerts}
+	monitor = &Monitor{resourceAlerts: resourceAlerts, trafficMonitoring: trafficMonitoring}
 
 	monitor.DataChannel = make(chan amqp.MonitoringData, config.Monitoring.MaxOfflineMessages)
 
@@ -223,12 +207,6 @@ func New(config *config.Config, trafficStorage TrafficStorage,
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
 
-	if err = monitor.setupTrafficMonitor(); err != nil {
-		return nil, err
-	}
-
-	monitor.processTraffic()
-
 	go monitor.run()
 
 	return monitor, nil
@@ -240,8 +218,6 @@ func (monitor *Monitor) Close() {
 
 	monitor.sendTimer.Stop()
 	monitor.pollTimer.Stop()
-
-	monitor.deleteAllTrafficChains()
 }
 
 // StartMonitorService starts monitoring service
@@ -270,26 +246,6 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		gid:        monitoringConfig.GID,
 		monitoringData: amqp.ServiceMonitoringData{
 			ServiceID: serviceID}}
-
-	if monitoringConfig.IPAddress != "" {
-		// create base chain name
-		chainBase := strconv.FormatUint(hash.Sum64(), 16)
-
-		serviceMonitoring.inChain = "AOS_" + chainBase + "_IN"
-		serviceMonitoring.outChain = "AOS_" + chainBase + "_OUT"
-
-		if err = monitor.createTrafficChain(serviceMonitoring.inChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
-			return err
-		}
-
-		monitor.trafficMap[serviceMonitoring.inChain].limit = monitoringConfig.DownloadLimit
-
-		if err = monitor.createTrafficChain(serviceMonitoring.outChain, "FORWARD", monitoringConfig.IPAddress); err != nil {
-			return err
-		}
-
-		monitor.trafficMap[serviceMonitoring.outChain].limit = monitoringConfig.UploadLimit
-	}
 
 	rules := monitoringConfig.ServiceRules
 
@@ -361,8 +317,6 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 	monitor.serviceMap[serviceID] = &serviceMonitoring
 
-	monitor.processTraffic()
-
 	return nil
 }
 
@@ -375,18 +329,6 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 
 	if _, ok := monitor.serviceMap[serviceID]; !ok {
 		return nil
-	}
-
-	if monitor.serviceMap[serviceID].inChain != "" {
-		if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].inChain, "FORWARD"); err != nil {
-			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
-		}
-	}
-
-	if monitor.serviceMap[serviceID].outChain != "" {
-		if err = monitor.deleteTrafficChain(monitor.serviceMap[serviceID].outChain, "FORWARD"); err != nil {
-			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
-		}
 	}
 
 	for _, e := range monitor.serviceMap[serviceID].alertProcessorElements {
@@ -423,12 +365,10 @@ func (monitor *Monitor) run() error {
 		case <-monitor.sendTimer.C:
 			monitor.Lock()
 			monitor.sendMonitoringData()
-			monitor.saveTraffic()
 			monitor.Unlock()
 
 		case <-monitor.pollTimer.C:
 			monitor.Lock()
-			monitor.processTraffic()
 			monitor.getCurrentSystemData()
 			monitor.getCurrentServicesData()
 			monitor.processAlerts()
@@ -471,16 +411,9 @@ func (monitor *Monitor) getCurrentSystemData() {
 		log.Errorf("Can't get system Disk usage: %s", err)
 	}
 
-	if traffic, ok := monitor.trafficMap[monitor.inChain]; ok {
-		monitor.dataToSend.Global.InTraffic = traffic.currentValue
-	} else {
-		log.WithField("chain", monitor.inChain).Error("Can't get service traffic value")
-	}
-
-	if traffic, ok := monitor.trafficMap[monitor.outChain]; ok {
-		monitor.dataToSend.Global.OutTraffic = traffic.currentValue
-	} else {
-		log.WithField("chain", monitor.outChain).Error("Can't get service traffic value")
+	monitor.dataToSend.Global.InTraffic, monitor.dataToSend.Global.OutTraffic, err = monitor.trafficMonitoring.GetSystemTraffic()
+	if err != nil {
+		log.Errorf("Can't get system traffic value: %s", err)
 	}
 
 	log.WithFields(log.Fields{
@@ -510,12 +443,9 @@ func (monitor *Monitor) getCurrentServicesData() {
 			log.Errorf("Can't get service Disc usage: %s", err)
 		}
 
-		if traffic, ok := monitor.trafficMap[value.inChain]; ok {
-			value.monitoringData.InTraffic = traffic.currentValue
-		}
-
-		if traffic, ok := monitor.trafficMap[value.outChain]; ok {
-			value.monitoringData.OutTraffic = traffic.currentValue
+		value.monitoringData.InTraffic, value.monitoringData.OutTraffic, err = monitor.trafficMonitoring.GetServiceTraffic(serviceID)
+		if err != nil {
+			log.Errorf("Can't get service traffic: %s", err)
 		}
 
 		log.WithFields(log.Fields{
@@ -525,98 +455,6 @@ func (monitor *Monitor) getCurrentServicesData() {
 			"Disk": value.monitoringData.UsedDisk,
 			"IN":   value.monitoringData.InTraffic,
 			"OUT":  value.monitoringData.OutTraffic}).Debug("Service monitoring data")
-	}
-}
-
-func (monitor *Monitor) isSamePeriod(t1, t2 time.Time) (result bool) {
-	y1, m1, d1 := t1.Date()
-	h1 := t1.Hour()
-	min1 := t1.Minute()
-
-	y2, m2, d2 := t2.Date()
-	h2 := t2.Hour()
-	min2 := t2.Minute()
-
-	switch monitor.trafficPeriod {
-	case MinutePeriod:
-		return y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2 && min1 == min2
-
-	case HourPeriod:
-		return y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2
-
-	case DayPeriod:
-		return y1 == y2 && m1 == m2 && d1 == d2
-
-	case MonthPeriod:
-		return y1 == y2 && m1 == m2
-
-	case YearPeriod:
-		return y1 == y2
-
-	default:
-		return false
-	}
-}
-
-func (monitor *Monitor) processTraffic() {
-	timestamp := time.Now().UTC()
-
-	for chain, traffic := range monitor.trafficMap {
-		var value uint64
-		var err error
-
-		if !traffic.disabled {
-			value, err = monitor.getTrafficChainBytes(chain)
-			if err != nil {
-				log.WithField("chain", chain).Errorf("Can't get chain byte count: %s", err)
-				continue
-			}
-		}
-
-		if !monitor.isSamePeriod(timestamp, traffic.lastUpdate) {
-			log.WithField("chain", chain).Debug("Reset stats")
-			// we count statistics per day, if date is different then reset stats
-			traffic.initialValue = 0
-			traffic.subValue = value
-		}
-
-		// initialValue is used to keep traffic between resets
-		// Unfortunately, github.com/coreos/go-iptables/iptables doesn't provide API to reset chain statistics.
-		// We use subValue to reset statistics.
-		traffic.currentValue = traffic.initialValue + value - traffic.subValue
-		traffic.lastUpdate = timestamp
-
-		if traffic.limit != 0 {
-			if traffic.currentValue > traffic.limit && !traffic.disabled {
-				// disable chain
-				if err := monitor.setChainState(chain, traffic.addresses, false); err != nil {
-					log.WithField("chain", chain).Errorf("Can't disable chain: %s", err)
-				} else {
-					traffic.disabled = true
-					traffic.initialValue = traffic.currentValue
-					traffic.subValue = 0
-				}
-			}
-
-			if traffic.currentValue < traffic.limit && traffic.disabled {
-				// enable chain
-				if err = monitor.setChainState(chain, traffic.addresses, true); err != nil {
-					log.WithField("chain", chain).Errorf("Can't enable chain: %s", err)
-				} else {
-					traffic.disabled = false
-					traffic.initialValue = traffic.currentValue
-					traffic.subValue = 0
-				}
-			}
-		}
-	}
-}
-
-func (monitor *Monitor) saveTraffic() {
-	for chain, traffic := range monitor.trafficMap {
-		if err := monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue); err != nil {
-			log.WithField("chain", chain).Errorf("Can't set traffic data: %s", err)
-		}
 	}
 }
 
@@ -725,216 +563,4 @@ func getServiceDiskUsage(path string, uid, gid uint32) (diskUse uint64, err erro
 	}
 
 	return diskUse, nil
-}
-
-func (monitor *Monitor) setupTrafficMonitor() (err error) {
-	monitor.trafficPeriod = DayPeriod
-
-	monitor.trafficMap = make(map[string]*trafficMonitoring)
-
-	monitor.iptables, err = iptables.New()
-	if err != nil {
-		return err
-	}
-
-	monitor.inChain = "AOS_SYSTEM_IN"
-	monitor.outChain = "AOS_SYSTEM_OUT"
-
-	if err = monitor.deleteAllTrafficChains(); err != nil {
-		return err
-	}
-
-	// We have to count only interned traffic.  Skip local sub networks and netns
-	// bridge network from traffic count.
-
-	skipNetworks := []string{
-		"127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16",
-		"172.16.0.0/12", "172.17.0.0/16", "172.18.0.0/16", "172.19.0.0/16",
-		"172.20.0.0/14", "172.24.0.0/14", "172.28.0.0/14",
-	}
-
-	if monitor.config.BridgeIP != "" {
-		skipNetworks = append(skipNetworks, monitor.config.BridgeIP)
-	}
-
-	monitor.skipAddresses = strings.Join(skipNetworks, ",")
-
-	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {
-		return err
-	}
-
-	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT", "0/0"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (monitor *Monitor) getTrafficChainBytes(chain string) (value uint64, err error) {
-	stats, err := monitor.iptables.ListWithCounters("filter", chain)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(stats) > 0 {
-		items := strings.Fields(stats[len(stats)-1])
-		for i, item := range items {
-			if item == "-c" && len(items) >= i+3 {
-				return strconv.ParseUint(items[i+2], 10, 64)
-			}
-		}
-	}
-
-	return 0, errors.New("statistic for chain not found")
-}
-
-func (monitor *Monitor) setChainState(chain, addresses string, enable bool) (err error) {
-	log.WithFields(log.Fields{"chain": chain, "state": enable}).Debug("Set chain state")
-
-	var addrType string
-
-	if strings.HasSuffix(chain, "_IN") {
-		addrType = "-d"
-	}
-
-	if strings.HasSuffix(chain, "_OUT") {
-		addrType = "-s"
-	}
-
-	if enable {
-		if err = monitor.deleteAllRules(chain, addrType, addresses, "-j", "DROP"); err != nil {
-			return err
-		}
-
-		if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
-			return err
-		}
-	} else {
-		if err = monitor.deleteAllRules(chain, addrType, addresses); err != nil {
-			return err
-		}
-
-		if err = monitor.iptables.Append("filter", chain, addrType, addresses, "-j", "DROP"); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (monitor *Monitor) createTrafficChain(chain, rootChain, addresses string) (err error) {
-	var skipAddrType, addrType string
-
-	log.WithField("chain", chain).Debug("Create iptables chain")
-
-	if strings.HasSuffix(chain, "_IN") {
-		skipAddrType = "-s"
-		addrType = "-d"
-	}
-
-	if strings.HasSuffix(chain, "_OUT") {
-		skipAddrType = "-d"
-		addrType = "-s"
-	}
-
-	if err = monitor.iptables.NewChain("filter", chain); err != nil {
-		return err
-	}
-
-	if err = monitor.iptables.Insert("filter", rootChain, 1, "-j", chain); err != nil {
-		return err
-	}
-
-	// This addresses will be not count but returned back to the root chain
-	if monitor.skipAddresses != "" {
-		if err = monitor.iptables.Append("filter", chain, skipAddrType, monitor.skipAddresses, "-j", "RETURN"); err != nil {
-			return err
-		}
-	}
-
-	if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
-		return err
-	}
-
-	traffic := trafficMonitoring{addresses: addresses}
-
-	if traffic.lastUpdate, traffic.initialValue, err =
-		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && !strings.Contains(err.Error(), "not exist") {
-		return err
-	}
-
-	monitor.trafficMap[chain] = &traffic
-
-	return nil
-}
-
-func (monitor *Monitor) deleteAllRules(chain string, rulespec ...string) (err error) {
-	for {
-		if err = monitor.iptables.Delete("filter", chain, rulespec...); err != nil {
-			errIPTables, ok := err.(*iptables.Error)
-			if ok && errIPTables.IsNotExist() {
-				return nil
-			}
-
-			return err
-		}
-	}
-}
-
-func (monitor *Monitor) deleteTrafficChain(chain, rootChain string) (err error) {
-	log.WithField("chain", chain).Debug("Delete iptables chain")
-
-	// Store traffic data to DB
-	if traffic, ok := monitor.trafficMap[chain]; ok {
-		monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
-	}
-
-	delete(monitor.trafficMap, chain)
-
-	if err = monitor.deleteAllRules(rootChain, "-j", chain); err != nil {
-		return err
-	}
-
-	if err = monitor.iptables.ClearChain("filter", chain); err != nil {
-		return err
-	}
-
-	if err = monitor.iptables.DeleteChain("filter", chain); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (monitor *Monitor) deleteAllTrafficChains() (err error) {
-	// Delete all aos related chains
-	chainList, err := monitor.iptables.ListChains("filter")
-	if err != nil {
-		return err
-	}
-
-	for _, chain := range chainList {
-		switch {
-		case !strings.HasPrefix(chain, "AOS_"):
-			continue
-
-		case chain == monitor.inChain:
-			err = monitor.deleteTrafficChain(chain, "INPUT")
-
-		case chain == monitor.outChain:
-			err = monitor.deleteTrafficChain(chain, "OUTPUT")
-
-		case strings.HasSuffix(chain, "_IN"):
-			err = monitor.deleteTrafficChain(chain, "FORWARD")
-
-		case strings.HasSuffix(chain, "_OUT"):
-			err = monitor.deleteTrafficChain(chain, "FORWARD")
-		}
-
-		if err != nil {
-			log.WithField("chain", chain).Errorf("Can't delete chain: %s", err)
-		}
-	}
-
-	return nil
 }

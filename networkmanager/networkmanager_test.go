@@ -451,7 +451,7 @@ func setup() (err error) {
 		return err
 	}
 
-	if manager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}); err != nil {
+	if manager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil); err != nil {
 		return err
 	}
 
