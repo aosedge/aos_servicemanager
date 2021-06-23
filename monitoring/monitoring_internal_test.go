@@ -265,7 +265,7 @@ func TestServices(t *testing.T) {
 	// Wait while .ip amd .pid files are created
 	time.Sleep(1 * time.Second)
 
-	err = monitor.StartMonitorService("Service1",
+	err = monitor.StartMonitorService("service1",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service1",
 			UID:        5000,
@@ -295,7 +295,7 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	monitor.StartMonitorService("Service2",
+	monitor.StartMonitorService("service2",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service2",
 			UID:        5002,
@@ -353,7 +353,7 @@ func TestServices(t *testing.T) {
 
 	alertMap = make(map[string]int)
 
-	err = monitor.StopMonitorService("Service1")
+	err = monitor.StopMonitorService("service1")
 	if err != nil {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
@@ -378,7 +378,7 @@ func TestServices(t *testing.T) {
 		}
 	}
 
-	err = monitor.StopMonitorService("Service2")
+	err = monitor.StopMonitorService("service2")
 	if err != nil {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
@@ -423,7 +423,7 @@ func TestTrafficLimit(t *testing.T) {
 		t.Fatalf("Can't get service IP: %s", err)
 	}
 
-	err = monitor.StartMonitorService("Service1",
+	err = monitor.StartMonitorService("service1",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service1",
 			IPAddress:  ipAddress,
@@ -437,7 +437,7 @@ func TestTrafficLimit(t *testing.T) {
 		t.Error("Ping should fail")
 	}
 
-	err = monitor.StopMonitorService("Service1")
+	err = monitor.StopMonitorService("service1")
 	if err != nil {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
@@ -472,7 +472,7 @@ func TestTrafficLimit(t *testing.T) {
 		t.Errorf("Wait for service error: %s", err)
 	}
 
-	err = monitor.StopMonitorService("Service1")
+	err = monitor.StopMonitorService("service1")
 	if err != nil {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
