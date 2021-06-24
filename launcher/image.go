@@ -19,7 +19,9 @@ package launcher
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -216,4 +218,29 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 	}
 
 	return parts, nil
+}
+
+func getManifestChecksum(installDir string) (digest []byte, err error) {
+	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
+	if err != nil {
+		return nil, err
+	}
+
+	h := sha256.New()
+	h.Write(manifestJSON)
+
+	return h.Sum(nil), nil
+}
+
+func validateImageManifest(service Service) (err error) {
+	digest, err := getManifestChecksum(service.Path)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(digest, service.ManifestDigest) {
+		return errors.New("manifest image digest does not match")
+	}
+
+	return nil
 }

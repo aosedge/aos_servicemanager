@@ -1625,6 +1625,68 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	}
 }
 
+func TestManifestValidation(t *testing.T) {
+	sender := newTestSender()
+
+	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	// install service
+	launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1", ProviderID: "sp1"},
+		chains, certs)
+
+	if status := <-sender.statusChannel; status.Error != "" {
+		t.Errorf("%s, service ID %s", status.Error, status.ID)
+	}
+
+	// stop-start with valid manifest should succeed
+	service, err := launcher.serviceProvider.GetService("service1")
+	if err != nil {
+		t.Fatalf("Can't get service: %s", err)
+	}
+
+	err = launcher.stopService(service)
+	if err != nil {
+		t.Fatal("Failed to stop service")
+	}
+
+	err = launcher.startService(service)
+	if err != nil {
+		t.Fatal("Failed to start service")
+	}
+
+	// stop and start service with invalid checksum should failed
+	err = launcher.stopService(service)
+	if err != nil {
+		t.Fatal("Failed to stop service")
+	}
+
+	// change service manifest digest
+	h := sha256.New()
+	h.Write([]byte(service.ManifestDigest))
+	service.ManifestDigest = h.Sum(nil)
+
+	err = launcher.startService(service)
+	if err == nil {
+		t.Error("Start service with invalid manifest digest should failed")
+	} else {
+		// check error message
+		if !strings.Contains(err.Error(), "digest does not match") {
+			t.Errorf("Unexpected error: %s", err)
+		}
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/

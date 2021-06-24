@@ -58,7 +58,7 @@ import (
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
 // services and their storages before first start.
-const OperationVersion = 4
+const OperationVersion = 5
 
 // Service status
 const (
@@ -186,6 +186,7 @@ type Service struct {
 	StartAt         time.Time     // time at which service was started
 	AlertRules      string        // alert rules in json format
 	Description     string        // service description
+	ManifestDigest  []byte        // sha256 of service manifest
 }
 
 // UsersService describes users service structure
@@ -1320,6 +1321,11 @@ func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServ
 }
 
 func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
+	err = validateImageManifest(service)
+	if err != nil {
+		return err
+	}
+
 	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
 	if err != nil {
 		return err
@@ -1795,6 +1801,11 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	if service.ServiceProvider == "" {
 		service.ServiceProvider = defaultServiceProvider
+	}
+
+	service.ManifestDigest, err = getManifestChecksum(service.Path)
+	if err != nil {
+		return service, err
 	}
 
 	return service, nil
