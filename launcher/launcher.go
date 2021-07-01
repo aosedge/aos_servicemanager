@@ -26,7 +26,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"os/user"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -128,9 +127,6 @@ const (
 
 const defaultServiceProvider = "default"
 
-const uidRangeBegin = 5000
-const uidRangeEnd = 10000
-
 const errNotLoaded = "not loaded"
 
 /*******************************************************************************
@@ -160,6 +156,7 @@ type Launcher struct {
 
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
+	idsPool        *identifierPool
 
 	downloader downloader
 
@@ -311,6 +308,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		devicemanager:    devicemanager,
 		services:         make(map[string]string),
 		serviceRegistrar: serviceRegistrar,
+		idsPool:          &identifierPool{},
 	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -360,6 +358,17 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 	// Create storage dir
 	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
 		return nil, err
+	}
+
+	services, err := launcher.serviceProvider.GetServices()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, service := range services {
+		if err = launcher.idsPool.add(service.UID, service.GID); err != nil {
+			log.Errorf("Can't add service UID/GID to pool: %s", err)
+		}
 	}
 
 	return launcher, nil
@@ -1738,7 +1747,7 @@ func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []con
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
-	uid, gid, err := launcher.getUIDGIDForService(serviceInfo.ID)
+	uid, gid, err := launcher.idsPool.getFree()
 	if err != nil {
 		return service, err
 	}
@@ -2009,6 +2018,13 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
+	if err := launcher.idsPool.remove(service.UID, service.GID); err != nil {
+		if retErr == nil {
+			log.WithField("name", service.ID).Errorf("Can't remove service UID/GID from pool: %s", err)
+			retErr = err
+		}
+	}
+
 	if err := os.RemoveAll(service.Path); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't remove service folder: %s", err)
@@ -2182,60 +2198,6 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 	}
 
 	return nil
-}
-
-func (launcher *Launcher) getUIDGIDForService(serviceID string) (uid, gid uint32, err error) {
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return uid, gid, err
-	}
-
-	if len(services) == 0 {
-		return uidRangeBegin, uidRangeBegin, err
-	}
-
-	type idsPair struct {
-		uid uint32
-		gid uint32
-	}
-	lockedIds := []idsPair{}
-
-	for _, service := range services {
-		if service.ID == serviceID {
-			return service.UID, service.GID, nil
-		}
-
-		lockedIds = append(lockedIds, idsPair{uid: service.UID, gid: service.GID})
-	}
-
-	for i := uint32(uidRangeBegin); i <= uidRangeEnd; i++ {
-		isFree := true
-
-		for _, value := range lockedIds {
-			if i == value.uid || i == value.gid {
-				isFree = false
-				break
-			}
-		}
-
-		if isFree == false {
-			continue
-		}
-
-		if user, err := user.LookupId(fmt.Sprint(i)); err == nil || user != nil {
-			log.Debug("UID is available in system ", i)
-			continue
-		}
-
-		if group, err := user.LookupGroupId(fmt.Sprint(i)); err == nil || group != nil {
-			log.Debug("GID is available in system ", i)
-			continue
-		}
-
-		return i, i, nil
-	}
-
-	return uid, gid, errors.New("No free UID GUID in system")
 }
 
 func (launcher *Launcher) isServiceValid(service Service) (err error) {
