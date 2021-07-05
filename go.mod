@@ -19,7 +19,7 @@ require (
 	github.com/docker/docker v17.12.1-ce+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.4.7
 	github.com/go-ole/go-ole v1.2.5 // indirect
-	github.com/godbus/dbus v4.1.0+incompatible
+	github.com/godbus/dbus v4.1.0+incompatible // indirect
 	github.com/golang/protobuf v1.4.3
 	github.com/google/go-tpm v0.3.2
 	github.com/google/go-tpm-tools v0.2.1 // indirect
