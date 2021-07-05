@@ -150,5 +150,3 @@ Test all packages:
 ```
 sudo -E go test ./... -v
 ```
-## Known issues
-* dbushandler test fails if run with sudo

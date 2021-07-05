@@ -39,7 +39,6 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
-	"aos_servicemanager/dbushandler"
 	"aos_servicemanager/downloader"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/iamclient"
@@ -70,7 +69,6 @@ type serviceManager struct {
 	cfg             *config.Config
 	crypt           *fcrypt.CryptoContext
 	db              *database.Database
-	dbus            *dbushandler.DBusHandler
 	downloader      *downloader.Downloader
 	launcher        *launcher.Launcher
 	resourcemanager *resource.ResourceManager
@@ -251,14 +249,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, err
 	}
 
-	// Create D-Bus handler
-
-	if cfg.EnableDBusServer {
-		if sm.dbus, err = dbushandler.New(sm.launcher); err != nil {
-			return sm, err
-		}
-	}
-
 	if err = sm.checkConsistency(); err != nil {
 		log.Errorf("Consistency error: %s. Cleanup...", err)
 
@@ -323,11 +313,6 @@ func (sm *serviceManager) close() {
 	// Close downloader
 	if sm.downloader != nil {
 		sm.downloader.Close()
-	}
-
-	// Close D-Bus
-	if sm.dbus != nil {
-		sm.dbus.Close()
 	}
 
 	// Close crypto context

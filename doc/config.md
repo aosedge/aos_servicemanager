@@ -244,11 +244,6 @@ The configuration file has JSON format. Following is JSON schema:
                     "default": "/var/aos/servicemanager/mergedMigrationPath"
                 }
             }
-        },
-	"enableDBusServer" {
-            "description": "Enables D-Bus server for interaction with Service Manager",
-            "type": "boolean",
-            "default": false
         }
     }
 }

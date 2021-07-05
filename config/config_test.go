@@ -100,8 +100,7 @@ func createConfigFile() (err error) {
 	"migration": {
 		"migrationPath" : "/usr/share/aos_servicemnager/migration",
 		"mergedMigrationPath" : "/var/aos/servicemanager/mergedMigration"
-	},
-	"enableDBusServer": true
+	}
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
@@ -415,17 +414,6 @@ func TestDatabaseMigration(t *testing.T) {
 
 	if config.Migration.MergedMigrationPath != "/var/aos/servicemanager/mergedMigration" {
 		t.Errorf("Wrong migrationPath /var/aos/servicemanager/mergedMigration != %s", config.Migration.MergedMigrationPath)
-	}
-}
-
-func TestEnableDBusServer(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if !config.EnableDBusServer {
-		t.Errorf("Wrong EnableDBusServer value: %v", config.EnableDBusServer)
 	}
 }
 
