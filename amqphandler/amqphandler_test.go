@@ -205,6 +205,10 @@ func TestSendMessages(t *testing.T) {
 			Header: amqphandler.MessageHeader{MessageType: amqphandler.RequestSystemLogType, Version: amqphandler.ProtocolVersion},
 			Data:   &amqphandler.RequestSystemLog{LogID: uuid.New().String(), From: &time.Time{}, Till: &time.Time{}},
 		},
+		{
+			Header: amqphandler.MessageHeader{MessageType: amqphandler.OverrideEnvVarsType, Version: amqphandler.ProtocolVersion},
+			Data:   &amqphandler.OverrideEnvVars{},
+		},
 	}
 
 	for _, message := range testData {
@@ -217,6 +221,14 @@ func TestSendMessages(t *testing.T) {
 
 		select {
 		case receiveMessage := <-amqpHandler.MessageChannel:
+			if value, ok := receiveMessage.Data.(amqphandler.DecodedOverrideEnvVars); ok {
+				if len(value.OverrideEnvVars) != 0 {
+					t.Error("Wrong count of override envs")
+				}
+
+				continue
+			}
+
 			if !reflect.DeepEqual(message.Data, receiveMessage.Data) {
 				t.Errorf("Wrong data received: %v %v", message.Data, receiveMessage.Data)
 				continue
@@ -334,6 +346,10 @@ func TestReceiveMessages(t *testing.T) {
 		},
 	}
 
+	overrideEnvStatus := []amqphandler.EnvVarInfoStatus{{ServiceID: "service0", SubjectID: "subject1", Statuses: []amqphandler.EnvVarStatus{{ID: "1234"},
+		{ID: "345", Error: "some error"}}},
+		{ServiceID: "service1", SubjectID: "subject1", Statuses: []amqphandler.EnvVarStatus{{ID: "0000"}}}}
+
 	testData := []messageDesc{
 		{
 			call: func() error {
@@ -418,6 +434,17 @@ func TestReceiveMessages(t *testing.T) {
 				Data:   &alertsData},
 			getDataType: func() interface{} {
 				return &amqphandler.Alerts{}
+			},
+		},
+		{
+			call: func() error {
+				return amqpHandler.SendOverrideEnvVarsStatus(overrideEnvStatus)
+			},
+			data: amqphandler.AOSMessage{
+				Header: amqphandler.MessageHeader{MessageType: amqphandler.OverrideEnvVarsStatusType, SystemID: systemID, Version: amqphandler.ProtocolVersion},
+				Data:   &amqphandler.OverrideEnvVarsStatus{OverrideEnvVarsStatus: overrideEnvStatus}},
+			getDataType: func() interface{} {
+				return &amqphandler.OverrideEnvVarsStatus{}
 			},
 		},
 	}

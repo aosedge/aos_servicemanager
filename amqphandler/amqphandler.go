@@ -62,6 +62,7 @@ const (
 	DeviceErrors                      = "deviceErrors"
 	RenewCertificatesNotificationType = "renewCertificatesNotification"
 	IssuedUnitCertificatesType        = "issuedUnitCertificates"
+	OverrideEnvVarsType               = "overrideEnvVars"
 )
 
 // amqp response types
@@ -74,6 +75,7 @@ const (
 	UnitStatusType                          = "unitStatus"
 	IssueUnitCertificatesRequestType        = "issueUnitCertificates"
 	InstallUnitCertificatesConfirmationType = "installUnitCertificatesConfirmation"
+	OverrideEnvVarsStatusType               = "overrideEnvVarsStatus"
 )
 
 // Alert tags
@@ -522,6 +524,48 @@ type InstallUnitCertificatesConfirmation struct {
 	Certificates []CertificateConfirmation `json:"certificates"`
 }
 
+// OverrideEnvVars request to override service environment variables
+type OverrideEnvVars struct {
+	OverrideEnvVars []byte `json:"overrideEnvVars"`
+}
+
+// DecodedOverrideEnvVars decoded service environment variables
+type DecodedOverrideEnvVars struct {
+	OverrideEnvVars []OverrideEnvsFromCloud `json:"overrideEnvVars"`
+}
+
+// OverrideEnvsFromCloud struct with envs and related service and user
+type OverrideEnvsFromCloud struct {
+	ServiceID string       `json:"serviceId"`
+	SubjectID string       `json:"subjectId"`
+	EnvVars   []EnvVarInfo `json:"envVars"`
+}
+
+// EnvVarInfo env info with id and time to live
+type EnvVarInfo struct {
+	ID       string     `json:"id"`
+	Variable string     `json:"variable"`
+	TTL      *time.Time `json:"TTL"`
+}
+
+// OverrideEnvVarsStatus override env status
+type OverrideEnvVarsStatus struct {
+	OverrideEnvVarsStatus []EnvVarInfoStatus `json:"overrideEnvVarsStatus"`
+}
+
+// EnvVarInfoStatus struct with envs status and related service and user
+type EnvVarInfoStatus struct {
+	ServiceID string         `json:"serviceId"`
+	SubjectID string         `json:"subjectId"`
+	Statuses  []EnvVarStatus `json:"statuses"`
+}
+
+// EnvVarStatus env status with error message
+type EnvVarStatus struct {
+	ID    string `json:"id"`
+	Error string `json:"error,omitempty"`
+}
+
 type unitSecret struct {
 	Version int `json:"version"`
 	Data    struct {
@@ -542,6 +586,7 @@ var messageMap = map[string]func() interface{}{
 	UpdateStateType:                   func() interface{} { return &UpdateState{} },
 	RenewCertificatesNotificationType: func() interface{} { return &RenewCertificatesNotification{} },
 	IssuedUnitCertificatesType:        func() interface{} { return &IssuedUnitCertificates{} },
+	OverrideEnvVarsType:               func() interface{} { return &OverrideEnvVars{} },
 }
 
 /*******************************************************************************
@@ -775,6 +820,13 @@ func (handler *AmqpHandler) SendInstallCertificatesConfirmation(confirmation []C
 		InstallUnitCertificatesConfirmation{Certificates: confirmation})
 
 	handler.sendChannel <- Message{"", response}
+
+	return nil
+}
+
+// SendOverrideEnvVarsStatus overrides env vars status
+func (handler *AmqpHandler) SendOverrideEnvVarsStatus(envs []EnvVarInfoStatus) (err error) {
+	handler.sendChannel <- Message{"", handler.createAosMessage(OverrideEnvVarsStatusType, OverrideEnvVarsStatus{OverrideEnvVarsStatus: envs})}
 
 	return nil
 }
@@ -1118,22 +1170,22 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 
 				desiredStatus := DecodedDesiredStatus{CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
 
-				if err := handler.decodeDesiredStatusParts(encodedData.BoardConfig, &desiredStatus.BoardConfig); err != nil {
+				if err := handler.decodeMessageParts(encodedData.BoardConfig, &desiredStatus.BoardConfig); err != nil {
 					log.Errorf("Can't decode board config: %s", err)
 					continue
 				}
 
-				if err := handler.decodeDesiredStatusParts(encodedData.Services, &desiredStatus.Services); err != nil {
+				if err := handler.decodeMessageParts(encodedData.Services, &desiredStatus.Services); err != nil {
 					log.Errorf("Can't decode services: %s", err)
 					continue
 				}
 
-				if err := handler.decodeDesiredStatusParts(encodedData.Layers, &desiredStatus.Layers); err != nil {
+				if err := handler.decodeMessageParts(encodedData.Layers, &desiredStatus.Layers); err != nil {
 					log.Errorf("Can't decode Layers: %s", err)
 					continue
 				}
 
-				if err := handler.decodeDesiredStatusParts(encodedData.Components, &desiredStatus.Components); err != nil {
+				if err := handler.decodeMessageParts(encodedData.Components, &desiredStatus.Components); err != nil {
 					log.Errorf("Can't decode Components: %s", err)
 					continue
 				}
@@ -1172,12 +1224,28 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 					Password: secret.Data.OwnerPassword}
 			}
 
+			if incomingMsg.Header.MessageType == OverrideEnvVarsType {
+				encodedData, ok := data.(*OverrideEnvVars)
+				if !ok {
+					log.Error("Wrong data type: expect override env")
+					continue
+				}
+
+				overrideEnvsRequest := DecodedOverrideEnvVars{}
+				if err := handler.decodeMessageParts(encodedData.OverrideEnvVars, &overrideEnvsRequest); err != nil {
+					log.Errorf("Can't decode override envs: %s", err)
+					continue
+				}
+
+				data = overrideEnvsRequest
+			}
+
 			handler.MessageChannel <- Message{delivery.CorrelationId, data}
 		}
 	}
 }
 
-func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interface{}) (err error) {
+func (handler *AmqpHandler) decodeMessageParts(data []byte, result interface{}) (err error) {
 	if len(data) == 0 {
 		return nil
 	}
