@@ -26,12 +26,14 @@ import (
 	"path"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
+	"aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/umcontroller"
 )
@@ -632,6 +634,41 @@ func TestUsersStorage(t *testing.T) {
 		t.Errorf("Can't remove all users: %s", err)
 	}
 }
+
+func TestOverideEnvVars(t *testing.T) {
+	// Add users service
+	if err := db.AddServiceToUsers([]string{"subject1"}, "service1"); err != nil {
+		t.Errorf("Can't add subject service: %s", err)
+	}
+
+	ttl := time.Now().UTC()
+
+	envVars := []amqphandler.EnvVarInfo{{ID: "some", Variable: "log=10", TTL: &ttl}}
+
+	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service2", envVars); err != nil {
+		if strings.Contains(err.Error(), ErrNotExist.Error()) == false {
+			t.Errorf("Should be error: %s", ErrNotExist)
+		}
+	}
+
+	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service1", envVars); err != nil {
+		t.Errorf("Can't update override env vars: %s", err)
+	}
+
+	allVars, err := db.GetAllOverrideEnvVars()
+	if err != nil {
+		t.Errorf("Can't get all env vars: %s", err)
+	}
+
+	if len(allVars) != 1 {
+		t.Error("Count of all env vars should be 1")
+	}
+
+	if reflect.DeepEqual(allVars[0].EnvVars, envVars) == false {
+		t.Error("Incorrect env vars in get all override env vars request")
+	}
+}
+
 func TestTrafficMonitor(t *testing.T) {
 	setTime := time.Now()
 	setValue := uint64(100)

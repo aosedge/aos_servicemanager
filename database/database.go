@@ -46,7 +46,7 @@ const (
 	syncMode    = "NORMAL"
 )
 
-const dbVersion = 3
+const dbVersion = 4
 
 /*******************************************************************************
  * Vars
@@ -348,7 +348,7 @@ func (db *Database) SetServiceStartTime(serviceID string, time time.Time) (err e
 
 // AddServiceToUsers adds service ID to users
 func (db *Database) AddServiceToUsers(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?, ?)")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -359,7 +359,7 @@ func (db *Database) AddServiceToUsers(users []string, serviceID string) (err err
 		return aoserrors.Wrap(err)
 	}
 
-	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{})
+	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{}, "")
 
 	return aoserrors.Wrap(err)
 }
@@ -526,6 +526,83 @@ func (db *Database) RemoveServiceFromAllUsers(serviceID string) (err error) {
 	_, err = stmt.Exec(serviceID)
 
 	return aoserrors.Wrap(err)
+}
+
+// UpdateOverrideEnvVars add/update/remove overrides env vars
+func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars []amqp.EnvVarInfo) (err error) {
+	// TODO: Currunt version support only one user. Should be re-implemented
+	usersJSON, err := json.Marshal(users)
+	if err != nil {
+		return err
+	}
+
+	varsText := ""
+	if len(vars) > 0 {
+		varsJSON, err := json.Marshal(vars)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		varsText = string(varsJSON)
+	}
+
+	result, err := db.sql.Exec("UPDATE users SET overrideEnvVars = ? WHERE users = ? AND serviceid = ?",
+		varsText, usersJSON, serviceID)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count == 0 {
+		return aoserrors.Wrap(ErrNotExist)
+	}
+
+	return nil
+}
+
+// GetAllOverrideEnvVars returns list of env vars for services
+func (db *Database) GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error) {
+	rows, err := db.sql.Query("SELECT users, serviceid, overrideEnvVars FROM users")
+	if err != nil {
+		return vars, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		varsText := ""
+		usersText := ""
+		users := []string{}
+		var envVar amqp.OverrideEnvsFromCloud
+
+		err = rows.Scan(&usersText, &envVar.ServiceID, &varsText)
+		if err != nil {
+			return vars, aoserrors.Wrap(err)
+		}
+
+		if err = json.Unmarshal([]byte(usersText), &users); err != nil {
+			return vars, aoserrors.Wrap(err)
+		}
+
+		if len(users) < 1 {
+			return vars, aoserrors.Wrap(ErrNotExist)
+		}
+
+		envVar.SubjectID = users[0] // TODO: currently support only one user
+
+		if varsText != "" {
+			if err = json.Unmarshal([]byte(varsText), &envVar.EnvVars); err != nil {
+				return vars, aoserrors.Wrap(err)
+			}
+		}
+
+		vars = append(vars, envVar)
+	}
+
+	return vars, nil
 }
 
 // SetTrafficMonitorData stores traffic monitor data
@@ -892,6 +969,7 @@ func (db *Database) createUsersTable() (err error) {
 															serviceid TEXT NOT NULL,
 															storageFolder TEXT,
 															stateCheckSum BLOB,
+															overrideEnvVars TEXT,
 															PRIMARY KEY(users, serviceid))`)
 
 	return aoserrors.Wrap(err)
