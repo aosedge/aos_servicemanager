@@ -23,10 +23,10 @@ import (
 	"crypto/cipher"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"errors"
 	"math/big"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 type asnContentInfo struct {
@@ -96,12 +96,12 @@ func getRecipientInfo(raw asn1.RawValue) (interface{}, error) {
 		var ktri keyTransRecipientInfo
 		_, err := asn1.Unmarshal(raw.FullBytes, &ktri)
 		if err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 		return ktri, nil
 
 	default:
-		return nil, errors.New("getRecipientInfo: unknown tag")
+		return nil, aoserrors.New("getRecipientInfo: unknown tag")
 	}
 }
 
@@ -117,7 +117,7 @@ func getEnvelopedData(ed asnEnvelopedData) (*envelopedData, error) {
 	ret.Version = ed.Version
 	oi, err := getOriginatorInfo(ed.OriginatorInfo)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	ret.OriginatorInfo = *oi
@@ -125,7 +125,7 @@ func getEnvelopedData(ed asnEnvelopedData) (*envelopedData, error) {
 	for i, recipient := range ed.RecipientInfos {
 		ret.RecipientInfos[i], err = getRecipientInfo(recipient)
 		if err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 	ret.EncryptedContentInfo = ed.EncryptedContentInfo
@@ -139,7 +139,7 @@ func getContentInfo(ci asnContentInfo) (*contentInfo, error) {
 	ret.OID = ci.OID
 	ed, err := getEnvelopedData(ci.EnvelopedData)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	ret.EnvelopedData = *ed
@@ -149,42 +149,45 @@ func getContentInfo(ci asnContentInfo) (*contentInfo, error) {
 
 func decryptCMSKey(ktri *keyTransRecipientInfo, decrypter crypto.Decrypter) (symmetrickey []byte, err error) {
 	if !ktri.KeyEncryptionAlgorithm.Algorithm.Equal(rsaEncryptionOid) {
-		return nil, errors.New("unknown public encryption OID")
+		return nil, aoserrors.New("unknown public encryption OID")
 	}
 
 	if ktri.KeyEncryptionAlgorithm.Parameters.Tag != asn1.TagNull {
-		return nil, errors.New("extra paramaters for RSA algorithm found")
+		return nil, aoserrors.New("extra paramaters for RSA algorithm found")
 	}
 
-	return decrypter.Decrypt(nil, ktri.EncryptedKey, nil)
+	symmetrickey, err = decrypter.Decrypt(nil, ktri.EncryptedKey, nil)
+
+	return symmetrickey, aoserrors.Wrap(err)
 }
 
 func decryptMessage(eci *EncryptedContentInfo, key []byte) ([]byte, error) {
 	switch {
 	case eci.ContentEncryptionAlgorithm.Algorithm.Equal(aes256CbcOid):
 		if eci.ContentEncryptionAlgorithm.Parameters.Tag != asn1.TagOctetString {
-			return nil, errors.New("can't find IV in extended params")
+			return nil, aoserrors.New("can't find IV in extended params")
 		}
 
 		iv := eci.ContentEncryptionAlgorithm.Parameters.Bytes
 		if len(iv) != 16 {
-			return nil, errors.New("invalid IV length")
+			return nil, aoserrors.New("invalid IV length")
 		}
 
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			log.Errorf("Can't create cipher: %s", err)
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 
 		mode := cipher.NewCBCDecrypter(block, iv)
 		outdata := make([]byte, len(eci.EncryptedContent))
 		mode.CryptBlocks(outdata, eci.EncryptedContent)
+		message, err := removePkcs7Padding(outdata, 16)
 
-		return removePkcs7Padding(outdata, 16)
+		return message, aoserrors.Wrap(err)
 
 	default:
-		return nil, errors.New("unknown symmetric algorithm OID")
+		return nil, aoserrors.New("unknown symmetric algorithm OID")
 	}
 }
 
@@ -194,12 +197,17 @@ func unmarshallCMS(der []byte) (*contentInfo, error) {
 	_, err := asn1.Unmarshal(der, &ci)
 	if err != nil {
 		log.Errorf("Error parsing CMS container: %s", err)
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if !ci.OID.Equal(envelopedDataOid) {
-		return nil, errors.New("unknown object identifier in ContentInfo")
+		return nil, aoserrors.New("unknown object identifier in ContentInfo")
 	}
 
-	return getContentInfo(ci)
+	info, err := getContentInfo(ci)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return info, nil
 }

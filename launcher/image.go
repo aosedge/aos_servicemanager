@@ -23,7 +23,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -63,29 +63,29 @@ type imageParts struct {
 func validateUnpackedImage(installDir string) (err error) {
 	manifest, err := getImageManifest(installDir)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// validate image config
 	if err = validateDigest(installDir, manifest.Config.Digest); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// validate aos service config
 	if manifest.AosService != nil {
 		if err = validateDigest(installDir, manifest.AosService.Digest); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	layersSize := len(manifest.Layers)
 	if layersSize == 0 {
-		return errors.New("no layers in image")
+		return aoserrors.New("no layers in image")
 	}
 
 	// validate service rootfs layer
 	if err = validateDigest(installDir, manifest.Layers[0].Digest); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -94,24 +94,24 @@ func validateUnpackedImage(installDir string) (err error) {
 func getImageManifest(installDir string) (manifest *serviceManifest, err error) {
 	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	manifest = new(serviceManifest)
 	if err = json.Unmarshal(manifestJSON, manifest); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	return manifest, nil
 }
 
 func validateDigest(installDir string, digest digest.Digest) (err error) {
 	if err = digest.Validate(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	file, err := os.Open(path.Join(installDir, "blobs", string(digest.Algorithm()), digest.Hex()))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
@@ -121,11 +121,11 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 	for {
 		count, readErr := file.Read(buffer)
 		if readErr != nil && readErr != io.EOF {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if _, err := verifier.Write(buffer[:count]); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if readErr != nil {
@@ -134,7 +134,7 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 	}
 
 	if verifier.Verified() == false {
-		return errors.New("hash missmach")
+		return aoserrors.New("hash missmach")
 	}
 
 	return nil
@@ -145,12 +145,12 @@ func packImage(source, name string) (err error) {
 
 	_, err = os.Stat(source)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	writer, err := os.Create(name)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	gzWriter := gzip.NewWriter(writer)
@@ -162,7 +162,7 @@ func packImage(source, name string) (err error) {
 	return filepath.Walk(source, func(fileName string, fileInfo os.FileInfo, err error) error {
 		header, err := tar.FileInfoHeader(fileInfo, fileInfo.Name())
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		header.Name = strings.TrimPrefix(strings.Replace(fileName, source, "", -1), string(filepath.Separator))
@@ -172,7 +172,7 @@ func packImage(source, name string) (err error) {
 		}
 
 		if err = tarWriter.WriteHeader(header); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if !fileInfo.Mode().IsRegular() {
@@ -181,19 +181,19 @@ func packImage(source, name string) (err error) {
 
 		file, err := os.Open(fileName)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 		defer file.Close()
 
 		_, err = io.Copy(tarWriter, file)
-		return err
+		return aoserrors.Wrap(err)
 	})
 }
 
 func getImageParts(installDir string) (parts imageParts, err error) {
 	manifest, err := getImageManifest(installDir)
 	if err != nil {
-		return parts, err
+		return parts, aoserrors.Wrap(err)
 	}
 
 	parts.imageConfigPath = path.Join(installDir, "blobs", string(manifest.Config.Digest.Algorithm()), string(manifest.Config.Digest.Hex()))
@@ -204,7 +204,7 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 
 	layersSize := len(manifest.Layers)
 	if layersSize == 0 {
-		return parts, errors.New("no layers in image")
+		return parts, aoserrors.New("no layers in image")
 	}
 
 	rootFSDigest := manifest.Layers[0].Digest
@@ -223,7 +223,7 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 func getManifestChecksum(installDir string) (digest []byte, err error) {
 	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	h := sha256.New()
@@ -235,11 +235,11 @@ func getManifestChecksum(installDir string) (digest []byte, err error) {
 func validateImageManifest(service Service) (err error) {
 	digest, err := getManifestChecksum(service.Path)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if !bytes.Equal(digest, service.ManifestDigest) {
-		return errors.New("manifest image digest does not match")
+		return aoserrors.New("manifest image digest does not match")
 	}
 
 	return nil

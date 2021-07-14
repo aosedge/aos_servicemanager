@@ -24,6 +24,7 @@ import (
 
 	"github.com/anexia-it/fsquota"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -53,7 +54,7 @@ func SetUserFSQuota(path string, limit uint64, uid, gid uint32) (err error) {
 	limits.Bytes.SetHard(limit)
 
 	if _, err := fsquota.SetUserQuota(path, &user, limits); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -69,7 +70,7 @@ func GetUserFSQuotaUsage(path string, uid, gid uint32) (byteUsed uint64, err err
 
 	info, err := fsquota.GetUserInfo(path, &user)
 	if err != nil {
-		return byteUsed, err
+		return byteUsed, aoserrors.Wrap(err)
 	}
 
 	return info.BytesUsed, nil

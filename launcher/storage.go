@@ -19,7 +19,6 @@ package launcher
 
 import (
 	"encoding/hex"
-	"errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -32,6 +31,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"golang.org/x/crypto/sha3"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -91,16 +91,16 @@ func newStorageHandler(storageDir string, serviceProvider ServiceProvider,
 
 	if _, err = os.Stat(handler.storageDir); err != nil {
 		if !os.IsNotExist(err) {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 
 		if err = os.MkdirAll(handler.storageDir, 0755); err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 
 	if handler.watcher, err = fsnotify.NewWatcher(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	handler.statesMap = make(map[string]*stateParams)
@@ -126,7 +126,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if storageLimit == 0 {
@@ -135,7 +135,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, ""); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 
 		return "", nil
@@ -144,7 +144,7 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	if usersService.StorageFolder != "" {
 		if _, err = os.Stat(usersService.StorageFolder); err != nil {
 			if !os.IsNotExist(err) {
-				return "", err
+				return "", aoserrors.Wrap(err)
 			}
 
 			log.WithFields(log.Fields{
@@ -157,11 +157,11 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 
 	if usersService.StorageFolder == "" {
 		if usersService.StorageFolder, err = createStorageFolder(handler.storageDir, service.UID, service.GID); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 
 		if err = handler.serviceProvider.SetUsersStorageFolder(users, service.ID, usersService.StorageFolder); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 
 		log.WithFields(log.Fields{"folder": usersService.StorageFolder, "serviceID": service.ID}).Debug("Create storage folder")
@@ -170,22 +170,22 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	if stateLimit == 0 {
 		if _, err = os.Stat(path.Join(usersService.StorageFolder, stateFile)); err != nil {
 			if !os.IsNotExist(err) {
-				return "", err
+				return "", aoserrors.Wrap(err)
 			}
 		}
 
 		if err = handler.serviceProvider.SetUsersStateChecksum(users, service.ID, []byte{}); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 	}
 
 	if stateLimit > 0 {
 		if err = createStateFile(path.Join(usersService.StorageFolder, stateFile), service.UID, service.GID); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 
 		if err = handler.startStateWatching(users, service); err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 	}
 
@@ -206,10 +206,10 @@ func (handler *storageHandler) StopStateWatching(users []string, service Service
 			return nil
 		}
 
-		return err
+		return aoserrors.Wrap(err)
 	}
 
-	return handler.stopStateWatching(path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder)
+	return aoserrors.Wrap(handler.stopStateWatching(path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder))
 }
 
 func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
@@ -234,7 +234,7 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 		}
 	}
 
-	return errors.New("correlation ID not found")
+	return aoserrors.New("correlation ID not found")
 }
 
 func (handler *storageHandler) UpdateState(users []string, service Service, state, checksum string,
@@ -249,29 +249,29 @@ func (handler *storageHandler) UpdateState(users []string, service Service, stat
 		"stateSize":  len(state)}).Debug("Update state")
 
 	if err = checkChecksum(state, checksum); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if len(state) > int(stateLimit) {
-		return errors.New("state is too big")
+		return aoserrors.New("state is too big")
 	}
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = ioutil.WriteFile(path.Join(usersService.StorageFolder, stateFile), []byte(state), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	sumBytes, err := hex.DecodeString(checksum)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = handler.serviceProvider.SetUsersStateChecksum(users, service.ID, sumBytes); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -282,7 +282,7 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	stateFileName := path.Join(usersService.StorageFolder, stateFile)
@@ -291,7 +291,7 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 
 	if _, ok := handler.statesMap[stateFileName]; ok {
 		if err = handler.stopStateWatching(stateFileName, usersService.StorageFolder); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -304,7 +304,7 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 
 	_, checksum, err := getFileAndChecksum(stateFileName)
 	if err != nil && err != os.ErrNotExist {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if !reflect.DeepEqual(usersService.StateChecksum, checksum) {
@@ -319,7 +319,7 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 	}
 
 	if err = handler.watcher.Add(usersService.StorageFolder); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -330,7 +330,7 @@ func (handler *storageHandler) stopStateWatching(stateFileName, storageFolder st
 
 	if state, ok := handler.statesMap[stateFileName]; ok {
 		if err = handler.watcher.Remove(storageFolder); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if state.changeTimer != nil {
@@ -477,31 +477,31 @@ func (handler *storageHandler) processWatcher() {
 
 func createStorageFolder(path string, uid, gid uint32) (folderName string, err error) {
 	if folderName, err = ioutil.TempDir(path, ""); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if err = os.Chown(folderName, int(uid), int(gid)); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	upperDir := filepath.Join(folderName, upperDirName)
 
 	if err = os.MkdirAll(upperDir, 0755); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if err = os.Chown(upperDir, int(uid), int(gid)); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	workDir := filepath.Join(folderName, workDirName)
 
 	if err = os.MkdirAll(workDir, 0755); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if err = os.Chown(workDir, int(uid), int(gid)); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	return folderName, nil
@@ -510,12 +510,12 @@ func createStorageFolder(path string, uid, gid uint32) (folderName string, err e
 func createStateFile(path string, uid, gid uint32) (err error) {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	if err = os.Chown(path, int(uid), int(gid)); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -532,7 +532,7 @@ func getFileAndChecksum(fileName string) (data []byte, checksum []byte, err erro
 
 	data, err = ioutil.ReadFile(fileName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, aoserrors.Wrap(err)
 	}
 
 	calcSum := sha3.Sum224(data)
@@ -543,13 +543,13 @@ func getFileAndChecksum(fileName string) (data []byte, checksum []byte, err erro
 func checkChecksum(state, checksum string) (err error) {
 	sum, err := hex.DecodeString(checksum)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	calcSum := sha3.Sum224([]byte(state))
 
 	if !reflect.DeepEqual(calcSum[:], sum) {
-		return errors.New("wrong checksum")
+		return aoserrors.New("wrong checksum")
 	}
 
 	return nil

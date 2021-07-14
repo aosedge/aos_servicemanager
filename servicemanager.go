@@ -19,7 +19,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -34,6 +33,7 @@ import (
 
 	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/alerts"
 	amqp "aos_servicemanager/amqphandler"
@@ -154,17 +154,17 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 		if sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath,
 			cfg.Migration.MergedMigrationPath); err != nil {
-			return sm, err
+			return sm, aoserrors.Wrap(err)
 		}
 	} else if err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Check operation version
 
 	version, err := sm.db.GetOperationVersion()
 	if err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	if launcher.OperationVersion != version {
@@ -176,25 +176,25 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 		if sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath,
 			cfg.Migration.MergedMigrationPath); err != nil {
-			return sm, err
+			return sm, aoserrors.Wrap(err)
 		}
 	}
 
 	// Create amqp
 	if sm.amqp, err = amqp.New(cfg); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create IAM client
 	if sm.iam, err = iamclient.New(cfg, sm.amqp, false); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	sm.amqp.SetSystemID(sm.iam.GetSystemID())
 
 	// Create crypto context
 	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.iam); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create alerts
@@ -202,23 +202,23 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		if err == alerts.ErrDisabled {
 			log.Warn(err)
 		} else {
-			return sm, err
+			return sm, aoserrors.Wrap(err)
 		}
 	}
 
 	sm.amqp.SetCryptoContext(sm.crypt)
 
 	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt, sm.alerts); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	if sm.umCtrl, err = umcontroller.New(cfg, sm.amqp, sm.db, sm.downloader, false); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create network
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create monitor
@@ -226,27 +226,27 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		if err == monitoring.ErrDisabled {
 			log.Warn(err)
 		} else {
-			return sm, err
+			return sm, aoserrors.Wrap(err)
 		}
 	}
 
 	if sm.layerMgr, err = layermanager.New(cfg.LayersDir, sm.downloader, sm.db, sm.amqp); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create resourcemanager
 	if sm.resourcemanager, err = resource.New(cfg.BoardConfigFile, sm.alerts); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create launcher
 	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager, sm.iam); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	if err = sm.checkConsistency(); err != nil {
@@ -263,7 +263,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 			log.Errorf("Can't cleanup layermanager: %s", layerErr)
 		}
 
-		return sm, err
+		return sm, aoserrors.Wrap(err)
 	}
 
 	return sm, nil
@@ -323,11 +323,11 @@ func (sm *serviceManager) close() {
 
 func (sm *serviceManager) checkConsistency() (err error) {
 	if err = sm.launcher.CheckServicesConsistency(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = sm.layerMgr.CheckLayersConsistency(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -356,7 +356,7 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 
 	if err = sm.amqp.SendInitialSetup(initialBoardConfigInfo,
 		initialList, initialLayerList, initialComponentList); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -439,7 +439,7 @@ func (sm *serviceManager) handleChannels() (err error) {
 		select {
 		case amqpMessage := <-sm.amqp.MessageChannel:
 			if err, ok := amqpMessage.Data.(error); ok {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			if err = sm.processAmqpMessage(amqpMessage); err != nil {
@@ -492,14 +492,14 @@ func (sm *serviceManager) updateBoardConfig(config json.RawMessage) (err error) 
 	}()
 
 	if newVendorVersion, err = sm.resourcemanager.CheckBoardConfig(config); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	sm.launcher.StopServices()
 	defer sm.launcher.StartServices()
 
 	if err = sm.resourcemanager.UpdateBoardConfig(config); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -664,17 +664,17 @@ func newJournalHook() (hook *journalHook) {
 
 func (hook *journalHook) Fire(entry *log.Entry) (err error) {
 	if entry == nil {
-		return errors.New("log entry is nil")
+		return aoserrors.New("log entry is nil")
 	}
 
 	logMessage, err := entry.String()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	err = journal.Print(hook.severityMap[entry.Level], logMessage)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (hook *journalHook) Levels() []log.Level {

@@ -19,7 +19,6 @@ package networkmanager_test
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -32,6 +31,7 @@ import (
 
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/networkmanager"
@@ -510,7 +510,7 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
 	if err != nil {
-		return errors.New(string(out))
+		return aoserrors.New(string(out))
 	}
 
 	if err := addHostResolvFiles(imagePath); err != nil {
@@ -569,7 +569,7 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 func runOCIContainer(imagePath string, containerID string) (err error) {
 	output, err := exec.Command("runc", "run", "-b", imagePath, containerID).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("message: %s, err: %s", string(output), err)
+		return aoserrors.Errorf("message: %s, err: %s", string(output), err)
 	}
 
 	return nil
@@ -578,7 +578,7 @@ func runOCIContainer(imagePath string, containerID string) (err error) {
 func killOCIContainer(containerID string) (err error) {
 	output, err := exec.Command("runc", "delete", "-f", containerID).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("message: %s, err: %s", string(output), err)
+		return aoserrors.Errorf("message: %s, err: %s", string(output), err)
 	}
 
 	return nil

@@ -19,12 +19,12 @@ package utils
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -35,26 +35,26 @@ import (
 func UnpackTarImage(source, destination string) (err error) {
 	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar image")
 
-	return unTarFromFile(source, destination)
+	return aoserrors.Wrap(unTarFromFile(source, destination))
 }
 
 // CopyFile copies file content
 func CopyFile(source, destination string) (err error) {
 	sourceFile, err := os.Open(source)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer sourceFile.Close()
 
 	desFile, err := os.Create(destination)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer desFile.Close()
 
 	_, err = io.Copy(desFile, sourceFile)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 /*******************************************************************************
@@ -63,11 +63,11 @@ func CopyFile(source, destination string) (err error) {
 func unTarFromFile(tarArchieve string, destination string) (err error) {
 	if _, err = os.Stat(tarArchieve); err != nil {
 		log.Error("Can't find tar arcieve")
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(destination, 0755); err != nil {
-		return errors.New("can't create tar destination path")
+		return aoserrors.New("can't create tar destination path")
 	}
 
 	cmd := exec.Command("tar", "xf", tarArchieve, "-C", destination)
@@ -80,5 +80,5 @@ func unTarFromFile(tarArchieve string, destination string) (err error) {
 		log.Errorf("Failed to untar archieve. Output is: %s", out.String())
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }

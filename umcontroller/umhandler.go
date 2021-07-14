@@ -23,6 +23,7 @@ import (
 	"github.com/looplab/fsm"
 	log "github.com/sirupsen/logrus"
 
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager"
 )
 
@@ -128,7 +129,7 @@ func newUmHandler(id string, umStream pb.UpdateController_RegisterUMServer,
 
 	go handler.receiveData()
 
-	return handler, handler.closeChannel, err
+	return handler, handler.closeChannel, aoserrors.Wrap(err)
 }
 
 // Close close connection
@@ -149,25 +150,25 @@ func (handler *umHandler) PrepareUpdate(prepareComponents []SystemComponent) (er
 
 	err = handler.FSM.Event(eventPrepareUpdate, request)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (handler *umHandler) StartUpdate() (err error) {
 	log.Debug("StartUpdate for UMID ", handler.umID)
 	err = handler.FSM.Event(eventStartUpdate)
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (handler *umHandler) StartApply() (err error) {
 	log.Debug("StartApply for UMID ", handler.umID)
 	err = handler.FSM.Event(eventStartApply)
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (handler *umHandler) StartRevert() (err error) {
 	log.Debug("StartRevert for UMID ", handler.umID)
 	err = handler.FSM.Event(eventStartRevert)
-	return err
+	return aoserrors.Wrap(err)
 }
 
 /*******************************************************************************

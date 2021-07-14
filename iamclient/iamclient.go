@@ -20,12 +20,12 @@ package iamclient
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
 	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
@@ -87,7 +87,7 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	log.Debug("Connecting to IAM...")
 
 	if sender == nil {
-		return nil, errors.New("sender is nil")
+		return nil, aoserrors.New("sender is nil")
 	}
 
 	client = &Client{
@@ -110,14 +110,14 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	} else {
 		tlsConfig, err := cryptutils.GetClientMutualTLSConfig(config.Crypt.CACert, config.CertStorage)
 		if err != nil {
-			return client, err
+			return client, aoserrors.Wrap(err)
 		}
 
 		secureOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
 	if client.connection, err = grpc.DialContext(ctx, config.IAMServerURL, secureOpt, grpc.WithBlock()); err != nil {
-		return client, err
+		return client, aoserrors.Wrap(err)
 	}
 
 	client.pbclient = pb.NewIAManagerClient(client.connection)
@@ -126,11 +126,11 @@ func New(config *config.Config, sender Sender, insecure bool) (client *Client, e
 	log.Debug("Connected to IAM")
 
 	if client.systemID, err = client.getSystemID(); err != nil {
-		return client, err
+		return client, aoserrors.Wrap(err)
 	}
 
 	if client.users, err = client.getUsers(); err != nil {
-		return client, err
+		return client, aoserrors.Wrap(err)
 	}
 
 	go client.handleUsersChanged()
@@ -170,7 +170,7 @@ func (client *Client) RenewCertificatesNotification(pwd string, certInfo []amqp.
 
 		response, err := client.pbclient.CreateKey(ctx, request)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		newCerts = append(newCerts, amqp.CertificateRequest{Type: response.Type, Csr: response.Csr})
@@ -181,7 +181,7 @@ func (client *Client) RenewCertificatesNotification(pwd string, certInfo []amqp.
 	}
 
 	if err := client.sender.SendIssueUnitCertificatesRequest(newCerts); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -223,7 +223,7 @@ func (client *Client) InstallCertificates(certInfo []amqp.IssuedUnitCertificates
 	}
 
 	if err = client.sender.SendInstallCertificatesConfirmation(confirmations); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -245,7 +245,7 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 
 	response, err := client.pbclient.RegisterService(ctx, req)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	return response.Secret, nil
@@ -262,7 +262,7 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 
 	_, err = client.pbclient.UnregisterService(ctx, req)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -279,7 +279,7 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 
 	response, err := client.pbclientPublic.GetPermissions(ctx, req)
 	if err != nil {
-		return "", nil, err
+		return "", nil, aoserrors.Wrap(err)
 	}
 
 	return response.ServiceId, response.Permissions.Permissions, nil
@@ -299,7 +299,7 @@ func (client *Client) GetCertificate(certType string, issuer []byte, serial stri
 
 	response, err := client.pbclient.GetCert(ctx, request)
 	if err != nil {
-		return "", "", err
+		return "", "", aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
@@ -331,7 +331,7 @@ func (client *Client) getSystemID() (systemID string, err error) {
 
 	response, err := client.pbclient.GetSystemInfo(ctx, request)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{"systemID": response.SystemId}).Debug("Get system ID")
@@ -347,7 +347,7 @@ func (client *Client) getUsers() (users []string, err error) {
 
 	response, err := client.pbclient.GetUsers(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{"users": response.Users}).Debug("Get users")
@@ -381,12 +381,12 @@ func (client *Client) subscribeUsersChanged() (err error) {
 
 	stream, err := client.pbclient.SubscribeUsersChanged(context.Background(), request)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	users, err := client.getUsers()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if !isUsersEqual(users, client.users) {
@@ -400,7 +400,7 @@ func (client *Client) subscribeUsersChanged() (err error) {
 	for {
 		notification, err := stream.Recv()
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		log.WithFields(log.Fields{"users": notification.Users}).Debug("Users changed notification")

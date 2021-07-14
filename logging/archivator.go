@@ -23,6 +23,7 @@ import (
 	"errors"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
 )
@@ -58,7 +59,7 @@ func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize, maxPartCo
 
 	if instance.zw, err = gzip.NewWriterLevel(
 		&instance.logBuffers[0], gzip.BestCompression); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return instance, nil
@@ -71,14 +72,14 @@ func (instance *archivator) addLog(message string) (err error) {
 
 	count, err := instance.zw.Write([]byte(message))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	instance.partSize += uint64(count)
 
 	if instance.partSize > instance.maxPartSize {
 		if err = instance.zw.Close(); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		instance.logBuffers = append(instance.logBuffers, bytes.Buffer{})
@@ -95,7 +96,7 @@ func (instance *archivator) addLog(message string) (err error) {
 
 func (instance *archivator) sendLog(logID string) (err error) {
 	if err = instance.zw.Close(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if instance.partSize > 0 {

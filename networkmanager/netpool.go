@@ -20,8 +20,9 @@
 package networkmanager
 
 import (
-	"fmt"
 	"net"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -50,11 +51,11 @@ func makeNetPools() (listIPNetPool []*net.IPNet, err error) {
 	for _, poolNet := range predefinedPrivateNetworks {
 		_, b, err := net.ParseCIDR(poolNet.ipSubNet)
 		if err != nil {
-			return nil, fmt.Errorf("invalid base pool %q: %v", poolNet.ipSubNet, err)
+			return nil, aoserrors.Errorf("invalid base pool %q: %v", poolNet.ipSubNet, err)
 		}
 		ones, _ := b.Mask.Size()
 		if poolNet.size <= 0 || poolNet.size < ones {
-			return nil, fmt.Errorf("invalid pools size: %d", poolNet.size)
+			return nil, aoserrors.Errorf("invalid pools size: %d", poolNet.size)
 		}
 		listIPNetPool = append(listIPNetPool, makeNetPool(poolNet.size, b)...)
 	}

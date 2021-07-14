@@ -20,7 +20,6 @@ package layermanager
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -28,6 +27,7 @@ import (
 
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/utils"
@@ -95,12 +95,12 @@ func New(layersStorageDir string, downloader downloader, infoProvider LayerInfoP
 		statusSender:      sender}
 
 	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	layermanager.currentLayerList, err = layermanager.layerInfoProvider.GetLayersInfo()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return layermanager, nil
@@ -147,7 +147,7 @@ func (layermanager *LayerManager) ProcessDesiredLayersList(layerList []amqp.Laye
 		}
 	}
 
-	return resultError
+	return aoserrors.Wrap(resultError)
 }
 
 // DeleteUnneededLayers remove all layer which are not present in desired configuration
@@ -180,7 +180,7 @@ func (layermanager *LayerManager) DeleteUnneededLayers() (err error) {
 		layermanager.currentLayerList, err = layermanager.layerInfoProvider.GetLayersInfo()
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // CheckLayersConsistency checks layers data to be consistent
@@ -188,19 +188,19 @@ func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
 	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
 	if err != nil {
 		log.Error("Can't get layers info")
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, layer := range layers {
 		// Checking if Layer path exists
 		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if fi, err := os.Stat(layerPath); err != nil || !fi.Mode().IsDir() {
 			log.Error("Can't find layer data on storage, or data is corrupted")
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -214,11 +214,11 @@ func (layermanager *LayerManager) Cleanup() (err error) {
 	certs := []amqp.Certificate{}
 	layerList := []amqp.LayerInfoFromCloud{}
 	if err := layermanager.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = layermanager.DeleteUnneededLayers(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -231,8 +231,12 @@ func (layermanager *LayerManager) GetLayersInfo() (layers []amqp.LayerInfo, err 
 
 // GetLayerPathByDigest provied installed layer path by digest
 func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
+	layerPath, err = layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
 
-	return layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
+	return layerPath, nil
 }
 
 /*******************************************************************************
@@ -254,44 +258,44 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 
 	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
 	if err != nil {
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(destinationFile)
 
 	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
 	if err = utils.UnpackTarImage(destinationFile, unpackDir); err != nil {
-		err = fmt.Errorf("extract layer package from archive error: %s", err.Error())
+		err = aoserrors.Errorf("extract layer package from archive error: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(unpackDir)
 
 	byteValue, err := ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor))
 	if err != nil {
-		err = fmt.Errorf("error read layer descriptor: %s", err.Error())
+		err = aoserrors.Errorf("error read layer descriptor: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 
 	var layerDescriptor imagespec.Descriptor
 	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
-		err = fmt.Errorf("error parse json descriptor: %s", err.Error())
+		err = aoserrors.Errorf("error parse json descriptor: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 
 	layerPath, err := getValidLayerPath(layerDescriptor, unpackDir)
 	if err != nil {
-		err = fmt.Errorf("layer descriptor in incorrect: %s", err.Error())
+		err = aoserrors.Errorf("layer descriptor in incorrect: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 
 	layerStorageDir := path.Join(layermanager.layersDir, "blobs", (string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
 	if err = utils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
-		err = fmt.Errorf("extract layer to storage: %s", err.Error())
+		err = aoserrors.Errorf("extract layer to storage: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 
 	osVersion := ""
@@ -302,9 +306,9 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 	if err = layermanager.layerInfoProvider.AddLayer(desiredLayer.Digest, desiredLayer.ID,
 		layerStorageDir, osVersion, desiredLayer.VendorVersion, desiredLayer.Description,
 		desiredLayer.AosVersion); err != nil {
-		err = fmt.Errorf("can't add layer to DB: %s", err.Error())
+		err = aoserrors.Errorf("can't add layer to DB: %s", err.Error())
 		layerStatus.Error = err.Error()
-		return layerStatus, err
+		return layerStatus, aoserrors.Wrap(err)
 	}
 
 	layerStatus.Status = layerStatusInstalled
@@ -316,7 +320,7 @@ func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (
 	//TODO implement Descriptor validation
 
 	layerPath = path.Join(unTarPath, layerDescriptor.Digest.Hex())
-	return layerPath, err
+	return layerPath, aoserrors.Wrap(err)
 }
 
 func (layermanager *LayerManager) updateCurrentLayerList(layerStatus amqp.LayerInfo) {

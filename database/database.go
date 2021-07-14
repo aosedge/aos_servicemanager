@@ -28,6 +28,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -72,14 +73,18 @@ type Database struct {
 
 // New creates new database handle
 func New(name string, migrationPath string, mergedMigrationPath string) (db *Database, err error) {
-	return newDatabase(name, migrationPath, mergedMigrationPath, dbVersion)
+	if db, err = newDatabase(name, migrationPath, mergedMigrationPath, dbVersion); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return db, nil
 }
 
 // GetOperationVersion returns operation version
 func (db *Database) GetOperationVersion() (version uint64, err error) {
 	stmt, err := db.sql.Prepare("SELECT operationVersion FROM config")
 	if err != nil {
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -89,7 +94,7 @@ func (db *Database) GetOperationVersion() (version uint64, err error) {
 			return version, ErrNotExist
 		}
 
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 
 	return version, nil
@@ -99,12 +104,12 @@ func (db *Database) GetOperationVersion() (version uint64, err error) {
 func (db *Database) SetOperationVersion(version uint64) (err error) {
 	result, err := db.sql.Exec("UPDATE config SET operationVersion = ?", version)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
@@ -118,7 +123,7 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 func (db *Database) AddService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -126,7 +131,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 		service.UID, service.GID, service.State, service.Status, service.StartAt,
 		service.AlertRules, service.VendorVersion, service.Description, service.ManifestDigest)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // UpdateService updates service
@@ -138,7 +143,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 
 	if err != nil {
 		log.Error("error prepare")
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -147,39 +152,39 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 		service.VendorVersion, service.Description, service.ManifestDigest, service.ID)
 	if err != nil {
 		log.Error("error exec")
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
 		return ErrNotExist
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // RemoveService removes existing service
 func (db *Database) RemoveService(serviceID string) (err error) {
 	stmt, err := db.sql.Prepare("DELETE FROM services WHERE id = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(serviceID)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // GetService returns service by service ID
 func (db *Database) GetService(serviceID string) (service launcher.Service, err error) {
 	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE id = ?")
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -191,17 +196,17 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 		return service, ErrNotExist
 	}
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
-	return service, err
+	return service, aoserrors.Wrap(err)
 }
 
 // GetServices returns all services
 func (db *Database) GetServices() (services []launcher.Service, err error) {
 	rows, err := db.sql.Query("SELECT * FROM services")
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -212,20 +217,20 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
-			return services, err
+			return services, aoserrors.Wrap(err)
 		}
 
 		services = append(services, service)
 	}
 
-	return services, rows.Err()
+	return services, aoserrors.Wrap(rows.Err())
 }
 
 // GetServiceProviderServices returns all services belong to specified service provider
 func (db *Database) GetServiceProviderServices(serviceProvider string) (services []launcher.Service, err error) {
 	rows, err := db.sql.Query("SELECT * FROM services WHERE serviceProvider = ?", serviceProvider)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -236,20 +241,20 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
-			return services, err
+			return services, aoserrors.Wrap(err)
 		}
 
 		services = append(services, service)
 	}
 
-	return services, rows.Err()
+	return services, aoserrors.Wrap(rows.Err())
 }
 
 // GetServiceByUnitName returns service by systemd unit name
 func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
 	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -260,139 +265,139 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 		return service, ErrNotExist
 	}
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
-	return service, err
+	return service, aoserrors.Wrap(err)
 }
 
 // SetServiceStatus sets service status
 func (db *Database) SetServiceStatus(serviceID string, status launcher.ServiceStatus) (err error) {
 	stmt, err := db.sql.Prepare("UPDATE services SET status = ? WHERE id = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	result, err := stmt.Exec(status, serviceID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
 		return ErrNotExist
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // SetServiceState sets service state
 func (db *Database) SetServiceState(serviceID string, state launcher.ServiceState) (err error) {
 	stmt, err := db.sql.Prepare("UPDATE services SET state = ? WHERE id = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	result, err := stmt.Exec(state, serviceID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
 		return ErrNotExist
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // SetServiceStartTime sets service start time
 func (db *Database) SetServiceStartTime(serviceID string, time time.Time) (err error) {
 	stmt, err := db.sql.Prepare("UPDATE services SET startat = ? WHERE id = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	result, err := stmt.Exec(time, serviceID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
 		return ErrNotExist
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // AddServiceToUsers adds service ID to users
 func (db *Database) AddServiceToUsers(users []string, serviceID string) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?)")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{})
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // RemoveServiceFromUsers removes service ID from users
 func (db *Database) RemoveServiceFromUsers(users []string, serviceID string) (err error) {
 	stmt, err := db.sql.Prepare("DELETE FROM users WHERE users = ? AND serviceid = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	_, err = stmt.Exec(usersJSON, serviceID)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // SetUsersStorageFolder sets users storage folder
 func (db *Database) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	result, err := db.sql.Exec("UPDATE users SET storageFolder = ? WHERE users = ? AND serviceid = ?",
 		storageFolder, usersJSON, serviceID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
@@ -406,18 +411,18 @@ func (db *Database) SetUsersStorageFolder(users []string, serviceID string, stor
 func (db *Database) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	result, err := db.sql.Exec("UPDATE users SET stateCheckSum = ? WHERE users = ? AND serviceid = ?",
 		checksum, usersJSON, serviceID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
@@ -431,19 +436,19 @@ func (db *Database) SetUsersStateChecksum(users []string, serviceID string, chec
 func (db *Database) GetUsersService(users []string, serviceID string) (usersService launcher.UsersService, err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return usersService, err
+		return usersService, aoserrors.Wrap(err)
 	}
 
 	rows, err := db.sql.Query("SELECT storageFolder, stateCheckSum FROM users WHERE users = ? AND serviceid = ?",
 		usersJSON, serviceID)
 	if err != nil {
-		return usersService, err
+		return usersService, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		if err = rows.Scan(&usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-			return usersService, err
+			return usersService, aoserrors.Wrap(err)
 		}
 
 		usersService.Users = users
@@ -459,7 +464,7 @@ func (db *Database) GetUsersService(users []string, serviceID string) (usersServ
 func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices []launcher.UsersService, err error) {
 	rows, err := db.sql.Query("SELECT users, storageFolder, stateCheckSum FROM users WHERE serviceid = ?", serviceID)
 	if err != nil {
-		return usersServices, err
+		return usersServices, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -468,29 +473,29 @@ func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices
 		usersJSON := []byte{}
 
 		if err = rows.Scan(&usersJSON, &usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-			return usersServices, err
+			return usersServices, aoserrors.Wrap(err)
 		}
 
 		if err = json.Unmarshal(usersJSON, &usersService.Users); err != nil {
-			return usersServices, err
+			return usersServices, aoserrors.Wrap(err)
 		}
 
 		usersServices = append(usersServices, usersService)
 	}
 
-	return usersServices, rows.Err()
+	return usersServices, aoserrors.Wrap(rows.Err())
 }
 
 // GetUsersServices returns list of users services
 func (db *Database) GetUsersServices(users []string) (usersServices []launcher.Service, err error) {
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	rows, err := db.sql.Query("SELECT * FROM services WHERE id IN (SELECT serviceid FROM users WHERE users = ?)", usersJSON)
 	if err != nil {
-		return usersServices, err
+		return usersServices, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -501,44 +506,44 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
-			return usersServices, err
+			return usersServices, aoserrors.Wrap(err)
 		}
 
 		usersServices = append(usersServices, service)
 	}
 
-	return usersServices, rows.Err()
+	return usersServices, aoserrors.Wrap(rows.Err())
 }
 
 // RemoveServiceFromAllUsers removes service from all users
 func (db *Database) RemoveServiceFromAllUsers(serviceID string) (err error) {
 	stmt, err := db.sql.Prepare("DELETE FROM users WHERE serviceid = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(serviceID)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // SetTrafficMonitorData stores traffic monitor data
 func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
 	result, err := db.sql.Exec("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?", timestamp, value, chain)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
 		if _, err = db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)",
 			chain, timestamp, value); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -549,7 +554,7 @@ func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, val
 func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
 	stmt, err := db.sql.Prepare("SELECT time, value FROM trafficmonitor WHERE chain = ?")
 	if err != nil {
-		return timestamp, value, err
+		return timestamp, value, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -558,7 +563,7 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 		return timestamp, value, ErrNotExist
 	}
 	if err != nil {
-		return timestamp, value, err
+		return timestamp, value, aoserrors.Wrap(err)
 	}
 
 	return timestamp, value, nil
@@ -568,25 +573,25 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
 	stmt, err := db.sql.Prepare("DELETE FROM trafficmonitor WHERE chain = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(chain)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // SetJournalCursor stores system logger cursor
 func (db *Database) SetJournalCursor(cursor string) (err error) {
 	result, err := db.sql.Exec("UPDATE config SET cursor = ?", cursor)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
@@ -600,7 +605,7 @@ func (db *Database) SetJournalCursor(cursor string) (err error) {
 func (db *Database) GetJournalCursor() (cursor string, err error) {
 	stmt, err := db.sql.Prepare("SELECT cursor FROM config")
 	if err != nil {
-		return cursor, err
+		return cursor, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -610,7 +615,7 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 			return cursor, ErrNotExist
 		}
 
-		return cursor, err
+		return cursor, aoserrors.Wrap(err)
 	}
 
 	return cursor, nil
@@ -620,17 +625,17 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 func (db *Database) SetComponentsUpdateInfo(updateInfo []umcontroller.SystemComponent) (err error) {
 	dataJSON, err := json.Marshal(&updateInfo)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	result, err := db.sql.Exec("UPDATE config SET componentsUpdateInfo = ?", dataJSON)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if count == 0 {
@@ -644,7 +649,7 @@ func (db *Database) SetComponentsUpdateInfo(updateInfo []umcontroller.SystemComp
 func (db *Database) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
 	stmt, err := db.sql.Prepare("SELECT componentsUpdateInfo FROM config")
 	if err != nil {
-		return updateInfo, err
+		return updateInfo, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -655,7 +660,7 @@ func (db *Database) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemC
 			return updateInfo, ErrNotExist
 		}
 
-		return updateInfo, err
+		return updateInfo, aoserrors.Wrap(err)
 	}
 
 	if dataJSON == nil {
@@ -667,7 +672,7 @@ func (db *Database) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemC
 	}
 
 	if err = json.Unmarshal(dataJSON, &updateInfo); err != nil {
-		return updateInfo, err
+		return updateInfo, aoserrors.Wrap(err)
 	}
 
 	return updateInfo, nil
@@ -678,33 +683,33 @@ func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, de
 	aosVersion uint64) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(digest, layerID, path, osVersion, vendorVersion, description, aosVersion)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 //DeleteLayerByDigest remove layer from DB by digest
 func (db *Database) DeleteLayerByDigest(digest string) (err error) {
 	stmt, err := db.sql.Prepare("DELETE FROM layers WHERE digest = ?")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(digest)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 //GetLayerPathByDigest return layer installation path by digest
 func (db *Database) GetLayerPathByDigest(digest string) (path string, err error) {
 	stmt, err := db.sql.Prepare("SELECT path FROM layers WHERE digest = ?")
 	if err != nil {
-		return path, err
+		return path, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
@@ -713,7 +718,7 @@ func (db *Database) GetLayerPathByDigest(digest string) (path string, err error)
 		return path, ErrNotExist
 	}
 	if err != nil {
-		return path, err
+		return path, aoserrors.Wrap(err)
 	}
 
 	return path, nil
@@ -723,7 +728,7 @@ func (db *Database) GetLayerPathByDigest(digest string) (path string, err error)
 func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
 	rows, err := db.sql.Query("SELECT digest, layerId, aosVersion FROM layers ")
 	if err != nil {
-		return layersList, err
+		return layersList, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -731,13 +736,13 @@ func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
 		layer := amqp.LayerInfo{Status: amqp.InstalledStatus}
 
 		if err = rows.Scan(&layer.Digest, &layer.ID, &layer.AosVersion); err != nil {
-			return layersList, err
+			return layersList, aoserrors.Wrap(err)
 		}
 
 		layersList = append(layersList, layer)
 	}
 
-	return layersList, rows.Err()
+	return layersList, aoserrors.Wrap(rows.Err())
 }
 
 // Close closes database
@@ -755,17 +760,17 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 	// Check and create db path
 	if _, err = os.Stat(filepath.Dir(name)); err != nil {
 		if !os.IsNotExist(err) {
-			return db, err
+			return db, aoserrors.Wrap(err)
 		}
 		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
-			return db, err
+			return db, aoserrors.Wrap(err)
 		}
 	}
 
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
 		name, busyTimeout, journalMode, syncMode))
 	if err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 
 	db = &Database{sqlite}
@@ -776,41 +781,41 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 	}()
 
 	if err = migration.MergeMigrationFiles(migrationPath, mergedMigrationPath); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 
 	exists, err := db.isTableExist("config")
 	if err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 
 	if !exists {
 		// Set database version if database not exist
 		if err = migration.SetDatabaseVersion(sqlite, migrationPath, version); err != nil {
 			log.Errorf("Error forcing database version. Err: %s", err)
-			return db, ErrMigrationFailed
+			return db, aoserrors.Wrap(ErrMigrationFailed)
 		}
 	} else {
 		if err = migration.DoMigrate(db.sql, mergedMigrationPath, version); err != nil {
 			log.Errorf("Error during database migration. Err: %s", err)
-			return db, ErrMigrationFailed
+			return db, aoserrors.Wrap(ErrMigrationFailed)
 		}
 	}
 
 	if err := db.createConfigTable(); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 	if err := db.createServiceTable(); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 	if err := db.createUsersTable(); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 	if err := db.createTrafficMonitorTable(); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 	if err := db.createLayersTable(); err != nil {
-		return db, err
+		return db, aoserrors.Wrap(err)
 	}
 
 	return db, nil
@@ -819,13 +824,13 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 func (db *Database) isTableExist(name string) (result bool, err error) {
 	rows, err := db.sql.Query("SELECT * FROM sqlite_master WHERE name = ? and type='table'", name)
 	if err != nil {
-		return false, err
+		return false, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
 	result = rows.Next()
 
-	return result, rows.Err()
+	return result, aoserrors.Wrap(rows.Err())
 }
 
 func (db *Database) createConfigTable() (err error) {
@@ -833,7 +838,7 @@ func (db *Database) createConfigTable() (err error) {
 
 	exist, err := db.isTableExist("config")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if exist {
@@ -845,7 +850,7 @@ func (db *Database) createConfigTable() (err error) {
 			operationVersion INTEGER,
 			cursor TEXT,
 			componentsUpdateInfo BLOB)`); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = db.sql.Exec(
@@ -853,7 +858,7 @@ func (db *Database) createConfigTable() (err error) {
 			operationVersion,
 			cursor, 
 			componentsUpdateInfo) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -877,7 +882,7 @@ func (db *Database) createServiceTable() (err error) {
 															   description TEXT,
 															   manifestDigest BLOB)`)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) createUsersTable() (err error) {
@@ -889,7 +894,7 @@ func (db *Database) createUsersTable() (err error) {
 															stateCheckSum BLOB,
 															PRIMARY KEY(users, serviceid))`)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) createTrafficMonitorTable() (err error) {
@@ -899,7 +904,7 @@ func (db *Database) createTrafficMonitorTable() (err error) {
 																	 time TIMESTAMP,
 																	 value INTEGER)`)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) createLayersTable() (err error) {
@@ -913,31 +918,31 @@ func (db *Database) createLayersTable() (err error) {
 															 description TEXT,
 															 aosVersion INTEGER)`)
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) removeAllServices() (err error) {
 	_, err = db.sql.Exec("DELETE FROM services")
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) removeAllUsers() (err error) {
 	_, err = db.sql.Exec("DELETE FROM users")
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func convertListToText(list []string) (listText string, err error) {
 	data, err := json.Marshal(list)
 	if err != nil {
-		return listText, err
+		return listText, aoserrors.Wrap(err)
 	}
 
 	listText = string(data)
@@ -948,7 +953,7 @@ func convertListToText(list []string) (listText string, err error) {
 func getListfromText(text string) (list []string, err error) {
 	err = json.Unmarshal([]byte(text), &list)
 	if err != nil {
-		return list, err
+		return list, aoserrors.Wrap(err)
 	}
 
 	return list, nil

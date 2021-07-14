@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -31,6 +30,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 )
@@ -575,7 +575,7 @@ func (handler *AmqpHandler) Connect(sdURL string, users []string) (err error) {
 
 	tlsConfig, err := handler.cryptoContext.GetTLSConfig()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	var connectionInfo rabbitConnectioninfo
@@ -584,13 +584,13 @@ func (handler *AmqpHandler) Connect(sdURL string, users []string) (err error) {
 		connectionInfo, err = getConnectionInfo(sdURL,
 			handler.createAosMessage(ServiceDiscoveryType, serviceDiscoveryRequestData{Users: users}),
 			tlsConfig)
-		return err
+		return aoserrors.Wrap(err)
 	}); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = handler.setupConnections("amqps", connectionInfo, tlsConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -616,7 +616,7 @@ func (handler *AmqpHandler) ConnectRabbit(host, user, password, exchange, consum
 			Queue:    queueInfo{Name: queue}}}
 
 	if err = handler.setupConnections("amqp", connectionInfo, nil); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -853,14 +853,14 @@ func retryHelper(f func() error) (err error) {
 		}
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // service discovery implementation
 func getConnectionInfo(url string, request AOSMessage, tlsConfig *tls.Config) (info rabbitConnectioninfo, err error) {
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
-		return info, err
+		return info, aoserrors.Wrap(err)
 	}
 
 	log.WithField("request", string(reqJSON)).Info("AMQP service discovery request")
@@ -870,24 +870,24 @@ func getConnectionInfo(url string, request AOSMessage, tlsConfig *tls.Config) (i
 
 	resp, err := client.Post(url, "application/json", bytes.NewBuffer(reqJSON))
 	if err != nil {
-		return info, err
+		return info, aoserrors.Wrap(err)
 	}
 	defer resp.Body.Close()
 
 	htmlData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return info, err
+		return info, aoserrors.Wrap(err)
 	}
 
 	if resp.StatusCode != 200 {
-		return info, fmt.Errorf("%s: %s", resp.Status, string(htmlData))
+		return info, aoserrors.Errorf("%s: %s", resp.Status, string(htmlData))
 	}
 
 	var jsonResp serviceDiscoveryResp
 
 	err = json.Unmarshal(htmlData, &jsonResp) // TODO: add check
 	if err != nil {
-		return info, err
+		return info, aoserrors.Wrap(err)
 	}
 
 	return jsonResp.Connection, nil
@@ -899,13 +899,13 @@ func (handler *AmqpHandler) setupConnections(scheme string, info rabbitConnectio
 	if err := retryHelper(func() (err error) {
 		return handler.setupSendConnection(scheme, info.SendParams, tlsConfig)
 	}); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := retryHelper(func() (err error) {
 		return handler.setupReceiveConnection(scheme, info.ReceiveParams, tlsConfig)
 	}); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -925,18 +925,18 @@ func (handler *AmqpHandler) setupSendConnection(scheme string, params sendParams
 		SASL:            nil,
 		Heartbeat:       10 * time.Second})
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	amqpChannel, err := connection.Channel()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	handler.sendConnection = connection
 
 	if err = amqpChannel.Confirm(false); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	go handler.runSender(params, amqpChannel)
@@ -1011,7 +1011,7 @@ func (handler *AmqpHandler) runSender(params sendParams, amqpChannel *amqp.Chann
 		}
 
 		if !ok {
-			handler.MessageChannel <- Message{"", errors.New("receive channel is closed")}
+			handler.MessageChannel <- Message{"", aoserrors.New("receive channel is closed")}
 		}
 	}
 }
@@ -1030,12 +1030,12 @@ func (handler *AmqpHandler) setupReceiveConnection(scheme string, params receive
 		SASL:            nil,
 		Heartbeat:       10 * time.Second})
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	amqpChannel, err := connection.Channel()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	deliveryChannel, err := amqpChannel.Consume(
@@ -1048,7 +1048,7 @@ func (handler *AmqpHandler) setupReceiveConnection(scheme string, params receive
 		nil,               // args
 	)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	handler.receiveConnection = connection
@@ -1182,11 +1182,11 @@ func (handler *AmqpHandler) decodeDesiredStatusParts(data []byte, result interfa
 
 	decryptData, err := handler.cryptoContext.DecryptMetadata(data)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = json.Unmarshal(decryptData, result); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if rawJSON, ok := result.(*json.RawMessage); ok {

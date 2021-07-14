@@ -18,7 +18,6 @@
 package umcontroller
 
 import (
-	"errors"
 	"io"
 	"net"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager"
 	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 
@@ -59,7 +59,7 @@ func newServer(cfg *config.Config, ch chan umCtrlInternalMsg, insecure bool) (se
 	if insecure == false {
 		tlsConfig, err := cryptutils.GetServerMutualTLSConfig(cfg.Crypt.CACert, cfg.CertStorage)
 		if err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 
 		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
@@ -80,7 +80,7 @@ func newServer(cfg *config.Config, ch chan umCtrlInternalMsg, insecure bool) (se
 func (server *umCtrlServer) Start() (err error) {
 	server.listener, err = net.Listen("tcp", server.url)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	go server.grpcServer.Serve(server.listener)
@@ -107,15 +107,14 @@ func (server *umCtrlServer) RegisterUM(stream pb.UpdateController_RegisterUMServ
 
 	if err != nil {
 		log.Error("Error receive message from UM ", err)
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	log.Debugf("Register UM id %s status %s", statusMsg.GetUmId(), statusMsg.GetUmState().String())
 
 	handler, ch, err := newUmHandler(statusMsg.GetUmId(), stream, server.controllerCh, statusMsg.GetUmState())
 	if err != nil {
-		err = errors.New("can't create handler")
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	openConnectionMsg := umCtrlInternalMsg{

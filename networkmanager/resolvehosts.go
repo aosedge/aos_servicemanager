@@ -25,6 +25,8 @@ import (
 	"io"
 	"io/ioutil"
 
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+
 	"aos_servicemanager/config"
 )
 
@@ -45,7 +47,7 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 	content := bytes.NewBuffer(nil)
 
 	if err = writeHosts(content, defaultContent); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	ownHosts := serviceID
@@ -55,11 +57,11 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 	}
 
 	if err = writeHosts(content, append([]config.Host{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -69,15 +71,15 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 	content := bytes.NewBuffer(nil)
 
 	if err = writeNameServers(content, mainServers); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = writeNameServers(content, extraServers); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -86,7 +88,7 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 func writeHosts(w io.Writer, hosts []config.Host) (err error) {
 	for _, host := range hosts {
 		if _, err = fmt.Fprintf(w, "%s\t%s\n", host.IP, host.Hostname); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -96,7 +98,7 @@ func writeHosts(w io.Writer, hosts []config.Host) (err error) {
 func writeNameServers(w io.Writer, nameServers []string) (err error) {
 	for _, server := range nameServers {
 		if _, err = fmt.Fprintf(w, "nameserver\t%s\n", server); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 

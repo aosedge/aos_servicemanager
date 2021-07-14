@@ -20,7 +20,6 @@
 package networkmanager
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"path"
@@ -30,18 +29,24 @@ import (
 	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 func getNetworkRoutes() (routeIPList []netlink.Route, err error) {
 	initNl, err := netlink.NewHandle(syscall.NETLINK_ROUTE, syscall.NETLINK_NETFILTER)
 
 	if err != nil {
-		return nil, fmt.Errorf("could not create netlink handle on initial namespace: %v", err)
+		return nil, aoserrors.Errorf("could not create netlink handle on initial namespace: %v", err)
 	}
 
 	defer initNl.Delete()
 
-	return initNl.RouteList(nil, netlink.FAMILY_V4)
+	routeIPList, err = initNl.RouteList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return routeIPList, nil
 }
 
 func checkRouteOverlaps(toCheck *net.IPNet, networks []netlink.Route) (overlapsIPs bool) {
@@ -65,11 +70,11 @@ func removeBridgeInterface(spID string) (err error) {
 	}
 
 	if err = netlink.LinkSetDown(br); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = netlink.LinkDel(br); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -82,24 +87,24 @@ func createNetNS(name string) (err error) {
 
 		origin, err := netns.Get()
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 		defer origin.Close()
 		defer netns.Set(origin)
 
 		newns, err := netns.NewNamed(name)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 		defer newns.Close()
 
 		lo, err := netlink.LinkByName("lo")
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if err = netlink.LinkSetUp(lo); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -115,12 +120,12 @@ func getIPAddressRange(subnetwork *net.IPNet) (ipLowNetRange net.IP, ipHighNetRa
 func checkExistNetInterface(name string) (ipNet *net.IPNet, err error) {
 	netInterface, err := net.InterfaceByName(name)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find interface %s", err)
+		return nil, aoserrors.Errorf("unable to find interface %s", err)
 	}
 
 	addrs, err := netInterface.Addrs()
 	if err != nil {
-		return nil, fmt.Errorf("interface has no address %s", err)
+		return nil, aoserrors.Errorf("interface has no address %s", err)
 	}
 
 	for _, addr := range addrs {
@@ -133,5 +138,5 @@ func checkExistNetInterface(name string) (ipNet *net.IPNet, err error) {
 		}
 	}
 
-	return nil, fmt.Errorf("interface has not IPv4 address")
+	return nil, aoserrors.Errorf("interface has not IPv4 address")
 }

@@ -20,7 +20,6 @@
 package downloader
 
 import (
-	"errors"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/cavaliercoder/grab"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	"aos_servicemanager/alerts"
@@ -101,15 +101,15 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 	log.Debug("New downloader")
 
 	if config == nil {
-		return nil, errors.New("config is nil")
+		return nil, aoserrors.New("config is nil")
 	}
 
 	if err = os.MkdirAll(path.Join(config.WorkingDir, downloadDirName), 755); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(path.Join(config.WorkingDir, decryptedDirName), 755); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	downloader = &Downloader{
@@ -136,12 +136,12 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 	syscall.Statfs(downloader.downloadDir, &stat)
 
 	if packageInfo.Size > stat.Bavail*uint64(stat.Bsize) {
-		return resultFile, errors.New("not enough space")
+		return resultFile, aoserrors.New("not enough space")
 	}
 
 	fileName, err := downloader.processURLs(packageInfo.URLs)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 	defer os.Remove(fileName)
 
@@ -149,7 +149,7 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 		Sha256: packageInfo.Sha256,
 		Sha512: packageInfo.Sha512,
 		Size:   packageInfo.Size}); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if decryptDir == "" {
@@ -158,13 +158,13 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 
 	resultFile, err = downloader.decryptPackage(fileName, decryptDir, packageInfo.DecryptionInfo)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	err = downloader.validateSigns(resultFile, packageInfo.Signs, chains, certs)
 	if err != nil {
 		os.RemoveAll(resultFile)
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	return resultFile, nil
@@ -176,7 +176,7 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 
 func (downloader *Downloader) processURLs(urls []string) (resultFile string, err error) {
 	if len(urls) == 0 {
-		return "", errors.New("file list URLs is empty")
+		return "", aoserrors.New("file list URLs is empty")
 	}
 
 	fileDownloaded := false
@@ -184,7 +184,7 @@ func (downloader *Downloader) processURLs(urls []string) (resultFile string, err
 	for _, rawURL := range urls {
 		url, err := url.Parse(rawURL)
 		if err != nil {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 
 		// skip already downloaded and decrypted files
@@ -203,7 +203,7 @@ func (downloader *Downloader) processURLs(urls []string) (resultFile string, err
 	}
 
 	if !fileDownloaded {
-		return resultFile, errors.New("can't download file from any source")
+		return resultFile, aoserrors.New("can't download file from any source")
 	}
 
 	return resultFile, nil
@@ -219,7 +219,7 @@ func (downloader *Downloader) download(url string) (fileName string, err error) 
 
 	req, err := grab.NewRequest(downloader.downloadDir, url)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	//Create BeforeCopy hook
@@ -248,7 +248,7 @@ func (downloader *Downloader) download(url string) (fileName string, err error) 
 				counter = 0
 				downloadStatus, err := getAlertStatusFromResponse(resp)
 				if err != nil {
-					return "", err
+					return "", aoserrors.Wrap(err)
 				}
 
 				downloader.sender.SendDownloadStatusAlert(downloadStatus)
@@ -256,7 +256,7 @@ func (downloader *Downloader) download(url string) (fileName string, err error) 
 
 		case <-resp.Done:
 			if err := resp.Err(); err != nil {
-				return "", err
+				return "", aoserrors.Wrap(err)
 			}
 
 			log.WithFields(log.Fields{"url": url, "file": resp.Filename}).Debug("Download complete")
@@ -272,13 +272,13 @@ func (downloader *Downloader) beforeCopyHook(resp *grab.Response) (err error) {
 
 	if !fileExists(copyStartedFile) {
 		if err = createFile(copyStartedFile); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if downloader.sender != nil {
 			downloadStatus, err := getAlertStatusFromResponse(resp)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			downloader.sender.SendDownloadStartedStatusAlert(downloadStatus)
@@ -288,14 +288,14 @@ func (downloader *Downloader) beforeCopyHook(resp *grab.Response) (err error) {
 		//then no interrupted alert was sent. Sending interrupted alert
 		if !fileExists(copyInterruptedFile) {
 			if err = createFile(copyInterruptedFile); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			log.Debug("Send download interrupted alert")
 			if downloader.sender != nil {
 				downloadStatus, err := getAlertStatusFromResponse(resp)
 				if err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 
 				//TODO: read reason from interruption flag file
@@ -309,7 +309,7 @@ func (downloader *Downloader) beforeCopyHook(resp *grab.Response) (err error) {
 		if downloader.sender != nil {
 			downloadStatus, err := getAlertStatusFromResponse(resp)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			//TODO: read reason from interruption flag file
@@ -327,13 +327,13 @@ func (downloader *Downloader) afterCopyHook(resp *grab.Response) (err error) {
 	if fileExists(copyStartedFile) {
 		log.WithField("file", copyStartedFile).Debug("Flag removed. Download finished successfully")
 		if err = os.Remove(copyStartedFile); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if fileExists(copyInterruptedFile) {
 		if err = os.Remove(copyInterruptedFile); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -341,7 +341,7 @@ func (downloader *Downloader) afterCopyHook(resp *grab.Response) (err error) {
 	if downloader.sender != nil {
 		downloadStatus, err := getAlertStatusFromResponse(resp)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		downloader.sender.SendDownloadFinishedStatusAlert(downloadStatus, resp.HTTPResponse.StatusCode)
@@ -359,7 +359,7 @@ func (downloader *Downloader) finalizeDownload(resp *grab.Response) (err error) 
 		if downloader.sender != nil {
 			downloadStatus, err := getAlertStatusFromResponse(resp)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			//TODO: read reason from interruption flag file
@@ -367,7 +367,7 @@ func (downloader *Downloader) finalizeDownload(resp *grab.Response) (err error) 
 		}
 
 		if err = createFile(copyInterruptedFile); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -377,11 +377,11 @@ func (downloader *Downloader) finalizeDownload(resp *grab.Response) (err error) 
 func (downloader *Downloader) decryptPackage(srcFileName string, decryptDir string,
 	decryptionInfo *amqp.DecryptionInfo) (resultFile string, err error) {
 	if decryptionInfo == nil {
-		return "", errors.New("no decrypt image info")
+		return "", aoserrors.New("no decrypt image info")
 	}
 
 	if decryptionInfo.ReceiverInfo == nil {
-		return "", errors.New("no receiver info")
+		return "", aoserrors.New("no receiver info")
 	}
 
 	context, err := downloader.crypt.ImportSessionKey(fcrypt.CryptoSessionKeyInfo{
@@ -394,12 +394,12 @@ func (downloader *Downloader) decryptPackage(srcFileName string, decryptDir stri
 			Serial: decryptionInfo.ReceiverInfo.Serial},
 	})
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	srcFile, err := os.Open(srcFileName)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 	defer srcFile.Close()
 
@@ -407,7 +407,7 @@ func (downloader *Downloader) decryptPackage(srcFileName string, decryptDir stri
 
 	dstFile, err := os.OpenFile(dstFileName, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 	defer func() {
 		dstFile.Close()
@@ -420,45 +420,45 @@ func (downloader *Downloader) decryptPackage(srcFileName string, decryptDir stri
 	log.WithFields(log.Fields{"srcFile": srcFile.Name(), "dstFile": dstFile.Name()}).Debug("Decrypt image")
 
 	if err = context.DecryptFile(srcFile, dstFile); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
-	return dstFileName, err
+	return dstFileName, aoserrors.Wrap(err)
 }
 
 func (downloader *Downloader) validateSigns(filePath string, signs *amqp.Signs,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
 	context, err := downloader.crypt.CreateSignContext()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, cert := range certs {
 		if err = context.AddCertificate(cert.Fingerprint, cert.Certificate); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	for _, chain := range chains {
 		if err = context.AddCertificateChain(chain.Name, chain.Fingerprints); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if signs == nil {
-		return errors.New("package does not have signature")
+		return aoserrors.New("package does not have signature")
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	log.WithField("file", file.Name()).Debug("Check signature")
 
 	if err = context.VerifySign(file, signs.ChainName, signs.Alg, signs.Value); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -466,7 +466,7 @@ func (downloader *Downloader) validateSigns(filePath string, signs *amqp.Signs,
 
 func getAlertStatusFromResponse(resp *grab.Response) (status alerts.DownloadAlertStatus, err error) {
 	if resp == nil {
-		return alerts.DownloadAlertStatus{}, errors.New("invalid response")
+		return alerts.DownloadAlertStatus{}, aoserrors.New("invalid response")
 	}
 
 	return alerts.DownloadAlertStatus{Source: moduleID, URL: resp.Request.HTTPRequest.URL.String(),
@@ -484,5 +484,5 @@ func fileExists(filename string) bool {
 }
 
 func createFile(filename string) (err error) {
-	return ioutil.WriteFile(filename, []byte{}, flagAccessRights)
+	return aoserrors.Wrap(ioutil.WriteFile(filename, []byte{}, flagAccessRights))
 }

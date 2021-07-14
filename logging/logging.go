@@ -25,6 +25,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -361,7 +362,7 @@ func (instance *Logging) addServiceIDFilter(journal *sdjournal.Journal,
 	}
 
 	if err = journal.AddMatch(fieldName + "=" + service.UnitName); err != nil {
-		return unitName, err
+		return unitName, aoserrors.Wrap(err)
 	}
 
 	return service.UnitName, nil
@@ -369,10 +370,10 @@ func (instance *Logging) addServiceIDFilter(journal *sdjournal.Journal,
 
 func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time) (err error) {
 	if from != nil {
-		return journal.SeekRealtimeUsec(uint64(from.UnixNano() / 1000))
+		return aoserrors.Wrap(journal.SeekRealtimeUsec(uint64(from.UnixNano() / 1000)))
 	}
 
-	return journal.SeekHead()
+	return aoserrors.Wrap(journal.SeekHead())
 }
 
 func createLogString(entry *sdjournal.JournalEntry, addUnit bool) (logStr string) {

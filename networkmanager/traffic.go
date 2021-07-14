@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -145,7 +145,7 @@ func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint
 		}
 	}
 
-	return 0, errors.New("statistic for chain not found")
+	return 0, aoserrors.New("statistic for chain not found")
 }
 
 func (monitor *trafficMonitoring) isSamePeriod(t1, t2 time.Time) (result bool) {

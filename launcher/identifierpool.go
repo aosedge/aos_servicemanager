@@ -19,12 +19,12 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
 	"os/user"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -55,11 +55,11 @@ func (pool *identifierPool) add(uid, gid uint32) error {
 	defer pool.Unlock()
 
 	if isInPool(pool.lockedUIDs, uid) {
-		return errors.New("service with given UID already exist in pool")
+		return aoserrors.New("service with given UID already exist in pool")
 	}
 
 	if isInPool(pool.lockedGIDs, gid) {
-		return errors.New("service with given GID already exist in pool")
+		return aoserrors.New("service with given GID already exist in pool")
 	}
 
 	pool.lockedUIDs = append(pool.lockedUIDs, uid)
@@ -140,7 +140,7 @@ func getFreeID(pool []uint32, systemAvailability func(uint32) bool) (id uint32, 
 		return i, nil
 	}
 
-	return 0, errors.New("can't get free id")
+	return 0, aoserrors.New("can't get free id")
 }
 
 func removeID(pool *[]uint32, id uint32) (err error) {
@@ -151,5 +151,5 @@ func removeID(pool *[]uint32, id uint32) (err error) {
 		}
 	}
 
-	return errors.New("can't remove ID from pool: UID/GID is not found")
+	return aoserrors.New("can't remove ID from pool: UID/GID is not found")
 }

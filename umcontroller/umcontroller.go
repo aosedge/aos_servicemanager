@@ -18,7 +18,6 @@
 package umcontroller
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/looplab/fsm"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -213,7 +213,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 	}
 
 	if umCtrl.fileStorage, err = newFileStorage(config.UmController); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	for _, client := range config.UmController.UmClients {
 		umCtrl.connections = append(umCtrl.connections, umConnection{umID: client.UmID,
@@ -281,7 +281,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 
 	umCtrl.server, err = newServer(config, umCtrl.eventChannel, insecure)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	go umCtrl.processInternallMessages()
@@ -587,19 +587,19 @@ func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.Compone
 
 	infoForUpdate.URL, err = umCtrl.downloader.DownloadAndDecrypt(decryptData, chains, certs, umCtrl.updateDir)
 	if err != nil {
-		return infoForUpdate, err
+		return infoForUpdate, aoserrors.Wrap(err)
 	}
 
 	fileInfo, err := image.CreateFileInfo(infoForUpdate.URL)
 	if err != nil {
-		return infoForUpdate, err
+		return infoForUpdate, aoserrors.Wrap(err)
 	}
 
 	infoForUpdate.Sha256 = fileInfo.Sha256
 	infoForUpdate.Sha512 = fileInfo.Sha512
 	infoForUpdate.Size = fileInfo.Size
 
-	return infoForUpdate, err
+	return infoForUpdate, aoserrors.Wrap(err)
 }
 
 func (umCtrl *UmController) getCurrentUpdateState() (state string) {
@@ -640,7 +640,7 @@ func (umCtrl *UmController) getUpdateComponentsFromStorage() (err error) {
 
 	updatecomponents, err := umCtrl.storage.GetComponentsUpdateInfo()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, component := range updatecomponents {
@@ -692,7 +692,7 @@ func (umCtrl *UmController) cleanupUpdateData() {
 
 func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) (err error) {
 	if umCtrl.operable == false {
-		return errors.New("update controller in shutdown state")
+		return aoserrors.New("update controller in shutdown state")
 	}
 
 	err = umCtrl.fsm.Event(event, args...)
@@ -700,7 +700,7 @@ func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) 
 		log.Error("Error transaction ", err)
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (monitor *allConnectionMonitor) startConnectionTimer(connectionsCount int) {

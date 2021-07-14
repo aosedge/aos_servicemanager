@@ -36,6 +36,7 @@ import (
 	"github.com/shirou/gopsutil/mem"
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -94,11 +95,13 @@ type Monitor struct {
 
 // ServiceMonitoringConfig contains info about service and rules for monitoring alerts
 type ServiceMonitoringConfig struct {
-	ServiceDir   string
-	IPAddress    string
-	UID          uint32
-	GID          uint32
-	ServiceRules *amqp.ServiceAlertRules
+	ServiceDir    string
+	IPAddress     string
+	UID           uint32
+	GID           uint32
+	UploadLimit   uint64
+	DownloadLimit uint64
+	ServiceRules  *amqp.ServiceAlertRules
 }
 
 type trafficMonitoring struct {
@@ -344,12 +347,12 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 func GetServicePid(servicePath string) (pid int32, err error) {
 	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
 	if err != nil {
-		return pid, err
+		return pid, aoserrors.Wrap(err)
 	}
 
 	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
 	if err != nil {
-		return pid, err
+		return pid, aoserrors.Wrap(err)
 	}
 
 	return int32(pid64), nil
@@ -470,7 +473,7 @@ func (monitor *Monitor) processAlerts() {
 func getSystemCPUUsage() (cpuUse float64, err error) {
 	v, err := cpu.Percent(0, false)
 	if err != nil {
-		return 0, err
+		return 0, aoserrors.Wrap(err)
 	}
 
 	cpuUse = v[0]
@@ -482,7 +485,7 @@ func getSystemCPUUsage() (cpuUse float64, err error) {
 func getSystemRAMUsage() (ram uint64, err error) {
 	v, err := mem.VirtualMemory()
 	if err != nil {
-		return ram, err
+		return ram, aoserrors.Wrap(err)
 	}
 
 	return v.Used, nil
@@ -492,7 +495,7 @@ func getSystemRAMUsage() (ram uint64, err error) {
 func getSystemDiskUsage(path string) (discUse uint64, err error) {
 	v, err := disk.Usage(path)
 	if err != nil {
-		return discUse, err
+		return discUse, aoserrors.Wrap(err)
 	}
 
 	return v.Used, nil
@@ -502,7 +505,7 @@ func getSystemDiskUsage(path string) (discUse uint64, err error) {
 func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
 	processes, err := process.Processes()
 	if err != nil {
-		return 0, err
+		return 0, aoserrors.Wrap(err)
 	}
 
 	for _, process := range processes {
@@ -531,7 +534,7 @@ func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
 func getServiceRAMUsage(uid int32) (ram uint64, err error) {
 	processes, err := process.Processes()
 	if err != nil {
-		return 0, err
+		return 0, aoserrors.Wrap(err)
 	}
 
 	for _, process := range processes {
@@ -559,7 +562,7 @@ func getServiceRAMUsage(uid int32) (ram uint64, err error) {
 // getServiceDiskUsage returns service disk usage in bytes
 func getServiceDiskUsage(path string, uid, gid uint32) (diskUse uint64, err error) {
 	if diskUse, err = platform.GetUserFSQuotaUsage(path, uid, gid); err != nil {
-		return diskUse, err
+		return diskUse, aoserrors.Wrap(err)
 	}
 
 	return diskUse, nil

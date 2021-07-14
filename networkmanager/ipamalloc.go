@@ -20,10 +20,10 @@
 package networkmanager
 
 import (
-	"fmt"
 	"net"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -44,7 +44,7 @@ func newIPam() (ipam *ipSubnetwork, err error) {
 
 	ipam = &ipSubnetwork{}
 	if ipam.predefinedPrivateNetworks, err = makeNetPools(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	ipam.usedIPSubnetNetworks = make(map[string]*net.IPNet)
 
@@ -66,12 +66,12 @@ func (ipam *ipSubnetwork) requestIPNetPool(spID string) (allocIPNet *net.IPNet, 
 	}
 
 	if len(ipam.predefinedPrivateNetworks) == 0 {
-		return nil, usedIPNet, fmt.Errorf("IP subnet pool is empty")
+		return nil, usedIPNet, aoserrors.Errorf("IP subnet pool is empty")
 	}
 
 	allocIPNet, err = ipam.findUnusedIPSubnetwork()
 	if err != nil {
-		return nil, usedIPNet, err
+		return nil, usedIPNet, aoserrors.Wrap(err)
 	}
 	ipam.usedIPSubnetNetworks[spID] = allocIPNet
 
@@ -92,7 +92,7 @@ func (ipam *ipSubnetwork) releaseIPNetPool(spID string) {
 func (ipam *ipSubnetwork) findUnusedIPSubnetwork() (unusedIPNet *net.IPNet, err error) {
 	networks, err := getNetworkRoutes()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	for i, nw := range ipam.predefinedPrivateNetworks {
 		if !checkRouteOverlaps(nw, networks) {
@@ -102,5 +102,5 @@ func (ipam *ipSubnetwork) findUnusedIPSubnetwork() (unusedIPNet *net.IPNet, err 
 		}
 	}
 
-	return nil, fmt.Errorf("no available network")
+	return nil, aoserrors.Errorf("no available network")
 }

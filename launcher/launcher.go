@@ -21,7 +21,6 @@ package launcher
 import (
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -38,6 +37,7 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"golang.org/x/sys/unix"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -314,55 +314,55 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 
 	if launcher.actionHandler, err = newActionHandler(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if launcher.storageHandler, err = newStorageHandler(config.StorageDir, serviceProvider,
 		launcher.NewStateChannel, sender); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	// Check and create service dir
 	dir := path.Join(config.WorkingDir, serviceDir)
 	if _, err = os.Stat(dir); err != nil {
 		if !os.IsNotExist(err) {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 		if err = os.MkdirAll(dir, 0755); err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 
 	// Create systemd connection
 	launcher.systemd, err = dbus.NewSystemConnection()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	// Get systemd service template
 	launcher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	// Retrieve runc abs path
 	launcher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = launcher.prepareHostfsDir(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	// Create storage dir
 	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	for _, service := range services {
@@ -391,7 +391,7 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 
 	version = service.AosVersion
@@ -426,12 +426,12 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 	//Check for storage folder
 	if _, err = os.Stat(launcher.config.StorageDir); err != nil {
 		log.Error("Can't find storagedir")
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, service := range services {
@@ -440,7 +440,7 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 
 			//try to remove only corrupted service
 			if err := launcher.removeService(service); err != nil {
-				return fmt.Errorf("can't remove corrupted service: %s", err.Error())
+				return aoserrors.Wrap(err)
 			}
 		}
 	}
@@ -454,7 +454,7 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 
 	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
-		return info, err
+		return info, aoserrors.Wrap(err)
 	}
 
 	info = make([]amqp.ServiceInfo, len(services))
@@ -464,12 +464,12 @@ func (launcher *Launcher) GetServicesInfo() (info []amqp.ServiceInfo, err error)
 
 		userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 		if err != nil {
-			return info, err
+			return info, aoserrors.Wrap(err)
 		}
 
 		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 		if err != nil {
-			return info, err
+			return info, aoserrors.Wrap(err)
 		}
 
 		if aosConfig.GetStateLimit() != 0 {
@@ -489,7 +489,7 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 	}
 
 	if err = launcher.addUserServicesToSystemd(users); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	launcher.StopServices()
@@ -509,7 +509,7 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 func (launcher *Launcher) RemoveAllServices() (err error) {
 	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	statusChannel := make(chan error, len(services))
@@ -519,7 +519,7 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
-					statusChannel <- errors.New("wrong data type")
+					statusChannel <- aoserrors.New("wrong data type")
 					return
 				}
 
@@ -538,18 +538,18 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 
 	err = launcher.systemd.Reload()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	services, err = launcher.serviceProvider.GetServices()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	if len(services) != 0 {
-		return errors.New("can't remove all services")
+		return aoserrors.New("can't remove all services")
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 // StateAcceptance notifies launcher about new state acceptance
@@ -664,7 +664,7 @@ func (launcher *Launcher) StartServices() {
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
-					statusChannel <- errors.New("wrong data type")
+					statusChannel <- aoserrors.New("wrong data type")
 					return
 				}
 
@@ -709,7 +709,7 @@ func (launcher *Launcher) StopServices() {
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
-					statusChannel <- errors.New("wrong data type")
+					statusChannel <- aoserrors.New("wrong data type")
 					return
 				}
 
@@ -731,18 +731,18 @@ func (launcher *Launcher) StopServices() {
 func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
 	service, err := launcher.serviceProvider.GetService(serviceID)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	// TODO: delete this functionality after adding a functional vis server
 	jsonPermissions, err := json.Marshal(aosConfig.Permissions)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	return string(jsonPermissions), nil
@@ -763,22 +763,22 @@ func (status ServiceStatus) String() string {
 func (launcher *Launcher) addUserServicesToSystemd(users []string) (err error) {
 	services, err := launcher.serviceProvider.GetUsersServices(users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, service := range services {
 		fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = launcher.systemd.Reload(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -788,7 +788,7 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 	witeoutsDir := path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir)
 
 	if err = os.MkdirAll(witeoutsDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	allowedDirs := defaultHostfsBinds
@@ -799,7 +799,7 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 
 	rootContent, err := ioutil.ReadDir("/")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, item := range rootContent {
@@ -811,7 +811,7 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 		}
 
 		if !os.IsNotExist(err) {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		allowed := false
@@ -830,7 +830,7 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 
 		// Create whiteout for not allowed items
 		if err = syscall.Mknod(itemPath, syscall.S_IFCHR, int(unix.Mkdev(0, 0))); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -876,7 +876,7 @@ func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 
 	serviceInfo, ok := data.(serviceInfoToInstall)
 	if !ok {
-		err = errors.New("wrong data type")
+		err = aoserrors.New("wrong data type")
 		return
 	}
 
@@ -922,28 +922,28 @@ func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) 
 
 func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err error) {
 	if launcher.users == nil {
-		return errors.New("users are not set")
+		return aoserrors.New("users are not set")
 	}
 
 	service, err := launcher.serviceProvider.GetService(serviceInfo.serviceDetails.ID)
 	if err != nil && !strings.Contains(err.Error(), "not exist") {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	serviceExists := err == nil
 
 	// Skip incorrect version
 	if serviceExists && serviceInfo.serviceDetails.AosVersion < service.AosVersion {
-		return errors.New("version mistmatch")
+		return aoserrors.New("version mistmatch")
 	}
 
 	// If same service version exists, just start the service
 	if serviceExists && serviceInfo.serviceDetails.AosVersion == service.AosVersion {
 		if err = launcher.addServiceToCurrentUsers(serviceInfo.serviceDetails.ID); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if err = launcher.startService(service); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		return nil
@@ -965,21 +965,21 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 		defer os.Remove(image)
 	}
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = utils.UnpackTarImage(image, unpackDir); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = validateUnpackedImage(unpackDir); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	servicePath := path.Join(launcher.config.WorkingDir, serviceDir)
 	// Create services dir if needed
 	if err = os.MkdirAll(servicePath, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// We need to install or update the service
@@ -987,7 +987,7 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 	// create install dir
 	installDir, err := ioutil.TempDir(servicePath, "")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	defer func() {
@@ -1007,16 +1007,16 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 
 	newService, err := launcher.prepareService(unpackDir, installDir, serviceInfo.serviceDetails)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if !serviceExists {
 		if err = launcher.addService(newService); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	} else {
 		if err = launcher.updateService(service, newService); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -1026,22 +1026,22 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 func (launcher *Launcher) uninstallService(id string) (version uint64, err error) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
-		return 0, err
+		return 0, aoserrors.Wrap(err)
 	}
 
 	version = service.AosVersion
 
 	if launcher.users == nil {
-		return version, errors.New("users are not set")
+		return version, aoserrors.New("users are not set")
 	}
 
 	if err := launcher.stopService(service); err != nil {
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 
 	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 	if err != nil {
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 
 	if userService.StorageFolder != "" {
@@ -1050,12 +1050,12 @@ func (launcher *Launcher) uninstallService(id string) (version uint64, err error
 			"serviceID": service.ID}).Debug("Remove storage folder")
 
 		if err = os.RemoveAll(userService.StorageFolder); err != nil {
-			return version, err
+			return version, aoserrors.Wrap(err)
 		}
 	}
 
 	if err = launcher.serviceProvider.RemoveServiceFromUsers(launcher.users, service.ID); err != nil {
-		return version, err
+		return version, aoserrors.Wrap(err)
 	}
 
 	return version, nil
@@ -1113,14 +1113,14 @@ func (launcher *Launcher) doStateAcceptance(id string, data interface{}) {
 func (launcher *Launcher) updateServiceState(id string, state ServiceState, status ServiceStatus) (err error) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if service.State != state {
 		log.WithField("id", id).Debugf("Set service state: %s", state)
 
 		if err = launcher.serviceProvider.SetServiceState(id, state); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -1128,7 +1128,7 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 		log.WithField("id", id).Debugf("Set service status: %s", status)
 
 		if err = launcher.serviceProvider.SetServiceStatus(id, status); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -1140,7 +1140,7 @@ func (launcher *Launcher) mountRootfs(service Service, storageFolder string, lay
 
 	// create merged dir
 	if err = os.MkdirAll(mergedDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	upperDir, workDir := "", ""
@@ -1158,7 +1158,7 @@ func (launcher *Launcher) mountRootfs(service Service, storageFolder string, lay
 	layerDirs = append(layerDirs, string("/"))
 
 	if err = overlayMount(mergedDir, layerDirs, workDir, upperDir); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1170,7 +1170,7 @@ func (launcher *Launcher) umountRootfs(service Service) (err error) {
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service rootfs")
 
 	if err = umountWithRetry(mergedDir, 0); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1180,12 +1180,12 @@ func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, service Se
 	aosSrvConf *aosServiceConfig) (err error) {
 	// Update Devices in spec
 	if err = launcher.setDevices(spec, aosSrvConf.Devices); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// Update Resources in spec
 	if err = launcher.setServiceResources(spec, aosSrvConf.Resources); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1194,32 +1194,32 @@ func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, service Se
 func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Service,
 	aosSrvConf *aosServiceConfig) (err error) {
 	if err = spec.bindHostDirs(launcher.config.WorkingDir); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = spec.setRootfs(serviceMergedDir); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.createMountPoints(service.Path, spec); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service,
 		aosSrvConf.GetStorageLimit(), aosSrvConf.GetStateLimit())
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if aosSrvConf.GetStateLimit() > 0 {
 		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	imageParts, err := getImageParts(service.Path)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	layers := make([]string, 0, len(imageParts.layersDigest))
@@ -1227,14 +1227,14 @@ func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Servic
 	for _, layerDigest := range imageParts.layersDigest {
 		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		layers = append(layers, layerPath)
 	}
 
 	if err = launcher.mountRootfs(service, storageFolder, layers); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1293,17 +1293,17 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 	}
 
 	if params.Hosts, err = launcher.getHostsFromResources(aosSrvConf.Resources); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, networkFile := range networkFiles {
 		if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1317,7 +1317,7 @@ func (launcher *Launcher) registerService(spec *serviceSpec, service Service,
 
 	secret, err := launcher.serviceRegistrar.RegisterService(service.ID, aosSrvConf.Permissions)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	spec.mergeEnv([]string{aosSecretEnv + "=" + secret})
@@ -1331,7 +1331,7 @@ func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServ
 	}
 
 	if err := launcher.serviceRegistrar.UnregisterService(service.ID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1340,18 +1340,18 @@ func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServ
 func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
 	err = validateImageManifest(service)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// generate config.json
 	spec, err := generateRuntimeSpec(imageSpec, path.Join(service.Path, ociRuntimeConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer func() {
 		if specErr := spec.save(); specErr != nil {
@@ -1364,29 +1364,29 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 	spec.setUserUIDGID(service.UID, service.GID)
 
 	if err = spec.applyAosServiceConfig(aosConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := launcher.applyDevicesAndResources(spec, service, aosConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := launcher.registerService(spec, service, aosConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := launcher.prepareServiceRootfs(spec, service, aosConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if launcher.network != nil {
 		if err = launcher.applyNetworkSettings(spec, service, aosConfig, &imageSpec); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = launcher.requestDeviceResources(service, aosConfig.Devices); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1395,15 +1395,15 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.systemd.Reload(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1414,7 +1414,7 @@ func (launcher *Launcher) requestDeviceResources(service Service, devices []Devi
 		log.Debugf("Request device %s, for %s service", device.Name, service.ID)
 
 		if err = launcher.devicemanager.RequestDevice(device.Name, service.ID); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -1430,16 +1430,16 @@ func (launcher *Launcher) startService(service Service) (err error) {
 
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.prestartService(service, &aosConfig); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	channel := make(chan string)
 	if _, err = launcher.systemd.StartUnit(service.UnitName, "replace", channel); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	status := <-channel
 
@@ -1469,7 +1469,7 @@ func (launcher *Launcher) releaseDeviceResources(service Service, devices []Devi
 		log.Debugf("Release device %s, for %s service", device.Name, service.ID)
 
 		if err = launcher.devicemanager.ReleaseDevice(device.Name, service.ID); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -1517,7 +1517,7 @@ func (launcher *Launcher) poststopService(service Service, aosConfig *aosService
 		}
 	}
 
-	return retErr
+	return aoserrors.Wrap(retErr)
 }
 
 func (launcher *Launcher) stopService(service Service) (retErr error) {
@@ -1564,7 +1564,7 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 
 	delete(launcher.services, service.ID)
 
-	return retErr
+	return aoserrors.Wrap(retErr)
 }
 
 func (launcher *Launcher) restoreService(service Service) (retErr error) {
@@ -1579,7 +1579,7 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := platform.SetUserFSQuota(launcher.config.StorageDir, aosConfig.GetStorageLimit(),
@@ -1604,14 +1604,14 @@ func (launcher *Launcher) restoreService(service Service) (retErr error) {
 		}
 	}
 
-	return retErr
+	return aoserrors.Wrap(retErr)
 }
 
 func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec) (err error) {
 	mountPointsDir := path.Join(serviceDir, serviceMountPointsDir)
 
 	if err = os.MkdirAll(mountPointsDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, mount := range spec.ocSpec.Mounts {
@@ -1623,7 +1623,7 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 
 			if len(nameValue) > 1 && nameValue[0] == "mode" {
 				if permissions, err = strconv.ParseUint(nameValue[1], 8, 32); err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 			}
 		}
@@ -1633,40 +1633,40 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 		switch mount.Type {
 		case "proc", "tmpfs", "sysfs":
 			if err = os.MkdirAll(itemPath, 0755); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			if permissions != 0 {
 				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 			}
 
 		case "bind":
 			stat, err := os.Stat(mount.Source)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			if stat.IsDir() {
 				if err = os.MkdirAll(itemPath, 0755); err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 			} else {
 				if err = os.MkdirAll(filepath.Dir(itemPath), 0755); err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 
 				file, err := os.OpenFile(itemPath, os.O_CREATE, 0644)
 				if err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 				file.Close()
 			}
 
 			if permissions != 0 {
 				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 			}
 		}
@@ -1683,19 +1683,19 @@ func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (err e
 	for _, device := range devices {
 		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		for _, hostDevice := range deviceResource.HostDevices {
 			// use absolute path from host devices and permissions from aos configuration
 			if err = spec.addHostDevice(Device{hostDevice, device.Permissions}); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 		}
 
 		for _, group := range deviceResource.Groups {
 			if err = spec.addAdditionalGroup(group); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 		}
 
@@ -1708,12 +1708,12 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 	for _, resource := range resources {
 		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		for _, group := range boardResource.Groups {
 			if err = spec.addAdditionalGroup(group); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 		}
 
@@ -1722,7 +1722,7 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 				Source:  mount.Source,
 				Type:    mount.Type,
 				Options: mount.Options}); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 		}
 
@@ -1736,7 +1736,7 @@ func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []con
 	for _, resource := range resources {
 		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
 		if err != nil {
-			return hosts, err
+			return hosts, aoserrors.Wrap(err)
 		}
 
 		hosts = append(hosts, boardResource.Hosts...)
@@ -1749,25 +1749,25 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
 	uid, gid, err := launcher.idsPool.getFree()
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	imageParts, err := getImageParts(unpackDir)
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	if err := utils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir, manifestFileName)); err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	if err := utils.CopyFile(imageParts.imageConfigPath, path.Join(installDir, ociImageConfigFile)); err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	if err := utils.CopyFile(imageParts.aosSrvConfigPath, path.Join(installDir, aosServiceConfigFile)); err != nil {
 		if !os.IsNotExist(err) {
-			return service, err
+			return service, aoserrors.Wrap(err)
 		}
 
 		log.Debug("Service without aos service configuration")
@@ -1777,28 +1777,28 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	// unpack rootfs layer
 	if err = utils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	if err = filepath.Walk(rootfsDir, func(name string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		return os.Chown(name, int(uid), int(gid))
 	}); err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	serviceName := "aos_" + serviceInfo.ID + ".service"
 
 	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.ID); err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	alertRules, err := json.Marshal(serviceInfo.AlertRules)
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	service = Service{
@@ -1822,7 +1822,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 
 	service.ManifestDigest, err = getManifestChecksum(service.Path)
 	if err != nil {
-		return service, err
+		return service, aoserrors.Wrap(err)
 	}
 
 	return service, nil
@@ -1834,16 +1834,16 @@ func (launcher *Launcher) addService(service Service) (err error) {
 
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir,
 		aosConfig.GetStorageLimit()+aosConfig.GetStateLimit(), service.UID, service.GID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.serviceProvider.AddService(service); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	defer func() {
@@ -1855,18 +1855,18 @@ func (launcher *Launcher) addService(service Service) (err error) {
 	}()
 
 	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.addServiceToSystemd(service); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.startService(service); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (launcher *Launcher) updateService(oldService, newService Service) (err error) {
@@ -1896,40 +1896,40 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 
 	newAosConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.addServiceToCurrentUsers(newService.ID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
 		newService.UID, newService.GID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.stopService(oldService); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.RemoveAll(oldService.Path); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.addServiceToSystemd(newService); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.startService(newService); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if launcher.sender != nil {
@@ -2032,7 +2032,7 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
-	return retErr
+	return aoserrors.Wrap(retErr)
 }
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
@@ -2040,13 +2040,13 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	fileContent, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return template, err
+			return template, aoserrors.Wrap(err)
 		}
 
 		log.Warnf("Service template file does not exist. Creating %s", fileName)
 
 		if err = ioutil.WriteFile(fileName, []byte(serviceTemplate), 0644); err != nil {
-			return template, err
+			return template, aoserrors.Wrap(err)
 		}
 
 		return serviceTemplate, nil
@@ -2058,13 +2058,13 @@ func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 func (launcher *Launcher) createSystemdService(installDir, serviceName, id string) (err error) {
 	f, err := os.Create(path.Join(installDir, serviceName))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer f.Close()
 
 	absServicePath, err := filepath.Abs(installDir)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
@@ -2082,7 +2082,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		fmt.Fprint(f, line)
 	}
 
-	return err
+	return aoserrors.Wrap(err)
 }
 
 func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, aosConfig *aosServiceConfig) (err error) {
@@ -2091,7 +2091,7 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 		var rules amqp.ServiceAlertRules
 
 		if err := json.Unmarshal([]byte(service.AlertRules), &rules); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		var ipAddress string
@@ -2110,12 +2110,12 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 			ServiceRules: &rules}
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoringConfig); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 	case stateStopped:
 		if err = launcher.monitor.StopMonitorService(service.ID); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -2129,11 +2129,11 @@ func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error)
 	}
 
 	if !strings.Contains(err.Error(), "not exist") {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.serviceProvider.AddServiceToUsers(launcher.users, serviceID); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -2144,12 +2144,12 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 
 	startedServices, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	allServices, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	now := time.Now()
@@ -2174,7 +2174,7 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 
 		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		ttl := launcher.config.DefaultServiceTTL
@@ -2203,22 +2203,22 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 func (launcher *Launcher) isServiceValid(service Service) (err error) {
 	//check service folder
 	if fi, err := os.Stat(service.Path); os.IsNotExist(err) || !fi.Mode().IsDir() {
-		return fmt.Errorf("service folder %s doesn't exist", service.Path)
+		return aoserrors.Errorf("service folder %s doesn't exist", service.Path)
 	}
 
 	//check image manifest
 	if _, err = os.Stat(path.Join(service.Path, manifestFileName)); os.IsNotExist(err) {
-		return fmt.Errorf("image manifest file %s doesn't exist", path.Join(service.Path, manifestFileName))
+		return aoserrors.Errorf("image manifest file %s doesn't exist", path.Join(service.Path, manifestFileName))
 	}
 
 	//check image specification
 	if _, err = os.Stat(path.Join(service.Path, ociImageConfigFile)); os.IsNotExist(err) {
-		return fmt.Errorf("image specification file %s doesn't exist", path.Join(service.Path, ociImageConfigFile))
+		return aoserrors.Errorf("image specification file %s doesn't exist", path.Join(service.Path, ociImageConfigFile))
 	}
 
 	//check service file
 	if _, err = os.Stat(path.Join(service.Path, service.UnitName)); os.IsNotExist(err) {
-		return fmt.Errorf("service file %s doesn't exist", path.Join(service.Path, service.UnitName))
+		return aoserrors.Errorf("service file %s doesn't exist", path.Join(service.Path, service.UnitName))
 	}
 
 	return nil

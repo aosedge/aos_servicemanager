@@ -18,8 +18,9 @@
 package fcrypt
 
 import (
-	"errors"
 	"strings"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -30,18 +31,18 @@ func removePkcs7Padding(in []byte, blocklen int) ([]byte, error) {
 	l := len(in)
 
 	if l%blocklen != 0 {
-		return nil, errors.New("padding error")
+		return nil, aoserrors.New("padding error")
 	}
 
 	pl := int(in[l-1])
 
 	if pl < 1 || pl > blocklen {
-		return nil, errors.New("padding error")
+		return nil, aoserrors.New("padding error")
 	}
 
 	for i := l - pl; i < l; i++ {
 		if in[i] != byte(pl) {
-			return nil, errors.New("padding error")
+			return nil, aoserrors.New("padding error")
 		}
 	}
 
@@ -109,6 +110,6 @@ func getSymmetricAlgInfo(algName string) (keySize int, ivSize int, err error) {
 		return 32, 16, nil
 
 	default:
-		return 0, 0, errors.New("unsupported symmetric algorithm")
+		return 0, 0, aoserrors.New("unsupported symmetric algorithm")
 	}
 }

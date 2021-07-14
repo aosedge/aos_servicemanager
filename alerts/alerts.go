@@ -32,6 +32,7 @@ import (
 	"code.cloudfoundry.org/bytefmt"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
@@ -145,7 +146,7 @@ func New(config *config.Config,
 	}
 
 	if err = instance.setupJournal(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return instance, nil
@@ -320,53 +321,53 @@ func (instance *Alerts) sendDownloadStatusAlertMessage(source string, payload am
 
 func (instance *Alerts) setupJournal() (err error) {
 	if instance.journal, err = sdjournal.NewJournal(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddMatch("PRIORITY=0"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddMatch("PRIORITY=1"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddMatch("PRIORITY=2"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddMatch("PRIORITY=3"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddDisjunction(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.AddMatch("_SYSTEMD_UNIT=init.scope"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.journal.SeekTail(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = instance.journal.Previous(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	cursor, err := instance.cursorStorage.GetJournalCursor()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if cursor != "" {
 		if err = instance.journal.SeekCursor(cursor); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if _, err = instance.journal.Next(); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -404,7 +405,7 @@ func (instance *Alerts) processJournal() (err error) {
 	for {
 		count, err := instance.journal.Next()
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if count == 0 {
@@ -413,7 +414,7 @@ func (instance *Alerts) processJournal() (err error) {
 
 		entry, err := instance.journal.GetEntry()
 		if err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		var version *uint64
@@ -519,7 +520,7 @@ func (instance *Alerts) sendAlerts() (err error) {
 		instance.alertsSize = 0
 
 		if err = instance.storeCurrentCursor(); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -529,11 +530,11 @@ func (instance *Alerts) sendAlerts() (err error) {
 func (instance *Alerts) storeCurrentCursor() (err error) {
 	cursor, err := instance.journal.GetCursor()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = instance.cursorStorage.SetJournalCursor(cursor); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil

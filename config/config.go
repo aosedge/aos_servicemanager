@@ -20,10 +20,11 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"path"
 	"time"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -154,7 +155,7 @@ func New(fileName string) (config *Config, err error) {
 			MaxOfflineMessages: 25}}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
-		return config, err
+		return config, aoserrors.Wrap(err)
 	}
 
 	if config.CertStorage == "" {
@@ -196,7 +197,7 @@ func New(fileName string) (config *Config, err error) {
 func (d Duration) MarshalJSON() (b []byte, err error) {
 	t, err := time.Parse("15:04:05", "00:00:00")
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 	t.Add(d.Duration)
 
@@ -208,7 +209,7 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 	var v interface{}
 
 	if err := json.Unmarshal(b, &v); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	switch value := v.(type) {
@@ -221,11 +222,11 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 		if err != nil {
 			t1, err := time.Parse("15:04:05", value)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 			t2, err := time.Parse("15:04:05", "00:00:00")
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			tmp = t1.Sub(t2)
@@ -236,6 +237,6 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 		return nil
 
 	default:
-		return fmt.Errorf("invalid duration value: %v", value)
+		return aoserrors.Errorf("invalid duration value: %v", value)
 	}
 }

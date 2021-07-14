@@ -22,7 +22,6 @@ package launcher
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"os/user"
@@ -36,6 +35,7 @@ import (
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"golang.org/x/sys/unix"
 )
 
@@ -68,17 +68,17 @@ type aosServiceConfig struct {
 	Sysctl     *map[string]string `json:"sysctl,omitempty"`
 	ServiceTTL *uint64            `json:"serviceTTL,omitempty"`
 	Quotas     struct {
-		StateLimit    *uint64                      `json:"stateLimit,omitempty"`
-		StorageLimit  *uint64                      `json:"storageLimit,omitempty"`
-		UploadSpeed   *uint64                      `json:"uploadSpeed,omitempty"`
-		DownloadSpeed *uint64                      `json:"downloadSpeed,omitempty"`
-		UploadLimit   *uint64                      `json:"uploadLimit,omitempty"`
-		DownloadLimit *uint64                      `json:"downloadLimit,omitempty"`
-		RAMLimit      *int64                       `json:"ramLimit,omitempty"`
-		PidsLimit     *int64                       `json:"pidsLimit,omitempty"`
-		NoFileLimit   *uint64                      `json:"noFileLimit,omitempty"`
-		CPULimit      *uint64                      `json:"cpuLimit,omitempty"`
-		TmpLimit      *uint64                      `json:"tmpLimit,omitempty"`
+		StateLimit    *uint64 `json:"stateLimit,omitempty"`
+		StorageLimit  *uint64 `json:"storageLimit,omitempty"`
+		UploadSpeed   *uint64 `json:"uploadSpeed,omitempty"`
+		DownloadSpeed *uint64 `json:"downloadSpeed,omitempty"`
+		UploadLimit   *uint64 `json:"uploadLimit,omitempty"`
+		DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
+		RAMLimit      *int64  `json:"ramLimit,omitempty"`
+		PidsLimit     *int64  `json:"pidsLimit,omitempty"`
+		NoFileLimit   *uint64 `json:"noFileLimit,omitempty"`
+		CPULimit      *uint64 `json:"cpuLimit,omitempty"`
+		TmpLimit      *uint64 `json:"tmpLimit,omitempty"`
 	} `json:"quotas"`
 	Mounts *[]struct {
 		ContainerPath string   `json:"containerPath"`
@@ -86,9 +86,9 @@ type aosServiceConfig struct {
 		HostPath      string   `json:"hostPath"`
 		Options       []string `json:"options,omitempty"`
 	} `json:"mounts,omitempty"`
-	AllowedConnections map[string]struct{} `json:"AllowedConnections,omitempty"`
-	Devices            []Device            `json:"devices,omitempty"`
-	Resources          []string            `json:"resources,omitempty"`
+	AllowedConnections map[string]struct{}          `json:"AllowedConnections,omitempty"`
+	Devices            []Device                     `json:"devices,omitempty"`
+	Resources          []string                     `json:"resources,omitempty"`
 	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
 }
 
@@ -130,11 +130,11 @@ func (config *aosServiceConfig) GetStorageLimit() uint64 {
 func getJSONFromFile(fileName string, data interface{}) (err error) {
 	byteValue, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = json.Unmarshal(byteValue, data); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -146,7 +146,7 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 	spec = &serviceSpec{runtimeFileName: fileName}
 
 	if err = getJSONFromFile(spec.runtimeFileName, &spec.ocSpec); err != nil {
-		return spec, err
+		return spec, aoserrors.Wrap(err)
 	}
 
 	return spec, nil
@@ -155,7 +155,7 @@ func getImageSpecFromImageConfig(fileImageConfigPath string) (spec imagespec.Ima
 	var imageConfig imagespec.Image
 
 	if err = getJSONFromFile(fileImageConfigPath, &imageConfig); err != nil {
-		return imageConfig, err
+		return imageConfig, aoserrors.Wrap(err)
 	}
 
 	return imageConfig, nil
@@ -164,7 +164,7 @@ func getImageSpecFromImageConfig(fileImageConfigPath string) (spec imagespec.Ima
 func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec string) (spec *serviceSpec, err error) {
 	strOS := strings.ToLower(imageConfig.OS)
 	if strOS != "linux" {
-		return nil, fmt.Errorf("unsupported OS in image config %s", imageConfig.OS)
+		return nil, aoserrors.Errorf("unsupported OS in image config %s", imageConfig.OS)
 	}
 
 	spec = &serviceSpec{runtimeFileName: fileNameRuntimeSpec}
@@ -188,7 +188,7 @@ func generateRuntimeSpec(imageConfig imagespec.Image, fileNameRuntimeSpec string
 func getAosServiceConfig(path string) (serviceConfig aosServiceConfig, err error) {
 	if err = getJSONFromFile(path, &serviceConfig); err != nil {
 		if !os.IsNotExist(err) {
-			return serviceConfig, err
+			return serviceConfig, aoserrors.Wrap(err)
 		}
 	}
 
@@ -317,20 +317,20 @@ func (spec *serviceSpec) save() (err error) {
 
 	file, err := os.Create(spec.runtimeFileName)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "\t")
 
-	return encoder.Encode(spec.ocSpec)
+	return aoserrors.Wrap(encoder.Encode(spec.ocSpec))
 }
 
 func (spec *serviceSpec) addBindMount(source, destination, attr string) (err error) {
 	absSource, err := filepath.Abs(source)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	newMount := runtimespec.Mount{
@@ -339,7 +339,7 @@ func (spec *serviceSpec) addBindMount(source, destination, attr string) (err err
 		Source:      absSource,
 		Options:     []string{"bind", attr}}
 
-	return spec.addMount(newMount)
+	return aoserrors.Wrap(spec.addMount(newMount))
 }
 
 func (spec *serviceSpec) addMount(newMount runtimespec.Mount) (err error) {
@@ -408,7 +408,7 @@ func addDevice(hostDevice Device, uid, gid uint32) (device *runtimespec.LinuxDev
 	var stat unix.Stat_t
 
 	if err := unix.Lstat(hostDevice.Name, &stat); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if unix.Major(stat.Rdev) == 0 {
@@ -456,14 +456,14 @@ func addDevice(hostDevice Device, uid, gid uint32) (device *runtimespec.LinuxDev
 func addDevices(hostDevice Device, uid, gid uint32) (devices []runtimespec.LinuxDevice, err error) {
 	stat, err := os.Stat(hostDevice.Name)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	switch {
 	case stat.IsDir():
 		files, err := ioutil.ReadDir(hostDevice.Name)
 		if err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 
 		for _, file := range files {
@@ -478,7 +478,7 @@ func addDevices(hostDevice Device, uid, gid uint32) (devices []runtimespec.Linux
 					Permissions: hostDevice.Permissions}
 				dirDevices, err := addDevices(dirDevice, uid, gid)
 				if err != nil {
-					return nil, err
+					return nil, aoserrors.Wrap(err)
 				}
 
 				devices = append(devices, dirDevices...)
@@ -501,7 +501,7 @@ func addDevices(hostDevice Device, uid, gid uint32) (devices []runtimespec.Linux
 				return nil, nil
 			}
 
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 
 		devices = append(devices, *device)
@@ -515,7 +515,7 @@ func (spec *serviceSpec) addHostDevice(hostDevice Device) (err error) {
 
 	specDevices, err := addDevices(hostDevice, spec.ocSpec.Process.User.UID, spec.ocSpec.Process.User.UID)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	spec.ocSpec.Linux.Devices = append(spec.ocSpec.Linux.Devices, specDevices...)
@@ -540,12 +540,12 @@ func (spec *serviceSpec) addAdditionalGroup(groupName string) (err error) {
 
 	group, err := user.LookupGroup(groupName)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	parsedValues, err := strconv.ParseUint(group.Gid, 10, 32)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	gid := uint32(parsedValues)

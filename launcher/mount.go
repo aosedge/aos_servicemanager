@@ -20,13 +20,13 @@
 package launcher
 
 import (
-	"errors"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"gitpct.epam.com/epmd-aepr/aos_common/fs"
 	"golang.org/x/sys/unix"
 )
@@ -61,7 +61,7 @@ func isOverlayMount(mountPoint string) (mounted bool, err error) {
 			return false, nil
 		}
 
-		return false, err
+		return false, aoserrors.Wrap(err)
 	}
 
 	if buf.Type == unix.OVERLAYFS_SUPER_MAGIC {
@@ -74,7 +74,7 @@ func isOverlayMount(mountPoint string) (mounted bool, err error) {
 func overlayMount(mountPoint string, lowerDirs []string, workDir, upperDir string) (err error) {
 	isMounted, err := isOverlayMount(mountPoint)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if isMounted {
@@ -87,22 +87,22 @@ func overlayMount(mountPoint string, lowerDirs []string, workDir, upperDir strin
 
 	if upperDir != "" {
 		if workDir == "" {
-			return errors.New("working dir path should be set")
+			return aoserrors.New("working dir path should be set")
 		}
 
 		if err = os.RemoveAll(workDir); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if err = os.MkdirAll(workDir, 0755); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		opts = opts + ",workdir=" + workDir + ",upperdir=" + upperDir
 	}
 
 	if err = fs.Mount("overlay", mountPoint, "overlay", 0, opts); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -120,5 +120,5 @@ func umountWithRetry(mountPoint string, flags int) (err error) {
 		return nil
 	}
 
-	return fs.Umount(mountPoint)
+	return aoserrors.Wrap(fs.Umount(mountPoint))
 }
