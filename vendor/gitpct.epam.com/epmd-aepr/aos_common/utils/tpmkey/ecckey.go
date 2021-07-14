@@ -19,11 +19,12 @@ package tpmkey
 
 import (
 	"crypto"
-	"fmt"
 	"io"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -32,7 +33,7 @@ import (
 
 // MakePersistent moves key to TPM persistent storage
 func (key *eccKey) MakePersistent(persistentHandle tpmutil.Handle) (err error) {
-	return makePersistent(&key.tpmKey, persistentHandle)
+	return aoserrors.Wrap(makePersistent(&key.tpmKey, persistentHandle))
 }
 
 // Public returns public key
@@ -51,11 +52,11 @@ func (key *eccKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 
 	tpmHash, ok := supportedHash[opts.HashFunc()]
 	if !ok {
-		return nil, fmt.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
+		return nil, aoserrors.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
 	}
 
 	if len(digest) != opts.HashFunc().Size() {
-		return nil, fmt.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
+		return nil, aoserrors.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
 	}
 
 	scheme := tpm2.SigScheme{
@@ -63,5 +64,7 @@ func (key *eccKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 		Hash: tpmHash,
 	}
 
-	return sign(key.tpmKey, digest, scheme)
+	signature, err = sign(key.tpmKey, digest, scheme)
+
+	return signature, aoserrors.Wrap(err)
 }

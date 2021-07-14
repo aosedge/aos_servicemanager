@@ -20,12 +20,12 @@ package tpmkey
 import (
 	"crypto"
 	"crypto/rsa"
-	"errors"
-	"fmt"
 	"io"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -34,7 +34,7 @@ import (
 
 // MakePersistent moves key to TPM persistent storage
 func (key *rsaKey) MakePersistent(persistentHandle tpmutil.Handle) (err error) {
-	return makePersistent(&key.tpmKey, persistentHandle)
+	return aoserrors.Wrap(makePersistent(&key.tpmKey, persistentHandle))
 }
 
 // Public returns public key
@@ -53,7 +53,7 @@ func (key *rsaKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 
 	if pssOpts, ok := opts.(*rsa.PSSOptions); ok {
 		if pssOpts.SaltLength != rsa.PSSSaltLengthAuto {
-			return nil, fmt.Errorf("salt length must be rsa.PSSSaltLengthAuto")
+			return nil, aoserrors.New("salt length must be rsa.PSSSaltLengthAuto")
 		}
 
 		alg = tpm2.AlgRSAPSS
@@ -61,11 +61,11 @@ func (key *rsaKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 
 	tpmHash, ok := supportedHash[opts.HashFunc()]
 	if !ok {
-		return nil, fmt.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
+		return nil, aoserrors.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
 	}
 
 	if len(digest) != opts.HashFunc().Size() {
-		return nil, fmt.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
+		return nil, aoserrors.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
 	}
 
 	scheme := tpm2.SigScheme{
@@ -73,7 +73,9 @@ func (key *rsaKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 		Hash: tpmHash,
 	}
 
-	return sign(key.tpmKey, digest, scheme)
+	signature, err = sign(key.tpmKey, digest, scheme)
+
+	return signature, aoserrors.Wrap(err)
 }
 
 // Decrypt decrypts data with private key
@@ -85,7 +87,7 @@ func (key *rsaKey) Decrypt(rand io.Reader, msg []byte, opts crypto.DecrypterOpts
 	case *rsa.OAEPOptions:
 		hashOpt, ok := supportedHash[opt.Hash]
 		if !ok {
-			return nil, fmt.Errorf("unsupported hash algorithm: %v", opt.Hash)
+			return nil, aoserrors.Errorf("unsupported hash algorithm: %v", opt.Hash)
 		}
 
 		scheme = tpm2.AsymScheme{
@@ -101,8 +103,10 @@ func (key *rsaKey) Decrypt(rand io.Reader, msg []byte, opts crypto.DecrypterOpts
 		}
 
 	default:
-		return nil, errors.New("unsupported decrypt opts")
+		return nil, aoserrors.New("unsupported decrypt opts")
 	}
 
-	return decryptRSA(key.tpmKey, msg, scheme, label)
+	plaintext, err = decryptRSA(key.tpmKey, msg, scheme, label)
+
+	return plaintext, aoserrors.Wrap(err)
 }

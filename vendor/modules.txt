@@ -169,8 +169,9 @@ github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
 ## explicit
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210607165638-ed151c401daf
+# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210713152207-c523a792a812
 ## explicit
+gitpct.epam.com/epmd-aepr/aos_common/aoserrors
 gitpct.epam.com/epmd-aepr/aos_common/api/iamanager
 gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager
 gitpct.epam.com/epmd-aepr/aos_common/fs

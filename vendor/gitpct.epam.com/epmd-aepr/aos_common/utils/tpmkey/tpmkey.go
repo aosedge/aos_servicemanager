@@ -20,12 +20,13 @@ package tpmkey
 import (
 	"crypto"
 	"encoding/asn1"
-	"errors"
 	"io"
 	"math/big"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpmutil"
+
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
@@ -81,12 +82,12 @@ var supportedHash = map[crypto.Hash]tpm2.Algorithm{
 func CreateFromPersistent(device io.ReadWriter, persistentHandle tpmutil.Handle) (key TPMKey, err error) {
 	tpmPublic, _, _, err := tpm2.ReadPublic(device, persistentHandle)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	publicKey, err := tpmPublic.Key()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return createNewKey(tpmPublic.Type, tpmKey{
@@ -101,12 +102,12 @@ func CreateFromBlobs(device io.ReadWriter, primaryHandle tpmutil.Handle,
 	password string, privateBlob, publicBlob []byte) (key TPMKey, err error) {
 	tpmPublic, err := tpm2.DecodePublic(publicBlob)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	publicKey, err := tpmPublic.Key()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return createNewKey(tpmPublic.Type, tpmKey{
@@ -132,18 +133,18 @@ func createNewKey(algorithm tpm2.Algorithm, tpmKey tpmKey) (key TPMKey, err erro
 		return &eccKey{tpmKey: tpmKey}, nil
 
 	default:
-		return nil, errors.New("unsupported key type")
+		return nil, aoserrors.New("unsupported key type")
 	}
 }
 
 func makePersistent(key *tpmKey, persistentHandle tpmutil.Handle) (err error) {
 	if key.persistentHandle != 0 {
-		return errors.New("key already in persistent storage")
+		return aoserrors.New("key already in persistent storage")
 	}
 
 	keyHandle, _, err := tpm2.Load(key.device, key.primaryHandle, key.password, key.publicBlob, key.privateBlob)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer tpm2.FlushContext(key.device, keyHandle)
 
@@ -151,7 +152,7 @@ func makePersistent(key *tpmKey, persistentHandle tpmutil.Handle) (err error) {
 	tpm2.EvictControl(key.device, key.password, tpm2.HandleOwner, persistentHandle, persistentHandle)
 
 	if err = tpm2.EvictControl(key.device, key.password, tpm2.HandleOwner, keyHandle, persistentHandle); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	key.persistentHandle = persistentHandle
@@ -165,7 +166,7 @@ func sign(key tpmKey, digest []byte, scheme tpm2.SigScheme) (signature []byte, e
 	if key.persistentHandle == 0 {
 		if keyHandle, _, err = tpm2.Load(key.device, key.primaryHandle, key.password,
 			key.publicBlob, key.privateBlob); err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 		defer tpm2.FlushContext(key.device, keyHandle)
 	} else {
@@ -174,7 +175,7 @@ func sign(key tpmKey, digest []byte, scheme tpm2.SigScheme) (signature []byte, e
 
 	sig, err := tpm2.Sign(key.device, keyHandle, "", digest, nil, &scheme)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	switch sig.Alg {
@@ -187,10 +188,11 @@ func sign(key tpmKey, digest []byte, scheme tpm2.SigScheme) (signature []byte, e
 	case tpm2.AlgECDSA:
 		sigStruct := struct{ R, S *big.Int }{sig.ECC.R, sig.ECC.S}
 
-		return asn1.Marshal(sigStruct)
+		signature, err = asn1.Marshal(sigStruct)
+		return signature, aoserrors.Wrap(err)
 
 	default:
-		return nil, errors.New("unsupported signing algorithm")
+		return nil, aoserrors.New("unsupported signing algorithm")
 	}
 }
 
@@ -200,12 +202,14 @@ func decryptRSA(key tpmKey, msg []byte, scheme tpm2.AsymScheme, label string) (p
 	if key.persistentHandle == 0 {
 		if keyHandle, _, err = tpm2.Load(key.device, key.primaryHandle, key.password,
 			key.publicBlob, key.privateBlob); err != nil {
-			return nil, err
+			return nil, aoserrors.Wrap(err)
 		}
 		defer tpm2.FlushContext(key.device, keyHandle)
 	} else {
 		keyHandle = key.persistentHandle
 	}
 
-	return tpm2.RSADecrypt(key.device, keyHandle, "", msg, &scheme, label)
+	plaintext, err = tpm2.RSADecrypt(key.device, keyHandle, "", msg, &scheme, label)
+
+	return plaintext, aoserrors.Wrap(err)
 }

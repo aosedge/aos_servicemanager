@@ -22,6 +22,7 @@ service IAManager {
     rpc SubscribeUsersChanged(google.protobuf.Empty) returns (stream UsersChangedNtf) {}
     rpc RegisterService(RegisterServiceReq) returns (RegisterServiceRsp) {}
     rpc UnregisterService(UnregisterServiceReq) returns (google.protobuf.Empty) {}
+    rpc EncryptDisk(EncryptDiskReq) returns (google.protobuf.Empty) {}
 }
 
 message GetCertTypesRsp {
@@ -97,4 +98,8 @@ message RegisterServiceRsp {
 
 message UnregisterServiceReq {
     string service_id = 1;
+}
+
+message EncryptDiskReq {    
+    string password = 1;
 }
