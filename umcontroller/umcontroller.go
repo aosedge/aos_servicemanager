@@ -31,6 +31,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
+	"aos_servicemanager/downloader"
 )
 
 /*******************************************************************************
@@ -41,7 +42,7 @@ import (
 type UmController struct {
 	sender       statusSender
 	storage      storage
-	downloader   downloader
+	downloader   Downloader
 	server       *umCtrlServer
 	eventChannel chan umCtrlInternalMsg
 	stopChannel  chan bool
@@ -121,7 +122,7 @@ type storage interface {
 	SetComponentsUpdateInfo(updateInfo []SystemComponent) (err error)
 }
 
-type downloader interface {
+type Downloader interface {
 	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
 }
@@ -199,7 +200,7 @@ const connectionTimeoutSec = 300
 
 // New creates new update managers controller
 func New(config *config.Config, sender statusSender, storage storage,
-	downloader downloader, insecure bool) (umCtrl *UmController, err error) {
+	downloader Downloader, insecure bool) (umCtrl *UmController, err error) {
 	umCtrl = &UmController{
 		sender:            sender,
 		storage:           storage,
@@ -787,6 +788,13 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 		updatePackage, err := umCtrl.downloadComponentUpdate(component, newComponentList.chains, newComponentList.certs)
 
 		if err != nil {
+			// Do not return error if can't download file. It will be downloaded again on next desired status
+			// Just display error
+			if err == downloader.ErrNotDownloaded {
+				log.WithFields(log.Fields{"id": component.ID}).Errorf("Can't download component image: %s", aoserrors.Wrap(err))
+				return
+			}
+
 			componentStatus.status = StatusError
 			componentStatus.err = err.Error()
 			umCtrl.updateComponentElement(componentStatus)

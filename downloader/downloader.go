@@ -21,6 +21,7 @@ package downloader
 
 import (
 	"bufio"
+	"errors"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -91,6 +92,12 @@ type alertSender interface {
 	// SendDownloadStatusAlert sends download status alert
 	SendDownloadStatusAlert(downloadStatus alerts.DownloadAlertStatus)
 }
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var ErrNotDownloaded = errors.New("can't download file from any source")
 
 /*******************************************************************************
 * Public
@@ -231,7 +238,7 @@ func (downloader *Downloader) processURLs(urls []string) (resultFile string, err
 	}
 
 	if !fileDownloaded {
-		return resultFile, aoserrors.New("can't download file from any source")
+		return resultFile, ErrNotDownloaded
 	}
 
 	return resultFile, nil
