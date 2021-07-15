@@ -234,8 +234,8 @@ func (downloader *Downloader) download(url string) (fileName string, err error) 
 	resp := grabClient.Do(req)
 
 	defer func() {
-		if err = downloader.finalizeDownload(resp); err != nil {
-			log.Warningf("Error finalizing download: %s", err)
+		if finalErr := downloader.finalizeDownload(resp); finalErr != nil {
+			log.Warningf("Error finalizing download: %s", finalErr)
 		}
 	}()
 
