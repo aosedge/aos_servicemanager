@@ -55,6 +55,8 @@ const interruptionReason = "Internet connection error"
 
 const moduleID = "downloader"
 
+const downloadMaxTry = 3
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
@@ -146,18 +148,17 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 		return "", aoserrors.Wrap(err)
 	}
 
-	fileName, err := downloader.processURLs(packageInfo.URLs)
+	fileName, err := downloader.downloadWithMaxTry(packageInfo)
 	if err != nil {
 		return "", aoserrors.Wrap(err)
 	}
 	defer os.Remove(fileName)
 
-	if err = image.CheckFileInfo(fileName, image.FileInfo{
-		Sha256: packageInfo.Sha256,
-		Sha512: packageInfo.Sha512,
-		Size:   packageInfo.Size}); err != nil {
-		return "", aoserrors.Wrap(err)
-	}
+	defer func() {
+		if err != nil && resultFile != "" {
+			os.RemoveAll(resultFile)
+		}
+	}()
 
 	resultFile, err = downloader.decryptPackage(fileName, decryptDir, packageInfo.DecryptionInfo)
 	if err != nil {
@@ -176,6 +177,30 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (downloader *Downloader) downloadWithMaxTry(packageInfo amqp.DecryptDataStruct) (fileName string, err error) {
+	for try := 0; try < downloadMaxTry; try++ {
+		if try != 0 {
+			log.Warnf("Can't download file: %s. Retry...", err)
+		}
+
+		if fileName, err = downloader.processURLs(packageInfo.URLs); err != nil {
+			continue
+		}
+
+		if err = image.CheckFileInfo(fileName, image.FileInfo{
+			Sha256: packageInfo.Sha256,
+			Sha512: packageInfo.Sha512,
+			Size:   packageInfo.Size}); err != nil {
+			os.RemoveAll(fileName)
+			continue
+		}
+
+		return fileName, nil
+	}
+
+	return "", err
+}
 
 func (downloader *Downloader) processURLs(urls []string) (resultFile string, err error) {
 	if len(urls) == 0 {

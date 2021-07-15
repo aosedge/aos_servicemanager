@@ -164,13 +164,16 @@ func TestInterruptResumeDownload(t *testing.T) {
 	}
 	defer os.RemoveAll(filePath)
 
-	//Kill connection after 32 secs to receive status alert
+	// Kill connection 3 times (due to retry counter) after 32 secs to receive status alert
 	go func() {
-		time.Sleep(32 * time.Second)
-		log.Debug("Kill connection")
+		for i := 0; i < 3; i++ {
 
-		if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
-			t.Errorf("Can't stop http server: %s", err)
+			time.Sleep(32 * time.Second)
+			log.Debug("Kill connection")
+
+			if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
+				t.Errorf("Can't stop http server: %s", err)
+			}
 		}
 	}()
 
@@ -180,7 +183,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 
 	_, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName))
 	if err == nil {
-		t.Errorf("Error was expected DownloadAndDecrypt %s", err)
+		t.Errorf("Error was expected DownloadAndDecrypt")
 	}
 
 	if alertsCnt.alertStarted != 1 {
@@ -191,7 +194,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 		t.Error("DownloadStatusAlert was not received")
 	}
 
-	if alertsCnt.alertInterrupted != 1 {
+	if alertsCnt.alertInterrupted == 0 {
 		t.Error("DownloadInterruptedAlert was not received")
 	}
 
@@ -202,11 +205,11 @@ func TestInterruptResumeDownload(t *testing.T) {
 		t.Errorf("Can't DownloadAndDecrypt %s", err)
 	}
 
-	if alertsCnt.alertResumed != 1 {
+	if alertsCnt.alertResumed == 0 {
 		t.Error("DownloadResumedAlert was not received")
 	}
 
-	if alertsCnt.alertFinished != 1 {
+	if alertsCnt.alertFinished == 0 {
 		t.Error("DownloadFinishedAlert was not received")
 	}
 }
@@ -251,11 +254,14 @@ func TestAvailableSize(t *testing.T) {
 
 	// Download more than half of the package in 1 minute and kill the connection
 	go func() {
-		time.Sleep(time.Minute)
-		log.Debug("Kill connection")
+		for i := 0; i < 3; i++ {
 
-		if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
-			t.Errorf("Can't stop http server: %s", err)
+			time.Sleep(20 * time.Second)
+			log.Debug("Kill connection")
+
+			if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
+				t.Errorf("Can't stop http server: %s", err)
+			}
 		}
 	}()
 
