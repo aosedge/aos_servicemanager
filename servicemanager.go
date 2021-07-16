@@ -323,11 +323,6 @@ func (sm *serviceManager) close() {
 		sm.db.Close()
 	}
 
-	// Close downloader
-	if sm.downloader != nil {
-		sm.downloader.Close()
-	}
-
 	// Close crypto context
 	if sm.crypt != nil {
 		sm.crypt.Close()

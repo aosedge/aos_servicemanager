@@ -70,9 +70,10 @@ type fcryptInterface interface {
 
 // Downloader instance
 type Downloader struct {
-	crypt       fcryptInterface
-	downloadDir string
-	sender      alertSender
+	crypt           fcryptInterface
+	downloadDir     string
+	sender          alertSender
+	downloadFileTTL time.Duration
 }
 
 //alertSender provdes sender interface
@@ -116,21 +117,21 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 	}
 
 	downloader = &Downloader{
-		crypt:       fcrypt,
-		downloadDir: config.DownloadDir,
-		sender:      sender,
+		crypt:           fcrypt,
+		downloadDir:     config.DownloadDir,
+		sender:          sender,
+		downloadFileTTL: time.Hour * 24 * time.Duration(config.DownloadFileTTLDays),
 	}
 
 	return downloader, nil
 }
 
-// Close cleans up downloader stuff
-func (downloader *Downloader) Close() {
-}
-
 // DownloadAndDecrypt download decrypt and validate blob
 func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
+	if err = downloader.removeOutdatedFiles(); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
 
 	if decryptDir == "" {
 		return "", aoserrors.New("decrypt directory is not defined")
@@ -184,6 +185,29 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (downloader *Downloader) removeOutdatedFiles() (err error) {
+	files, err := ioutil.ReadDir(downloader.downloadDir)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+
+	for _, file := range files {
+		if now.Sub(file.ModTime()) > downloader.downloadFileTTL {
+			fileName := path.Join(downloader.downloadDir, file.Name())
+
+			log.Debugf("Remove outdated file: %s", fileName)
+
+			if err = os.RemoveAll(fileName); err != nil {
+				log.Errorf("Can't remove outdated file: %s", fileName)
+			}
+		}
+	}
+
+	return nil
+}
 
 func (downloader *Downloader) downloadWithMaxTry(packageInfo amqp.DecryptDataStruct) (fileName string, err error) {
 	for try := 0; try < downloadMaxTry; try++ {
