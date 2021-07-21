@@ -19,6 +19,7 @@ package unitstatushandler
 
 import (
 	"encoding/json"
+	"sync"
 
 	amqp "aos_servicemanager/amqphandler"
 )
@@ -67,6 +68,10 @@ type ServiceUpdater interface {
 
 // Instance instance of unit status handler
 type Instance struct {
+	sync.Mutex
+
+	isDesiredStatusProcessing bool
+	pendindDesiredStatus      *amqp.DecodedDesiredStatus
 }
 
 /*******************************************************************************
@@ -90,4 +95,36 @@ func (instance *Instance) Init() (err error) {
 
 // ProcessDesiredStatus processes desired status
 func (instance *Instance) ProcessDesiredStatus(desiredStatus amqp.DecodedDesiredStatus) {
+	instance.Lock()
+	defer instance.Unlock()
+
+	if instance.isDesiredStatusProcessing {
+		instance.pendindDesiredStatus = &desiredStatus
+
+		return
+	}
+
+	instance.isDesiredStatusProcessing = true
+
+	go instance.processDesiredStatus(desiredStatus)
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (instance *Instance) finishProcessDesiredStatus() {
+	instance.Lock()
+	defer instance.Unlock()
+
+	if instance.pendindDesiredStatus != nil {
+		go instance.processDesiredStatus(*instance.pendindDesiredStatus)
+		instance.pendindDesiredStatus = nil
+	} else {
+		instance.isDesiredStatusProcessing = false
+	}
+}
+
+func (instance *Instance) processDesiredStatus(desiredStatus amqp.DecodedDesiredStatus) {
+	defer instance.finishProcessDesiredStatus()
 }
