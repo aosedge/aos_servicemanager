@@ -154,6 +154,8 @@ type Launcher struct {
 	config           *config.Config
 	layerProvider    layerProvider
 
+	envVarsProvider *envVarsProvider
+
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
 	idsPool        *identifierPool
@@ -214,6 +216,8 @@ type ServiceProvider interface {
 	GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
+	GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error)
+	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []amqp.EnvVarInfo) (err error)
 }
 
 // ServiceRegistrar provides API to register/unregister service
@@ -232,6 +236,7 @@ type ServiceMonitor interface {
 type Sender interface {
 	SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error)
 	SendStateRequest(serviceID string, defaultState bool) (err error)
+	SendOverrideEnvVarsStatus(envs []amqp.EnvVarInfoStatus) (err error)
 }
 
 // NetworkProvider provides network interface
@@ -348,6 +353,10 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 	// Retrieve runc abs path
 	launcher.runcPath, err = exec.LookPath(runcName)
 	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if launcher.envVarsProvider, err = createEnvVarsProvider(launcher.serviceProvider, launcher.sender); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -654,8 +663,83 @@ func (launcher *Launcher) StartServices() {
 	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
 		log.Errorf("Can't start services: %s", err)
+		return
 	}
 
+	launcher.startServices(services)
+}
+
+// StopServices stops current users services
+func (launcher *Launcher) StopServices() {
+	log.WithField("users", launcher.users).Debug("Stop user services")
+
+	var services []Service
+	var err error
+
+	if launcher.users == nil {
+		services, err = launcher.serviceProvider.GetServices()
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+			return
+		}
+	} else {
+		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+			return
+		}
+	}
+
+	launcher.stopServices(services)
+}
+
+// GetServicePermissions returns service permissions
+func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
+	service, err := launcher.serviceProvider.GetService(serviceID)
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	// TODO: delete this functionality after adding a functional vis server
+	jsonPermissions, err := json.Marshal(aosConfig.Permissions)
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	return string(jsonPermissions), nil
+}
+
+// ProcessDesiredEnvVarsList override env vars fore services
+func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars amqp.DecodedOverrideEnvVars) (err error) {
+	subjectServiceToRestart, err := launcher.envVarsProvider.processOverrideEnvVars(envVars.OverrideEnvVars)
+	if err != nil {
+		return err
+	}
+
+	launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
+
+	return nil
+}
+
+func (state ServiceState) String() string {
+	return [...]string{"Init", "Running", "Stopped"}[state]
+}
+
+func (status ServiceStatus) String() string {
+	return [...]string{"installed", "Error"}[status]
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (launcher *Launcher) startServices(services []Service) {
+	var err error
 	statusChannel := make(chan error, len(services))
 
 	// Start all services in parallel
@@ -682,25 +766,8 @@ func (launcher *Launcher) StartServices() {
 	}
 }
 
-// StopServices stops current users services
-func (launcher *Launcher) StopServices() {
-	log.WithField("users", launcher.users).Debug("Stop user services")
-
-	var services []Service
+func (launcher *Launcher) stopServices(services []Service) {
 	var err error
-
-	if launcher.users == nil {
-		services, err = launcher.serviceProvider.GetServices()
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-		}
-	} else {
-		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-		}
-	}
-
 	statusChannel := make(chan error, len(services))
 
 	// Stop all services in parallel
@@ -727,38 +794,28 @@ func (launcher *Launcher) StopServices() {
 	}
 }
 
-//GetServicePermissions return service permissions
-func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
-	service, err := launcher.serviceProvider.GetService(serviceID)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
+func (launcher *Launcher) restartServicesBySubjectServiceID(subjectServiceToRestart []subjectServicePair) {
+	servicesToRestart := []Service{}
+
+	for _, value := range subjectServiceToRestart {
+		if launcher.isSubjectActive(value.subjectID) {
+			service, err := launcher.serviceProvider.GetService(value.serviseID)
+			if err != nil {
+				log.Errorf("Service %s doesn't present in the system, err: %s", value.serviseID, err.Error())
+				continue
+			}
+
+			servicesToRestart = append(servicesToRestart, service)
+		}
 	}
 
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return "", aoserrors.Wrap(err)
+	if len(servicesToRestart) == 0 {
+		return
 	}
 
-	// TODO: delete this functionality after adding a functional vis server
-	jsonPermissions, err := json.Marshal(aosConfig.Permissions)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	return string(jsonPermissions), nil
+	launcher.stopServices(servicesToRestart)
+	launcher.startServices(servicesToRestart)
 }
-
-func (state ServiceState) String() string {
-	return [...]string{"Init", "Running", "Stopped"}[state]
-}
-
-func (status ServiceStatus) String() string {
-	return [...]string{"installed", "Error"}[status]
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
 
 func (launcher *Launcher) addUserServicesToSystemd(users []string) (err error) {
 	services, err := launcher.serviceProvider.GetUsersServices(users)
@@ -1337,6 +1394,29 @@ func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServ
 	return nil
 }
 
+func (launcher *Launcher) overrideEnvVars(spec *serviceSpec, service Service) (err error) {
+	currentSubject := launcher.users[0] //TODO: currently supported only one user
+
+	vars, err := launcher.envVarsProvider.getEnvVars(subjectServicePair{subjectID: currentSubject,
+		serviseID: service.ID})
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if len(vars) == 0 {
+		return nil
+	}
+
+	envVars := []string{}
+	for _, oneVar := range vars {
+		envVars = append(envVars, oneVar.Variable)
+	}
+
+	spec.mergeEnv(envVars)
+
+	return nil
+}
+
 func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
 	err = validateImageManifest(service)
 	if err != nil {
@@ -1372,6 +1452,10 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 	}
 
 	if err := launcher.registerService(spec, service, aosConfig); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := launcher.overrideEnvVars(spec, service); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -2136,6 +2220,10 @@ func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error)
 		return aoserrors.Wrap(err)
 	}
 
+	if err = launcher.envVarsProvider.syncEnvVarsWithStorage(); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	return nil
 }
 
@@ -2222,4 +2310,14 @@ func (launcher *Launcher) isServiceValid(service Service) (err error) {
 	}
 
 	return nil
+}
+
+func (launcher *Launcher) isSubjectActive(subjectID string) bool {
+	for _, curSubject := range launcher.users {
+		if subjectID == curSubject {
+			return true
+		}
+	}
+
+	return false
 }

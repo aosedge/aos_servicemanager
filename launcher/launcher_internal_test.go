@@ -1976,6 +1976,10 @@ func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) 
 	return nil
 }
 
+func (sender *testSender) SendOverrideEnvVarsStatus(envs []amqp.EnvVarInfoStatus) (err error) {
+	return
+}
+
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
@@ -2224,6 +2228,18 @@ func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string
 	}
 
 	return fmt.Errorf("service %s does not exist in users", serviceID)
+}
+
+func (serviceProvider *testServiceProvider) GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error) {
+	for _, value := range serviceProvider.usersServices {
+		vars = append(vars, amqp.OverrideEnvsFromCloud{SubjectID: value.Users[0], ServiceID: value.ServiceID})
+	}
+
+	return vars, nil
+}
+
+func (serviceProvider *testServiceProvider) UpdateOverrideEnvVars(subjects []string, serviceID string, vars []amqp.EnvVarInfo) (err error) {
+	return nil
 }
 
 func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
