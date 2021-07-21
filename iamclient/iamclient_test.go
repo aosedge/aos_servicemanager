@@ -594,6 +594,10 @@ func (server *testServer) GetPermissions(ctx context.Context, req *pb.GetPermiss
 	return rsp, nil
 }
 
+func (server *testServer) EncryptDisk(context.Context, *pb.EncryptDiskReq) (*empty.Empty, error) {
+	return nil, nil
+}
+
 func (server *testServer) findServiceID(serviceID string) (secret string) {
 	for key, value := range server.permissionsCache {
 		if value.serviceID == serviceID {
