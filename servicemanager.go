@@ -367,6 +367,13 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	case amqp.DecodedDesiredStatus:
 		go sm.processDesiredStatus(data)
 
+	case amqp.DecodedOverrideEnvVars:
+		log.Info("Receive request to override env vars")
+
+		if err := sm.launcher.ProcessDesiredEnvVarsList(data); err != nil {
+			log.Error("Can't override env vars: ", err)
+		}
+
 	case *amqp.StateAcceptance:
 		log.WithFields(log.Fields{
 			"serviceID": data.ServiceID,
