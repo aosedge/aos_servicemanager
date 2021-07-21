@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -129,6 +130,8 @@ const defaultServiceProvider = "default"
 
 const errNotLoaded = "not loaded"
 
+const ttlValidatePeriod = 1 * time.Minute
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -155,10 +158,13 @@ type Launcher struct {
 	layerProvider    layerProvider
 
 	envVarsProvider *envVarsProvider
+	ttlStopChannel  chan bool
 
 	actionHandler  *actionHandler
 	storageHandler *storageHandler
 	idsPool        *identifierPool
+
+	ttlTicker *time.Ticker
 
 	downloader downloader
 
@@ -168,6 +174,8 @@ type Launcher struct {
 
 	serviceTemplate string
 	runcPath        string
+
+	sync.Mutex
 }
 
 // Service describes service structure
@@ -318,6 +326,8 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
 
+	launcher.ttlStopChannel = make(chan bool, 1)
+
 	if launcher.actionHandler, err = newActionHandler(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -392,6 +402,8 @@ func (launcher *Launcher) Close() {
 	launcher.systemd.Close()
 
 	launcher.storageHandler.Close()
+
+	close(launcher.ttlStopChannel)
 }
 
 // GetServiceVersion returns installed version of requested service
@@ -510,6 +522,8 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 	if err = launcher.cleanServicesDB(); err != nil {
 		log.Errorf("Error cleaning DB: %s", err)
 	}
+
+	go launcher.validateTTLs()
 
 	return nil
 }
@@ -2320,4 +2334,34 @@ func (launcher *Launcher) isSubjectActive(subjectID string) bool {
 	}
 
 	return false
+}
+
+func (launcher *Launcher) validateTTLs() {
+	launcher.Lock()
+
+	if launcher.ttlTicker != nil {
+		launcher.Unlock()
+		return
+	}
+
+	launcher.ttlTicker = time.NewTicker(ttlValidatePeriod)
+	defer launcher.ttlTicker.Stop()
+
+	launcher.Unlock()
+
+	for {
+		select {
+		case <-launcher.ttlTicker.C:
+			subjectServiceToRestart, err := launcher.envVarsProvider.validateEnvVarsTTL()
+			if err != nil {
+				log.Error("Validate env var ttl error: ", err)
+				continue
+			}
+
+			launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
+
+		case <-launcher.ttlStopChannel:
+			return
+		}
+	}
 }
