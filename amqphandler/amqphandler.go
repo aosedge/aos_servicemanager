@@ -1132,9 +1132,6 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				return
 			}
 
-			log.WithFields(log.Fields{
-				"corrlationId": delivery.CorrelationId}).Debug("AMQP received message")
-
 			var rawData json.RawMessage
 			incomingMsg := AOSMessage{Data: &rawData}
 
@@ -1142,6 +1139,11 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				log.Errorf("Can't parse message header: %s", err)
 				continue
 			}
+
+			log.WithFields(log.Fields{
+				"corrlationId": delivery.CorrelationId,
+				"version":      incomingMsg.Header.Version,
+				"type":         incomingMsg.Header.MessageType}).Debug("AMQP received message")
 
 			if incomingMsg.Header.Version != ProtocolVersion {
 				log.Errorf("Unsupported protocol version: %d", incomingMsg.Header.Version)
@@ -1161,83 +1163,51 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 				continue
 			}
 
-			if incomingMsg.Header.MessageType == DesiredStatusType {
-				encodedData, ok := data.(*DesiredStatus)
+			switch incomingMsg.Header.MessageType {
+			case DesiredStatusType:
+				encodedStatus, ok := data.(*DesiredStatus)
 				if !ok {
 					log.Error("Wrong data type: expect desired status")
 					continue
 				}
 
-				desiredStatus := DecodedDesiredStatus{CertificateChains: encodedData.CertificateChains, Certificates: encodedData.Certificates}
-
-				if err := handler.decodeMessageParts(encodedData.BoardConfig, &desiredStatus.BoardConfig); err != nil {
-					log.Errorf("Can't decode board config: %s", err)
+				decodedStatus, err := handler.decodeDesiredStatus(encodedStatus)
+				if err != nil {
+					log.Errorf("Can't decode desired status: %s", err)
 					continue
 				}
 
-				if err := handler.decodeMessageParts(encodedData.Services, &desiredStatus.Services); err != nil {
-					log.Errorf("Can't decode services: %s", err)
-					continue
-				}
+				data = decodedStatus
 
-				if err := handler.decodeMessageParts(encodedData.Layers, &desiredStatus.Layers); err != nil {
-					log.Errorf("Can't decode Layers: %s", err)
-					continue
-				}
-
-				if err := handler.decodeMessageParts(encodedData.Components, &desiredStatus.Components); err != nil {
-					log.Errorf("Can't decode Components: %s", err)
-					continue
-				}
-
-				data = desiredStatus
-			}
-
-			if incomingMsg.Header.MessageType == RenewCertificatesNotificationType {
-				msg, ok := data.(*RenewCertificatesNotification)
+			case RenewCertificatesNotificationType:
+				notification, ok := data.(*RenewCertificatesNotification)
 				if !ok {
-					log.Error("Wrong data type: expect RenewCertificatesNotificationType")
+					log.Error("Wrong data type: expect renew certificate notification")
 					continue
 				}
 
-				secret := new(unitSecret)
-
-				if len(msg.UnitSecureData) > 0 {
-					rowSecret, err := handler.cryptoContext.DecryptMetadata(msg.UnitSecureData)
-					if err != nil {
-						log.Error("Can't decrypt UnitSecureData ", err)
-						continue
-					}
-
-					if err := json.Unmarshal(rowSecret, secret); err != nil {
-						log.Error("Can't unmarshal unitSecret ", err)
-						continue
-					}
-
-					if secret.Version != unitSecureVersion {
-						log.Error("unit secure version  missmatch ", secret.Version, " != ", unitSecureVersion)
-						continue
-					}
+				notificationWithPwd, err := handler.decodeRenewCertificatesNotification(notification)
+				if err != nil {
+					log.Errorf("Can't decode renew certificate notification: %s", err)
+					continue
 				}
 
-				data = &RenewCertificatesNotificationWithPwd{Certificates: msg.Certificates,
-					Password: secret.Data.OwnerPassword}
-			}
+				data = notificationWithPwd
 
-			if incomingMsg.Header.MessageType == OverrideEnvVarsType {
-				encodedData, ok := data.(*OverrideEnvVars)
+			case OverrideEnvVarsType:
+				encodedEnvVars, ok := data.(*OverrideEnvVars)
 				if !ok {
 					log.Error("Wrong data type: expect override env")
 					continue
 				}
 
-				overrideEnvsRequest := DecodedOverrideEnvVars{}
-				if err := handler.decodeMessageParts(encodedData.OverrideEnvVars, &overrideEnvsRequest); err != nil {
-					log.Errorf("Can't decode override envs: %s", err)
+				decodedEnvVars, err := handler.decodeEnvVars(encodedEnvVars)
+				if err != nil {
+					log.Errorf("Can't decode env vars: %s", err)
 					continue
 				}
 
-				data = overrideEnvsRequest
+				data = decodedEnvVars
 			}
 
 			handler.MessageChannel <- Message{delivery.CorrelationId, data}
@@ -1245,7 +1215,60 @@ func (handler *AmqpHandler) runReceiver(param receiveParams, deliveryChannel <-c
 	}
 }
 
-func (handler *AmqpHandler) decodeMessageParts(data []byte, result interface{}) (err error) {
+func (handler *AmqpHandler) decodeDesiredStatus(encodedStatus *DesiredStatus) (decodedStatus *DecodedDesiredStatus, err error) {
+	decodedStatus = &DecodedDesiredStatus{
+		CertificateChains: encodedStatus.CertificateChains,
+		Certificates:      encodedStatus.Certificates}
+
+	if err = handler.decodeData(encodedStatus.BoardConfig, &decodedStatus.BoardConfig); err != nil {
+		return nil, err
+	}
+
+	if err = handler.decodeData(encodedStatus.Services, &decodedStatus.Services); err != nil {
+		return nil, err
+	}
+
+	if err = handler.decodeData(encodedStatus.Layers, &decodedStatus.Layers); err != nil {
+		return nil, err
+	}
+
+	if err = handler.decodeData(encodedStatus.Components, &decodedStatus.Components); err != nil {
+		return nil, err
+	}
+
+	return decodedStatus, nil
+}
+
+func (handler *AmqpHandler) decodeRenewCertificatesNotification(
+	encodedNotification *RenewCertificatesNotification) (decodedNotification *RenewCertificatesNotificationWithPwd, err error) {
+	var secret unitSecret
+
+	if len(encodedNotification.UnitSecureData) > 0 {
+		if err = handler.decodeData(encodedNotification.UnitSecureData, &secret); err != nil {
+			return nil, err
+		}
+
+		if secret.Version != unitSecureVersion {
+			return nil, aoserrors.New("unit secure version missmatch")
+		}
+	}
+
+	return &RenewCertificatesNotificationWithPwd{
+		Certificates: encodedNotification.Certificates,
+		Password:     secret.Data.OwnerPassword}, nil
+}
+
+func (handler *AmqpHandler) decodeEnvVars(encodedEnvVars *OverrideEnvVars) (decodedEnvVars *DecodedOverrideEnvVars, err error) {
+	decodedEnvVars = &DecodedOverrideEnvVars{}
+
+	if err = handler.decodeData(encodedEnvVars.OverrideEnvVars, decodedEnvVars); err != nil {
+		return nil, err
+	}
+
+	return decodedEnvVars, nil
+}
+
+func (handler *AmqpHandler) decodeData(data []byte, result interface{}) (err error) {
 	if len(data) == 0 {
 		return nil
 	}

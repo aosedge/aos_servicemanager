@@ -364,13 +364,13 @@ func (sm *serviceManager) sendInitialSetup() (err error) {
 
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
-	case amqp.DecodedDesiredStatus:
-		go sm.processDesiredStatus(data)
+	case *amqp.DecodedDesiredStatus:
+		go sm.processDesiredStatus(*data)
 
-	case amqp.DecodedOverrideEnvVars:
+	case *amqp.DecodedOverrideEnvVars:
 		log.Info("Receive request to override env vars")
 
-		if err := sm.launcher.ProcessDesiredEnvVarsList(data); err != nil {
+		if err := sm.launcher.ProcessDesiredEnvVarsList(*data); err != nil {
 			log.Error("Can't override env vars: ", err)
 		}
 

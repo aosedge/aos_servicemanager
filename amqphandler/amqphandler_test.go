@@ -221,7 +221,7 @@ func TestSendMessages(t *testing.T) {
 
 		select {
 		case receiveMessage := <-amqpHandler.MessageChannel:
-			if value, ok := receiveMessage.Data.(amqphandler.DecodedOverrideEnvVars); ok {
+			if value, ok := receiveMessage.Data.(*amqphandler.DecodedOverrideEnvVars); ok {
 				if len(value.OverrideEnvVars) != 0 {
 					t.Error("Wrong count of override envs")
 				}
