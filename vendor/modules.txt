@@ -178,6 +178,7 @@ gitpct.epam.com/epmd-aepr/aos_common/fs
 gitpct.epam.com/epmd-aepr/aos_common/image
 gitpct.epam.com/epmd-aepr/aos_common/migration
 gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils
+gitpct.epam.com/epmd-aepr/aos_common/utils/testtools
 gitpct.epam.com/epmd-aepr/aos_common/utils/tpmkey
 # golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 ## explicit

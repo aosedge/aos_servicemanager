@@ -20,11 +20,13 @@
 package downloader
 
 import (
+	"bufio"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -131,12 +133,13 @@ func (downloader *Downloader) Close() {
 // if decryptDir = "" downloader will use own dir
 func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
-	var stat syscall.Statfs_t
 
-	syscall.Statfs(downloader.downloadDir, &stat)
+	if decryptDir == "" {
+		decryptDir = downloader.decryptedDir
+	}
 
-	if packageInfo.Size > stat.Bavail*uint64(stat.Bsize) {
-		return resultFile, aoserrors.New("not enough space")
+	if err = downloader.isEnoughSpaceForPackage(packageInfo, downloader.downloadDir, decryptDir); err != nil {
+		return "", aoserrors.Wrap(err)
 	}
 
 	fileName, err := downloader.processURLs(packageInfo.URLs)
@@ -150,10 +153,6 @@ func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 		Sha512: packageInfo.Sha512,
 		Size:   packageInfo.Size}); err != nil {
 		return "", aoserrors.Wrap(err)
-	}
-
-	if decryptDir == "" {
-		decryptDir = downloader.decryptedDir
 	}
 
 	resultFile, err = downloader.decryptPackage(fileName, decryptDir, packageInfo.DecryptionInfo)
@@ -485,4 +484,85 @@ func fileExists(filename string) bool {
 
 func createFile(filename string) (err error) {
 	return aoserrors.Wrap(ioutil.WriteFile(filename, []byte{}, flagAccessRights))
+}
+
+func getMountPoint(dir string) (mountPoint string, err error) {
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			// the last split() item is empty string following the last \n
+			continue
+		}
+
+		if strings.HasPrefix(dir, fields[1]) {
+			return fields[1], nil
+		}
+	}
+
+	return "", aoserrors.Errorf("failed to find mount point for %s", dir)
+}
+
+func (downloader *Downloader) isEnoughSpaceForPackage(packageInfo amqp.DecryptDataStruct, downloadDir, decryptedDir string) (err error) {
+	var stat syscall.Statfs_t
+	var notCompletedFileSizes uint64
+
+	for _, urlRaw := range packageInfo.URLs {
+		url, err := url.Parse(urlRaw)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		filePath := path.Join(downloadDir, filepath.Base(url.Path))
+		if fileExists(filePath) {
+			fi, err := os.Stat(filePath)
+			if err != nil {
+				return aoserrors.Wrap(err)
+			} else {
+				notCompletedFileSizes += uint64(fi.Size())
+			}
+
+			break
+		}
+	}
+
+	downloadMountPoint, err := getMountPoint(downloadDir)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	decryptMountPoint, err := getMountPoint(decryptedDir)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if downloadMountPoint == decryptMountPoint {
+		syscall.Statfs(downloadDir, &stat)
+
+		// Free space is needed for double size of the package - for encrypted package and for decrypted
+		if 2*packageInfo.Size > (stat.Bavail*uint64(stat.Bsize) + notCompletedFileSizes) {
+			return aoserrors.New("not enough space for downloading and decrypting")
+		}
+	} else {
+		syscall.Statfs(downloadDir, &stat)
+
+		if packageInfo.Size > (stat.Bavail*uint64(stat.Bsize) + notCompletedFileSizes) {
+			return aoserrors.New("not enough space for downloading")
+		}
+
+		syscall.Statfs(decryptedDir, &stat)
+
+		if packageInfo.Size > stat.Bavail*uint64(stat.Bsize) {
+			return aoserrors.New("not enough space for decrypting")
+		}
+	}
+
+	return nil
 }

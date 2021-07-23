@@ -26,11 +26,13 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"syscall"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
+	"gitpct.epam.com/epmd-aepr/aos_common/utils/testtools"
 
 	"aos_servicemanager/alerts"
 	amqp "aos_servicemanager/amqphandler"
@@ -156,7 +158,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 	fileName := "bigPackage.txt"
 	filePath := path.Join(serverDir, fileName)
 	// Generate file with size 1Mb
-	if err := generateBigPackage(filePath, "1"); err != nil {
+	if err := generateBigPackage(filePath, "1", "1M"); err != nil {
 		t.Errorf("Can't generate big file")
 	}
 	defer os.RemoveAll(filePath)
@@ -205,6 +207,69 @@ func TestInterruptResumeDownload(t *testing.T) {
 
 	if alertsCnt.alertFinished != 1 {
 		t.Error("DownloadFinishedAlert was not received")
+	}
+}
+
+// The test checks if available disk size is counted properly after resuming
+// download and takes into account files that already have been partially downloaded
+func TestAvailableSize(t *testing.T) {
+	mountDir, imgFile, err := createTmpDisk(8)
+	if err != nil {
+		t.Fatalf("Can't create temporary disk: %s", err)
+	}
+
+	defer func() {
+		if err = clearTmpDisk(mountDir, imgFile); err != nil {
+			t.Errorf("Can't remove temporary disk: %s", err)
+		}
+	}()
+
+	conf := config.Config{WorkingDir: mountDir}
+
+	secondDownloader, err := downloader.New(&conf, new(fakeFcrypt), testSender)
+	if err != nil {
+		log.Fatalf("Error creation downloader: %s", err)
+	}
+
+	fileName := "bigPackage.txt"
+	filePath := path.Join(serverDir, fileName)
+	// Generate file with size 1Mb
+	if err := generateBigPackage(filePath, "1", "1M"); err != nil {
+		t.Errorf("Can't generate big file: %s", err)
+	}
+
+	var stat syscall.Statfs_t
+	syscall.Statfs(mountDir, &stat)
+
+	// Fill-up the available space to fit only one package and safe 100KB for metadata files and etc
+	payloadSize := stat.Bavail*uint64(stat.Bsize) - 2*1024*1024 - 100*1024
+
+	if err := generateBigPackage(path.Join(mountDir, "payload"), fmt.Sprintf("%d", payloadSize), "1"); err != nil {
+		t.Errorf("Can't generate payload file: %s", err)
+	}
+
+	// Download more than half of the package in 1 minute and kill the connection
+	go func() {
+		time.Sleep(time.Minute)
+		log.Debug("Kill connection")
+
+		if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
+			t.Errorf("Can't stop http server: %s", err)
+		}
+	}()
+
+	packageInfo := preparePackageInfo(fileName)
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+
+	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, ""); err == nil {
+		t.Error("Error was expected")
+	}
+
+	time.Sleep(1 * time.Second)
+
+	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, ""); err != nil {
+		t.Errorf("Can't download and decrypt package: %s", err)
 	}
 }
 
@@ -350,9 +415,9 @@ func preparePackageInfo(fileName string) (packageInfo amqp.DecryptDataStruct) {
 	return packageInfo
 }
 
-func generateBigPackage(fileName string, sizeMb string) (err error) {
-	if output, err := exec.Command("dd", "if=/dev/zero", "of="+fileName, "bs=1M",
-		"count="+sizeMb).CombinedOutput(); err != nil {
+func generateBigPackage(fileName string, count, bs string) (err error) {
+	if output, err := exec.Command("dd", "if=/dev/zero", "of="+fileName, "bs="+bs,
+		"count="+count).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
 	}
 
@@ -371,6 +436,57 @@ func setWondershaperLimit(iface string, limit string) (err error) {
 func clearWondershaperLimit(iface string) (err error) {
 	if output, err := exec.Command("wondershaper", "-ca", iface).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return nil
+}
+
+func createTmpDisk(sizeMb uint64) (mountDir, imgFileName string, err error) {
+	imgFile, err := ioutil.TempFile("", "um_")
+	if err != nil {
+		return "", "", err
+	}
+
+	imgFileName = imgFile.Name()
+
+	defer func() {
+		if err != nil {
+			os.Remove(imgFileName)
+		}
+	}()
+
+	if mountDir, err = ioutil.TempDir("", "um_"); err != nil {
+		return "", "", err
+	}
+
+	defer func() {
+		if err != nil {
+			os.RemoveAll(mountDir)
+		}
+	}()
+
+	if err = testtools.CreateFilePartition(imgFileName, "ext3", sizeMb, nil, false); err != nil {
+		return "", "", err
+	}
+
+	if output, err := exec.Command("mount", imgFileName, mountDir).CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	return mountDir, imgFileName, nil
+}
+
+func clearTmpDisk(mountDir, imgFile string) (err error) {
+	if output, err := exec.Command("umount", mountDir).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s (%s)", err, (string(output)))
+	}
+
+	if err = os.RemoveAll(mountDir); err != nil {
+		return err
+	}
+
+	if err = os.Remove(imgFile); err != nil {
+		return err
 	}
 
 	return nil
