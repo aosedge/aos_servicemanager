@@ -89,10 +89,15 @@ const unitSecureVersion = 2
 
 // Unit statuses
 const (
-	PendingStatus   = "pending"
-	RemovedStatus   = "removed"
-	InstalledStatus = "installed"
-	ErrorStatus     = "error"
+	UnknownStatus     = "unknown"
+	PendingStatus     = "pending"
+	DownloadingStatus = "downloading"
+	DownloadedStatus  = "downloaded"
+	InstallingStatus  = "installing"
+	InstalledStatus   = "installed"
+	RemovingStatus    = "removing"
+	RemovedStatus     = "removed"
+	ErrorStatus       = "error"
 )
 
 /*******************************************************************************
