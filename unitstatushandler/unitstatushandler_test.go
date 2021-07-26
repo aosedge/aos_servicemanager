@@ -46,6 +46,12 @@ type testBoardConfigUpdater struct {
 	updateError     string
 }
 
+type testComponentUpdater struct {
+	componentsInfo []amqp.ComponentInfo
+	updateError    string
+	statusChannel  chan amqp.ComponentInfo
+}
+
 type testServiceUpdater struct {
 }
 
@@ -68,13 +74,21 @@ func init() {
 
 func TestSendInitialStatus(t *testing.T) {
 	expectedUnitStatus := amqp.UnitStatus{
-		BoardConfig: []amqp.BoardConfigInfo{{VendorVersion: "1.0", Status: amqp.InstalledStatus}},
+		BoardConfig: []amqp.BoardConfigInfo{
+			{VendorVersion: "1.0", Status: amqp.InstalledStatus},
+		},
+		Components: []amqp.ComponentInfo{
+			{ID: "comp0", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+			{ID: "comp1", VendorVersion: "1.1", Status: amqp.InstalledStatus},
+			{ID: "comp2", VendorVersion: "1.2", Status: amqp.InstalledStatus},
+		},
 	}
 
 	boardConfigUpdater := newTestBoardConfigUpdater(expectedUnitStatus.BoardConfig)
+	componentUpdater := newTestComponentUpdater(expectedUnitStatus.Components)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, nil, nil, nil, sender)
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, nil, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -97,10 +111,11 @@ func TestSendInitialStatus(t *testing.T) {
 func TestUpdateBoardConfig(t *testing.T) {
 	boardConfigUpdater := newTestBoardConfigUpdater(
 		[]amqp.BoardConfigInfo{{VendorVersion: "1.0", Status: amqp.InstalledStatus}})
+	componentUpdater := newTestComponentUpdater(nil)
 	serviceUpdater := newTestServiceUpdater()
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, nil, nil, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -146,6 +161,90 @@ func TestUpdateBoardConfig(t *testing.T) {
 	boardConfigUpdater.updateError = "some error occurs"
 
 	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{BoardConfig: json.RawMessage("{}")})
+
+	if receivedUnitStatus, err = sender.waitForStatus(35 * time.Second); err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	if err = compareUnitStatus(receivedUnitStatus, expectedUnitStatus); err != nil {
+		t.Errorf("Wrong unit status received: %v, expected: %v", receivedUnitStatus, expectedUnitStatus)
+	}
+}
+
+func TestUpdateComponents(t *testing.T) {
+	boardConfigUpdater := newTestBoardConfigUpdater([]amqp.BoardConfigInfo{
+		{VendorVersion: "1.0", Status: amqp.InstalledStatus}})
+	componentUpdater := newTestComponentUpdater([]amqp.ComponentInfo{
+		{ID: "comp0", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+		{ID: "comp1", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+		{ID: "comp2", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+	})
+	serviceUpdater := newTestServiceUpdater()
+	sender := newTestSender()
+
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, serviceUpdater, sender)
+	if err != nil {
+		t.Fatalf("Can't create unit status handler: %s", err)
+	}
+	defer statusHandler.Close()
+
+	if err = statusHandler.Init(); err != nil {
+		t.Fatalf("Can't initialize status handler: %s", err)
+	}
+
+	if _, err = sender.waitForStatus(5 * time.Second); err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	// success update
+
+	expectedUnitStatus := amqp.UnitStatus{
+		BoardConfig: boardConfigUpdater.boardConfigInfo,
+		Components: []amqp.ComponentInfo{
+			{ID: "comp0", VendorVersion: "2.0", Status: amqp.InstalledStatus},
+			{ID: "comp1", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+			{ID: "comp2", VendorVersion: "2.0", Status: amqp.InstalledStatus},
+		},
+		Layers:   []amqp.LayerInfo{},
+		Services: []amqp.ServiceInfo{},
+	}
+
+	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{
+		Components: []amqp.ComponentInfoFromCloud{
+			{ID: "comp0", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2.0"}},
+			{ID: "comp2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2.0"}},
+		},
+	})
+
+	receivedUnitStatus, err := sender.waitForStatus(35 * time.Second)
+	if err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	if err = compareUnitStatus(receivedUnitStatus, expectedUnitStatus); err != nil {
+		t.Errorf("Wrong unit status received: %v, expected: %v", receivedUnitStatus, expectedUnitStatus)
+	}
+
+	// failed update
+
+	componentUpdater.updateError = "some error occurs"
+
+	expectedUnitStatus = amqp.UnitStatus{
+		BoardConfig: boardConfigUpdater.boardConfigInfo,
+		Components: []amqp.ComponentInfo{
+			{ID: "comp0", VendorVersion: "2.0", Status: amqp.InstalledStatus},
+			{ID: "comp1", VendorVersion: "1.0", Status: amqp.InstalledStatus},
+			{ID: "comp1", VendorVersion: "2.0", Status: amqp.ErrorStatus, Error: componentUpdater.updateError},
+			{ID: "comp2", VendorVersion: "2.0", Status: amqp.InstalledStatus},
+		},
+		Layers:   []amqp.LayerInfo{},
+		Services: []amqp.ServiceInfo{},
+	}
+
+	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{
+		Components: []amqp.ComponentInfoFromCloud{
+			{ID: "comp1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2.0"}},
+		}})
 
 	if receivedUnitStatus, err = sender.waitForStatus(35 * time.Second); err != nil {
 		t.Fatalf("Can't receive unit status: %s", err)
@@ -206,6 +305,27 @@ func compareUnitStatus(status1, status2 amqp.UnitStatus) (err error) {
 		return err
 	}
 
+	if err = compareStatus(len(status1.Components), len(status2.Components),
+		func(index1, index2 int) (result bool) {
+			return status1.Components[index1] == status2.Components[index2]
+		}); err != nil {
+		return err
+	}
+
+	if err = compareStatus(len(status1.Layers), len(status2.Layers),
+		func(index1, index2 int) (result bool) {
+			return status1.Layers[index1] == status2.Layers[index2]
+		}); err != nil {
+		return err
+	}
+
+	if err = compareStatus(len(status1.Services), len(status2.Services),
+		func(index1, index2 int) (result bool) {
+			return status1.Services[index1] == status2.Services[index2]
+		}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -259,6 +379,43 @@ func (updater *testBoardConfigUpdater) UpdateBoardConfig(configJSON json.RawMess
 	}
 
 	return err
+}
+
+/*******************************************************************************
+ * testComponentUpdater
+ ******************************************************************************/
+
+func newTestComponentUpdater(componentsInfo []amqp.ComponentInfo) (updater *testComponentUpdater) {
+	return &testComponentUpdater{componentsInfo: componentsInfo, statusChannel: make(chan amqp.ComponentInfo)}
+}
+
+func (updater *testComponentUpdater) GetComponentsInfo() (info []amqp.ComponentInfo, err error) {
+	return updater.componentsInfo, nil
+}
+
+func (updater *testComponentUpdater) UpdateComponents(components []amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	for _, component := range components {
+		componentInfo := amqp.ComponentInfo{
+			ID:            component.ID,
+			AosVersion:    component.AosVersion,
+			VendorVersion: component.VendorVersion,
+			Status:        amqp.InstalledStatus,
+		}
+
+		if updater.updateError != "" {
+			componentInfo.Status = amqp.ErrorStatus
+			componentInfo.Error = updater.updateError
+		}
+
+		updater.statusChannel <- componentInfo
+	}
+
+	return nil
+}
+
+func (updater *testComponentUpdater) UpdateStatus() (statusChannel <-chan amqp.ComponentInfo) {
+	return updater.statusChannel
 }
 
 /*******************************************************************************

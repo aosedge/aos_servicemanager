@@ -18,6 +18,7 @@
 package unitstatushandler
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -89,8 +90,11 @@ type Instance struct {
 	isDesiredStatusProcessing bool
 	pendindDesiredStatus      *amqp.DecodedDesiredStatus
 
+	ctx               context.Context
+	cancel            context.CancelFunc
 	statusTimer       *time.Timer
 	boardConfigStatus itemStatus
+	componentStatuses map[string]*itemStatus
 }
 
 type statusDescriptor struct {
@@ -112,13 +116,19 @@ func New(
 	statusSender StatusSender) (instance *Instance, err error) {
 	log.Debug("Create unit status handler")
 
-	return &Instance{
+	instance = &Instance{
 		boardConfigUpdater: boardConfigUpdater,
 		componentUpdater:   componentUpdater,
 		layerUpdater:       layerUpdater,
 		serviceUpdater:     serviceUpdater,
 		statusSender:       statusSender,
-	}, nil
+	}
+
+	instance.ctx, instance.cancel = context.WithCancel(context.Background())
+
+	go instance.handleComponentStatuses()
+
+	return instance, nil
 }
 
 // Close closes unit status handler
@@ -132,12 +142,21 @@ func (instance *Instance) Close() (err error) {
 		instance.statusTimer.Stop()
 	}
 
+	instance.cancel()
+
 	return nil
 }
 
 // Init initialize unit status
 func (instance *Instance) Init() (err error) {
+	// This function can't be fully locked because GetComponentsInfo may be blocked for while and
+	// at same time componentUpdater may send component status through status channel which is handled
+	// in handleComponentStatuses. To avoid dead lock componentUpdater.GetComponentsInfo() and
+	// handleComponentStatuses should not be locked at same time.
+
 	log.Debug("Init unit status")
+
+	// Get initial board config info
 
 	instance.boardConfigStatus = nil
 
@@ -152,8 +171,25 @@ func (instance *Instance) Init() (err error) {
 		instance.Unlock()
 	}
 
+	// Get initial components info
+
+	instance.componentStatuses = make(map[string]*itemStatus)
+
+	componentsInfo, err := instance.componentUpdater.GetComponentsInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, componentInfo := range componentsInfo {
+		instance.Lock()
+		instance.updateComponentStatus(componentInfo)
+		instance.Unlock()
+	}
+
 	instance.Lock()
 	defer instance.Unlock()
+
+	// Send current status
 
 	instance.sendCurrentStatus()
 
@@ -185,6 +221,9 @@ func (descriptor *statusDescriptor) getStatus() (status string) {
 	case *amqp.BoardConfigInfo:
 		return amqpStatus.Status
 
+	case *amqp.ComponentInfo:
+		return amqpStatus.Status
+
 	default:
 		return amqp.UnknownStatus
 	}
@@ -195,9 +234,22 @@ func (descriptor *statusDescriptor) getVersion() (version string) {
 	case *amqp.BoardConfigInfo:
 		return amqpStatus.VendorVersion
 
+	case *amqp.ComponentInfo:
+		return amqpStatus.VendorVersion
+
 	default:
 		return ""
 	}
+}
+
+func (status *itemStatus) isInstalled() (installed bool, descriptor statusDescriptor) {
+	for _, element := range *status {
+		if element.getStatus() == amqp.InstalledStatus {
+			return true, element
+		}
+	}
+
+	return false, statusDescriptor{}
 }
 
 func (instance *Instance) finishProcessDesiredStatus() {
@@ -220,15 +272,27 @@ func (instance *Instance) processDesiredStatus(desiredStatus amqp.DecodedDesired
 			log.Errorf("Can't update board config: %s", err)
 		}
 	}
+
+	if err := instance.updateComponents(
+		desiredStatus.Components, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
+		log.Errorf("Can't update components: %s", err)
+	}
 }
 
 func (instance *Instance) sendCurrentStatus() {
 	unitStatus := amqp.UnitStatus{
 		BoardConfig: make([]amqp.BoardConfigInfo, 0, len(instance.boardConfigStatus)),
+		Components:  make([]amqp.ComponentInfo, 0, len(instance.componentStatuses)),
 	}
 
 	for _, status := range instance.boardConfigStatus {
 		unitStatus.BoardConfig = append(unitStatus.BoardConfig, *status.amqpStatus.(*amqp.BoardConfigInfo))
+	}
+
+	for _, componentStatus := range instance.componentStatuses {
+		for _, status := range *componentStatus {
+			unitStatus.Components = append(unitStatus.Components, *status.amqpStatus.(*amqp.ComponentInfo))
+		}
 	}
 
 	if err := instance.statusSender.SendUnitStatus(unitStatus); err != nil {
@@ -248,6 +312,22 @@ func (instance *Instance) updateBoardConfigStatus(boardConfigInfo amqp.BoardConf
 		"error":         boardConfigInfo.Error}).Debug("Update board config status")
 
 	instance.updateStatus(&instance.boardConfigStatus, statusDescriptor{&boardConfigInfo})
+}
+
+func (instance *Instance) updateComponentStatus(componentInfo amqp.ComponentInfo) {
+	log.WithFields(log.Fields{
+		"id":            componentInfo.ID,
+		"status":        componentInfo.Status,
+		"vendorVersion": componentInfo.VendorVersion,
+		"error":         componentInfo.Error}).Debug("Update component status")
+
+	componentStatus, ok := instance.componentStatuses[componentInfo.ID]
+	if !ok {
+		componentStatus = &itemStatus{}
+		instance.componentStatuses[componentInfo.ID] = componentStatus
+	}
+
+	instance.updateStatus(componentStatus, statusDescriptor{&componentInfo})
 }
 
 func (instance *Instance) statusChanged() {
@@ -313,6 +393,58 @@ func (instance *Instance) updateBoardConfig(config json.RawMessage) (err error) 
 	}
 
 	boardConfigInfo.Status = amqp.InstalledStatus
+
+	return nil
+}
+
+func (instance *Instance) handleComponentStatuses() {
+	for {
+		select {
+		case componentInfo, ok := <-instance.componentUpdater.UpdateStatus():
+			if !ok {
+				return
+			}
+
+			instance.Lock()
+			instance.updateComponentStatus(componentInfo)
+			instance.Unlock()
+
+		case <-instance.ctx.Done():
+			return
+		}
+	}
+}
+
+func (instance *Instance) updateComponents(components []amqp.ComponentInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	log.Debug("Update components")
+
+	var updateComponents []amqp.ComponentInfoFromCloud
+
+	for _, component := range components {
+		updated := false
+
+		if itemStatus, ok := instance.componentStatuses[component.ID]; ok {
+			if installed, descriptor := itemStatus.isInstalled(); installed &&
+				descriptor.getVersion() == component.VendorVersion {
+				updated = true
+			}
+		}
+
+		if !updated {
+			updateComponents = append(updateComponents, component)
+		}
+	}
+
+	if len(updateComponents) == 0 {
+		log.Debug("All components are up to date")
+
+		return nil
+	}
+
+	if err = instance.componentUpdater.UpdateComponents(updateComponents, chains, certs); err != nil {
+		return err
+	}
 
 	return nil
 }
