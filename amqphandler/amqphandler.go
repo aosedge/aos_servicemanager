@@ -150,8 +150,10 @@ type DesiredStatus struct {
 
 // RequestServiceCrashLog request service crash log message
 type RequestServiceCrashLog struct {
-	ServiceID string `json:"serviceId"`
-	LogID     string `json:"logID"`
+	ServiceID string     `json:"serviceId"`
+	LogID     string     `json:"logID"`
+	From      *time.Time `json:"from"`
+	Till      *time.Time `json:"till"`
 }
 
 // RequestServiceLog request service log message
