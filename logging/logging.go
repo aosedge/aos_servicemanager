@@ -248,8 +248,14 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		panic("Can't add filter")
 	}
 
-	if err = journal.SeekTail(); err != nil {
-		panic("Can't seek log")
+	if request.Till == nil {
+		if err = journal.SeekTail(); err != nil {
+			panic("Can't seek log tail")
+		}
+	} else {
+		if err = journal.SeekRealtimeUsec(uint64(request.Till.UnixNano() / 1000)); err != nil {
+			panic("Can't seek log till")
+		}
 	}
 
 	var crashTime uint64
@@ -258,7 +264,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		var rowCount uint64
 
 		if rowCount, err = journal.Previous(); err != nil {
-			panic("Can't seek log")
+			panic("Can't seek previous entry")
 		}
 
 		// end of log
@@ -270,6 +276,12 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 		if logEntry, err = journal.GetEntry(); err != nil {
 			panic("Can't get entry")
+		}
+
+		if request.From != nil {
+			if logEntry.RealtimeTimestamp <= uint64(request.From.UnixNano()/1000) {
+				break
+			}
 		}
 
 		if crashTime == 0 {

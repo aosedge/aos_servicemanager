@@ -243,6 +243,43 @@ func TestGetServiceCrashLog(t *testing.T) {
 		LogID:     "log2"})
 
 	checkReceivedLog(t, logging.LogChannel, &from, &till)
+
+	if err = createService("logservice5"); err != nil {
+		t.Fatalf("Can't create service: %s", err)
+	}
+
+	from = time.Now()
+
+	if err = startService("logservice5"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	crashService("logservice5")
+
+	time.Sleep(1 * time.Second)
+
+	till = time.Now()
+
+	time.Sleep(1 * time.Second)
+
+	if err = startService("logservice5"); err != nil {
+		t.Fatalf("Can't start service: %s", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	crashService("logservice5")
+
+	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
+		ServiceID: "logservice5",
+		LogID:     "log5",
+		From:      &from,
+		Till:      &till,
+	})
+
+	checkReceivedLog(t, logging.LogChannel, &from, &till)
 }
 
 func TestMaxPartCountLog(t *testing.T) {
