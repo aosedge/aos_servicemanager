@@ -52,6 +52,11 @@ type testComponentUpdater struct {
 	statusChannel  chan amqp.ComponentInfo
 }
 
+type testLayerUpdater struct {
+	layersInfo  []amqp.LayerInfo
+	updateError string
+}
+
 type testServiceUpdater struct {
 }
 
@@ -82,13 +87,19 @@ func TestSendInitialStatus(t *testing.T) {
 			{ID: "comp1", VendorVersion: "1.1", Status: amqp.InstalledStatus},
 			{ID: "comp2", VendorVersion: "1.2", Status: amqp.InstalledStatus},
 		},
+		Layers: []amqp.LayerInfo{
+			{ID: "layer0", Digest: "digest0", AosVersion: 1, Status: amqp.InstalledStatus},
+			{ID: "layer1", Digest: "digest1", AosVersion: 2, Status: amqp.InstalledStatus},
+			{ID: "layer2", Digest: "digest2", AosVersion: 3, Status: amqp.InstalledStatus},
+		},
 	}
 
 	boardConfigUpdater := newTestBoardConfigUpdater(expectedUnitStatus.BoardConfig)
 	componentUpdater := newTestComponentUpdater(expectedUnitStatus.Components)
+	layerUpdater := newTestLayerUpdater(expectedUnitStatus.Layers)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, nil, sender)
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, nil, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -112,10 +123,11 @@ func TestUpdateBoardConfig(t *testing.T) {
 	boardConfigUpdater := newTestBoardConfigUpdater(
 		[]amqp.BoardConfigInfo{{VendorVersion: "1.0", Status: amqp.InstalledStatus}})
 	componentUpdater := newTestComponentUpdater(nil)
+	layerUpdater := newTestLayerUpdater(nil)
 	serviceUpdater := newTestServiceUpdater()
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -179,10 +191,11 @@ func TestUpdateComponents(t *testing.T) {
 		{ID: "comp1", VendorVersion: "1.0", Status: amqp.InstalledStatus},
 		{ID: "comp2", VendorVersion: "1.0", Status: amqp.InstalledStatus},
 	})
+	layerUpdater := newTestLayerUpdater(nil)
 	serviceUpdater := newTestServiceUpdater()
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, nil, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -244,6 +257,97 @@ func TestUpdateComponents(t *testing.T) {
 	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{
 		Components: []amqp.ComponentInfoFromCloud{
 			{ID: "comp1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2.0"}},
+		}})
+
+	if receivedUnitStatus, err = sender.waitForStatus(35 * time.Second); err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	if err = compareUnitStatus(receivedUnitStatus, expectedUnitStatus); err != nil {
+		t.Errorf("Wrong unit status received: %v, expected: %v", receivedUnitStatus, expectedUnitStatus)
+	}
+}
+
+func TestUpdateLayers(t *testing.T) {
+	boardConfigUpdater := newTestBoardConfigUpdater(
+		[]amqp.BoardConfigInfo{{VendorVersion: "1.0", Status: amqp.InstalledStatus}})
+	componentUpdater := newTestComponentUpdater(nil)
+	layerUpdater := newTestLayerUpdater([]amqp.LayerInfo{
+		{ID: "layer0", Digest: "digest0", AosVersion: 0, Status: amqp.InstalledStatus},
+		{ID: "layer1", Digest: "digest1", AosVersion: 0, Status: amqp.InstalledStatus},
+		{ID: "layer2", Digest: "digest2", AosVersion: 0, Status: amqp.InstalledStatus},
+	})
+	serviceUpdater := newTestServiceUpdater()
+	sender := newTestSender()
+
+	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	if err != nil {
+		t.Fatalf("Can't create unit status handler: %s", err)
+	}
+	defer statusHandler.Close()
+
+	if err = statusHandler.Init(); err != nil {
+		t.Fatalf("Can't initialize status handler: %s", err)
+	}
+
+	if _, err = sender.waitForStatus(5 * time.Second); err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	// success update
+
+	expectedUnitStatus := amqp.UnitStatus{
+		BoardConfig: boardConfigUpdater.boardConfigInfo,
+		Components:  []amqp.ComponentInfo{},
+		Layers: []amqp.LayerInfo{
+			{ID: "layer1", Digest: "digest1", AosVersion: 0, Status: amqp.InstalledStatus},
+			{ID: "layer3", Digest: "digest3", AosVersion: 1, Status: amqp.InstalledStatus},
+			{ID: "layer4", Digest: "digest4", AosVersion: 1, Status: amqp.InstalledStatus},
+			{Digest: "digest0", Status: amqp.RemovedStatus},
+			{Digest: "digest2", Status: amqp.RemovedStatus},
+		},
+		Services: []amqp.ServiceInfo{},
+	}
+
+	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{
+		Layers: []amqp.LayerInfoFromCloud{
+			{ID: "layer1", Digest: "digest1", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}},
+			{ID: "layer3", Digest: "digest3", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}},
+			{ID: "layer4", Digest: "digest4", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}},
+		}})
+
+	receivedUnitStatus, err := sender.waitForStatus(35 * time.Second)
+	if err != nil {
+		t.Fatalf("Can't receive unit status: %s", err)
+	}
+
+	if err = compareUnitStatus(receivedUnitStatus, expectedUnitStatus); err != nil {
+		t.Errorf("Wrong unit status received: %v, expected: %v", receivedUnitStatus, expectedUnitStatus)
+	}
+
+	// failed update
+
+	layerUpdater.updateError = "some error occurs"
+
+	expectedUnitStatus = amqp.UnitStatus{
+		BoardConfig: boardConfigUpdater.boardConfigInfo,
+		Components:  []amqp.ComponentInfo{},
+		Layers: []amqp.LayerInfo{
+			{ID: "layer3", Digest: "digest3", AosVersion: 1, Status: amqp.InstalledStatus},
+			{ID: "layer4", Digest: "digest4", AosVersion: 1, Status: amqp.InstalledStatus},
+			{Digest: "digest0", Status: amqp.RemovedStatus},
+			{Digest: "digest2", Status: amqp.RemovedStatus},
+			{ID: "layer5", Digest: "digest5", AosVersion: 1, Status: amqp.ErrorStatus, Error: layerUpdater.updateError},
+			{Digest: "digest1", Status: amqp.ErrorStatus, Error: layerUpdater.updateError},
+		},
+		Services: []amqp.ServiceInfo{},
+	}
+
+	statusHandler.ProcessDesiredStatus(amqp.DecodedDesiredStatus{
+		Layers: []amqp.LayerInfoFromCloud{
+			{ID: "layer3", Digest: "digest3", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}},
+			{ID: "layer4", Digest: "digest4", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}},
+			{ID: "layer5", Digest: "digest5", VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}},
 		}})
 
 	if receivedUnitStatus, err = sender.waitForStatus(35 * time.Second); err != nil {
@@ -416,6 +520,65 @@ func (updater *testComponentUpdater) UpdateComponents(components []amqp.Componen
 
 func (updater *testComponentUpdater) UpdateStatus() (statusChannel <-chan amqp.ComponentInfo) {
 	return updater.statusChannel
+}
+
+/*******************************************************************************
+ * testLayerUpdater
+ ******************************************************************************/
+
+func newTestLayerUpdater(layersInfo []amqp.LayerInfo) (updater *testLayerUpdater) {
+	return &testLayerUpdater{layersInfo: layersInfo}
+}
+
+func (updater *testLayerUpdater) GetLayersInfo() (layers []amqp.LayerInfo, err error) {
+	return updater.layersInfo, nil
+}
+
+func (updater *testLayerUpdater) InstallLayer(layerInfo amqp.LayerInfoFromCloud, chains []amqp.CertificateChain,
+	certs []amqp.Certificate) (statusChannel <-chan amqp.LayerInfo) {
+	channel := make(chan amqp.LayerInfo)
+
+	go func() {
+		defer close(channel)
+
+		layerStatus := amqp.LayerInfo{
+			ID:         layerInfo.ID,
+			Digest:     layerInfo.Digest,
+			AosVersion: layerInfo.AosVersion,
+			Status:     amqp.InstalledStatus,
+		}
+
+		if updater.updateError != "" {
+			layerStatus.Status = amqp.ErrorStatus
+			layerStatus.Error = updater.updateError
+		}
+
+		channel <- layerStatus
+	}()
+
+	return channel
+}
+
+func (updater *testLayerUpdater) UninstallLayer(digest string) (statusChannel <-chan amqp.LayerInfo) {
+	channel := make(chan amqp.LayerInfo)
+
+	go func() {
+		defer close(channel)
+
+		layerStatus := amqp.LayerInfo{
+			Digest: digest,
+			Status: amqp.RemovedStatus,
+		}
+
+		if updater.updateError != "" {
+			layerStatus.Status = amqp.ErrorStatus
+			layerStatus.Error = updater.updateError
+		}
+
+		channel <- layerStatus
+	}()
+
+	return channel
 }
 
 /*******************************************************************************

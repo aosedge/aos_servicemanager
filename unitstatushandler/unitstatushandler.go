@@ -20,6 +20,8 @@ package unitstatushandler
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -95,6 +97,7 @@ type Instance struct {
 	statusTimer       *time.Timer
 	boardConfigStatus itemStatus
 	componentStatuses map[string]*itemStatus
+	layerStatuses     map[string]*itemStatus
 }
 
 type statusDescriptor struct {
@@ -186,6 +189,21 @@ func (instance *Instance) Init() (err error) {
 		instance.Unlock()
 	}
 
+	// Get initial layers info
+
+	instance.layerStatuses = make(map[string]*itemStatus)
+
+	layersInfo, err := instance.layerUpdater.GetLayersInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, layerInfo := range layersInfo {
+		instance.Lock()
+		instance.updateLayerStatus(layerInfo)
+		instance.Unlock()
+	}
+
 	instance.Lock()
 	defer instance.Unlock()
 
@@ -224,6 +242,9 @@ func (descriptor *statusDescriptor) getStatus() (status string) {
 	case *amqp.ComponentInfo:
 		return amqpStatus.Status
 
+	case *amqp.LayerInfo:
+		return amqpStatus.Status
+
 	default:
 		return amqp.UnknownStatus
 	}
@@ -236,6 +257,9 @@ func (descriptor *statusDescriptor) getVersion() (version string) {
 
 	case *amqp.ComponentInfo:
 		return amqpStatus.VendorVersion
+
+	case *amqp.LayerInfo:
+		return strconv.FormatUint(amqpStatus.AosVersion, 10)
 
 	default:
 		return ""
@@ -277,12 +301,23 @@ func (instance *Instance) processDesiredStatus(desiredStatus amqp.DecodedDesired
 		desiredStatus.Components, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
 		log.Errorf("Can't update components: %s", err)
 	}
+
+	if err := instance.installLayers(
+		desiredStatus.Layers, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
+		log.Errorf("Can't install layers: %s", err)
+	}
+
+	if err := instance.removeLayers(
+		desiredStatus.Layers, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
+		log.Errorf("Can't remove layers: %s", err)
+	}
 }
 
 func (instance *Instance) sendCurrentStatus() {
 	unitStatus := amqp.UnitStatus{
 		BoardConfig: make([]amqp.BoardConfigInfo, 0, len(instance.boardConfigStatus)),
 		Components:  make([]amqp.ComponentInfo, 0, len(instance.componentStatuses)),
+		Layers:      make([]amqp.LayerInfo, 0, len(instance.layerStatuses)),
 	}
 
 	for _, status := range instance.boardConfigStatus {
@@ -292,6 +327,12 @@ func (instance *Instance) sendCurrentStatus() {
 	for _, componentStatus := range instance.componentStatuses {
 		for _, status := range *componentStatus {
 			unitStatus.Components = append(unitStatus.Components, *status.amqpStatus.(*amqp.ComponentInfo))
+		}
+	}
+
+	for _, layerStatus := range instance.layerStatuses {
+		for _, status := range *layerStatus {
+			unitStatus.Layers = append(unitStatus.Layers, *status.amqpStatus.(*amqp.LayerInfo))
 		}
 	}
 
@@ -328,6 +369,23 @@ func (instance *Instance) updateComponentStatus(componentInfo amqp.ComponentInfo
 	}
 
 	instance.updateStatus(componentStatus, statusDescriptor{&componentInfo})
+}
+
+func (instance *Instance) updateLayerStatus(layerInfo amqp.LayerInfo) {
+	log.WithFields(log.Fields{
+		"id":         layerInfo.ID,
+		"digest":     layerInfo.Digest,
+		"status":     layerInfo.Status,
+		"aosVersion": layerInfo.AosVersion,
+		"error":      layerInfo.Error}).Debug("Update layer status")
+
+	layerStatus, ok := instance.layerStatuses[layerInfo.Digest]
+	if !ok {
+		layerStatus = &itemStatus{}
+		instance.layerStatuses[layerInfo.Digest] = layerStatus
+	}
+
+	instance.updateStatus(layerStatus, statusDescriptor{&layerInfo})
 }
 
 func (instance *Instance) statusChanged() {
@@ -447,4 +505,123 @@ func (instance *Instance) updateComponents(components []amqp.ComponentInfoFromCl
 	}
 
 	return nil
+}
+
+func (instance *Instance) installLayers(desiredLayers []amqp.LayerInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	log.Debug("Install layers")
+
+	var selectCases []reflect.SelectCase
+
+	for _, desiredLayer := range desiredLayers {
+		installed := false
+
+		if layerStatus, ok := instance.layerStatuses[desiredLayer.Digest]; ok {
+			installed, _ = layerStatus.isInstalled()
+		}
+
+		if !installed {
+			selectCases = append(selectCases, reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(instance.layerUpdater.InstallLayer(desiredLayer, chains, certs)),
+			})
+		}
+	}
+
+	if len(selectCases) == 0 {
+		log.Debug("No layers need to be installed")
+
+		return nil
+	}
+
+	instance.processSelectedCases(selectCases, func(value interface{}) {
+		instance.Lock()
+		defer instance.Unlock()
+
+		layerInfo := value.(amqp.LayerInfo)
+
+		if layerInfo.Status == amqp.ErrorStatus {
+			if err == nil {
+				err = aoserrors.New(layerInfo.Error)
+			}
+		}
+
+		instance.updateLayerStatus(layerInfo)
+	})
+
+	return err
+}
+
+func (instance *Instance) removeLayers(desiredLayers []amqp.LayerInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	log.Debug("Remove layers")
+
+	var selectCases []reflect.SelectCase
+
+nextLayer:
+	for digest, layerStatus := range instance.layerStatuses {
+		if installed, _ := layerStatus.isInstalled(); !installed {
+			continue
+		}
+
+		for _, desiredLayer := range desiredLayers {
+			if desiredLayer.Digest == digest {
+				continue nextLayer
+			}
+		}
+
+		selectCases = append(selectCases, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(instance.layerUpdater.UninstallLayer(digest)),
+		})
+	}
+
+	if len(selectCases) == 0 {
+		log.Debug("No layers need to be removed")
+
+		return nil
+	}
+
+	instance.processSelectedCases(selectCases, func(value interface{}) {
+		instance.Lock()
+		defer instance.Unlock()
+
+		layerInfo := value.(amqp.LayerInfo)
+
+		if layerInfo.Status == amqp.ErrorStatus {
+			if err == nil {
+				err = aoserrors.New(layerInfo.Error)
+			}
+		}
+
+		instance.updateLayerStatus(layerInfo)
+	})
+
+	return err
+}
+
+func (instance *Instance) processSelectedCases(selectCases []reflect.SelectCase,
+	processValue func(value interface{})) {
+
+	selectCases = append(selectCases, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(instance.ctx.Done()),
+	})
+
+	for len(selectCases) != 1 {
+		chosen, value, ok := reflect.Select(selectCases)
+		if !ok {
+			// ctx canceled
+			if chosen == len(selectCases)-1 {
+				return
+			}
+
+			// remove closed channel
+			selectCases = append(selectCases[:chosen], selectCases[chosen+1:]...)
+
+			continue
+		}
+
+		processValue(value.Interface())
+	}
 }
