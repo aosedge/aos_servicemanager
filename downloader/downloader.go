@@ -45,7 +45,6 @@ import (
  * Consts
  ******************************************************************************/
 
-const downloadDirName = "download"
 const decryptedDirName = "decrypt"
 
 const updateDownloadsTime = 10 * time.Second
@@ -106,7 +105,7 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 		return nil, aoserrors.New("config is nil")
 	}
 
-	if err = os.MkdirAll(path.Join(config.WorkingDir, downloadDirName), 755); err != nil {
+	if err = os.MkdirAll(config.DownloadDir, 755); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -116,7 +115,7 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 
 	downloader = &Downloader{
 		crypt:        fcrypt,
-		downloadDir:  path.Join(config.WorkingDir, downloadDirName),
+		downloadDir:  config.DownloadDir,
 		decryptedDir: path.Join(config.WorkingDir, decryptedDirName),
 		sender:       sender,
 	}

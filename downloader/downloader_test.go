@@ -81,7 +81,7 @@ const pythonServerScript = "start.py"
 
 var downloaderObj *downloader.Downloader
 var serverDir string
-var workingDir string
+var downloadDir string
 var testSender *TestSender
 var alertsCnt alertsCounter
 
@@ -108,7 +108,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Error setting up: %s", err)
 	}
 
-	conf := config.Config{WorkingDir: workingDir}
+	conf := config.Config{DownloadDir: downloadDir}
 
 	downloaderObj, err = downloader.New(&conf, new(fakeFcrypt), testSender)
 	if err != nil {
@@ -224,7 +224,7 @@ func TestAvailableSize(t *testing.T) {
 		}
 	}()
 
-	conf := config.Config{WorkingDir: mountDir}
+	conf := config.Config{DownloadDir: mountDir}
 
 	secondDownloader, err := downloader.New(&conf, new(fakeFcrypt), testSender)
 	if err != nil {
@@ -356,7 +356,7 @@ func setup() (err error) {
 		return err
 	}
 
-	workingDir, err = ioutil.TempDir("", "wd_")
+	downloadDir, err = ioutil.TempDir("", "wd_")
 	if err != nil {
 		return err
 	}

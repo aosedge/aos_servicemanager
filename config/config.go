@@ -114,6 +114,7 @@ type Config struct {
 	VISServerURL        string       `json:"visServer"`
 	IAMServerURL        string       `json:"iamServer"`
 	WorkingDir          string       `json:"workingDir"`
+	DownloadDir         string       `json:"downloadDir"`
 	UpdateDir           string       `json:"updateDir"`
 	StorageDir          string       `json:"storageDir"`
 	LayersDir           string       `json:"layersDir"`
@@ -172,6 +173,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.LayersDir == "" {
 		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
+	}
+
+	if config.DownloadDir == "" {
+		config.DownloadDir = path.Join(config.WorkingDir, "download")
 	}
 
 	if config.BoardConfigFile == "" {
