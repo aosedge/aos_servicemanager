@@ -98,6 +98,7 @@ type Instance struct {
 	boardConfigStatus itemStatus
 	componentStatuses map[string]*itemStatus
 	layerStatuses     map[string]*itemStatus
+	serviceStatuses   map[string]*itemStatus
 }
 
 type statusDescriptor struct {
@@ -204,6 +205,21 @@ func (instance *Instance) Init() (err error) {
 		instance.Unlock()
 	}
 
+	// Get initial services info
+
+	instance.serviceStatuses = make(map[string]*itemStatus)
+
+	servicesInfo, err := instance.serviceUpdater.GetServicesInfo()
+	if err != nil {
+		return err
+	}
+
+	for _, serviceInfo := range servicesInfo {
+		instance.Lock()
+		instance.updateServiceStatus(serviceInfo)
+		instance.Unlock()
+	}
+
 	instance.Lock()
 	defer instance.Unlock()
 
@@ -245,6 +261,9 @@ func (descriptor *statusDescriptor) getStatus() (status string) {
 	case *amqp.LayerInfo:
 		return amqpStatus.Status
 
+	case *amqp.ServiceInfo:
+		return amqpStatus.Status
+
 	default:
 		return amqp.UnknownStatus
 	}
@@ -259,6 +278,9 @@ func (descriptor *statusDescriptor) getVersion() (version string) {
 		return amqpStatus.VendorVersion
 
 	case *amqp.LayerInfo:
+		return strconv.FormatUint(amqpStatus.AosVersion, 10)
+
+	case *amqp.ServiceInfo:
 		return strconv.FormatUint(amqpStatus.AosVersion, 10)
 
 	default:
@@ -307,6 +329,11 @@ func (instance *Instance) processDesiredStatus(desiredStatus amqp.DecodedDesired
 		log.Errorf("Can't install layers: %s", err)
 	}
 
+	if err := instance.updateServices(
+		desiredStatus.Services, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
+		log.Errorf("Can't update services: %s", err)
+	}
+
 	if err := instance.removeLayers(
 		desiredStatus.Layers, desiredStatus.CertificateChains, desiredStatus.Certificates); err != nil {
 		log.Errorf("Can't remove layers: %s", err)
@@ -318,6 +345,7 @@ func (instance *Instance) sendCurrentStatus() {
 		BoardConfig: make([]amqp.BoardConfigInfo, 0, len(instance.boardConfigStatus)),
 		Components:  make([]amqp.ComponentInfo, 0, len(instance.componentStatuses)),
 		Layers:      make([]amqp.LayerInfo, 0, len(instance.layerStatuses)),
+		Services:    make([]amqp.ServiceInfo, 0, len(instance.serviceStatuses)),
 	}
 
 	for _, status := range instance.boardConfigStatus {
@@ -333,6 +361,12 @@ func (instance *Instance) sendCurrentStatus() {
 	for _, layerStatus := range instance.layerStatuses {
 		for _, status := range *layerStatus {
 			unitStatus.Layers = append(unitStatus.Layers, *status.amqpStatus.(*amqp.LayerInfo))
+		}
+	}
+
+	for _, serviceStatus := range instance.serviceStatuses {
+		for _, status := range *serviceStatus {
+			unitStatus.Services = append(unitStatus.Services, *status.amqpStatus.(*amqp.ServiceInfo))
 		}
 	}
 
@@ -386,6 +420,22 @@ func (instance *Instance) updateLayerStatus(layerInfo amqp.LayerInfo) {
 	}
 
 	instance.updateStatus(layerStatus, statusDescriptor{&layerInfo})
+}
+
+func (instance *Instance) updateServiceStatus(serviceInfo amqp.ServiceInfo) {
+	log.WithFields(log.Fields{
+		"id":         serviceInfo.ID,
+		"status":     serviceInfo.Status,
+		"aosVersion": serviceInfo.AosVersion,
+		"error":      serviceInfo.Error}).Debug("Update service status")
+
+	serviceStatus, ok := instance.serviceStatuses[serviceInfo.ID]
+	if !ok {
+		serviceStatus = &itemStatus{}
+		instance.serviceStatuses[serviceInfo.ID] = serviceStatus
+	}
+
+	instance.updateStatus(serviceStatus, statusDescriptor{&serviceInfo})
 }
 
 func (instance *Instance) statusChanged() {
@@ -595,6 +645,69 @@ nextLayer:
 		}
 
 		instance.updateLayerStatus(layerInfo)
+	})
+
+	return err
+}
+
+func (instance *Instance) updateServices(desiredServices []amqp.ServiceInfoFromCloud,
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	log.Debug("Update services")
+
+	var selectCases []reflect.SelectCase
+
+	for _, desiredService := range desiredServices {
+		if serviceStatus, ok := instance.serviceStatuses[desiredService.ID]; ok {
+			if installed, descriptor := serviceStatus.isInstalled(); installed &&
+				descriptor.amqpStatus.(*amqp.ServiceInfo).AosVersion >= desiredService.AosVersion {
+				continue
+			}
+		}
+
+		selectCases = append(selectCases, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(instance.serviceUpdater.InstallService(desiredService, chains, certs)),
+		})
+	}
+
+nextService:
+	for id, serviceStatus := range instance.serviceStatuses {
+		if installed, _ := serviceStatus.isInstalled(); !installed {
+			continue
+		}
+
+		for _, desiredService := range desiredServices {
+			if desiredService.ID == id {
+				continue nextService
+			}
+		}
+
+		selectCases = append(selectCases, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(instance.serviceUpdater.UninstallService(id)),
+		})
+
+	}
+
+	if len(selectCases) == 0 {
+		log.Debug("No services need to be updated")
+
+		return nil
+	}
+
+	instance.processSelectedCases(selectCases, func(value interface{}) {
+		instance.Lock()
+		defer instance.Unlock()
+
+		serviceInfo := value.(amqp.ServiceInfo)
+
+		if serviceInfo.Status == amqp.ErrorStatus {
+			if err == nil {
+				err = aoserrors.New(serviceInfo.Error)
+			}
+		}
+
+		instance.updateServiceStatus(serviceInfo)
 	})
 
 	return err
