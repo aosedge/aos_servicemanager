@@ -139,12 +139,10 @@ func (instance *Logging) getLog(request getLogRequest) {
 
 	// error handling
 	defer func() {
-		if r := recover(); r != nil {
-			errorStr := fmt.Sprintf("%s: %s", r, err)
+		if err != nil {
+			log.Error("Can't get logs: ", err)
 
-			log.Error(errorStr)
-
-			instance.sendErrorResponse(errorStr, request.logID)
+			instance.sendErrorResponse(err.Error(), request.logID)
 		}
 	}()
 
@@ -152,7 +150,8 @@ func (instance *Logging) getLog(request getLogRequest) {
 
 	journal, err = sdjournal.NewJournal()
 	if err != nil {
-		panic("Can't open sd journal")
+		err = aoserrors.Wrap(err)
+		return
 	}
 	defer journal.Close()
 
@@ -162,12 +161,14 @@ func (instance *Logging) getLog(request getLogRequest) {
 		needUnitField = false
 
 		if _, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID); err != nil {
-			panic("Can't add filter")
+			err = aoserrors.Wrap(err)
+			return
 		}
 	}
 
 	if err = instance.seekToTime(journal, request.from); err != nil {
-		panic("Can't seek log")
+		err = aoserrors.Wrap(err)
+		return
 	}
 
 	var tillRealtime uint64
@@ -181,14 +182,17 @@ func (instance *Logging) getLog(request getLogRequest) {
 	if archInstance, err = newArchivator(instance.LogChannel,
 		instance.config.MaxPartSize,
 		instance.config.MaxPartCount); err != nil {
-		panic("Can't create archivator")
+		err = aoserrors.Wrap(err)
+
+		return
 	}
 
 	for {
 		var rowCount uint64
 
 		if rowCount, err = journal.Next(); err != nil {
-			panic("Can't seek log")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		// end of log
@@ -199,7 +203,8 @@ func (instance *Logging) getLog(request getLogRequest) {
 		var logEntry *sdjournal.JournalEntry
 
 		if logEntry, err = journal.GetEntry(); err != nil {
-			panic("Can't get entry")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		// till time reached
@@ -213,12 +218,15 @@ func (instance *Logging) getLog(request getLogRequest) {
 				break
 			}
 
-			panic("Can't archive log")
+			err = aoserrors.Wrap(err)
+
+			return
 		}
 	}
 
 	if err = archInstance.sendLog(request.logID); err != nil {
-		panic("Can't send log")
+		err = aoserrors.Wrap(err)
+		return
 	}
 }
 
@@ -227,12 +235,10 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 	// error handling
 	defer func() {
-		if r := recover(); r != nil {
-			errorStr := fmt.Sprintf("%s: %s", r, err)
+		if err != nil {
+			log.Error("Can't get service crash logs: ", err)
 
-			log.Error(errorStr)
-
-			instance.sendErrorResponse(errorStr, request.LogID)
+			instance.sendErrorResponse(err.Error(), request.LogID)
 		}
 	}()
 
@@ -240,21 +246,25 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 	journal, err = sdjournal.NewJournal()
 	if err != nil {
-		panic("Can't open sd journal")
+		err = aoserrors.Wrap(err)
+		return
 	}
 	defer journal.Close()
 
 	if _, err = instance.addServiceIDFilter(journal, unitField, request.ServiceID); err != nil {
-		panic("Can't add filter")
+		err = aoserrors.Wrap(err)
+		return
 	}
 
 	if request.Till == nil {
 		if err = journal.SeekTail(); err != nil {
-			panic("Can't seek log tail")
+			err = aoserrors.Wrap(err)
+			return
 		}
 	} else {
 		if err = journal.SeekRealtimeUsec(uint64(request.Till.UnixNano() / 1000)); err != nil {
-			panic("Can't seek log till")
+			err = aoserrors.Wrap(err)
+			return
 		}
 	}
 
@@ -264,7 +274,8 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		var rowCount uint64
 
 		if rowCount, err = journal.Previous(); err != nil {
-			panic("Can't seek previous entry")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		// end of log
@@ -275,7 +286,8 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		var logEntry *sdjournal.JournalEntry
 
 		if logEntry, err = journal.GetEntry(); err != nil {
-			panic("Can't get entry")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		if request.From != nil {
@@ -304,26 +316,30 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 	if archInstance, err = newArchivator(instance.LogChannel,
 		instance.config.MaxPartSize,
 		instance.config.MaxPartCount); err != nil {
-		panic("Can't create archivator")
+		err = aoserrors.Wrap(err)
+		return
 	}
 
 	if crashTime > 0 {
 		if err = journal.AddDisjunction(); err != nil {
-			panic("Can't add filter")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		var unitName string
 
 		unitName, err = instance.addServiceIDFilter(journal, serviceField, request.ServiceID)
 		if err != nil {
-			panic("Can't add filter")
+			err = aoserrors.Wrap(err)
+			return
 		}
 
 		for {
 			var rowCount uint64
 
 			if rowCount, err = journal.Next(); err != nil {
-				panic("Can't seek log")
+				err = aoserrors.Wrap(err)
+				return
 			}
 
 			// end of log
@@ -334,7 +350,8 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			var logEntry *sdjournal.JournalEntry
 
 			if logEntry, err = journal.GetEntry(); err != nil {
-				panic("Can't get entry")
+				err = aoserrors.Wrap(err)
+				return
 			}
 
 			if logEntry.MonotonicTimestamp > crashTime {
@@ -343,14 +360,16 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 			if serviceName, ok := logEntry.Fields[serviceField]; ok && unitName == serviceName {
 				if err = archInstance.addLog(createLogString(logEntry, false)); err != nil {
-					panic("Can't archive log")
+					err = aoserrors.Wrap(err)
+					return
 				}
 			}
 		}
 	}
 
 	if err = archInstance.sendLog(request.LogID); err != nil {
-		panic("Can't send log")
+		err = aoserrors.Wrap(err)
+		return
 	}
 }
 
