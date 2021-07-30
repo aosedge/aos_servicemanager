@@ -74,6 +74,7 @@ type alertsCounter struct {
  ******************************************************************************/
 
 const pythonServerScript = "start.py"
+const decryptedDirName = "decrypt"
 
 /*******************************************************************************
  * Vars
@@ -138,7 +139,7 @@ func TestDownload(t *testing.T) {
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
-	_, err = downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, "")
+	_, err = downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName))
 	if err != nil {
 		t.Errorf("Can't DownloadAndDecrypt %s", err)
 	}
@@ -177,7 +178,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
-	_, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, "")
+	_, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName))
 	if err == nil {
 		t.Errorf("Error was expected DownloadAndDecrypt %s", err)
 	}
@@ -196,7 +197,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	_, err = downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, "")
+	_, err = downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName))
 	if err != nil {
 		t.Errorf("Can't DownloadAndDecrypt %s", err)
 	}
@@ -262,13 +263,13 @@ func TestAvailableSize(t *testing.T) {
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
-	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, ""); err == nil {
+	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(mountDir, decryptedDirName)); err == nil {
 		t.Error("Error was expected")
 	}
 
 	time.Sleep(1 * time.Second)
 
-	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, ""); err != nil {
+	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(mountDir, decryptedDirName)); err != nil {
 		t.Errorf("Can't download and decrypt package: %s", err)
 	}
 }
@@ -376,7 +377,7 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	clearWondershaperLimit("lo")
-	os.RemoveAll(workingDir)
+	os.RemoveAll(downloadDir)
 	os.RemoveAll(serverDir)
 
 	return nil

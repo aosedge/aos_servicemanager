@@ -30,6 +30,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
 	"aos_servicemanager/utils"
 )
 
@@ -38,6 +39,7 @@ import (
  ******************************************************************************/
 const (
 	extractDirName     = "extract"
+	decryptDirName     = "decrypt"
 	layerOCIDescriptor = "layer.json"
 )
 
@@ -56,6 +58,7 @@ type LayerManager struct {
 	layersDir         string
 	layerInfoProvider LayerInfoProvider
 	extractDir        string
+	decryptDir        string
 	downloader        downloader
 	layersToRemove    []amqp.LayerInfo
 	statusSender      LayerStatusSender
@@ -83,15 +86,15 @@ type downloader interface {
 /*******************************************************************************
  * Public
  ******************************************************************************/
-
 // New creates new launcher object
-func New(layersStorageDir string, downloader downloader, infoProvider LayerInfoProvider,
+func New(config *config.Config, downloader downloader, infoProvider LayerInfoProvider,
 	sender LayerStatusSender) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{
-		layersDir:         layersStorageDir,
+		layersDir:         config.LayersDir,
 		downloader:        downloader,
 		layerInfoProvider: infoProvider,
-		extractDir:        path.Join(layersStorageDir, extractDirName),
+		extractDir:        path.Join(config.LayersDir, extractDirName),
+		decryptDir:        path.Join(config.WorkingDir, decryptDirName),
 		statusSender:      sender}
 
 	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
@@ -102,6 +105,8 @@ func New(layersStorageDir string, downloader downloader, infoProvider LayerInfoP
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
+	os.RemoveAll(layermanager.decryptDir)
 
 	return layermanager, nil
 }
@@ -256,7 +261,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 	layerStatus = amqp.LayerInfo{Digest: desiredLayer.Digest, ID: desiredLayer.ID, Status: layerStatusError,
 		AosVersion: desiredLayer.AosVersion}
 
-	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, "")
+	destinationFile, err := layermanager.downloader.DownloadAndDecrypt(decryptData, chains, certs, layermanager.decryptDir)
 	if err != nil {
 		return layerStatus, aoserrors.Wrap(err)
 	}

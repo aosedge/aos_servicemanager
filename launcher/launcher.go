@@ -116,6 +116,8 @@ WantedBy=multi-user.target
 
 const serviceTemplateFile = "template.service"
 
+const decryptedDirName = "decrypt"
+
 const (
 	hostfsWiteoutsDir = "hostfs/whiteouts"
 )
@@ -167,6 +169,7 @@ type Launcher struct {
 	ttlTicker *time.Ticker
 
 	downloader downloader
+	decryptDir string
 
 	users []string
 
@@ -322,6 +325,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		services:         make(map[string]string),
 		serviceRegistrar: serviceRegistrar,
 		idsPool:          &identifierPool{},
+		decryptDir:       path.Join(config.WorkingDir, decryptedDirName),
 	}
 
 	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
@@ -389,6 +393,8 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 			log.Errorf("Can't add service UID/GID to pool: %s", err)
 		}
 	}
+
+	os.RemoveAll(launcher.decryptDir)
 
 	return launcher, nil
 }
@@ -1031,7 +1037,7 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 		Signs:          serviceInfo.serviceDetails.Signs}
 
 	// download and unpack
-	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, serviceInfo.chains, serviceInfo.certs, "")
+	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, serviceInfo.chains, serviceInfo.certs, launcher.decryptDir)
 	if image != "" {
 		defer os.Remove(image)
 	}

@@ -45,8 +45,6 @@ import (
  * Consts
  ******************************************************************************/
 
-const decryptedDirName = "decrypt"
-
 const updateDownloadsTime = 10 * time.Second
 const statusAlertTickCount = 3
 
@@ -69,10 +67,9 @@ type fcryptInterface interface {
 
 // Downloader instance
 type Downloader struct {
-	crypt        fcryptInterface
-	downloadDir  string
-	decryptedDir string
-	sender       alertSender
+	crypt       fcryptInterface
+	downloadDir string
+	sender      alertSender
 }
 
 //alertSender provdes sender interface
@@ -109,15 +106,10 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(path.Join(config.WorkingDir, decryptedDirName), 755); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
 	downloader = &Downloader{
-		crypt:        fcrypt,
-		downloadDir:  config.DownloadDir,
-		decryptedDir: path.Join(config.WorkingDir, decryptedDirName),
-		sender:       sender,
+		crypt:       fcrypt,
+		downloadDir: config.DownloadDir,
+		sender:      sender,
 	}
 
 	return downloader, nil
@@ -125,16 +117,29 @@ func New(config *config.Config, fcrypt fcryptInterface, sender alertSender) (dow
 
 // Close cleans up downloader stuff
 func (downloader *Downloader) Close() {
-	os.RemoveAll(downloader.decryptedDir)
 }
 
 // DownloadAndDecrypt download decrypt and validate blob
-// if decryptDir = "" downloader will use own dir
 func (downloader *Downloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
 
 	if decryptDir == "" {
-		decryptDir = downloader.decryptedDir
+		return "", aoserrors.New("decrypt directory is not defined")
+	}
+
+	statInfo, err := os.Stat(decryptDir)
+	if err != nil && !os.IsNotExist(err) {
+		return "", aoserrors.Wrap(err)
+	}
+
+	if os.IsNotExist(err) {
+		if err = os.MkdirAll(decryptDir, 755); err != nil {
+			return "", aoserrors.Wrap(err)
+		}
+	} else {
+		if !statInfo.Mode().IsDir() {
+			return "", aoserrors.New("decrypt dir path is the file path")
+		}
 	}
 
 	if err = downloader.isEnoughSpaceForPackage(packageInfo, downloader.downloadDir, decryptDir); err != nil {

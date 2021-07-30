@@ -36,6 +36,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 )
 
@@ -239,7 +240,8 @@ func TestLayersStatus(t *testing.T) {
 
 	sender := new(fakeLayerSender)
 
-	testLayerMgr, err := New(path.Join(testTmpDir, "layerStorage"), new(layerDownloader), testDb, sender)
+	testLayerMgr, err := New(&config.Config{WorkingDir: path.Join(testTmpDir, "workingDir"),
+		LayersDir: path.Join(testTmpDir, "layerStorage")}, new(layerDownloader), testDb, sender)
 	if err != nil {
 		log.Fatalf("Can't create layer manager: %s", err)
 	}
@@ -358,7 +360,8 @@ func setup() (err error) {
 		log.Fatalf("Can't create database: %s", err)
 	}
 
-	layerMgr, err = New(path.Join(tmpDir, "layerStorage"), new(layerDownloader), db, new(fakeLayerSender))
+	layerMgr, err = New(&config.Config{WorkingDir: path.Join(tmpDir, "workingDir"),
+		LayersDir: path.Join(tmpDir, "layerStorage")}, new(layerDownloader), db, new(fakeLayerSender))
 	if err != nil {
 		log.Fatalf("Can't layer manager: %s", err)
 	}
