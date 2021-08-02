@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package launcher
+package action
 
 import (
 	"container/list"
@@ -34,52 +34,63 @@ const (
  * Types
  ******************************************************************************/
 
-type actionHandler struct {
+// Handler action handler
+type Handler struct {
 	sync.Mutex
 
 	waitQueue *list.List
 	workQueue *list.List
 }
 
-type serviceAction struct {
+type action struct {
 	id       string
 	data     interface{}
 	doAction func(string, interface{})
 }
 
 /*******************************************************************************
- * Private
+ * Public
  ******************************************************************************/
 
-func newActionHandler() (handler *actionHandler, err error) {
-	handler = &actionHandler{}
-
-	handler.waitQueue = list.New()
-	handler.workQueue = list.New()
+func New() (handler *Handler, err error) {
+	handler = &Handler{
+		workQueue: list.New(),
+		waitQueue: list.New(),
+	}
 
 	return handler, nil
 }
 
-func (handler *actionHandler) PutInQueue(action serviceAction) {
+func (handler *Handler) PutInQueue(id string, data interface{}, doAction func(string, interface{})) {
 	handler.Lock()
 	defer handler.Unlock()
 
-	if handler.isIDInWorkQueue(action.id) {
-		handler.waitQueue.PushBack(action)
+	newAction := action{
+		id:       id,
+		data:     data,
+		doAction: doAction,
+	}
+
+	if handler.isIDInWorkQueue(newAction.id) {
+		handler.waitQueue.PushBack(newAction)
 		return
 	}
 
 	if handler.workQueue.Len() >= maxExecutedActions {
-		handler.waitQueue.PushBack(action)
+		handler.waitQueue.PushBack(newAction)
 		return
 	}
 
-	go handler.processAction(handler.workQueue.PushBack(action))
+	go handler.processAction(handler.workQueue.PushBack(newAction))
 }
 
-func (handler *actionHandler) isIDInWorkQueue(id string) (result bool) {
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (handler *Handler) isIDInWorkQueue(id string) (result bool) {
 	for item := handler.workQueue.Front(); item != nil; item = item.Next() {
-		if item.Value.(serviceAction).id == id {
+		if item.Value.(action).id == id {
 			return true
 		}
 	}
@@ -87,10 +98,10 @@ func (handler *actionHandler) isIDInWorkQueue(id string) (result bool) {
 	return false
 }
 
-func (handler *actionHandler) processAction(item *list.Element) {
-	action := item.Value.(serviceAction)
+func (handler *Handler) processAction(item *list.Element) {
+	currentAction := item.Value.(action)
 
-	action.doAction(action.id, action.data)
+	currentAction.doAction(currentAction.id, currentAction.data)
 
 	handler.Lock()
 	defer handler.Unlock()
@@ -98,11 +109,12 @@ func (handler *actionHandler) processAction(item *list.Element) {
 	handler.workQueue.Remove(item)
 
 	for item := handler.waitQueue.Front(); item != nil; item = item.Next() {
-		if handler.isIDInWorkQueue(item.Value.(serviceAction).id) {
+		if handler.isIDInWorkQueue(item.Value.(action).id) {
 			continue
 		}
 
 		go handler.processAction(handler.workQueue.PushBack(handler.waitQueue.Remove(item)))
+
 		break
 	}
 }

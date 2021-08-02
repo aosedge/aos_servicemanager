@@ -31,7 +31,7 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/utils"
+	"aos_servicemanager/utils/imageutils"
 )
 
 /*******************************************************************************
@@ -268,7 +268,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 	defer os.RemoveAll(destinationFile)
 
 	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
-	if err = utils.UnpackTarImage(destinationFile, unpackDir); err != nil {
+	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {
 		err = aoserrors.Errorf("extract layer package from archive error: %s", err.Error())
 		layerStatus.Error = err.Error()
 		return layerStatus, aoserrors.Wrap(err)
@@ -297,7 +297,7 @@ func (layermanager *LayerManager) installLayer(desiredLayer amqp.LayerInfoFromCl
 	}
 
 	layerStorageDir := path.Join(layermanager.layersDir, "blobs", (string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
-	if err = utils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
+	if err = imageutils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
 		err = aoserrors.Errorf("extract layer to storage: %s", err.Error())
 		layerStatus.Error = err.Error()
 		return layerStatus, aoserrors.Wrap(err)

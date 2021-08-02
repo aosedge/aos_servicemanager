@@ -47,7 +47,8 @@ import (
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
 	"aos_servicemanager/resourcemanager"
-	"aos_servicemanager/utils"
+	"aos_servicemanager/utils/action"
+	"aos_servicemanager/utils/imageutils"
 )
 
 /*******************************************************************************
@@ -162,7 +163,7 @@ type Launcher struct {
 	envVarsProvider *envVarsProvider
 	ttlStopChannel  chan bool
 
-	actionHandler  *actionHandler
+	actionHandler  *action.Handler
 	storageHandler *storageHandler
 	idsPool        *identifierPool
 
@@ -334,7 +335,7 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 
 	launcher.ttlStopChannel = make(chan bool, 1)
 
-	if launcher.actionHandler, err = newActionHandler(); err != nil {
+	if launcher.actionHandler, err = action.New(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -442,7 +443,7 @@ func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud,
 
 	info.statusSender.sendStatus(info.serviceDetails.ID, info.serviceDetails.AosVersion, amqp.PendingStatus, "", "")
 
-	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, info, launcher.doActionInstall})
+	launcher.actionHandler.PutInQueue(serviceInfo.ID, info, launcher.doActionInstall)
 
 	return statusSender
 }
@@ -451,14 +452,14 @@ func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud,
 func (launcher *Launcher) UninstallService(id string) (statusChannel <-chan amqp.ServiceInfo) {
 	statusSender := make(statusSender, 1)
 
-	launcher.actionHandler.PutInQueue(serviceAction{id, statusSender, launcher.doActionUninstall})
+	launcher.actionHandler.PutInQueue(id, statusSender, launcher.doActionUninstall)
 
 	return statusSender
 }
 
 // FinishProcessingLayers triggers layers cleanup
 func (launcher *Launcher) FinishProcessingLayers() {
-	launcher.actionHandler.PutInQueue(serviceAction{"", nil, launcher.doFinishProcessingLayers})
+	launcher.actionHandler.PutInQueue("", nil, launcher.doFinishProcessingLayers)
 }
 
 // CheckServicesConsistency checks if service folders exist
@@ -557,7 +558,7 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 	statusChannel := make(chan error, len(services))
 
 	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+		launcher.actionHandler.PutInQueue(service.ID, service,
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
@@ -570,7 +571,7 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 				}
 
 				statusChannel <- err
-			}})
+			})
 	}
 
 	// Wait all services are deleted
@@ -596,13 +597,13 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 
 // StateAcceptance notifies launcher about new state acceptance
 func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) {
-	launcher.actionHandler.PutInQueue(serviceAction{acceptance.ServiceID,
-		stateAcceptance{correlationID, acceptance}, launcher.doStateAcceptance})
+	launcher.actionHandler.PutInQueue(acceptance.ServiceID,
+		stateAcceptance{correlationID, acceptance}, launcher.doStateAcceptance)
 }
 
 // UpdateState updates service state
 func (launcher *Launcher) UpdateState(state amqp.UpdateState) {
-	launcher.actionHandler.PutInQueue(serviceAction{state.ServiceID, state, launcher.doUpdateState})
+	launcher.actionHandler.PutInQueue(state.ServiceID, state, launcher.doUpdateState)
 }
 
 // Cleanup deletes all AOS services, their storages and states
@@ -777,7 +778,7 @@ func (launcher *Launcher) startServices(services []Service) {
 
 	// Start all services in parallel
 	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+		launcher.actionHandler.PutInQueue(service.ID, service,
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
@@ -790,7 +791,7 @@ func (launcher *Launcher) startServices(services []Service) {
 				}
 
 				statusChannel <- err
-			}})
+			})
 	}
 
 	// Wait all services are started
@@ -805,7 +806,7 @@ func (launcher *Launcher) stopServices(services []Service) {
 
 	// Stop all services in parallel
 	for _, service := range services {
-		launcher.actionHandler.PutInQueue(serviceAction{service.ID, service,
+		launcher.actionHandler.PutInQueue(service.ID, service,
 			func(id string, data interface{}) {
 				service, ok := data.(Service)
 				if !ok {
@@ -818,7 +819,7 @@ func (launcher *Launcher) stopServices(services []Service) {
 				}
 
 				statusChannel <- err
-			}})
+			})
 	}
 
 	// Wait all services are stopped
@@ -1098,7 +1099,7 @@ func (launcher *Launcher) installService(installInfo installServiceInfo) (err er
 	installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
 		amqp.InstallingStatus, "", "")
 
-	if err = utils.UnpackTarImage(image, unpackDir); err != nil {
+	if err = imageutils.UnpackTarImage(image, unpackDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1905,15 +1906,15 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, aoserrors.Wrap(err)
 	}
 
-	if err := utils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir, manifestFileName)); err != nil {
+	if err := imageutils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir, manifestFileName)); err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 
-	if err := utils.CopyFile(imageParts.imageConfigPath, path.Join(installDir, ociImageConfigFile)); err != nil {
+	if err := imageutils.CopyFile(imageParts.imageConfigPath, path.Join(installDir, ociImageConfigFile)); err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 
-	if err := utils.CopyFile(imageParts.aosSrvConfigPath, path.Join(installDir, aosServiceConfigFile)); err != nil {
+	if err := imageutils.CopyFile(imageParts.aosSrvConfigPath, path.Join(installDir, aosServiceConfigFile)); err != nil {
 		if !os.IsNotExist(err) {
 			return service, aoserrors.Wrap(err)
 		}
@@ -1924,7 +1925,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	rootfsDir := path.Join(installDir, serviceRootfsDir)
 
 	// unpack rootfs layer
-	if err = utils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
+	if err = imageutils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 

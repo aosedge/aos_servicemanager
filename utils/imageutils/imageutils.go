@@ -15,10 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package imageutils
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"os/exec"
@@ -60,25 +59,21 @@ func CopyFile(source, destination string) (err error) {
 /*******************************************************************************
  * Private
  ******************************************************************************/
-func unTarFromFile(tarArchieve string, destination string) (err error) {
-	if _, err = os.Stat(tarArchieve); err != nil {
-		log.Error("Can't find tar arcieve")
+
+func unTarFromFile(tarArchive string, destination string) (err error) {
+	if _, err = os.Stat(tarArchive); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(destination, 0755); err != nil {
-		return aoserrors.New("can't create tar destination path")
+		return aoserrors.Wrap(err)
 	}
 
-	cmd := exec.Command("tar", "xf", tarArchieve, "-C", destination)
+	if output, err := exec.Command("tar", "xf", tarArchive, "-C", destination).CombinedOutput(); err != nil {
+		log.Errorf("Failed to unpack archive: %s", string(output))
 
-	var out bytes.Buffer
-	cmd.Stdout = &out
-
-	err = cmd.Run()
-	if err != nil {
-		log.Errorf("Failed to untar archieve. Output is: %s", out.String())
+		return aoserrors.Wrap(err)
 	}
 
-	return aoserrors.Wrap(err)
+	return nil
 }
