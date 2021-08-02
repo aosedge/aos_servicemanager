@@ -245,7 +245,6 @@ type ServiceMonitor interface {
 
 // Sender provides API to send messages to the cloud
 type Sender interface {
-	SendServiceStatus(serviceStatus amqp.ServiceInfo) (err error)
 	SendStateRequest(serviceID string, defaultState bool) (err error)
 	SendOverrideEnvVarsStatus(envs []amqp.EnvVarInfoStatus) (err error)
 }
@@ -298,11 +297,14 @@ type layerProvider interface {
 	DeleteUnneededLayers() (err error)
 }
 
-type serviceInfoToInstall struct {
+type installServiceInfo struct {
 	serviceDetails amqp.ServiceInfoFromCloud
 	chains         []amqp.CertificateChain
 	certs          []amqp.Certificate
+	statusSender   statusSender
 }
+
+type statusSender chan amqp.ServiceInfo
 
 /*******************************************************************************
  * Public
@@ -428,19 +430,30 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 
 // InstallService installs and runs service
 func (launcher *Launcher) InstallService(serviceInfo amqp.ServiceInfoFromCloud,
-	chains []amqp.CertificateChain, certs []amqp.Certificate) {
-	serviceInfoForInstall := serviceInfoToInstall{
+	chains []amqp.CertificateChain, certs []amqp.Certificate) (statusChannel <-chan amqp.ServiceInfo) {
+	statusSender := make(statusSender, 1)
+
+	info := installServiceInfo{
 		serviceDetails: serviceInfo,
 		chains:         chains,
 		certs:          certs,
+		statusSender:   statusSender,
 	}
 
-	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, serviceInfoForInstall, launcher.doActionInstall})
+	info.statusSender.sendStatus(info.serviceDetails.ID, info.serviceDetails.AosVersion, amqp.PendingStatus, "", "")
+
+	launcher.actionHandler.PutInQueue(serviceAction{serviceInfo.ID, info, launcher.doActionInstall})
+
+	return statusSender
 }
 
 // UninstallService stops and removes service
-func (launcher *Launcher) UninstallService(id string) {
-	launcher.actionHandler.PutInQueue(serviceAction{id, nil, launcher.doActionUninstall})
+func (launcher *Launcher) UninstallService(id string) (statusChannel <-chan amqp.ServiceInfo) {
+	statusSender := make(statusSender, 1)
+
+	launcher.actionHandler.PutInQueue(serviceAction{id, statusSender, launcher.doActionUninstall})
+
+	return statusSender
 }
 
 // FinishProcessingLayers triggers layers cleanup
@@ -936,59 +949,93 @@ func isUsersEqual(users1, users2 []string) (result bool) {
 	return true
 }
 
+func (sender *statusSender) sendStatus(id string, aosVersion uint64, status, errStr, stateCheckSum string) {
+	*sender <- amqp.ServiceInfo{
+		ID:            id,
+		AosVersion:    aosVersion,
+		Status:        status,
+		Error:         errStr,
+		StateChecksum: stateCheckSum,
+	}
+}
+
 func (launcher *Launcher) doActionInstall(id string, data interface{}) {
 	var err error
 
-	status := amqp.ServiceInfo{ID: id, Status: "installed"}
+	installInfo := data.(installServiceInfo)
+
+	log.WithFields(log.Fields{
+		"id":         installInfo.serviceDetails.ID,
+		"aosVersion": installInfo.serviceDetails.AosVersion}).Debug("Install service")
 
 	defer func() {
 		if err != nil {
-			status.Status = "error"
-			status.Error = "Can't install service: " + err.Error()
-			if launcher.sender != nil {
-				launcher.sender.SendServiceStatus(status)
-			}
+			log.WithFields(log.Fields{
+				"id":         installInfo.serviceDetails.ID,
+				"aosVersion": installInfo.serviceDetails.AosVersion}).Errorf("Can't install service: %s", err)
+
+			installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
+				amqp.ErrorStatus, err.Error(), "")
 		}
+
+		close(installInfo.statusSender)
 	}()
 
-	serviceInfo, ok := data.(serviceInfoToInstall)
-	if !ok {
-		err = aoserrors.New("wrong data type")
-		return
-	}
-
-	status.AosVersion = serviceInfo.serviceDetails.AosVersion
-
-	if err = launcher.installService(serviceInfo); err != nil {
+	if err = launcher.installService(installInfo); err != nil {
+		err = aoserrors.Wrap(err)
 		return
 	}
 
 	var userService UsersService
 
 	if userService, err = launcher.serviceProvider.GetUsersService(launcher.users, id); err != nil {
+		err = aoserrors.Wrap(err)
 		return
 	}
 
-	status.StateChecksum = hex.EncodeToString(userService.StateChecksum)
+	installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
+		amqp.InstalledStatus, "", hex.EncodeToString(userService.StateChecksum))
 
-	if launcher.sender != nil {
-		launcher.sender.SendServiceStatus(status)
-	}
+	log.WithFields(log.Fields{
+		"id":         installInfo.serviceDetails.ID,
+		"aosVersion": installInfo.serviceDetails.AosVersion}).Info("Service successfully installed")
 }
 
 func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
-	var err error
+	var (
+		err     error
+		service Service
+	)
 
-	status := amqp.ServiceInfo{ID: id, Status: "removed"}
-	status.AosVersion, err = launcher.uninstallService(status.ID)
-	if err != nil {
-		status.Status = "error"
-		status.Error = err.Error()
+	statusSender := data.(statusSender)
+
+	log.WithFields(log.Fields{"id": id}).Debug("Uninstall service")
+
+	defer func() {
+		if err != nil {
+			log.WithFields(log.Fields{"id": id}).Errorf("Can't uninstall service: %s", err)
+
+			statusSender.sendStatus(id, service.AosVersion, amqp.ErrorStatus, err.Error(), "")
+		}
+
+		close(statusSender)
+	}()
+
+	if service, err = launcher.serviceProvider.GetService(id); err != nil {
+		err = aoserrors.Wrap(err)
+		return
 	}
 
-	if launcher.sender != nil {
-		launcher.sender.SendServiceStatus(status)
+	statusSender.sendStatus(id, service.AosVersion, amqp.RemovingStatus, "", "")
+
+	if err = launcher.uninstallService(service); err != nil {
+		err = aoserrors.Wrap(err)
+		return
 	}
+
+	statusSender.sendStatus(id, service.AosVersion, amqp.RemovedStatus, "", "")
+
+	log.WithFields(log.Fields{"id": id}).Info("Service successfully uninstalled")
 }
 
 func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) {
@@ -997,25 +1044,25 @@ func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) 
 	}
 }
 
-func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err error) {
+func (launcher *Launcher) installService(installInfo installServiceInfo) (err error) {
 	if launcher.users == nil {
 		return aoserrors.New("users are not set")
 	}
 
-	service, err := launcher.serviceProvider.GetService(serviceInfo.serviceDetails.ID)
+	service, err := launcher.serviceProvider.GetService(installInfo.serviceDetails.ID)
 	if err != nil && !strings.Contains(err.Error(), "not exist") {
 		return aoserrors.Wrap(err)
 	}
 	serviceExists := err == nil
 
 	// Skip incorrect version
-	if serviceExists && serviceInfo.serviceDetails.AosVersion < service.AosVersion {
+	if serviceExists && installInfo.serviceDetails.AosVersion < service.AosVersion {
 		return aoserrors.New("version mistmatch")
 	}
 
 	// If same service version exists, just start the service
-	if serviceExists && serviceInfo.serviceDetails.AosVersion == service.AosVersion {
-		if err = launcher.addServiceToCurrentUsers(serviceInfo.serviceDetails.ID); err != nil {
+	if serviceExists && installInfo.serviceDetails.AosVersion == service.AosVersion {
+		if err = launcher.addServiceToCurrentUsers(installInfo.serviceDetails.ID); err != nil {
 			return aoserrors.Wrap(err)
 		}
 
@@ -1026,24 +1073,30 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 		return nil
 	}
 
+	installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
+		amqp.DownloadingStatus, "", "")
+
 	unpackDir, err := ioutil.TempDir("", "aos_")
 	defer os.RemoveAll(unpackDir)
 
-	decryptData := amqp.DecryptDataStruct{URLs: serviceInfo.serviceDetails.URLs,
-		Sha256:         serviceInfo.serviceDetails.Sha256,
-		Sha512:         serviceInfo.serviceDetails.Sha512,
-		Size:           serviceInfo.serviceDetails.Size,
-		DecryptionInfo: serviceInfo.serviceDetails.DecryptionInfo,
-		Signs:          serviceInfo.serviceDetails.Signs}
+	decryptData := amqp.DecryptDataStruct{URLs: installInfo.serviceDetails.URLs,
+		Sha256:         installInfo.serviceDetails.Sha256,
+		Sha512:         installInfo.serviceDetails.Sha512,
+		Size:           installInfo.serviceDetails.Size,
+		DecryptionInfo: installInfo.serviceDetails.DecryptionInfo,
+		Signs:          installInfo.serviceDetails.Signs}
 
 	// download and unpack
-	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, serviceInfo.chains, serviceInfo.certs, launcher.decryptDir)
+	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, installInfo.chains, installInfo.certs, launcher.decryptDir)
 	if image != "" {
 		defer os.Remove(image)
 	}
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
+		amqp.InstallingStatus, "", "")
 
 	if err = utils.UnpackTarImage(image, unpackDir); err != nil {
 		return aoserrors.Wrap(err)
@@ -1069,20 +1122,18 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 
 	defer func() {
 		if err != nil {
-			log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Error install service: %s", err)
-
 			// Remove install dir if exists
 			if _, err := os.Stat(installDir); err == nil {
 				if err := os.RemoveAll(installDir); err != nil {
-					log.WithField("serviceID", serviceInfo.serviceDetails.ID).Errorf("Can't remove service dir: %s", err)
+					log.WithField("serviceID", installInfo.serviceDetails.ID).Errorf("Can't remove service dir: %s", err)
 				}
 			}
 		}
 	}()
 
-	log.WithFields(log.Fields{"dir": installDir, "serviceID": serviceInfo.serviceDetails.ID}).Debug("Create install dir")
+	log.WithFields(log.Fields{"dir": installDir, "serviceID": installInfo.serviceDetails.ID}).Debug("Create install dir")
 
-	newService, err := launcher.prepareService(unpackDir, installDir, serviceInfo.serviceDetails)
+	newService, err := launcher.prepareService(unpackDir, installDir, installInfo.serviceDetails)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -1092,7 +1143,7 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 			return aoserrors.Wrap(err)
 		}
 	} else {
-		if err = launcher.updateService(service, newService); err != nil {
+		if err = launcher.updateService(service, newService, installInfo.statusSender); err != nil {
 			return aoserrors.Wrap(err)
 		}
 	}
@@ -1100,25 +1151,18 @@ func (launcher *Launcher) installService(serviceInfo serviceInfoToInstall) (err 
 	return nil
 }
 
-func (launcher *Launcher) uninstallService(id string) (version uint64, err error) {
-	service, err := launcher.serviceProvider.GetService(id)
-	if err != nil {
-		return 0, aoserrors.Wrap(err)
-	}
-
-	version = service.AosVersion
-
+func (launcher *Launcher) uninstallService(service Service) (err error) {
 	if launcher.users == nil {
-		return version, aoserrors.New("users are not set")
+		return aoserrors.New("users are not set")
 	}
 
 	if err := launcher.stopService(service); err != nil {
-		return version, aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
 	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
 	if err != nil {
-		return version, aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
 	if userService.StorageFolder != "" {
@@ -1127,15 +1171,15 @@ func (launcher *Launcher) uninstallService(id string) (version uint64, err error
 			"serviceID": service.ID}).Debug("Remove storage folder")
 
 		if err = os.RemoveAll(userService.StorageFolder); err != nil {
-			return version, aoserrors.Wrap(err)
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = launcher.serviceProvider.RemoveServiceFromUsers(launcher.users, service.ID); err != nil {
-		return version, aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
-	return version, nil
+	return nil
 }
 
 func (launcher *Launcher) doUpdateState(id string, data interface{}) {
@@ -1973,7 +2017,7 @@ func (launcher *Launcher) addService(service Service) (err error) {
 	return aoserrors.Wrap(err)
 }
 
-func (launcher *Launcher) updateService(oldService, newService Service) (err error) {
+func (launcher *Launcher) updateService(oldService, newService Service, statusSender statusSender) (err error) {
 	defer func() {
 		if err != nil {
 			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
@@ -1987,16 +2031,16 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 			}
 
 			if err := launcher.restoreService(oldService); err != nil {
+				statusSender.sendStatus(oldService.ID, oldService.AosVersion, amqp.RemovingStatus, "", "")
 				launcher.removeService(oldService)
-				if launcher.sender != nil {
-					launcher.sender.SendServiceStatus(amqp.ServiceInfo{
-						ID:         oldService.ID,
-						AosVersion: oldService.AosVersion,
-						Status:     "removed"})
-				}
+				statusSender.sendStatus(oldService.ID, oldService.AosVersion, amqp.RemovedStatus, "", "")
+			} else {
+				statusSender.sendStatus(oldService.ID, oldService.AosVersion, amqp.RemovedStatus, "", "")
 			}
 		}
 	}()
+
+	statusSender.sendStatus(oldService.ID, oldService.AosVersion, amqp.RemovingStatus, "", "")
 
 	newAosConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
 	if err != nil {
@@ -2036,12 +2080,7 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return aoserrors.Wrap(err)
 	}
 
-	if launcher.sender != nil {
-		launcher.sender.SendServiceStatus(amqp.ServiceInfo{
-			ID:         oldService.ID,
-			AosVersion: oldService.AosVersion,
-			Status:     "removed"})
-	}
+	statusSender.sendStatus(oldService.ID, oldService.AosVersion, amqp.RemovedStatus, "", "")
 
 	return nil
 }
