@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package layermanager
+package layermanager_test
 
 import (
 	"crypto/sha256"
@@ -25,46 +25,43 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
-	"reflect"
-	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/database"
+	"aos_servicemanager/layermanager"
 )
-
-/*******************************************************************************
- * Consts
- ******************************************************************************/
-
-const tmpDir = "tmp"
-const tmpServerDir = "/tmp/aos/layerserver"
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
-type fakeLayerSender struct {
-	LayerList []amqp.LayerInfo
-}
 
 type layerDownloader struct {
+}
+
+type testInfoProvider struct {
+	sync.Mutex
+	layers map[string]layerDesc
+}
+
+type layerDesc struct {
+	id         string
+	aosVersion uint64
+	path       string
 }
 
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var (
-	layerMgr *LayerManager
-	db       *database.Database
-)
+var tmpDir string
 
 /*******************************************************************************
  * Init
@@ -102,32 +99,26 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemoveLayer(t *testing.T) {
-	layerDir := path.Join(tmpDir, "layerdir1")
-	if err := os.MkdirAll(layerDir, 0755); err != nil {
-		log.Fatalf("Can't create folder: %s", err)
-	}
-	defer os.RemoveAll(layerDir)
-
-	layerFile, digest, err := createLayer(layerDir)
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), newTesInfoProvider())
 	if err != nil {
-		log.Fatalf("Can't layer: %s", err)
+		t.Fatalf("Can't create layer manager: %s", err)
 	}
 
-	chains := []amqp.CertificateChain{}
-	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{generateLayerFromCloud(layerFile, "LayerId1", digest, 1)}
-
-	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		t.Errorf("Can't process layer list %s", err)
-	}
-
-	list, err := layerMgr.GetLayersInfo()
+	layerFile, digest, err := createLayer(path.Join(tmpDir, "layerdir1"))
 	if err != nil {
-		t.Errorf("Can't get layer list %s", err)
+		t.Fatalf("Can't create layer: %s", err)
+	}
+
+	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
+		layerManager.InstallLayer(generateLayerFromCloud(layerFile, "LayerId1", digest, 1), nil, nil)})
+
+	list, err := layerManager.GetLayersInfo()
+	if err != nil {
+		t.Fatalf("Can't get layer list: %s", err)
 	}
 
 	if len(list) != 1 {
-		t.Error("Count of layers should be 1")
+		t.Fatal("Count of layers should be 1")
 	}
 
 	if list[0].ID != "LayerId1" {
@@ -138,20 +129,10 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Error("Layer AosVersion should be 1")
 	}
 
-	if err = layerMgr.DeleteUnneededLayers(); err != nil {
-		t.Errorf("Error delete unneeded layers %s", err)
-	}
+	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
+		layerManager.UninstallLayer(digest)})
 
-	layerList = []amqp.LayerInfoFromCloud{}
-	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		t.Errorf("Can't process layer list %s", err)
-	}
-
-	if err = layerMgr.DeleteUnneededLayers(); err != nil {
-		t.Errorf("Error delete unneeded layers %s", err)
-	}
-
-	list, err = layerMgr.GetLayersInfo()
+	list, err = layerManager.GetLayersInfo()
 	if err != nil {
 		t.Errorf("Can't get layer list %s", err)
 	}
@@ -159,187 +140,140 @@ func TestInstallRemoveLayer(t *testing.T) {
 	if len(list) != 0 {
 		t.Error("Count of layers should be 0")
 	}
-
 }
 
 func TestLayerConsistencyCheck(t *testing.T) {
-	layerDir := path.Join(tmpDir, "layerdir1")
-	if err := os.MkdirAll(layerDir, 0755); err != nil {
-		log.Fatalf("Can't create folder: %s", err)
-	}
-	defer os.RemoveAll(layerDir)
+	infoProvider := newTesInfoProvider()
 
-	layerDir2 := path.Join(tmpDir, "layerdir2")
-	if err := os.MkdirAll(layerDir2, 0755); err != nil {
-		log.Fatalf("Can't create folder: %s", err)
-	}
-	defer func() {
-		if _, err := os.Stat(layerDir2); !os.IsNotExist(err) {
-			os.RemoveAll(layerDir2)
-		}
-	}()
-
-	layerFile, digest, err := createLayer(layerDir)
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), infoProvider)
 	if err != nil {
-		log.Fatalf("Can't layer: %s", err)
+		t.Fatalf("Can't create layer manager: %s", err)
 	}
 
-	layerFile2, digest2, err := createLayer(layerDir2)
+	layerFile1, digest1, err := createLayer(path.Join(tmpDir, "layerdir1"))
 	if err != nil {
-		log.Fatalf("Can't layer: %s", err)
+		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	chains := []amqp.CertificateChain{}
-	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{
-		generateLayerFromCloud(layerFile, "LayerId1", digest, 1),
-		generateLayerFromCloud(layerFile2, "LayerId2", digest2, 2)}
-
-	if err := layerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		t.Errorf("Can't process layer list %s", err)
-	}
-
-	list, err := layerMgr.GetLayersInfo()
+	layerFile2, digest2, err := createLayer(path.Join(tmpDir, "layerdir2"))
 	if err != nil {
-		t.Errorf("Can't get layer list %s", err)
+		t.Fatalf("Can't create layer: %s", err)
+	}
+
+	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
+		layerManager.InstallLayer(generateLayerFromCloud(layerFile1, "LayerId1", digest1, 1), nil, nil),
+		layerManager.InstallLayer(generateLayerFromCloud(layerFile2, "LayerId2", digest2, 2), nil, nil),
+	})
+
+	list, err := layerManager.GetLayersInfo()
+	if err != nil {
+		t.Fatalf("Can't get layer list: %s", err)
 	}
 
 	if len(list) != 2 {
 		t.Error("Count of layers should be 2")
 	}
 
-	if err = layerMgr.CheckLayersConsistency(); err != nil {
-		t.Errorf("Layer configuration expected to be consistent. Err: %s", err)
+	if err = layerManager.CheckLayersConsistency(); err != nil {
+		t.Errorf("Error checking layer consistency: %s", err)
 	}
 
-	layer2path, err := layerMgr.layerInfoProvider.GetLayerPathByDigest(digest2)
+	layer2path, err := infoProvider.GetLayerPathByDigest(digest2)
 	if err != nil {
-		t.Errorf("Can't get layer path. Err: %s", err)
+		t.Errorf("Can't get layer path: %s", err)
 	}
 
 	if err = os.RemoveAll(layer2path); err != nil {
 		t.Errorf("Can't remove dir: %s", err)
 	}
 
-	if err = layerMgr.CheckLayersConsistency(); err == nil {
+	if err = layerManager.CheckLayersConsistency(); err == nil {
 		t.Error("Consistency check error is expected")
 	}
 }
 
 func TestLayersStatus(t *testing.T) {
-	testTmpDir, err := ioutil.TempDir("", "aos_layers")
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), newTesInfoProvider())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Can't create layer manager: %s", err)
 	}
-	defer os.RemoveAll(testTmpDir)
 
-	testDb, err := database.New(path.Join(testTmpDir, "db.txt"), tmpServerDir, tmpServerDir)
+	layerFile, digest, err := createLayer(path.Join(tmpDir, "layerdir1"))
 	if err != nil {
-		log.Fatalf("Can't create database: %s", err)
+		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	sender := new(fakeLayerSender)
-
-	testLayerMgr, err := New(&config.Config{WorkingDir: path.Join(testTmpDir, "workingDir"),
-		LayersDir: path.Join(testTmpDir, "layerStorage")}, new(layerDownloader), testDb, sender)
-	if err != nil {
-		log.Fatalf("Can't create layer manager: %s", err)
+	if status := waitLayerStatus(layerManager.InstallLayer(
+		generateLayerFromCloud(layerFile, "LayerId1", digest, 1), nil, nil)); status.Status != amqp.InstalledStatus {
+		t.Errorf("Wrong status received: %s", status.Status)
 	}
 
-	type testLayerInfo struct {
-		layerFile string
-		digest    string
-	}
-
-	layersInfo := []testLayerInfo{}
-
-	for i := 1; i <= 3; i++ {
-		layerDir := "layerdir" + strconv.Itoa(i)
-		if err := os.MkdirAll(layerDir, 0755); err != nil {
-			log.Fatalf("Can't create folder: %s", err)
-		}
-		defer os.RemoveAll(layerDir)
-
-		layerFile, digest, err := createLayer(layerDir)
-		if err != nil {
-			log.Fatalf("Can't layer: %s", err)
-		}
-
-		layersInfo = append(layersInfo, testLayerInfo{layerFile: layerFile, digest: digest})
-	}
-
-	layer1FomCloud := generateLayerFromCloud(layersInfo[0].layerFile, "LayerId1", layersInfo[0].digest, 1)
-	layer2FomCloud := generateLayerFromCloud(layersInfo[1].layerFile, "LayerId2", layersInfo[1].digest, 2)
-	layer2UpdateFomCloud := generateLayerFromCloud(layersInfo[2].layerFile, "LayerId2", layersInfo[2].digest, 3)
-
-	chains := []amqp.CertificateChain{}
-	certs := []amqp.Certificate{}
-	layerList := []amqp.LayerInfoFromCloud{layer1FomCloud, layer2FomCloud}
-
-	if err := testLayerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		t.Errorf("Can't process layer list %s", err)
-	}
-	testLayerMgr.DeleteUnneededLayers()
-
-	referenceList := []amqp.LayerInfo{
-		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
-		amqp.LayerInfo{ID: "LayerId2", AosVersion: 2, Digest: layersInfo[1].digest, Status: "installed"}}
-
-	if !reflect.DeepEqual(referenceList, sender.LayerList) {
-		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
-	}
-
-	layerList = []amqp.LayerInfoFromCloud{layer1FomCloud, layer2UpdateFomCloud}
-	if err := testLayerMgr.ProcessDesiredLayersList(layerList, chains, certs); err != nil {
-		t.Errorf("Can't process layer list %s", err)
-	}
-
-	referenceList = []amqp.LayerInfo{
-		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
-		amqp.LayerInfo{ID: "LayerId2", AosVersion: 2, Digest: layersInfo[1].digest, Status: "installed"},
-		amqp.LayerInfo{ID: "LayerId2", AosVersion: 3, Digest: layersInfo[2].digest, Status: "installed"}}
-
-	if !reflect.DeepEqual(referenceList, sender.LayerList) {
-		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
-	}
-
-	testLayerMgr.DeleteUnneededLayers()
-
-	referenceList[1].Status = "removed"
-	if !reflect.DeepEqual(referenceList, sender.LayerList) {
-		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
-	}
-
-	referenceList = []amqp.LayerInfo{
-		amqp.LayerInfo{ID: "LayerId1", AosVersion: 1, Digest: layersInfo[0].digest, Status: "installed"},
-		amqp.LayerInfo{ID: "LayerId2", AosVersion: 3, Digest: layersInfo[2].digest, Status: "installed"}}
-
-	currentList, err := testLayerMgr.GetLayersInfo()
-	if err != nil {
-		t.Error("Can't get current layer list")
-	}
-
-	if !reflect.DeepEqual(referenceList, currentList) {
-		t.Error("Incorrect layer status list \n", referenceList, " != \n", sender.LayerList)
+	if status := waitLayerStatus(layerManager.UninstallLayer(digest)); status.Status != amqp.RemovedStatus {
+		t.Errorf("Wrong status received: %s", status.Status)
 	}
 }
 
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-func (sender *fakeLayerSender) SendLayerStatus(layers []amqp.LayerInfo) {
-	sender.LayerList = make([]amqp.LayerInfo, len(layers))
-	copy(sender.LayerList, layers)
-}
 
 func (downloader *layerDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
-	srcFile := packageInfo.URLs[0]
+	return packageInfo.URLs[0], err
+}
 
-	cpCmd := exec.Command("cp", srcFile, tmpDir)
-	err = cpCmd.Run()
+func newTesInfoProvider() (infoProvider *testInfoProvider) {
+	return &testInfoProvider{layers: make(map[string]layerDesc)}
+}
 
-	return path.Join(tmpDir, filepath.Base(srcFile)), err
+func (infoProvider *testInfoProvider) AddLayer(digest, layerID, path, osVersion,
+	vendorVersion, description string, aosVersion uint64) (err error) {
+	infoProvider.Lock()
+	defer infoProvider.Unlock()
+
+	infoProvider.layers[digest] = layerDesc{
+		id:         layerID,
+		aosVersion: aosVersion,
+		path:       path}
+
+	return nil
+}
+
+func (infoProvider *testInfoProvider) DeleteLayerByDigest(digest string) (err error) {
+	infoProvider.Lock()
+	defer infoProvider.Unlock()
+
+	if _, ok := infoProvider.layers[digest]; !ok {
+		return aoserrors.New("layer not found")
+	}
+
+	delete(infoProvider.layers, digest)
+
+	return nil
+}
+
+func (infoProvider *testInfoProvider) GetLayerPathByDigest(digest string) (path string, err error) {
+	infoProvider.Lock()
+	defer infoProvider.Unlock()
+
+	layer, ok := infoProvider.layers[digest]
+	if !ok {
+		return "", aoserrors.New("layer not found")
+	}
+
+	return layer.path, nil
+}
+
+func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
+	infoProvider.Lock()
+	defer infoProvider.Unlock()
+
+	for digest, layer := range infoProvider.layers {
+		layersList = append(layersList, amqp.LayerInfo{
+			ID: layer.id, AosVersion: layer.aosVersion, Digest: digest, Status: amqp.InstalledStatus})
+	}
+
+	return layersList, nil
 }
 
 /*******************************************************************************
@@ -347,23 +281,8 @@ func (downloader *layerDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDa
  ******************************************************************************/
 
 func setup() (err error) {
-	if err := os.MkdirAll(tmpServerDir, 0755); err != nil {
+	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
 		return err
-	}
-
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return err
-	}
-
-	db, err := database.New(path.Join(tmpServerDir, "db.txt"), tmpServerDir, tmpServerDir)
-	if err != nil {
-		log.Fatalf("Can't create database: %s", err)
-	}
-
-	layerMgr, err = New(&config.Config{WorkingDir: path.Join(tmpDir, "workingDir"),
-		LayersDir: path.Join(tmpDir, "layerStorage")}, new(layerDownloader), db, new(fakeLayerSender))
-	if err != nil {
-		log.Fatalf("Can't layer manager: %s", err)
 	}
 
 	return nil
@@ -371,43 +290,49 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	os.RemoveAll(tmpDir)
-	os.RemoveAll(tmpServerDir)
+
 	return nil
 }
 
 func createLayer(dir string) (layerFile string, digest string, err error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(dir)
+
 	tmpLayerFolder := path.Join(tmpDir, "tmpLayerDir")
 	if err := os.MkdirAll(tmpLayerFolder, 0755); err != nil {
-		log.Fatalf("Can't create folder: %s", err)
+		return "", "", err
 	}
 
 	data := []byte("this is layer data in layer " + dir)
+
 	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0644); err != nil {
-		return "", layerFile, err
+		return "", "", err
 	}
 	defer os.RemoveAll(tmpLayerFolder)
 
-	tarFile := path.Join(dir, "layer.tag")
+	tarFile := path.Join(dir, "layer.tar")
 
 	if output, err := exec.Command("tar", "-C", tmpLayerFolder, "-cf", tarFile, "./").CombinedOutput(); err != nil {
-		return layerFile, digest, fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fmt.Errorf("error: %s, code: %s", string(output), err)
 	}
 	defer os.Remove(tarFile)
 
 	file, err := os.Open(tarFile)
 	if err != nil {
-		return layerFile, digest, err
+		return "", "", err
 	}
 	defer file.Close()
 
 	byteValue, err := ioutil.ReadAll(file)
 	if err != nil {
-		return "", layerFile, err
+		return "", "", err
 	}
 
 	layerDigest, err := generateAndSaveDigest(dir, byteValue)
 	if err != nil {
-		return layerFile, digest, err
+		return "", "", err
 	}
 
 	layerDescriptor := imagespec.Descriptor{
@@ -430,31 +355,28 @@ func createLayer(dir string) (layerFile string, digest string, err error) {
 		return "", "", err
 	}
 
-	layerFile = path.Join(tmpServerDir, layerDigest.Hex()+".tar.gz")
+	layerFile = path.Join(tmpDir, layerDigest.Hex()+".tar.gz")
 	if output, err := exec.Command("tar", "-C", dir, "-czf", layerFile, "./").CombinedOutput(); err != nil {
-		return layerFile, digest, fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fmt.Errorf("error: %s, code: %s", string(output), err)
 	}
 
-	digest = (string)(layerDigest)
-	layerFile = layerDigest.Hex() + ".tar.gz"
-
-	return layerFile, digest, nil
+	return layerFile, string(layerDigest), nil
 }
 
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
 	h := sha256.New()
 	h.Write(data)
+
 	retDigest = digest.NewDigest("sha256", h)
 
 	file, err := os.Create(path.Join(folder, retDigest.Hex()))
 	if err != nil {
-		return retDigest, err
+		return "", err
 	}
 	defer file.Close()
 
-	_, err = file.Write(data)
-	if err != nil {
-		return retDigest, err
+	if _, err = file.Write(data); err != nil {
+		return "", err
 	}
 
 	return retDigest, nil
@@ -465,10 +387,9 @@ func generateLayerFromCloud(layerFile, layerID, digest string, aosVersion uint64
 	layerInfo.Digest = digest
 	layerInfo.AosVersion = aosVersion
 
-	filePath := path.Join(tmpServerDir, layerFile)
-	layerInfo.URLs = []string{filePath}
+	layerInfo.URLs = []string{layerFile}
 
-	imageFileInfo, err := image.CreateFileInfo(filePath)
+	imageFileInfo, err := image.CreateFileInfo(layerFile)
 	if err != nil {
 		log.Error("error CreateFileInfo", err)
 		return layerInfo
@@ -495,4 +416,45 @@ func generateLayerFromCloud(layerFile, layerID, digest string, aosVersion uint64
 	layerInfo.Signs = new(amqp.Signs)
 
 	return layerInfo
+}
+
+func waitLayerStatus(statusChannel <-chan amqp.LayerInfo) (status amqp.LayerInfo) {
+	for {
+		select {
+		case newStatus, ok := <-statusChannel:
+			if !ok {
+				return status
+			}
+
+			log.WithFields(log.Fields{
+				"id":         newStatus.ID,
+				"aosVersion": newStatus.AosVersion,
+				"digest":     newStatus.Digest,
+				"status":     newStatus.Status,
+				"error":      newStatus.Error,
+			}).Debug("Receive layer status")
+
+			status = newStatus
+		}
+	}
+}
+
+func checkLayerStatuses(t *testing.T, statusChannels []<-chan amqp.LayerInfo) {
+	t.Helper()
+
+	var wg sync.WaitGroup
+
+	for _, statusChannel := range statusChannels {
+		wg.Add(1)
+
+		go func(statusChannel <-chan amqp.LayerInfo) {
+			defer wg.Done()
+
+			if status := waitLayerStatus(statusChannel); status.Status == amqp.ErrorStatus {
+				t.Errorf("%s, layer ID %s", status.Error, status.ID)
+			}
+		}(statusChannel)
+	}
+
+	wg.Wait()
 }
