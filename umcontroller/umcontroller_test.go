@@ -46,10 +46,6 @@ const (
 	serverURL = "localhost:8091"
 )
 
-type testStatusSender struct {
-	Components []amqp.ComponentInfo
-}
-
 type testStorage struct {
 	updateInfo []umcontroller.SystemComponent
 }
@@ -110,10 +106,11 @@ func TestConnection(t *testing.T) {
 	}
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	umCtrl, err := umcontroller.New(&smConfig, &testStatusSender{}, &testStorage{}, &testDownloader{}, true)
+	umCtrl, err := umcontroller.New(&smConfig, &testStorage{}, &testDownloader{}, true)
 	if err != nil {
 		t.Fatalf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	components := []*pb.SystemComponent{&pb.SystemComponent{Id: "component1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "component2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -136,9 +133,7 @@ func TestConnection(t *testing.T) {
 		t.Errorf("Error connect %s", err)
 	}
 
-	umCtrl.Close()
-
-	newComponents, err := umCtrl.GetSystemComponents()
+	newComponents, err := umCtrl.GetComponentsInfo()
 	if err != nil {
 		t.Errorf("Can't get system components %s", err)
 	}
@@ -146,6 +141,8 @@ func TestConnection(t *testing.T) {
 	if len(newComponents) != 4 {
 		t.Errorf("Incorrect count of components %d", len(newComponents))
 	}
+
+	umCtrl.Close()
 
 	streamUM1.CloseSend()
 	connUM1.Close()
@@ -208,15 +205,15 @@ func TestFullUpdate(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um1Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um1C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um1C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -230,18 +227,17 @@ func TestFullUpdate(t *testing.T) {
 	um2 := newTestUM("testUM2", pb.UmState_IDLE, "init", um2Components, t)
 	go um2.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um1C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um1C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um1C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um2C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um2C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func(finChan chan bool) {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
 		finChan <- true
-	}(finishChanel)
+	}(finishChannel)
 
 	<-updateDownloader.downloadSyncCh
 
@@ -294,7 +290,22 @@ func TestFullUpdate(t *testing.T) {
 	um1.step = "finish"
 	um2.step = "finish"
 
-	<-finishChanel
+	<-finishChannel
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um1C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um1C2", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um2C1", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um2C2", VendorVersion: "2", Status: "installed"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+	}
 
 	um1.closeConnection()
 	um2.closeConnection()
@@ -303,16 +314,6 @@ func TestFullUpdate(t *testing.T) {
 	<-um2.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um1C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um1C2", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um2C1", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um2C2", VendorVersion: "2", Status: "installed"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-	}
 
 	time.Sleep(time.Second)
 }
@@ -339,15 +340,15 @@ func TestFullUpdateWithDisconnect(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um3Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um3C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um3C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -361,17 +362,16 @@ func TestFullUpdateWithDisconnect(t *testing.T) {
 	um4 := newTestUM("testUM4", pb.UmState_IDLE, "init", um4Components, t)
 	go um4.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um3C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um3C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um3C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um4C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um4C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -446,7 +446,22 @@ func TestFullUpdateWithDisconnect(t *testing.T) {
 	um3.step = "finish"
 	um4.step = "finish"
 
-	<-finishChanel
+	<-finishChannel
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um3C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um3C2", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um4C1", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um4C2", VendorVersion: "2", Status: "installed"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+	}
 
 	um3.closeConnection()
 	um4.closeConnection()
@@ -455,16 +470,6 @@ func TestFullUpdateWithDisconnect(t *testing.T) {
 	<-um4.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um3C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um3C2", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um4C1", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um4C2", VendorVersion: "2", Status: "installed"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-	}
 
 	time.Sleep(time.Second)
 }
@@ -486,15 +491,15 @@ func TestFullUpdateWithReboot(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um5Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um5C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um5C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -508,17 +513,16 @@ func TestFullUpdateWithReboot(t *testing.T) {
 	um6 := newTestUM("testUM6", pb.UmState_IDLE, "init", um6Components, t)
 	go um6.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um5C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um5C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um5C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um6C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um6C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -556,12 +560,13 @@ func TestFullUpdateWithReboot(t *testing.T) {
 
 	<-um5.notifyTestChan
 	<-um6.notifyTestChan
-	<-finishChanel
+	<-finishChannel
 
-	umCtrl, err = umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err = umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um5 = newTestUM("testUM5", pb.UmState_UPDATED, "apply", um5Components, t)
 	go um5.processMessages()
@@ -593,10 +598,11 @@ func TestFullUpdateWithReboot(t *testing.T) {
 	<-um5.notifyTestChan
 	<-um6.notifyTestChan
 
-	umCtrl, err = umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err = umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um5Components = []*pb.SystemComponent{&pb.SystemComponent{Id: "um5C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um5C2", VendorVersion: "2", Status: pb.ComponentStatus_INSTALLED}}
@@ -618,6 +624,21 @@ func TestFullUpdateWithReboot(t *testing.T) {
 	um5.step = "finish"
 	um6.step = "finish"
 
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um5C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um5C2", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um6C1", VendorVersion: "2", Status: "installed"},
+		amqp.ComponentInfo{ID: "um6C2", VendorVersion: "2", Status: "installed"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+	}
+
 	um5.closeConnection()
 	um6.closeConnection()
 
@@ -625,16 +646,6 @@ func TestFullUpdateWithReboot(t *testing.T) {
 	<-um6.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um5C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um5C2", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um6C1", VendorVersion: "2", Status: "installed"},
-		amqp.ComponentInfo{ID: "um6C2", VendorVersion: "2", Status: "installed"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-	}
 
 	time.Sleep(time.Second)
 }
@@ -656,15 +667,15 @@ func TestRevertOnPrepare(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um7Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um7C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um7C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -678,17 +689,16 @@ func TestRevertOnPrepare(t *testing.T) {
 	um8 := newTestUM("testUM8", pb.UmState_IDLE, "init", um8Components, t)
 	go um8.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um7C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um7C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um7C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um8C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um8C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -730,7 +740,24 @@ func TestRevertOnPrepare(t *testing.T) {
 	um7.step = "finish"
 	um8.step = "finish"
 
-	<-finishChanel
+	<-finishChannel
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um7C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um7C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "2", Status: "error"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
 
 	um7.closeConnection()
 	um8.closeConnection()
@@ -739,18 +766,6 @@ func TestRevertOnPrepare(t *testing.T) {
 	<-um8.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um7C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um7C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um8C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um8C2", VendorVersion: "2", Status: "error"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-		log.Debug(etalonComponents)
-	}
 
 	time.Sleep(time.Second)
 }
@@ -772,15 +787,15 @@ func TestRevertOnUpdate(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um9Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um9C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um9C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -794,17 +809,16 @@ func TestRevertOnUpdate(t *testing.T) {
 	um10 := newTestUM("testUM10", pb.UmState_IDLE, "init", um10Components, t)
 	go um10.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um9C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um9C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um9C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um10C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um10C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -863,7 +877,24 @@ func TestRevertOnUpdate(t *testing.T) {
 	um9.step = "finish"
 	um10.step = "finish"
 
-	<-finishChanel
+	<-finishChannel
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um9C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um9C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "2", Status: "error"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
 
 	um9.closeConnection()
 	um10.closeConnection()
@@ -872,18 +903,6 @@ func TestRevertOnUpdate(t *testing.T) {
 	<-um10.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um9C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um9C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um10C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um10C2", VendorVersion: "2", Status: "error"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-		log.Debug(etalonComponents)
-	}
 
 	time.Sleep(time.Second)
 }
@@ -905,15 +924,15 @@ func TestRevertOnUpdateWithDisconnect(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um11Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um11C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um11C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -927,17 +946,16 @@ func TestRevertOnUpdateWithDisconnect(t *testing.T) {
 	um12 := newTestUM("testUM12", pb.UmState_IDLE, "init", um12Components, t)
 	go um12.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um11C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um11C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um11C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um12C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um12C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -1001,7 +1019,24 @@ func TestRevertOnUpdateWithDisconnect(t *testing.T) {
 	um11.step = "finish"
 	um12.step = "finish"
 
-	<-finishChanel
+	<-finishChannel
+
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um11C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um11C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "2", Status: "error"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
 
 	um11.closeConnection()
 	um12.closeConnection()
@@ -1010,18 +1045,6 @@ func TestRevertOnUpdateWithDisconnect(t *testing.T) {
 	<-um12.notifyTestChan
 
 	umCtrl.Close()
-
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um11C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um11C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um12C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um12C2", VendorVersion: "2", Status: "error"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-		log.Debug(etalonComponents)
-	}
 
 	time.Sleep(time.Second)
 }
@@ -1044,15 +1067,15 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 
 	smConfig := config.Config{UmController: umCtrlConfig}
 
-	var updateSender testStatusSender
 	var updateStorage testStorage
 
 	updateDownloader := testNotifyDownloader{downloadSyncCh: make(chan bool, 1), componetCount: 3}
 
-	umCtrl, err := umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err := umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um13Components := []*pb.SystemComponent{&pb.SystemComponent{Id: "um13C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
 		&pb.SystemComponent{Id: "um13C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
@@ -1066,17 +1089,16 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 	um14 := newTestUM("testUM14", pb.UmState_IDLE, "init", um14Components, t)
 	go um14.processMessages()
 
-	desiredStatus := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um13C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "1"}},
-		amqp.ComponentInfoFromCloud{ID: "um13C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	updateComponents := []amqp.ComponentInfoFromCloud{amqp.ComponentInfoFromCloud{ID: "um13C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um14C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 		amqp.ComponentInfoFromCloud{ID: "um14C2", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
 	}
 
-	finishChanel := make(chan bool)
+	finishChannel := make(chan bool)
 
 	go func() {
-		umCtrl.ProcessDesiredComponents(desiredStatus, []amqp.CertificateChain{}, []amqp.Certificate{})
-		close(finishChanel)
+		umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+		close(finishChannel)
 	}()
 
 	<-updateDownloader.downloadSyncCh
@@ -1122,13 +1144,14 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 
 	<-um13.notifyTestChan
 	<-um14.notifyTestChan
-	<-finishChanel
+	<-finishChannel
 	// um14  reboot
 
-	umCtrl, err = umcontroller.New(&smConfig, &updateSender, &updateStorage, &updateDownloader, true)
+	umCtrl, err = umcontroller.New(&smConfig, &updateStorage, &updateDownloader, true)
 	if err != nil {
 		t.Errorf("Can't create: UM controller %s", err)
 	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
 
 	um13 = newTestUM("testUM13", pb.UmState_UPDATED, "revert", um13Components, t)
 	go um13.processMessages()
@@ -1159,6 +1182,23 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 
 	time.Sleep(time.Second)
 
+	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um13C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um13C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C1", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "1", Status: "installed"},
+		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "2", Status: "error"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+		log.Debug(etalonComponents)
+	}
+
 	um13.closeConnection()
 	um14.closeConnection()
 
@@ -1167,28 +1207,12 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 
 	umCtrl.Close()
 
-	etalonComponents := []amqp.ComponentInfo{amqp.ComponentInfo{ID: "um13C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um13C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um14C1", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "1", Status: "installed"},
-		amqp.ComponentInfo{ID: "um14C2", VendorVersion: "2", Status: "error"}}
-
-	if !reflect.DeepEqual(etalonComponents, updateSender.Components) {
-		log.Debug(updateSender.Components)
-		t.Error("incorrect result component list")
-		log.Debug(etalonComponents)
-	}
-
 	time.Sleep(time.Second)
 }
 
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-func (sender *testStatusSender) SendComponentStatus(components []amqp.ComponentInfo) {
-	sender.Components = make([]amqp.ComponentInfo, len(components))
-	copy(sender.Components, components)
-}
 
 func (storage *testStorage) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
 	return storage.updateInfo, err
@@ -1273,6 +1297,7 @@ func (um *testUmConnection) processMessages() {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
 func newTestUM(id string, umState pb.UmState, testState string, components []*pb.SystemComponent, t *testing.T) (umTest *testUmConnection) {
 	stream, conn, err := createClientConnection(id, umState, components)
 	if err != nil {
@@ -1310,4 +1335,23 @@ func (um *testUmConnection) closeConnection() {
 	um.continueChan <- true
 	um.conn.Close()
 	um.stream.CloseSend()
+}
+
+func watchUpdateStatus(statusChannel <-chan amqp.ComponentInfo) {
+	for {
+		select {
+		case status, ok := <-statusChannel:
+			if !ok {
+				return
+			}
+
+			log.WithFields(log.Fields{
+				"id":            status.ID,
+				"aosVersion":    status.AosVersion,
+				"vendorVersion": status.VendorVersion,
+				"status":        status.Status,
+				"error":         status.Error,
+			}).Debug("Receive component status")
+		}
+	}
 }

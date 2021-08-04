@@ -40,7 +40,6 @@ import (
 
 // UmController update managers controller
 type UmController struct {
-	sender       statusSender
 	storage      storage
 	downloader   Downloader
 	server       *umCtrlServer
@@ -56,9 +55,11 @@ type UmController struct {
 	fileStorage       *fileStorage
 	operable          bool
 	updateFinishCond  *sync.Cond
+
+	statusChannel chan amqp.ComponentInfo
 }
 
-// SystemComponent infromation about system component update
+// SystemComponent information about system component update
 type SystemComponent struct {
 	ID            string `json:"id"`
 	VendorVersion string `json:"vendorVersion"`
@@ -107,14 +108,11 @@ type updateRequest struct {
 }
 
 type allConnectionMonitor struct {
+	sync.Mutex
 	connTimer     *time.Timer
 	timeoutChan   chan bool
 	stopTimerChan chan bool
 	wg            sync.WaitGroup
-}
-
-type statusSender interface {
-	SendComponentStatus(components []amqp.ComponentInfo)
 }
 
 type storage interface {
@@ -135,16 +133,6 @@ const (
 	openConnection = iota
 	closeConnection
 	umStatusUpdate
-)
-
-// Component status
-const (
-	StatusPending     = "pending"
-	StatusDownloading = "downloading"
-	StatusDownloaded  = "downloaded"
-	StatusInstalling  = "installing"
-	StatusInstalled   = "installed"
-	StatusError       = "error"
 )
 
 // FSM states
@@ -199,10 +187,9 @@ const connectionTimeoutSec = 300
  ******************************************************************************/
 
 // New creates new update managers controller
-func New(config *config.Config, sender statusSender, storage storage,
+func New(config *config.Config, storage storage,
 	downloader Downloader, insecure bool) (umCtrl *UmController, err error) {
 	umCtrl = &UmController{
-		sender:            sender,
 		storage:           storage,
 		downloader:        downloader,
 		updateDir:         config.UmController.UpdateDir,
@@ -211,6 +198,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 		connectionMonitor: allConnectionMonitor{stopTimerChan: make(chan bool, 1), timeoutChan: make(chan bool, 1)},
 		operable:          true,
 		updateFinishCond:  sync.NewCond(&sync.Mutex{}),
+		statusChannel:     make(chan amqp.ComponentInfo, 1),
 	}
 
 	if umCtrl.fileStorage, err = newFileStorage(config.UmController); err != nil {
@@ -286,6 +274,7 @@ func New(config *config.Config, sender statusSender, storage storage,
 	}
 
 	go umCtrl.processInternallMessages()
+	umCtrl.connectionMonitor.wg.Add(1)
 	go umCtrl.connectionMonitor.startConnectionTimer(len(umCtrl.connections))
 	go umCtrl.server.Start()
 	go umCtrl.fileStorage.startFileStorage()
@@ -297,10 +286,12 @@ func New(config *config.Config, sender statusSender, storage storage,
 func (umCtrl *UmController) Close() {
 	umCtrl.operable = false
 	umCtrl.stopChannel <- true
+
+	close(umCtrl.statusChannel)
 }
 
-// GetSystemComponents returns list of system components information
-func (umCtrl *UmController) GetSystemComponents() (components []amqp.ComponentInfo, err error) {
+// GetComponentsInfo returns list of system components information
+func (umCtrl *UmController) GetComponentsInfo() (info []amqp.ComponentInfo, err error) {
 	currentState := umCtrl.fsm.Current()
 	if currentState != stateInit {
 		return umCtrl.currentComponents, nil
@@ -311,54 +302,41 @@ func (umCtrl *UmController) GetSystemComponents() (components []amqp.ComponentIn
 	return umCtrl.currentComponents, nil
 }
 
-// ProcessDesiredComponents process desred component list
-func (umCtrl *UmController) ProcessDesiredComponents(components []amqp.ComponentInfoFromCloud,
+// UpdateComponents updates components
+func (umCtrl *UmController) UpdateComponents(components []amqp.ComponentInfoFromCloud,
 	chains []amqp.CertificateChain, certs []amqp.Certificate) (err error) {
+	log.Debug("Update components")
+
 	currentState := umCtrl.fsm.Current()
+
 	if currentState == stateIdle {
-		newComponents := []amqp.ComponentInfoFromCloud{}
-
-		for _, desComponent := range components {
-			wasFound := false
-
-			for _, curComponent := range umCtrl.currentComponents {
-				if curComponent.ID != desComponent.ID {
-					continue
-				}
-
-				if curComponent.VendorVersion == desComponent.VendorVersion &&
-					curComponent.Status != StatusError {
-					wasFound = true
-				}
-
-				break
-			}
-
-			if wasFound == false {
-				newComponents = append(newComponents, desComponent)
-				umCtrl.updateComponentElement(systemComponentStatus{id: desComponent.ID,
-					vendorVersion: desComponent.VendorVersion,
-					aosVersion:    desComponent.AosVersion,
-					status:        StatusPending,
-				})
-			}
-		}
-
-		if len(newComponents) == 0 {
-			log.Debug("No update for componenets")
+		if len(components) == 0 {
 			return nil
 		}
 
-		umCtrl.generateFSMEvent(evUpdateRequest, updateRequest{components: newComponents, certs: certs, chains: chains})
+		for _, component := range components {
+			componentStatus := systemComponentStatus{id: component.ID, vendorVersion: component.VendorVersion,
+				aosVersion: component.AosVersion, status: amqp.PendingStatus}
+
+			umCtrl.updateComponentElement(componentStatus)
+		}
+
+		umCtrl.generateFSMEvent(evUpdateRequest, updateRequest{components: components, certs: certs, chains: chains})
 	} else {
-		log.Debug("Another update in progress, state =", currentState)
+		log.Debugf("Another update in progress, current state: %s", currentState)
 	}
 
 	umCtrl.updateFinishCond.L.Lock()
+	defer umCtrl.updateFinishCond.L.Unlock()
+
 	umCtrl.updateFinishCond.Wait()
-	umCtrl.updateFinishCond.L.Unlock()
 
 	return nil
+}
+
+// UpdateStatus returns update component status channel
+func (umCtrl *UmController) UpdateStatus() (statusChannel <-chan amqp.ComponentInfo) {
+	return umCtrl.statusChannel
 }
 
 /*******************************************************************************
@@ -482,7 +460,7 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 			umCtrl.connections[i].handler = nil
 
 			umCtrl.fsm.SetState(stateInit)
-
+			umCtrl.connectionMonitor.wg.Add(1)
 			go umCtrl.connectionMonitor.startConnectionTimer(len(umCtrl.connections))
 
 			return
@@ -493,12 +471,12 @@ func (umCtrl *UmController) handleCloseConnection(umID string) {
 func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemComponentStatus) {
 	log.Debug("Receive components: ", componsStatus)
 	for _, value := range componsStatus {
-		if value.status == StatusInstalled {
+		if value.status == amqp.InstalledStatus {
 			toRemove := []int{}
 
 			for i, curStatus := range umCtrl.currentComponents {
 				if value.id == curStatus.ID {
-					if curStatus.Status != StatusInstalled {
+					if curStatus.Status != amqp.InstalledStatus {
 						continue
 					}
 
@@ -522,53 +500,43 @@ func (umCtrl *UmController) updateCurrentComponetsStatus(componsStatus []systemC
 }
 
 func (umCtrl *UmController) updateComponentElement(component systemComponentStatus) {
-	componentExist := false
 	for i, curElement := range umCtrl.currentComponents {
 		if curElement.ID == component.id && curElement.VendorVersion == component.vendorVersion {
-			umCtrl.currentComponents[i].Status = component.status
-			umCtrl.currentComponents[i].Error = component.err
-			umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
+			if umCtrl.currentComponents[i].Status != component.status {
+				umCtrl.currentComponents[i].Status = component.status
+				umCtrl.currentComponents[i].Error = component.err
 
-			componentExist = true
+				umCtrl.statusChannel <- umCtrl.currentComponents[i]
+			}
 
-			break
+			return
 		}
 	}
 
-	if componentExist == false {
-		umCtrl.currentComponents = append(umCtrl.currentComponents, amqp.ComponentInfo{
-			ID:            component.id,
-			VendorVersion: component.vendorVersion,
-			AosVersion:    component.aosVersion,
-			Status:        component.status,
-			Error:         component.err,
-		})
-	}
+	umCtrl.currentComponents = append(umCtrl.currentComponents, amqp.ComponentInfo{
+		ID:            component.id,
+		VendorVersion: component.vendorVersion,
+		AosVersion:    component.aosVersion,
+		Status:        component.status,
+		Error:         component.err,
+	})
 
-	umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
-
-	return
+	umCtrl.statusChannel <- umCtrl.currentComponents[len(umCtrl.currentComponents)-1]
 }
 
-func (umCtrl *UmController) cleanupCurrentCompontStatus() {
-	toRemove := []int{}
+func (umCtrl *UmController) cleanupCurrentComponentStatus() {
+	i := 0
 
-	for i, value := range umCtrl.currentComponents {
-		if value.Status != StatusInstalled && value.Status != StatusError {
-			toRemove = append(toRemove, i)
+	for _, component := range umCtrl.currentComponents {
+		if component.Status == amqp.InstalledStatus || component.Status == amqp.ErrorStatus {
+			umCtrl.currentComponents[i] = component
+			i++
+
+			umCtrl.statusChannel <- component
 		}
 	}
 
-	if len(toRemove) == 0 {
-		return
-	}
-
-	for i, value := range toRemove {
-		umCtrl.currentComponents = append(umCtrl.currentComponents[:value-i], umCtrl.currentComponents[value-i+1:]...)
-
-	}
-
-	umCtrl.sender.SendComponentStatus(umCtrl.currentComponents)
+	umCtrl.currentComponents = umCtrl.currentComponents[:i]
 }
 
 func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.ComponentInfoFromCloud,
@@ -600,7 +568,7 @@ func (umCtrl *UmController) downloadComponentUpdate(componentUpdate amqp.Compone
 	infoForUpdate.Sha512 = fileInfo.Sha512
 	infoForUpdate.Size = fileInfo.Size
 
-	return infoForUpdate, aoserrors.Wrap(err)
+	return infoForUpdate, nil
 }
 
 func (umCtrl *UmController) getCurrentUpdateState() (state string) {
@@ -705,6 +673,11 @@ func (umCtrl *UmController) generateFSMEvent(event string, args ...interface{}) 
 }
 
 func (monitor *allConnectionMonitor) startConnectionTimer(connectionsCount int) {
+	monitor.Lock()
+	defer monitor.Unlock()
+
+	defer monitor.wg.Done()
+
 	if connectionsCount == 0 {
 		monitor.timeoutChan <- true
 		return
@@ -715,10 +688,9 @@ func (monitor *allConnectionMonitor) startConnectionTimer(connectionsCount int) 
 		return
 	}
 
-	monitor.wg.Add(1)
-	defer monitor.wg.Done()
-
 	monitor.connTimer = time.NewTimer(connectionTimeoutSec * time.Second)
+
+	monitor.Unlock()
 
 	select {
 	case <-monitor.connTimer.C:
@@ -728,9 +700,9 @@ func (monitor *allConnectionMonitor) startConnectionTimer(connectionsCount int) 
 		monitor.connTimer.Stop()
 	}
 
-	monitor.connTimer = nil
+	monitor.Lock()
 
-	return
+	monitor.connTimer = nil
 }
 
 func (monitor *allConnectionMonitor) stopConnectionTimer() {
@@ -782,22 +754,20 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 
 	for _, component := range newComponentList.components {
 		componentStatus := systemComponentStatus{id: component.ID, vendorVersion: component.VendorVersion,
-			aosVersion: component.AosVersion, status: StatusDownloading}
+			aosVersion: component.AosVersion, status: amqp.DownloadingStatus}
 
 		umCtrl.updateComponentElement(componentStatus)
 		updatePackage, err := umCtrl.downloadComponentUpdate(component, newComponentList.chains, newComponentList.certs)
-
 		if err != nil {
 			// Do not return error if can't download file. It will be downloaded again on next desired status
 			// Just display error
 			if err == downloader.ErrNotDownloaded {
 				log.WithFields(log.Fields{"id": component.ID}).Errorf("Can't download component image: %s", aoserrors.Wrap(err))
-				return
+			} else {
+				componentStatus.status = amqp.ErrorStatus
+				componentStatus.err = err.Error()
+				umCtrl.updateComponentElement(componentStatus)
 			}
-
-			componentStatus.status = StatusError
-			componentStatus.err = err.Error()
-			umCtrl.updateComponentElement(componentStatus)
 
 			go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
 			return
@@ -810,7 +780,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 
 		componentsToSave = append(componentsToSave, updatePackage)
 
-		componentStatus.status = StatusDownloaded
+		componentStatus.status = amqp.DownloadedStatus
 		umCtrl.updateComponentElement(componentStatus)
 	}
 
@@ -948,13 +918,13 @@ func (umCtrl *UmController) processError(e *fsm.Event) {
 func (umCtrl *UmController) revertComplete(e *fsm.Event) {
 	log.Debug("Revert complete")
 
-	umCtrl.cleanupCurrentCompontStatus()
+	umCtrl.cleanupCurrentComponentStatus()
 }
 
 func (umCtrl *UmController) updateComplete(e *fsm.Event) {
 	log.Debug("Update finished")
 
-	umCtrl.cleanupCurrentCompontStatus()
+	umCtrl.cleanupCurrentComponentStatus()
 }
 
 func (status systemComponentStatus) String() string {
