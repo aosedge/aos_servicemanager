@@ -295,7 +295,6 @@ type stateAcceptance struct {
 
 type layerProvider interface {
 	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
-	DeleteUnneededLayers() (err error)
 }
 
 type installServiceInfo struct {
@@ -455,11 +454,6 @@ func (launcher *Launcher) UninstallService(id string) (statusChannel <-chan amqp
 	launcher.actionHandler.PutInQueue(id, statusSender, launcher.doActionUninstall)
 
 	return statusSender
-}
-
-// FinishProcessingLayers triggers layers cleanup
-func (launcher *Launcher) FinishProcessingLayers() {
-	launcher.actionHandler.PutInQueue("", nil, launcher.doFinishProcessingLayers)
 }
 
 // CheckServicesConsistency checks if service folders exist
@@ -1037,12 +1031,6 @@ func (launcher *Launcher) doActionUninstall(id string, data interface{}) {
 	statusSender.sendStatus(id, service.AosVersion, amqp.RemovedStatus, "", "")
 
 	log.WithFields(log.Fields{"id": id}).Info("Service successfully uninstalled")
-}
-
-func (launcher *Launcher) doFinishProcessingLayers(id string, data interface{}) {
-	if err := launcher.layerProvider.DeleteUnneededLayers(); err != nil {
-		log.Error("DeleteUnneededLayers error: ", err)
-	}
 }
 
 func (launcher *Launcher) installService(installInfo installServiceInfo) (err error) {
