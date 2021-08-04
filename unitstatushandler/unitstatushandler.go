@@ -83,6 +83,8 @@ type ServiceUpdater interface {
 type Instance struct {
 	sync.Mutex
 
+	isInitialized bool
+
 	boardConfigUpdater BoardConfigUpdater
 	componentUpdater   ComponentUpdater
 	layerUpdater       LayerUpdater
@@ -226,6 +228,8 @@ func (instance *Instance) Init() (err error) {
 	// Send current status
 
 	instance.sendCurrentStatus()
+
+	instance.isInitialized = true
 
 	return nil
 }
@@ -439,7 +443,7 @@ func (instance *Instance) updateServiceStatus(serviceInfo amqp.ServiceInfo) {
 }
 
 func (instance *Instance) statusChanged() {
-	if instance.statusTimer != nil {
+	if instance.statusTimer != nil || !instance.isInitialized {
 		return
 	}
 
