@@ -25,7 +25,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -121,10 +120,7 @@ type AmqpHandler struct {
 
 	systemID string
 
-	currentUnitStatus UnitStatus
-	unitStatusChanged bool
-	stopChannel       chan bool
-	unitStatusMutex   sync.Mutex
+	stopChannel chan bool
 }
 
 type amqpCryptoContext interface {
@@ -689,78 +685,13 @@ func (handler *AmqpHandler) Disconnect() (err error) {
 	return nil
 }
 
-// SendInitialSetup sends initial list of available services and layers
-func (handler *AmqpHandler) SendInitialSetup(boardConfigList []BoardConfigInfo, serviceList []ServiceInfo, layersList []LayerInfo,
-	components []ComponentInfo) (err error) {
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
+// SendUnitStatus sends unit status
+func (handler *AmqpHandler) SendUnitStatus(unitStatus UnitStatus) (err error) {
+	unitStatusMsg := handler.createAosMessage(UnitStatusType, unitStatus)
 
-	handler.currentUnitStatus.BoardConfig = make([]BoardConfigInfo, len(boardConfigList))
-	copy(handler.currentUnitStatus.BoardConfig, boardConfigList)
-
-	handler.currentUnitStatus.Services = make([]ServiceInfo, len(serviceList))
-	copy(handler.currentUnitStatus.Services, serviceList)
-
-	handler.currentUnitStatus.Layers = make([]LayerInfo, len(layersList))
-	copy(handler.currentUnitStatus.Layers, layersList)
-
-	handler.currentUnitStatus.Components = make([]ComponentInfo, len(components))
-	copy(handler.currentUnitStatus.Components, components)
-
-	handler.unitStatusChanged = true
-
-	go handler.processUnitStatusChanges()
+	handler.sendChannel <- Message{"", unitStatusMsg}
 
 	return nil
-}
-
-// SendServiceStatus sends message with service status
-func (handler *AmqpHandler) SendServiceStatus(serviceStatus ServiceInfo) (err error) {
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	for i, value := range handler.currentUnitStatus.Services {
-		if value.ID == serviceStatus.ID {
-			handler.currentUnitStatus.Services[i] = serviceStatus
-			handler.unitStatusChanged = true
-			break
-		}
-	}
-
-	return nil
-}
-
-// SendLayerStatus sends message with layer status
-func (handler *AmqpHandler) SendLayerStatus(layers []LayerInfo) {
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	handler.currentUnitStatus.Layers = make([]LayerInfo, len(layers))
-	copy(handler.currentUnitStatus.Layers, layers)
-
-	handler.unitStatusChanged = true
-}
-
-// SendComponentStatus sends message with layer status
-func (handler *AmqpHandler) SendComponentStatus(components []ComponentInfo) {
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	handler.currentUnitStatus.Components = make([]ComponentInfo, len(components))
-	copy(handler.currentUnitStatus.Components, components)
-
-	handler.unitStatusChanged = true
-}
-
-// SendBoardConfigStatus sends board config status
-func (handler *AmqpHandler) SendBoardConfigStatus(info []BoardConfigInfo) {
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	handler.currentUnitStatus.BoardConfig = make([]BoardConfigInfo, len(info))
-	copy(handler.currentUnitStatus.BoardConfig, info)
-
-	handler.unitStatusChanged = true
 }
 
 // SendMonitoringData sends monitoring data
@@ -843,41 +774,6 @@ func (handler *AmqpHandler) Close() {
 	handler.stopChannel <- true
 
 	handler.Disconnect()
-}
-
-// UpdateUnitStatusWithDesiredFromCloud update current status
-func (handler *AmqpHandler) UpdateUnitStatusWithDesiredFromCloud(desiredStatus *DecodedDesiredStatus) {
-	newServices := []ServiceInfo{}
-
-	handler.unitStatusMutex.Lock()
-	defer handler.unitStatusMutex.Unlock()
-
-	for _, desSrv := range desiredStatus.Services {
-		wasFound := false
-		pendingService := ServiceInfo{ID: desSrv.ID, AosVersion: desSrv.AosVersion, Status: PendingStatus}
-
-		for _, curSrv := range handler.currentUnitStatus.Services {
-			if curSrv.ID != desSrv.ID {
-				continue
-			}
-
-			wasFound = true
-
-			if curSrv.AosVersion != desSrv.AosVersion {
-				newServices = append(newServices, pendingService)
-			}
-			break
-		}
-
-		if wasFound == false {
-			newServices = append(newServices, pendingService)
-		}
-	}
-
-	if len(newServices) > 0 {
-		handler.unitStatusChanged = true
-		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services, newServices...)
-	}
 }
 
 func (service ServiceInfoFromCloud) String() string {
@@ -1302,44 +1198,4 @@ func (handler *AmqpHandler) createAosMessage(msgType string, data interface{}) (
 		Data:   data}
 
 	return msg
-}
-
-func (handler *AmqpHandler) processUnitStatusChanges() {
-	timer := time.NewTicker(time.Duration(handler.config.UnitStatusTimeout) * time.Second)
-
-	for {
-		handler.unitStatusMutex.Lock()
-
-		if handler.unitStatusChanged {
-			statusMsg := handler.createAosMessage(UnitStatusType, handler.currentUnitStatus)
-			handler.sendChannel <- Message{"", statusMsg}
-			handler.unitStatusChanged = false
-
-			handler.cleanupServiceStatusList()
-		}
-
-		handler.unitStatusMutex.Unlock()
-
-		select {
-		case <-timer.C:
-
-		case <-handler.stopChannel:
-			return
-		}
-	}
-}
-
-func (handler *AmqpHandler) cleanupServiceStatusList() {
-	removedElements := []int{}
-
-	for i, value := range handler.currentUnitStatus.Services {
-		if value.Status == RemovedStatus {
-			removedElements = append(removedElements, i)
-		}
-	}
-
-	for i, value := range removedElements {
-		handler.currentUnitStatus.Services = append(handler.currentUnitStatus.Services[:value-i],
-			handler.currentUnitStatus.Services[value-i+1:]...)
-	}
 }
