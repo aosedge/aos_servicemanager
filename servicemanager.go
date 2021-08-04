@@ -18,7 +18,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -49,6 +48,7 @@ import (
 	"aos_servicemanager/networkmanager"
 	resource "aos_servicemanager/resourcemanager"
 	"aos_servicemanager/umcontroller"
+	"aos_servicemanager/unitstatushandler"
 )
 
 /*******************************************************************************
@@ -78,6 +78,7 @@ type serviceManager struct {
 	umCtrl          *umcontroller.UmController
 	iam             *iamclient.Client
 	layerMgr        *layermanager.LayerManager
+	statusHandler   *unitstatushandler.Instance
 
 	isDesiredStatusInProcessing bool
 	desiredStatusMutex          sync.Mutex
@@ -212,7 +213,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.umCtrl, err = umcontroller.New(cfg, sm.amqp, sm.db, sm.downloader, false); err != nil {
+	if sm.umCtrl, err = umcontroller.New(cfg, sm.db, sm.downloader, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -230,7 +231,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.layerMgr, err = layermanager.New(cfg, sm.downloader, sm.db, sm.amqp); err != nil {
+	if sm.layerMgr, err = layermanager.New(cfg, sm.downloader, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -240,12 +241,19 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor, sm.network, sm.resourcemanager, sm.iam); err != nil {
+	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor,
+		sm.network, sm.resourcemanager, sm.iam); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	// Create unit status handler
+	if sm.statusHandler, err = unitstatushandler.New(sm.resourcemanager, sm.umCtrl,
+		sm.layerMgr, sm.launcher, sm.amqp); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -273,6 +281,11 @@ func (sm *serviceManager) close() {
 	// Close logging
 	if sm.logging != nil {
 		sm.logging.Close()
+	}
+
+	// Close unit status handler
+	if sm.statusHandler != nil {
+		sm.statusHandler.Close()
 	}
 
 	// Close amqp
@@ -333,39 +346,10 @@ func (sm *serviceManager) checkConsistency() (err error) {
 	return nil
 }
 
-func (sm *serviceManager) sendInitialSetup() (err error) {
-	initialList, err := sm.launcher.GetServicesInfo()
-	if err != nil {
-		log.Fatalf("Can't get services: %s", err)
-	}
-
-	initialLayerList, err := sm.layerMgr.GetLayersInfo()
-	if err != nil {
-		log.Fatalf("Can't get layers list: %s", err)
-	}
-
-	initialComponentList, err := sm.umCtrl.GetSystemComponents()
-	if err != nil {
-		log.Fatalf("Can't get component list: %s", err)
-	}
-
-	initialBoardConfigInfo, err := sm.resourcemanager.GetBoardConfigInfo()
-	if err != nil {
-		log.Fatalf("Can't get board config info: %s", err)
-	}
-
-	if err = sm.amqp.SendInitialSetup(initialBoardConfigInfo,
-		initialList, initialLayerList, initialComponentList); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
 	case *amqp.DecodedDesiredStatus:
-		go sm.processDesiredStatus(*data)
+		go sm.statusHandler.ProcessDesiredStatus(*data)
 
 	case *amqp.DecodedOverrideEnvVars:
 		log.Info("Receive request to override env vars")
@@ -481,131 +465,6 @@ func (sm *serviceManager) handleChannels() (err error) {
 	}
 }
 
-func (sm *serviceManager) updateBoardConfig(config json.RawMessage) (err error) {
-	newVendorVersion := "unknown"
-
-	defer func() {
-		boardConfigInfo, _ := sm.resourcemanager.GetBoardConfigInfo()
-
-		if err != nil {
-			boardConfigInfo = append(boardConfigInfo, amqp.BoardConfigInfo{
-				VendorVersion: newVendorVersion,
-				Status:        amqp.ErrorStatus,
-				Error:         err.Error(),
-			})
-		}
-
-		sm.amqp.SendBoardConfigStatus(boardConfigInfo)
-	}()
-
-	if newVendorVersion, err = sm.resourcemanager.CheckBoardConfig(config); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	sm.launcher.StopServices()
-	defer sm.launcher.StartServices()
-
-	if err = sm.resourcemanager.UpdateBoardConfig(config); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (sm *serviceManager) processDesiredStatus(data amqp.DecodedDesiredStatus) {
-	sm.desiredStatusMutex.Lock()
-	if sm.isDesiredStatusInProcessing == true {
-		sm.desiredStatusMutex.Unlock()
-		return
-	}
-
-	sm.isDesiredStatusInProcessing = true
-
-	sm.amqp.UpdateUnitStatusWithDesiredFromCloud(&data)
-
-	sm.desiredStatusMutex.Unlock()
-
-	defer func() {
-		sm.desiredStatusMutex.Lock()
-		sm.isDesiredStatusInProcessing = false
-		sm.desiredStatusMutex.Unlock()
-	}()
-
-	if data.BoardConfig != nil {
-		if err := sm.updateBoardConfig(data.BoardConfig); err != nil {
-			log.Error("Can't update board config: ", err)
-		}
-	}
-
-	if err := sm.umCtrl.ProcessDesiredComponents(data.Components, data.CertificateChains, data.Certificates); err != nil {
-		log.Error("Can't process components: ", err)
-	}
-
-	if err := sm.layerMgr.ProcessDesiredLayersList(data.Layers, data.CertificateChains, data.Certificates); err != nil {
-		log.Error("Can't process layer list: ", err)
-	}
-
-	log.WithField("len", len(data.Services)).Info("Receive services info")
-
-	currentList, err := sm.launcher.GetServicesInfo()
-	if err != nil {
-		log.Error("Can't get services list: ", err)
-	}
-
-	type serviceDesc struct {
-		serviceInfo          *amqp.ServiceInfo
-		serviceInfoFromCloud *amqp.ServiceInfoFromCloud
-	}
-
-	servicesMap := make(map[string]*serviceDesc)
-
-	for _, item := range currentList {
-		serviceInfo := item
-
-		servicesMap[serviceInfo.ID] = &serviceDesc{serviceInfo: &serviceInfo}
-	}
-
-	for _, item := range data.Services {
-		serviceInfoFromCloud := item
-
-		if _, ok := servicesMap[serviceInfoFromCloud.ID]; !ok {
-			servicesMap[serviceInfoFromCloud.ID] = &serviceDesc{}
-		}
-
-		servicesMap[serviceInfoFromCloud.ID].serviceInfoFromCloud = &serviceInfoFromCloud
-	}
-
-	for _, service := range servicesMap {
-		if service.serviceInfoFromCloud != nil && service.serviceInfo != nil {
-			// Update
-			if service.serviceInfoFromCloud.AosVersion > service.serviceInfo.AosVersion {
-				log.WithFields(log.Fields{
-					"id":   service.serviceInfo.ID,
-					"from": service.serviceInfo.AosVersion,
-					"to":   service.serviceInfoFromCloud.AosVersion}).Info("Update service")
-
-				sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
-			}
-		} else if service.serviceInfoFromCloud != nil {
-			// Install
-			log.WithFields(log.Fields{
-				"id":         service.serviceInfoFromCloud.ID,
-				"aosVersion": service.serviceInfoFromCloud.AosVersion}).Info("Install service")
-
-			sm.launcher.InstallService(*service.serviceInfoFromCloud, data.CertificateChains, data.Certificates)
-		} else if service.serviceInfo != nil {
-			// Remove
-			log.WithFields(log.Fields{
-				"id":         service.serviceInfo.ID,
-				"aosVersion": service.serviceInfo.AosVersion}).Info("Remove service")
-
-			sm.launcher.UninstallService(service.serviceInfo.ID)
-		}
-	}
-
-	sm.launcher.FinishProcessingLayers()
-}
-
 func (sm *serviceManager) run() (err error) {
 	for {
 		var orgNames []string
@@ -637,8 +496,8 @@ func (sm *serviceManager) run() (err error) {
 			goto reconnect
 		}
 
-		if err = sm.sendInitialSetup(); err != nil {
-			log.Errorf("Can't send initial setup: %s", err)
+		if err = sm.statusHandler.Init(); err != nil {
+			log.Errorf("Can't initialize unit status handler: %s", err)
 			goto reconnect
 		}
 
