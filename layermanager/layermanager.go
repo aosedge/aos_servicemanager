@@ -39,6 +39,7 @@ import (
  * Consts
  ******************************************************************************/
 const (
+	layerDirName       = "layers"
 	extractDirName     = "extract"
 	decryptDirName     = "decrypt"
 	layerOCIDescriptor = "layer.json"
@@ -90,8 +91,12 @@ func New(config *config.Config, downloader downloader,
 		layersDir:         config.LayersDir,
 		downloader:        downloader,
 		layerInfoProvider: infoProvider,
-		extractDir:        path.Join(config.LayersDir, extractDirName),
+		extractDir:        path.Join(config.WorkingDir, extractDirName),
 		decryptDir:        path.Join(config.WorkingDir, decryptDirName),
+	}
+
+	if layermanager.layersDir == "" {
+		layermanager.layersDir = path.Join(config.WorkingDir, layerDirName)
 	}
 
 	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
