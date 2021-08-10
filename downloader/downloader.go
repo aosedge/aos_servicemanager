@@ -224,6 +224,7 @@ func (downloader *Downloader) processURLs(urls []string) (resultFile string, err
 
 		// skip already downloaded and decrypted files
 		if !url.IsAbs() {
+			fileDownloaded = true
 			break
 		}
 
@@ -238,7 +239,7 @@ func (downloader *Downloader) processURLs(urls []string) (resultFile string, err
 	}
 
 	if !fileDownloaded {
-		return resultFile, ErrNotDownloaded
+		return resultFile, aoserrors.Wrap(ErrNotDownloaded)
 	}
 
 	return resultFile, nil
