@@ -31,10 +31,13 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
+	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/updatemanager"
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
+	"aos_servicemanager/downloader"
+	loader "aos_servicemanager/downloader"
 	"aos_servicemanager/umcontroller"
 )
 
@@ -56,6 +59,7 @@ type testNotifyDownloader struct {
 	downloadSyncCh chan bool
 	componetCount  int
 	curretCount    int
+	err            error
 }
 
 type testUmConnection struct {
@@ -1210,6 +1214,85 @@ func TestRevertOnUpdateWithReboot(t *testing.T) {
 	time.Sleep(time.Second)
 }
 
+func TestNotDownloadedUpdate(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	umCtrlConfig := config.UmController{
+		ServerURL: "localhost:8091",
+		UmClients: []config.UmClientConfig{{UmID: "testUM1", Priority: 1}, {UmID: "testUM2", Priority: 10}},
+		UpdateDir: tmpDir,
+	}
+
+	smConfig := config.Config{UmController: umCtrlConfig}
+
+	updateDownloader := testNotifyDownloader{err: downloader.ErrNotDownloaded}
+
+	umCtrl, err := umcontroller.New(&smConfig, new(testStorage), &updateDownloader, true)
+	if err != nil {
+		t.Errorf("Can't create UM controller: %s", err)
+	}
+	go watchUpdateStatus(umCtrl.UpdateStatus())
+
+	um1Components := []*pb.SystemComponent{
+		{Id: "um1C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		{Id: "um1C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um1 := newTestUM("testUM1", pb.UmState_IDLE, "init", um1Components, t)
+	go um1.processMessages()
+
+	um2Components := []*pb.SystemComponent{
+		{Id: "um2C1", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED},
+		{Id: "um2C2", VendorVersion: "1", Status: pb.ComponentStatus_INSTALLED}}
+
+	um2 := newTestUM("testUM2", pb.UmState_IDLE, "init", um2Components, t)
+	go um2.processMessages()
+
+	updateComponents := []amqp.ComponentInfoFromCloud{
+		{ID: "um1C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+		{ID: "um2C1", VersionFromCloud: amqp.VersionFromCloud{VendorVersion: "2"}},
+	}
+
+	statusChannel := make(chan error)
+
+	go func() {
+		statusChannel <- umCtrl.UpdateComponents(updateComponents, []amqp.CertificateChain{}, []amqp.Certificate{})
+	}()
+
+	if err := <-statusChannel; err == nil {
+		t.Errorf("Update failure expected")
+	}
+
+	etalonComponents := []amqp.ComponentInfo{
+		{ID: "um1C1", VendorVersion: "1", Status: "installed"},
+		{ID: "um1C2", VendorVersion: "1", Status: "installed"},
+		{ID: "um2C1", VendorVersion: "1", Status: "installed"},
+		{ID: "um2C2", VendorVersion: "1", Status: "installed"}}
+
+	currentComponents, err := umCtrl.GetComponentsInfo()
+	if err != nil {
+		t.Fatalf("Can't get components info: %s", err)
+	}
+
+	if !reflect.DeepEqual(etalonComponents, currentComponents) {
+		log.Debug(currentComponents)
+		t.Error("incorrect result component list")
+	}
+
+	um1.closeConnection()
+	um2.closeConnection()
+
+	<-um1.notifyTestChan
+	<-um2.notifyTestChan
+
+	umCtrl.Close()
+
+	time.Sleep(time.Second)
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -1233,15 +1316,19 @@ func (downloader *testNotifyDownloader) DownloadAndDecrypt(packageInfo amqp.Decr
 	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
 	log.Debug("testNotifyDownloader")
 
-	downloader.curretCount++
-	if downloader.curretCount == downloader.componetCount {
-		downloader.downloadSyncCh <- true
+	if downloader.err != nil {
+		return "", aoserrors.Wrap(loader.ErrNotDownloaded)
 	}
 
 	resultFile = path.Join(decryptDir, strconv.Itoa(downloader.curretCount))
 
 	if err := ioutil.WriteFile(resultFile, []byte("Some Update"), 0644); err != nil {
 		return resultFile, err
+	}
+
+	downloader.curretCount++
+	if downloader.curretCount == downloader.componetCount {
+		downloader.downloadSyncCh <- true
 	}
 
 	return resultFile, nil
@@ -1252,6 +1339,10 @@ func (um *testUmConnection) processMessages() {
 	for {
 		<-um.continueChan
 		msg, err := um.stream.Recv()
+		if err != nil {
+			return
+		}
+
 		switch um.step {
 		case "finish":
 			fallthrough

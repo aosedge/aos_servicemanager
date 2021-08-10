@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,8 @@ type UmController struct {
 	fileStorage       *fileStorage
 	operable          bool
 	updateFinishCond  *sync.Cond
+
+	updateError error
 
 	statusChannel chan amqp.ComponentInfo
 }
@@ -310,6 +313,8 @@ func (umCtrl *UmController) UpdateComponents(components []amqp.ComponentInfoFrom
 	currentState := umCtrl.fsm.Current()
 
 	if currentState == stateIdle {
+		umCtrl.updateError = nil
+
 		if len(components) == 0 {
 			return nil
 		}
@@ -331,7 +336,7 @@ func (umCtrl *UmController) UpdateComponents(components []amqp.ComponentInfoFrom
 
 	umCtrl.updateFinishCond.Wait()
 
-	return nil
+	return umCtrl.updateError
 }
 
 // UpdateStatus returns update component status channel
@@ -734,8 +739,9 @@ func (umCtrl *UmController) processIdleState(e *fsm.Event) {
 		return
 	}
 
-	umCtrl.updateFinishCond.Broadcast()
 	umCtrl.cleanupUpdateData()
+
+	umCtrl.updateFinishCond.Broadcast()
 }
 
 func (umCtrl *UmController) processFaultState(e *fsm.Event) {
@@ -746,7 +752,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 	newComponentList := e.Args[0].(updateRequest)
 
 	if err := os.MkdirAll(umCtrl.updateDir, 755); err != nil {
-		go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+		go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.Wrap(err))
 		return
 	}
 
@@ -761,7 +767,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 		if err != nil {
 			// Do not return error if can't download file. It will be downloaded again on next desired status
 			// Just display error
-			if err == downloader.ErrNotDownloaded {
+			if strings.Contains(err.Error(), downloader.ErrNotDownloaded.Error()) {
 				log.WithFields(log.Fields{"id": component.ID}).Errorf("Can't download component image: %s", aoserrors.Wrap(err))
 			} else {
 				componentStatus.status = amqp.ErrorStatus
@@ -769,7 +775,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 				umCtrl.updateComponentElement(componentStatus)
 			}
 
-			go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+			go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.Wrap(err))
 			return
 		}
 
@@ -785,7 +791,7 @@ func (umCtrl *UmController) processNewComponentList(e *fsm.Event) {
 	}
 
 	if err := umCtrl.storage.SetComponentsUpdateInfo(componentsToSave); err != nil {
-		go umCtrl.generateFSMEvent(evUpdateFailed, err.Error())
+		go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.Wrap(err))
 		return
 	}
 
@@ -796,7 +802,7 @@ func (umCtrl *UmController) processPrepareState(e *fsm.Event) {
 	for i := range umCtrl.connections {
 		if len(umCtrl.connections[i].updatePackages) > 0 {
 			if umCtrl.connections[i].state == umFailed {
-				go umCtrl.generateFSMEvent(evUpdateFailed, "preparUpdate failure umID = "+umCtrl.connections[i].umID)
+				go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.New("preparUpdate failure umID = "+umCtrl.connections[i].umID))
 				return
 			}
 
@@ -819,7 +825,7 @@ func (umCtrl *UmController) processStartUpdateState(e *fsm.Event) {
 	for i := range umCtrl.connections {
 		if len(umCtrl.connections[i].updatePackages) > 0 {
 			if umCtrl.connections[i].state == umFailed {
-				go umCtrl.generateFSMEvent(evUpdateFailed, "update failure umID = "+umCtrl.connections[i].umID)
+				go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.New("update failure umID = "+umCtrl.connections[i].umID))
 				return
 			}
 		}
@@ -874,7 +880,7 @@ func (umCtrl *UmController) processStartApplyState(e *fsm.Event) {
 	for i := range umCtrl.connections {
 		if len(umCtrl.connections[i].updatePackages) > 0 {
 			if umCtrl.connections[i].state == umFailed {
-				go umCtrl.generateFSMEvent(evUpdateFailed, "apply failure umID = "+umCtrl.connections[i].umID)
+				go umCtrl.generateFSMEvent(evUpdateFailed, aoserrors.New("apply failure umID = "+umCtrl.connections[i].umID))
 				return
 			}
 		}
@@ -911,8 +917,11 @@ func (umCtrl *UmController) processUpdateUmState(e *fsm.Event) {
 }
 
 func (umCtrl *UmController) processError(e *fsm.Event) {
-	errtorMSg := e.Args[0].(string)
-	log.Error("update Error: ", errtorMSg)
+	umCtrl.updateError = e.Args[0].(error)
+
+	log.Error("Update error: ", umCtrl.updateError)
+
+	umCtrl.cleanupCurrentComponentStatus()
 }
 
 func (umCtrl *UmController) revertComplete(e *fsm.Event) {
