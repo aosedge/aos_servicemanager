@@ -135,7 +135,7 @@ func TestDownload(t *testing.T) {
 	if err != nil {
 		log.Fatalf("Can't create package file: %s", err)
 	}
-	packageInfo := preparePackageInfo(fileName)
+	packageInfo := preparePackageInfo("http://localhost:8001/", fileName)
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
@@ -177,7 +177,7 @@ func TestInterruptResumeDownload(t *testing.T) {
 		}
 	}()
 
-	packageInfo := preparePackageInfo(fileName)
+	packageInfo := preparePackageInfo("http://localhost:8001/", fileName)
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
@@ -265,7 +265,7 @@ func TestAvailableSize(t *testing.T) {
 		}
 	}()
 
-	packageInfo := preparePackageInfo(fileName)
+	packageInfo := preparePackageInfo("http://localhost:8001/", fileName)
 	chains := []amqp.CertificateChain{}
 	certs := []amqp.Certificate{}
 
@@ -276,6 +276,52 @@ func TestAvailableSize(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	if _, err = secondDownloader.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(mountDir, decryptedDirName)); err != nil {
+		t.Errorf("Can't download and decrypt package: %s", err)
+	}
+}
+
+func TestInterruptResumeDownloadFrom2Servers(t *testing.T) {
+	// Define alertsCnt with 0
+	alertsCnt = alertsCounter{}
+	fileName := "bigPackage.txt"
+	filePath := path.Join(serverDir, fileName)
+	// Generate file with size 1Mb
+	if err := generateBigPackage(filePath, "1", "1M"); err != nil {
+		t.Errorf("Can't generate big file")
+	}
+	defer os.RemoveAll(filePath)
+
+	go func() {
+		log.Fatal(http.ListenAndServe(":8002", http.FileServer(http.Dir(serverDir))))
+	}()
+
+	time.Sleep(time.Second)
+
+	// Kill first connection and try resume from another server
+
+	go func() {
+		time.Sleep(30 * time.Second)
+
+		for i := 0; i < 3; i++ {
+			log.Debug("Kill connection")
+
+			if _, err := exec.Command("ss", "-K", "src", "127.0.0.1", "dport", "=", "8001").CombinedOutput(); err != nil {
+				t.Errorf("Can't stop http server: %s", err)
+			}
+		}
+	}()
+
+	packageInfo := preparePackageInfo("http://localhost:8001/", fileName)
+	chains := []amqp.CertificateChain{}
+	certs := []amqp.Certificate{}
+
+	if _, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName)); err == nil {
+		t.Error("Error was expected")
+	}
+
+	packageInfo = preparePackageInfo("http://localhost:8002/", fileName)
+
+	if _, err := downloaderObj.DownloadAndDecrypt(packageInfo, chains, certs, path.Join(downloadDir, decryptedDirName)); err != nil {
 		t.Errorf("Can't download and decrypt package: %s", err)
 	}
 }
@@ -389,8 +435,8 @@ func cleanup() (err error) {
 	return nil
 }
 
-func preparePackageInfo(fileName string) (packageInfo amqp.DecryptDataStruct) {
-	packageInfo.URLs = []string{"http://localhost:8001/" + fileName}
+func preparePackageInfo(host, fileName string) (packageInfo amqp.DecryptDataStruct) {
+	packageInfo.URLs = []string{host + fileName}
 
 	filePath := path.Join(serverDir, fileName)
 	imageFileInfo, err := image.CreateFileInfo(filePath)
