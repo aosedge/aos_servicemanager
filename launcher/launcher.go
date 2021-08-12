@@ -2313,7 +2313,7 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		ttl := launcher.config.DefaultServiceTTL
+		ttl := launcher.config.DefaultServiceTTLDays
 
 		if aosConfig.ServiceTTL != nil {
 			ttl = *aosConfig.ServiceTTL

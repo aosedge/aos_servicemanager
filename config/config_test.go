@@ -264,8 +264,8 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.DefaultServiceTTL != 30 {
-		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTL)
+	if config.DefaultServiceTTLDays != 30 {
+		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTLDays)
 	}
 }
 

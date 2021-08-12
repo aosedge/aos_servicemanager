@@ -1666,7 +1666,7 @@ func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTL: 30}, downloader,
+		DefaultServiceTTLDays: 30}, downloader,
 		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err

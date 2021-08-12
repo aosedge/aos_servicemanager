@@ -107,26 +107,26 @@ type Migration struct {
 
 // Config instance
 type Config struct {
-	Crypt               Crypt        `json:"fcrypt"`
-	CertStorage         string       `json:"certStorage"`
-	ServiceDiscoveryURL string       `json:"serviceDiscovery"`
-	UmController        UmController `json:"umController"`
-	VISServerURL        string       `json:"visServer"`
-	IAMServerURL        string       `json:"iamServer"`
-	WorkingDir          string       `json:"workingDir"`
-	DownloadDir         string       `json:"downloadDir"`
-	UpdateDir           string       `json:"updateDir"`
-	StorageDir          string       `json:"storageDir"`
-	LayersDir           string       `json:"layersDir"`
-	BoardConfigFile     string       `json:"boardConfigFile"`
-	DefaultServiceTTL   uint64       `json:"defaultServiceTTLDays"`
-	UnitStatusTimeout   uint64       `json:"unitStatusTimeout"`
-	Monitoring          Monitoring   `json:"monitoring"`
-	Logging             Logging      `json:"logging"`
-	Alerts              Alerts       `json:"alerts"`
-	HostBinds           []string     `json:"hostBinds"`
-	Hosts               []Host       `json:"hosts,omitempty"`
-	Migration           Migration    `json:"migration"`
+	Crypt                 Crypt        `json:"fcrypt"`
+	CertStorage           string       `json:"certStorage"`
+	ServiceDiscoveryURL   string       `json:"serviceDiscovery"`
+	UmController          UmController `json:"umController"`
+	VISServerURL          string       `json:"visServer"`
+	IAMServerURL          string       `json:"iamServer"`
+	WorkingDir            string       `json:"workingDir"`
+	DownloadDir           string       `json:"downloadDir"`
+	UpdateDir             string       `json:"updateDir"`
+	StorageDir            string       `json:"storageDir"`
+	LayersDir             string       `json:"layersDir"`
+	BoardConfigFile       string       `json:"boardConfigFile"`
+	DefaultServiceTTLDays uint64       `json:"defaultServiceTTLDays"`
+	UnitStatusTimeoutSec  uint64       `json:"unitStatusTimeoutSec"`
+	Monitoring            Monitoring   `json:"monitoring"`
+	Logging               Logging      `json:"logging"`
+	Alerts                Alerts       `json:"alerts"`
+	HostBinds             []string     `json:"hostBinds"`
+	Hosts                 []Host       `json:"hosts,omitempty"`
+	Migration             Migration    `json:"migration"`
 }
 
 /*******************************************************************************
@@ -141,8 +141,8 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		DefaultServiceTTL: 30,
-		UnitStatusTimeout: 30,
+		DefaultServiceTTLDays: 30,
+		UnitStatusTimeoutSec:  30,
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},
 			PollPeriod:         Duration{10 * time.Second},

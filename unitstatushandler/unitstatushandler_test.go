@@ -108,7 +108,7 @@ func TestSendInitialStatus(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(expectedUnitStatus.Services)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeoutSec: 3},
 		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
@@ -137,7 +137,7 @@ func TestUpdateBoardConfig(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeoutSec: 3},
 		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
@@ -206,7 +206,7 @@ func TestUpdateComponents(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeoutSec: 3},
 		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
@@ -292,7 +292,7 @@ func TestUpdateLayers(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeoutSec: 3},
 		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
@@ -384,7 +384,7 @@ func TestUpdateServices(t *testing.T) {
 	})
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeoutSec: 3},
 		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)

@@ -130,7 +130,7 @@ func New(
 		layerUpdater:       layerUpdater,
 		serviceUpdater:     serviceUpdater,
 		statusSender:       statusSender,
-		sendStatusPeriod:   time.Duration(cfg.UnitStatusTimeout) * time.Second,
+		sendStatusPeriod:   time.Duration(cfg.UnitStatusTimeoutSec) * time.Second,
 	}
 
 	instance.ctx, instance.cancel = context.WithCancel(context.Background())
