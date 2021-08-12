@@ -29,7 +29,6 @@ import (
 	"github.com/streadway/amqp"
 
 	"aos_servicemanager/amqphandler"
-	"aos_servicemanager/config"
 )
 
 /*******************************************************************************
@@ -173,7 +172,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestSendMessages(t *testing.T) {
-	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
+	amqpHandler, err := amqphandler.New()
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}
@@ -253,7 +252,7 @@ func TestSendMessages(t *testing.T) {
 func TestReceiveMessages(t *testing.T) {
 	systemID := "testID"
 
-	amqpHandler, err := amqphandler.New(&config.Config{UnitStatusTimeout: 2})
+	amqpHandler, err := amqphandler.New()
 	if err != nil {
 		t.Fatalf("Can't create amqp: %s", err)
 	}

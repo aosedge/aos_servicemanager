@@ -105,8 +105,6 @@ const (
 
 // AmqpHandler structure with all amqp connection info
 type AmqpHandler struct {
-	config *config.Config
-
 	// MessageChannel channel for amqp messages
 	MessageChannel chan Message
 
@@ -119,8 +117,6 @@ type AmqpHandler struct {
 	cryptoContext amqpCryptoContext
 
 	systemID string
-
-	stopChannel chan bool
 }
 
 type amqpCryptoContext interface {
@@ -595,14 +591,13 @@ var messageMap = map[string]func() interface{}{
  ******************************************************************************/
 
 // New creates new amqp object
-func New(cfg *config.Config) (handler *AmqpHandler, err error) {
+func New() (handler *AmqpHandler, err error) {
 	log.Debug("New AMQP")
 
-	handler = &AmqpHandler{config: cfg}
-
-	handler.sendChannel = make(chan Message, sendChannelSize)
-	handler.retryChannel = make(chan Message, retryChannelSize)
-	handler.stopChannel = make(chan bool, 1)
+	handler = &AmqpHandler{
+		sendChannel:  make(chan Message, sendChannelSize),
+		retryChannel: make(chan Message, retryChannelSize),
+	}
 
 	return handler, nil
 }
@@ -770,8 +765,6 @@ func (handler *AmqpHandler) SendOverrideEnvVarsStatus(envs []EnvVarInfoStatus) (
 // Close closes all amqp connection
 func (handler *AmqpHandler) Close() {
 	log.Info("Close AMQP")
-
-	handler.stopChannel <- true
 
 	handler.Disconnect()
 }

@@ -18,7 +18,6 @@
 package unitstatushandler_test
 
 import (
-	"aos_servicemanager/unitstatushandler"
 	"encoding/json"
 	"errors"
 	"os"
@@ -30,6 +29,8 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
+	"aos_servicemanager/unitstatushandler"
 )
 
 /*******************************************************************************
@@ -107,7 +108,8 @@ func TestSendInitialStatus(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(expectedUnitStatus.Services)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -135,7 +137,8 @@ func TestUpdateBoardConfig(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -203,7 +206,8 @@ func TestUpdateComponents(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -288,7 +292,8 @@ func TestUpdateLayers(t *testing.T) {
 	serviceUpdater := newTestServiceUpdater(nil)
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}
@@ -379,7 +384,8 @@ func TestUpdateServices(t *testing.T) {
 	})
 	sender := newTestSender()
 
-	statusHandler, err := unitstatushandler.New(boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
+	statusHandler, err := unitstatushandler.New(&config.Config{UnitStatusTimeout: 3},
+		boardConfigUpdater, componentUpdater, layerUpdater, serviceUpdater, sender)
 	if err != nil {
 		t.Fatalf("Can't create unit status handler: %s", err)
 	}

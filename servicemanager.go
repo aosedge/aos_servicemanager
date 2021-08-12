@@ -182,7 +182,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create amqp
-	if sm.amqp, err = amqp.New(cfg); err != nil {
+	if sm.amqp, err = amqp.New(); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -252,7 +252,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create unit status handler
-	if sm.statusHandler, err = unitstatushandler.New(sm.resourcemanager, sm.umCtrl,
+	if sm.statusHandler, err = unitstatushandler.New(cfg, sm.resourcemanager, sm.umCtrl,
 		sm.layerMgr, sm.launcher, sm.amqp); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}

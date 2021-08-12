@@ -29,13 +29,12 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	amqp "aos_servicemanager/amqphandler"
+	"aos_servicemanager/config"
 )
 
 /*******************************************************************************
  * Consts
  ******************************************************************************/
-
-const sendStatusPeriod = 30 * time.Second
 
 /*******************************************************************************
  * Types
@@ -101,6 +100,8 @@ type Instance struct {
 	componentStatuses map[string]*itemStatus
 	layerStatuses     map[string]*itemStatus
 	serviceStatuses   map[string]*itemStatus
+
+	sendStatusPeriod time.Duration
 }
 
 type statusDescriptor struct {
@@ -115,6 +116,7 @@ type itemStatus []statusDescriptor
 
 // New creates new unit status handler instance
 func New(
+	cfg *config.Config,
 	boardConfigUpdater BoardConfigUpdater,
 	componentUpdater ComponentUpdater,
 	layerUpdater LayerUpdater,
@@ -128,6 +130,7 @@ func New(
 		layerUpdater:       layerUpdater,
 		serviceUpdater:     serviceUpdater,
 		statusSender:       statusSender,
+		sendStatusPeriod:   time.Duration(cfg.UnitStatusTimeout) * time.Second,
 	}
 
 	instance.ctx, instance.cancel = context.WithCancel(context.Background())
@@ -447,7 +450,7 @@ func (instance *Instance) statusChanged() {
 		return
 	}
 
-	instance.statusTimer = time.AfterFunc(sendStatusPeriod, func() {
+	instance.statusTimer = time.AfterFunc(instance.sendStatusPeriod, func() {
 		instance.Lock()
 		defer instance.Unlock()
 
