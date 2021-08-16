@@ -1406,12 +1406,6 @@ func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Servic
 		return aoserrors.Wrap(err)
 	}
 
-	for _, networkFile := range networkFiles {
-		if err = spec.addBindMount(path.Join(service.Path, serviceMountPointsDir, networkFile), networkFile, "ro"); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
 	if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
 		return aoserrors.Wrap(err)
 	}
