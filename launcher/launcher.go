@@ -1122,7 +1122,7 @@ func (launcher *Launcher) installService(installInfo installServiceInfo) (err er
 
 	log.WithFields(log.Fields{"dir": installDir, "serviceID": installInfo.serviceDetails.ID}).Debug("Create install dir")
 
-	newService, err := launcher.prepareService(unpackDir, installDir, installInfo.serviceDetails)
+	newService, err := launcher.prepareService(unpackDir, installDir, installInfo.serviceDetails, serviceExists, service)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -1883,10 +1883,17 @@ func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []con
 }
 
 func (launcher *Launcher) prepareService(unpackDir, installDir string,
-	serviceInfo amqp.ServiceInfoFromCloud) (service Service, err error) {
-	uid, gid, err := launcher.idsPool.getFree()
-	if err != nil {
-		return service, aoserrors.Wrap(err)
+	serviceInfo amqp.ServiceInfoFromCloud, update bool, oldService Service) (service Service, err error) {
+	var uid, gid uint32
+
+	if update {
+		uid = oldService.UID
+		gid = oldService.GID
+	} else {
+		uid, gid, err = launcher.idsPool.getFree()
+		if err != nil {
+			return service, aoserrors.Wrap(err)
+		}
 	}
 
 	imageParts, err := getImageParts(unpackDir)
