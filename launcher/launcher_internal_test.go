@@ -1658,6 +1658,94 @@ func TestManifestValidation(t *testing.T) {
 	}
 }
 
+func TestServiceCompatibilityAfterUpdate(t *testing.T) {
+	sender := newTestSender()
+	imageDownloader := new(pythonImage)
+
+	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192 * 20, 0, 0, nil}, sender, nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+	t.Cleanup(func() {
+		launcher.RemoveAllServices()
+		launcher.Close()
+	})
+
+	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	imageDownloader.version = 0
+	imageDownloader.serviceID = "service0"
+
+	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
+			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	service, err := launcher.serviceProvider.GetService("service0")
+	if err != nil {
+		t.Errorf("Can't get service: %s", err)
+	}
+
+	uid, gid := service.UID, service.GID
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+
+	writeBuf := make([]byte, 8192)
+
+	if err := ftp.Stor("test1.dat", bytes.NewReader(writeBuf)); err != nil {
+		t.Errorf("Can't write file: %s", err)
+	}
+
+	ftp.Quit()
+
+	imageDownloader.version = 1
+
+	// Update service
+	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
+		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
+			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)})
+
+	// Wait ftp server ready
+	time.Sleep(2 * time.Second)
+
+	service, err = launcher.serviceProvider.GetService("service0")
+	if err != nil {
+		t.Errorf("Can't get service: %s", err)
+	}
+
+	if uid != service.UID || gid != service.GID {
+		t.Errorf("Service uid/gid should be %d %d, but got %d %d", uid, gid, service.UID, service.GID)
+	}
+
+	ftp, err = launcher.connectToFtp("service0")
+	if err != nil {
+		t.Fatalf("Can't connect to ftp: %s", err)
+	}
+	defer ftp.Quit()
+
+	r, err := ftp.Retr("test1.dat")
+	if err != nil {
+		t.Errorf("Failed to read file %s", err)
+	}
+	defer r.Close()
+
+	readBuf, err := ioutil.ReadAll(r)
+	if err != nil {
+		t.Errorf("Failed to read ftp buffer %s", err)
+	}
+
+	if bytes.Compare(writeBuf, readBuf) != 0 {
+		t.Error("Read and write buffers should be equal")
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
