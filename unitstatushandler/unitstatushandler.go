@@ -135,6 +135,11 @@ func New(
 
 	instance.ctx, instance.cancel = context.WithCancel(context.Background())
 
+	// Initialize maps of statuses for avoiding situation of adding values to uninitialized map on go routine
+	instance.componentStatuses = make(map[string]*itemStatus)
+	instance.layerStatuses = make(map[string]*itemStatus)
+	instance.serviceStatuses = make(map[string]*itemStatus)
+
 	go instance.handleComponentStatuses()
 
 	return instance, nil
@@ -182,8 +187,6 @@ func (instance *Instance) Init() (err error) {
 
 	// Get initial components info
 
-	instance.componentStatuses = make(map[string]*itemStatus)
-
 	componentsInfo, err := instance.componentUpdater.GetComponentsInfo()
 	if err != nil {
 		return err
@@ -197,8 +200,6 @@ func (instance *Instance) Init() (err error) {
 
 	// Get initial layers info
 
-	instance.layerStatuses = make(map[string]*itemStatus)
-
 	layersInfo, err := instance.layerUpdater.GetLayersInfo()
 	if err != nil {
 		return err
@@ -211,8 +212,6 @@ func (instance *Instance) Init() (err error) {
 	}
 
 	// Get initial services info
-
-	instance.serviceStatuses = make(map[string]*itemStatus)
 
 	servicesInfo, err := instance.serviceUpdater.GetServicesInfo()
 	if err != nil {
