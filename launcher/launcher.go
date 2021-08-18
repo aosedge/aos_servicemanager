@@ -59,7 +59,7 @@ import (
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
 // services and their storages before first start.
-const OperationVersion = 5
+const OperationVersion = 6
 
 // Service status
 const (
@@ -77,8 +77,6 @@ const (
 const (
 	serviceDir = "services" // services directory
 
-	runcName = "runc" // runc file name
-
 	aosSecretEnv = "SERVICE_SECRET"
 
 	ociRuntimeConfigFile = "config.json"
@@ -94,7 +92,7 @@ const serviceTemplate = `# This is template file used to launch AOS services
 # Known variables:
 # * ${ID}            - service id
 # * ${SERVICEPATH}   - path to service dir
-# * ${RUNC}          - path to runc
+# * ${RUNNER}        - path to runner
 [Unit]
 Description=AOS Service
 After=network.target
@@ -103,11 +101,11 @@ After=network.target
 Type=forking
 Restart=always
 RestartSec=1
-ExecStartPre=${RUNC} delete -f ${ID}
-ExecStart=${RUNC} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
+ExecStartPre=${RUNNER} delete -f ${ID}
+ExecStart=${RUNNER} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
 
-ExecStop=${RUNC} kill ${ID} SIGKILL
-ExecStopPost=${RUNC} delete -f ${ID}
+ExecStop=${RUNNER} kill ${ID} SIGKILL
+ExecStopPost=${RUNNER} delete -f ${ID}
 PIDFile=${SERVICEPATH}/.pid
 SuccessExitStatus=SIGKILL
 
@@ -177,7 +175,7 @@ type Launcher struct {
 	services map[string]string
 
 	serviceTemplate string
-	runcPath        string
+	runnerPath      string
 
 	sync.Mutex
 }
@@ -313,7 +311,7 @@ type statusSender chan amqp.ServiceInfo
 // New creates new launcher object
 func New(config *config.Config, downloader downloader, sender Sender, serviceProvider ServiceProvider,
 	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement, serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
-	log.Debug("New launcher")
+	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
 		config:           config,
@@ -366,8 +364,8 @@ func New(config *config.Config, downloader downloader, sender Sender, servicePro
 		return nil, aoserrors.Wrap(err)
 	}
 
-	// Retrieve runc abs path
-	launcher.runcPath, err = exec.LookPath(runcName)
+	// Retrieve runner abs path
+	launcher.runnerPath, err = exec.LookPath(config.Runner)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -2208,7 +2206,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		}
 
 		// replaces variables with values
-		line = strings.Replace(line, "${RUNC}", launcher.runcPath, -1)
+		line = strings.Replace(line, "${RUNNER}", launcher.runnerPath, -1)
 		line = strings.Replace(line, "${ID}", id, -1)
 		line = strings.Replace(line, "${SERVICEPATH}", absServicePath, -1)
 

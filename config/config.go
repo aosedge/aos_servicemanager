@@ -128,6 +128,7 @@ type Config struct {
 	HostBinds             []string     `json:"hostBinds"`
 	Hosts                 []Host       `json:"hosts,omitempty"`
 	Migration             Migration    `json:"migration"`
+	Runner                string       `json:"runner"`
 }
 
 /*******************************************************************************
@@ -145,6 +146,7 @@ func New(fileName string) (config *Config, err error) {
 		DefaultServiceTTLDays: 30,
 		UnitStatusTimeoutSec:  30,
 		DownloadFileTTLDays:   3,
+		Runner:                "runc",
 		Monitoring: Monitoring{
 			SendPeriod:         Duration{1 * time.Minute},
 			PollPeriod:         Duration{10 * time.Second},
