@@ -109,7 +109,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Error setting up: %s", err)
 	}
 
-	conf := config.Config{DownloadDir: downloadDir}
+	conf := config.Config{DownloadDir: downloadDir, DownloadFileTTLDays: 3}
 
 	downloaderObj, err = downloader.New(&conf, new(fakeFcrypt), testSender)
 	if err != nil {
@@ -228,7 +228,7 @@ func TestAvailableSize(t *testing.T) {
 		}
 	}()
 
-	conf := config.Config{DownloadDir: mountDir}
+	conf := config.Config{DownloadDir: mountDir, DownloadFileTTLDays: 3}
 
 	secondDownloader, err := downloader.New(&conf, new(fakeFcrypt), testSender)
 	if err != nil {
