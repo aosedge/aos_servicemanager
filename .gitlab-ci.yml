@@ -50,6 +50,14 @@ test:
     - sudo rm .testCoverage.txt
     - sudo systemctl stop rabbitmq-server.service --no-block
 
+test_crun:
+  tags:
+    - sm_ci
+  stage: test
+  script:
+    - echo "-------   Run Launcher Unit tests with crun   -------"
+    - sudo -E AOS_RUNNER=crun /usr/local/go/bin/go test aos_servicemanager/launcher -p=1 -failfast -v
+
 whitesource:
   only:
     refs:

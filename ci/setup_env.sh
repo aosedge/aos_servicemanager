@@ -34,6 +34,21 @@ sudo mv ./bin/ /opt/cni/
 echo "Install SM dependencies"
 sudo apt install quota dnsmasq runc -y
 
+echo "Build and install crun"
+# For Ubuntu releases older than 20.04
+sudo apt-get install -y make git gcc build-essential pkgconf libtool \
+   libsystemd-dev libcap-dev libseccomp-dev libyajl-dev \
+   go-md2man libtool autoconf python3 automake
+git clone https://github.com/containers/crun.git
+cd crun
+git checkout 7ef74c9330033cb884507c28fd8c267861486633 # Commit that is used in Yocto build
+./autogen.sh
+./configure
+make
+sudo make install
+# For Ubuntu 20.04 and newer:
+# sudo apt install crun
+
 echo "Install tests dependencies"
 sudo apt install libsystemd-dev dbus-x11 make iperf libssl-dev rabbitmq-server -y
 sudo systemctl stop rabbitmq-server
