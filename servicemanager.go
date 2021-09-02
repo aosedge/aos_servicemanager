@@ -178,11 +178,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create IAM client
-	if sm.iam, err = iamclient.New(cfg, sm.amqp, false); err != nil {
+	if sm.iam, err = iamclient.New(cfg, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
-
-	sm.amqp.SetSystemID(sm.iam.GetSystemID())
 
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
@@ -392,22 +390,14 @@ func (sm *serviceManager) handleChannels() (err error) {
 			if err := sm.amqp.SendAlerts(alerts); err != nil {
 				log.Errorf("Error send alerts: %s", err)
 			}
-
-		case users := <-sm.iam.UsersChangedChannel():
-			log.WithField("users", users).Info("Users changed")
-			return nil
 		}
 	}
 }
 
 func (sm *serviceManager) run() (err error) {
 	for {
-		if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
-			log.Fatalf("Can't set users: %s", err)
-		}
-
 		// Connect
-		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, sm.iam.GetUsers()); err != nil {
+		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, []string{}); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
 			goto reconnect
 		}
