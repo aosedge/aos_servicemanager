@@ -66,36 +66,12 @@ The configuration file has JSON format. Following is JSON schema:
             "description": "Address of service discovery server",
             "type": "string"
         },
-        "umController": {
-            "description": "UM controller configuration",
-            "type": "object",
-            "required": [
-                "ServerUrl"
-            ],
-            "properties": {
-                "ServerUrl": {
-                    "description": "UM controller server url",
-                    "type": "string"
-                },                
-                "UmIds": {
-                    "type": "array",
-                    "items": {
-                        "type" : "string",
-                        "description": "Id of update manager in the system"
-                    }
-                }
-            }
-        },
         "workingDir": {
             "description": "Directory where AOS data will be stored",
             "type": "string"
         },
         "storageDir": {
             "description": "Directory where service storage folders are located",
-            "type": "string"
-        },
-        "updateDir": {
-            "description": "Directory where update image are stored",
             "type": "string"
         },
         "layersDir": {

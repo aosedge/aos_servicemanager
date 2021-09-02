@@ -10,7 +10,6 @@ AOS Service Manager contains following packages:
 * [monitoring](doc/monitoring.md) - monitors system and AOS services resource usage
 * [alerts](doc/alerts.md) - sends different kind of alerts to the cloud
 * [logging](doc/logging.md) - provides systemd and services log to the cloud
-* [umclient](doc/umclient.md) - downloads and validates the update image and communicates with the update manager (UM)
 * [devicemanager](devicemanager.md) - system resources such as devices, RAM, CPU, etc for AOS service    
 
 ![](images/servicemanager.png)

@@ -35,7 +35,6 @@ import (
 
 	"aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
-	"aos_servicemanager/umcontroller"
 )
 
 /*******************************************************************************
@@ -758,42 +757,6 @@ func TestGetServiceByUnitName(t *testing.T) {
 	// Clear DB
 	if err = db.removeAllServices(); err != nil {
 		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestComponentsUpdateInfo(t *testing.T) {
-	testData := []umcontroller.SystemComponent{
-		{ID: "component1", VendorVersion: "v1", AosVersion: 1,
-			Annotations: "Some anotation", URL: "url12", Sha512: []byte{1, 3, 90, 42}},
-		{ID: "component2", VendorVersion: "v1", AosVersion: 1, URL: "url12", Sha512: []byte{1, 3, 90, 42}},
-	}
-
-	if err := db.SetComponentsUpdateInfo(testData); err != nil {
-		t.Fatal("Can't set update manager's update info ", err)
-	}
-
-	getUpdateInfo, err := db.GetComponentsUpdateInfo()
-	if err != nil {
-		t.Fatal("Can't get update manager's update info ", err)
-	}
-
-	if !reflect.DeepEqual(testData, getUpdateInfo) {
-		t.Fatalf("Wrong update info value: %v", getUpdateInfo)
-	}
-
-	testData = []umcontroller.SystemComponent{}
-
-	if err := db.SetComponentsUpdateInfo(testData); err != nil {
-		t.Fatal("Can't set update manager's update info ", err)
-	}
-
-	getUpdateInfo, err = db.GetComponentsUpdateInfo()
-	if err != nil {
-		t.Fatal("Can't get update manager's update info ", err)
-	}
-
-	if len(getUpdateInfo) != 0 {
-		t.Fatalf("Wrong count of update elements 0 != %d", len(getUpdateInfo))
 	}
 }
 

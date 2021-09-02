@@ -9,10 +9,8 @@ Devise contains following AOS components:
     * communicate with cloud
     * handle services life cycle
     * downloads and validates system update image
-* AOS Update Manager (UM):
-    * applies updates for different system components
 
-See [SM architecture](doc/servicemanager.md), [UM architecture]() documents for more details. 
+See [SM architecture](doc/servicemanager.md), documents for more details. 
 
 On the unit side, SM interacts with the Identifier plugin in order to get unit systemID and current Users.  SM receives notification from identifier when Users changed. When it happens SM reconnects to the cloud with new parameters.
 

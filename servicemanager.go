@@ -47,7 +47,6 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	resource "aos_servicemanager/resourcemanager"
-	"aos_servicemanager/umcontroller"
 	"aos_servicemanager/unitstatushandler"
 )
 
@@ -75,7 +74,6 @@ type serviceManager struct {
 	logging         *logging.Logging
 	monitor         *monitoring.Monitor
 	network         *networkmanager.NetworkManager
-	umCtrl          *umcontroller.UmController
 	iam             *iamclient.Client
 	layerMgr        *layermanager.LayerManager
 	statusHandler   *unitstatushandler.Instance
@@ -213,10 +211,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.umCtrl, err = umcontroller.New(cfg, sm.db, sm.downloader, false); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	// Create network
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
@@ -252,7 +246,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create unit status handler
-	if sm.statusHandler, err = unitstatushandler.New(cfg, sm.resourcemanager, sm.umCtrl,
+	if sm.statusHandler, err = unitstatushandler.New(cfg, sm.resourcemanager,
 		sm.layerMgr, sm.launcher, sm.amqp); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
@@ -291,11 +285,6 @@ func (sm *serviceManager) close() {
 	// Close amqp
 	if sm.amqp != nil {
 		sm.amqp.Close()
-	}
-
-	// Close UM controller
-	if sm.umCtrl != nil {
-		sm.umCtrl.Close()
 	}
 
 	// Close launcher

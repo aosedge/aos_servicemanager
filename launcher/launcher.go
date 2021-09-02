@@ -665,12 +665,6 @@ func Cleanup(cfg *config.Config) (err error) {
 		log.Fatalf("Can't remove storage folder: %s", err)
 	}
 
-	log.WithField("dir", cfg.UpdateDir).Debug("Remove update dir")
-
-	if err := os.RemoveAll(cfg.UpdateDir); err != nil {
-		log.Fatalf("Can't remove update folder: %s", err)
-	}
-
 	if err := os.RemoveAll(path.Join(cfg.WorkingDir, serviceTemplateFile)); err != nil {
 		log.Fatalf("Can't remove service template file: %s", err)
 	}

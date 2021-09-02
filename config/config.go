@@ -38,21 +38,6 @@ type Crypt struct {
 	Pkcs11Library string `json:"pkcs11Library,omitempty"`
 }
 
-// UmController configuration for update controller
-type UmController struct {
-	ServerURL     string           `json:"serverUrl"`
-	FileServerURL string           `json:"fileServerUrl,omitempty"`
-	UmClients     []UmClientConfig `json:"umClients"`
-	UpdateDir     string           `json:"updateDir"`
-}
-
-// UmClientConfig update manager config
-type UmClientConfig struct {
-	UmID     string `json:"umId"`
-	Priority uint32 `json:"priority"`
-	IsLocal  bool   `json:"isLocal,omitempty"`
-}
-
 // Duration represents duration in format "00:00:00"
 type Duration struct {
 	time.Duration
@@ -107,28 +92,26 @@ type Migration struct {
 
 // Config instance
 type Config struct {
-	Crypt                 Crypt        `json:"fcrypt"`
-	CertStorage           string       `json:"certStorage"`
-	ServiceDiscoveryURL   string       `json:"serviceDiscovery"`
-	UmController          UmController `json:"umController"`
-	VISServerURL          string       `json:"visServer"`
-	IAMServerURL          string       `json:"iamServer"`
-	WorkingDir            string       `json:"workingDir"`
-	DownloadDir           string       `json:"downloadDir"`
-	UpdateDir             string       `json:"updateDir"`
-	StorageDir            string       `json:"storageDir"`
-	LayersDir             string       `json:"layersDir"`
-	BoardConfigFile       string       `json:"boardConfigFile"`
-	DefaultServiceTTLDays uint64       `json:"defaultServiceTTLDays"`
-	DownloadFileTTLDays   uint64       `json:"downloadFileTTLDays"`
-	UnitStatusTimeoutSec  uint64       `json:"unitStatusTimeoutSec"`
-	Monitoring            Monitoring   `json:"monitoring"`
-	Logging               Logging      `json:"logging"`
-	Alerts                Alerts       `json:"alerts"`
-	HostBinds             []string     `json:"hostBinds"`
-	Hosts                 []Host       `json:"hosts,omitempty"`
-	Migration             Migration    `json:"migration"`
-	Runner                string       `json:"runner"`
+	Crypt                 Crypt      `json:"fcrypt"`
+	CertStorage           string     `json:"certStorage"`
+	ServiceDiscoveryURL   string     `json:"serviceDiscovery"`
+	VISServerURL          string     `json:"visServer"`
+	IAMServerURL          string     `json:"iamServer"`
+	WorkingDir            string     `json:"workingDir"`
+	DownloadDir           string     `json:"downloadDir"`
+	StorageDir            string     `json:"storageDir"`
+	LayersDir             string     `json:"layersDir"`
+	BoardConfigFile       string     `json:"boardConfigFile"`
+	DefaultServiceTTLDays uint64     `json:"defaultServiceTTLDays"`
+	DownloadFileTTLDays   uint64     `json:"downloadFileTTLDays"`
+	UnitStatusTimeoutSec  uint64     `json:"unitStatusTimeoutSec"`
+	Monitoring            Monitoring `json:"monitoring"`
+	Logging               Logging    `json:"logging"`
+	Alerts                Alerts     `json:"alerts"`
+	HostBinds             []string   `json:"hostBinds"`
+	Hosts                 []Host     `json:"hosts,omitempty"`
+	Migration             Migration  `json:"migration"`
+	Runner                string     `json:"runner"`
 }
 
 /*******************************************************************************
@@ -171,10 +154,6 @@ func New(fileName string) (config *Config, err error) {
 		config.StorageDir = path.Join(config.WorkingDir, "storages")
 	}
 
-	if config.UpdateDir == "" {
-		config.UpdateDir = path.Join(config.WorkingDir, "update")
-	}
-
 	if config.LayersDir == "" {
 		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
 	}
@@ -193,10 +172,6 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.Migration.MergedMigrationPath == "" {
 		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
-	}
-
-	if config.UmController.UpdateDir == "" {
-		config.UmController.UpdateDir = path.Join(config.WorkingDir, "update")
 	}
 
 	return config, nil

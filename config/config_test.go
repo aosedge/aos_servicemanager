@@ -46,19 +46,8 @@ func createConfigFile() (err error) {
 	"workingDir" : "workingDir",
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
-	"UpdateDir" : "/var/aos/update",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"visServer" : "wss://localhost:8088",
-	"umController": {
-        "serverUrl": "localhost:8091",
-		"fileServerUrl": "localhost:8092",
-		"umClients": [{
-			"umId": "um",
-			"priority": 0,
-			"isLocal": true
-		}],
-		"updateDir": "/var/aos/update"
-	},
 	"iamServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
@@ -247,17 +236,6 @@ func TestGetIAMServerURL(t *testing.T) {
 	}
 }
 
-func TestGetUpdateDir(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if config.UpdateDir != "/var/aos/update" {
-		t.Errorf("Wrong update dir value: %s", config.UpdateDir)
-	}
-}
-
 func TestGetDefaultServiceTTL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
@@ -374,25 +352,6 @@ func TestHosts(t *testing.T) {
 
 	if config.Hosts[1].Hostname != "wwwaosum" {
 		t.Errorf("Incorrect hostname")
-	}
-}
-
-func TestUmControllerConfig(t *testing.T) {
-	configObj, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	umClient := config.UmClientConfig{UmID: "um", Priority: 0, IsLocal: true}
-
-	originalConfig := config.UmController{ServerURL: "localhost:8091",
-		FileServerURL: "localhost:8092",
-		UmClients:     []config.UmClientConfig{umClient},
-		UpdateDir:     "/var/aos/update",
-	}
-
-	if !reflect.DeepEqual(originalConfig, configObj.UmController) {
-		t.Errorf("Wrong UmController configuration ")
 	}
 }
 

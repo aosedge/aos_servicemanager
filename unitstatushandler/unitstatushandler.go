@@ -118,7 +118,6 @@ type itemStatus []statusDescriptor
 func New(
 	cfg *config.Config,
 	boardConfigUpdater BoardConfigUpdater,
-	componentUpdater ComponentUpdater,
 	layerUpdater LayerUpdater,
 	serviceUpdater ServiceUpdater,
 	statusSender StatusSender) (instance *Instance, err error) {
@@ -126,7 +125,6 @@ func New(
 
 	instance = &Instance{
 		boardConfigUpdater: boardConfigUpdater,
-		componentUpdater:   componentUpdater,
 		layerUpdater:       layerUpdater,
 		serviceUpdater:     serviceUpdater,
 		statusSender:       statusSender,

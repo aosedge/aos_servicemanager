@@ -33,7 +33,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
-	"aos_servicemanager/umcontroller"
 )
 
 /*******************************************************************************
@@ -696,63 +695,6 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 	}
 
 	return cursor, nil
-}
-
-// SetComponentsUpdateInfo store update data for update managers
-func (db *Database) SetComponentsUpdateInfo(updateInfo []umcontroller.SystemComponent) (err error) {
-	dataJSON, err := json.Marshal(&updateInfo)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	result, err := db.sql.Exec("UPDATE config SET componentsUpdateInfo = ?", dataJSON)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetComponentsUpdateInfo returns update data for sysytem components
-func (db *Database) GetComponentsUpdateInfo() (updateInfo []umcontroller.SystemComponent, err error) {
-	stmt, err := db.sql.Prepare("SELECT componentsUpdateInfo FROM config")
-	if err != nil {
-		return updateInfo, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	var dataJSON []byte
-
-	if err = stmt.QueryRow().Scan(&dataJSON); err != nil {
-		if err == sql.ErrNoRows {
-			return updateInfo, ErrNotExist
-		}
-
-		return updateInfo, aoserrors.Wrap(err)
-	}
-
-	if dataJSON == nil {
-		return updateInfo, nil
-	}
-
-	if len(dataJSON) == 0 {
-		return updateInfo, nil
-	}
-
-	if err = json.Unmarshal(dataJSON, &updateInfo); err != nil {
-		return updateInfo, aoserrors.Wrap(err)
-	}
-
-	return updateInfo, nil
 }
 
 //AddLayer add layer to layers table
