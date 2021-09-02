@@ -47,7 +47,6 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	resource "aos_servicemanager/resourcemanager"
-	"aos_servicemanager/unitstatushandler"
 )
 
 /*******************************************************************************
@@ -76,7 +75,6 @@ type serviceManager struct {
 	network         *networkmanager.NetworkManager
 	iam             *iamclient.Client
 	layerMgr        *layermanager.LayerManager
-	statusHandler   *unitstatushandler.Instance
 
 	isDesiredStatusInProcessing bool
 	desiredStatusMutex          sync.Mutex
@@ -245,12 +243,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create unit status handler
-	if sm.statusHandler, err = unitstatushandler.New(cfg, sm.resourcemanager,
-		sm.layerMgr, sm.launcher, sm.amqp); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	if err = sm.checkConsistency(); err != nil {
 		log.Errorf("Consistency error: %s. Cleanup...", err)
 
@@ -275,11 +267,6 @@ func (sm *serviceManager) close() {
 	// Close logging
 	if sm.logging != nil {
 		sm.logging.Close()
-	}
-
-	// Close unit status handler
-	if sm.statusHandler != nil {
-		sm.statusHandler.Close()
 	}
 
 	// Close amqp
@@ -333,7 +320,6 @@ func (sm *serviceManager) checkConsistency() (err error) {
 func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 	switch data := message.Data.(type) {
 	case *amqp.DecodedDesiredStatus:
-		go sm.statusHandler.ProcessDesiredStatus(*data)
 
 	case *amqp.DecodedOverrideEnvVars:
 		log.Info("Receive request to override env vars")
@@ -477,11 +463,6 @@ func (sm *serviceManager) run() (err error) {
 		// Connect
 		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, sm.iam.GetUsers()); err != nil {
 			log.Errorf("Can't establish connection: %s", err)
-			goto reconnect
-		}
-
-		if err = sm.statusHandler.Init(); err != nil {
-			log.Errorf("Can't initialize unit status handler: %s", err)
 			goto reconnect
 		}
 
