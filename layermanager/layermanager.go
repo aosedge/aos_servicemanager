@@ -55,7 +55,6 @@ type LayerManager struct {
 	layerInfoProvider LayerInfoProvider
 	extractDir        string
 	decryptDir        string
-	downloader        downloader
 	actionHandler     *action.Handler
 }
 
@@ -65,11 +64,6 @@ type LayerInfoProvider interface {
 	DeleteLayerByDigest(digest string) (err error)
 	GetLayerPathByDigest(digest string) (path string, err error)
 	GetLayersInfo() (layersList []amqp.LayerInfo, err error)
-}
-
-type downloader interface {
-	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
 }
 
 type installLayerInfo struct {
@@ -85,11 +79,10 @@ type statusSender chan amqp.LayerInfo
  * Public
  ******************************************************************************/
 // New creates new launcher object
-func New(config *config.Config, downloader downloader,
+func New(config *config.Config,
 	infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{
 		layersDir:         config.LayersDir,
-		downloader:        downloader,
 		layerInfoProvider: infoProvider,
 		extractDir:        path.Join(config.WorkingDir, extractDirName),
 		decryptDir:        path.Join(config.WorkingDir, decryptDirName),
@@ -241,20 +234,7 @@ func (layermanager *LayerManager) doActionInstall(id string, data interface{}) {
 	installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,
 		installInfo.layerInfo.Digest, amqp.DownloadingStatus, "")
 
-	decryptData := amqp.DecryptDataStruct{URLs: installInfo.layerInfo.URLs,
-		Sha256:         installInfo.layerInfo.Sha256,
-		Sha512:         installInfo.layerInfo.Sha512,
-		Size:           installInfo.layerInfo.Size,
-		DecryptionInfo: installInfo.layerInfo.DecryptionInfo,
-		Signs:          installInfo.layerInfo.Signs}
-
 	var destinationFile string
-
-	if destinationFile, err = layermanager.downloader.DownloadAndDecrypt(
-		decryptData, installInfo.chains, installInfo.certs, layermanager.decryptDir); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
 	defer os.RemoveAll(destinationFile)
 
 	installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,

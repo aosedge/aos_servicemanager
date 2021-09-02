@@ -38,7 +38,6 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
-	"aos_servicemanager/downloader"
 	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/iamclient"
 	"aos_servicemanager/launcher"
@@ -67,7 +66,6 @@ type serviceManager struct {
 	cfg             *config.Config
 	crypt           *fcrypt.CryptoContext
 	db              *database.Database
-	downloader      *downloader.Downloader
 	launcher        *launcher.Launcher
 	resourcemanager *resource.ResourceManager
 	logging         *logging.Logging
@@ -205,10 +203,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	sm.amqp.SetCryptoContext(sm.crypt)
 
-	if sm.downloader, err = downloader.New(sm.cfg, sm.crypt, sm.alerts); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	// Create network
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
@@ -223,7 +217,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.layerMgr, err = layermanager.New(cfg, sm.downloader, sm.db); err != nil {
+	if sm.layerMgr, err = layermanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -233,7 +227,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.downloader, sm.amqp, sm.db, sm.layerMgr, sm.monitor,
+	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor,
 		sm.network, sm.resourcemanager, sm.iam); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}

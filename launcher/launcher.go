@@ -167,7 +167,6 @@ type Launcher struct {
 
 	ttlTicker *time.Ticker
 
-	downloader downloader
 	decryptDir string
 
 	users []string
@@ -281,11 +280,6 @@ type ServiceState int
 
 type actionType int
 
-type downloader interface {
-	DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-		chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error)
-}
-
 type stateAcceptance struct {
 	correlationID string
 	acceptance    amqp.StateAcceptance
@@ -309,13 +303,12 @@ type statusSender chan amqp.ServiceInfo
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, downloader downloader, sender Sender, serviceProvider ServiceProvider,
+func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement, serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
 	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
 		config:           config,
-		downloader:       downloader,
 		sender:           sender,
 		serviceProvider:  serviceProvider,
 		layerProvider:    layerProvider,
@@ -1060,22 +1053,8 @@ func (launcher *Launcher) installService(installInfo installServiceInfo) (err er
 	unpackDir, err := ioutil.TempDir("", "aos_")
 	defer os.RemoveAll(unpackDir)
 
-	decryptData := amqp.DecryptDataStruct{URLs: installInfo.serviceDetails.URLs,
-		Sha256:         installInfo.serviceDetails.Sha256,
-		Sha512:         installInfo.serviceDetails.Sha512,
-		Size:           installInfo.serviceDetails.Size,
-		DecryptionInfo: installInfo.serviceDetails.DecryptionInfo,
-		Signs:          installInfo.serviceDetails.Signs}
-
 	// download and unpack
-	image, err := launcher.downloader.DownloadAndDecrypt(decryptData, installInfo.chains, installInfo.certs, launcher.decryptDir)
-	if image != "" {
-		defer os.Remove(image)
-	}
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
+	image := ""
 	installInfo.statusSender.sendStatus(installInfo.serviceDetails.ID, installInfo.serviceDetails.AosVersion,
 		amqp.InstallingStatus, "", "")
 

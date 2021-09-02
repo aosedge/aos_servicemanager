@@ -124,6 +124,9 @@ type testDeviceManager struct {
 type fakeFcrypt struct {
 }
 
+type downloader interface {
+}
+
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -1754,7 +1757,7 @@ func newTestLauncher(
 	downloader downloader, sender Sender,
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTLDays: 30, Runner: getRuntime()}, downloader,
+		DefaultServiceTTLDays: 30, Runner: getRuntime()},
 		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err
