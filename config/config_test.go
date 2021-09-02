@@ -37,9 +37,7 @@ import (
 func createConfigFile() (err error) {
 	configContent := `{
 	"fcrypt" : {
-		"CACert" : "CACert",
-		"tpmDevice": "/dev/tpmrm0",
-		"pkcs11Library": "/path/to/pkcs11/library"
+		"CACert" : "CACert"
 	},
 	"certStorage": "/var/aos/crypt/sm/",
 	"serviceDiscovery" : "www.aos.com",
@@ -146,16 +144,8 @@ func TestGetCrypt(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Crypt.TpmDevice != "/dev/tpmrm0" {
-		t.Errorf("Wrong TPMEngine Interface value: %s", config.Crypt.TpmDevice)
-	}
-
 	if config.Crypt.CACert != "CACert" {
 		t.Errorf("Wrong CACert value: %s", config.Crypt.CACert)
-	}
-
-	if config.Crypt.Pkcs11Library != "/path/to/pkcs11/library" {
-		t.Errorf("Wrong PKCS11 library value: %s", config.Crypt.Pkcs11Library)
 	}
 }
 

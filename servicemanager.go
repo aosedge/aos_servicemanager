@@ -21,7 +21,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -38,7 +37,6 @@ import (
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
-	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/iamclient"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/layermanager"
@@ -64,7 +62,6 @@ type serviceManager struct {
 	alerts          *alerts.Alerts
 	amqp            *amqp.AmqpHandler
 	cfg             *config.Config
-	crypt           *fcrypt.CryptoContext
 	db              *database.Database
 	launcher        *launcher.Launcher
 	resourcemanager *resource.ResourceManager
@@ -187,11 +184,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	sm.amqp.SetSystemID(sm.iam.GetSystemID())
 
-	// Create crypto context
-	if sm.crypt, err = fcrypt.New(cfg.Crypt, sm.iam); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
 		if err == alerts.ErrDisabled {
@@ -200,8 +192,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 			return sm, aoserrors.Wrap(err)
 		}
 	}
-
-	sm.amqp.SetCryptoContext(sm.crypt)
 
 	// Create network
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
@@ -292,11 +282,6 @@ func (sm *serviceManager) close() {
 	if sm.db != nil {
 		sm.db.Close()
 	}
-
-	// Close crypto context
-	if sm.crypt != nil {
-		sm.crypt.Close()
-	}
 }
 
 func (sm *serviceManager) checkConsistency() (err error) {
@@ -356,20 +341,6 @@ func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
 			"till": data.Till}).Info("Receive request system log")
 
 		sm.logging.GetSystemLog(*data)
-
-	case *amqp.RenewCertificatesNotificationWithPwd:
-		log.Info("Receive renew certificates notification")
-
-		if err = sm.iam.RenewCertificatesNotification(data.Password, data.Certificates); err != nil {
-			log.Errorf("Can't process renew certificates notification: %s", err)
-		}
-
-	case *amqp.IssuedUnitCertificates:
-		log.Info("Receive issued unit certificates")
-
-		if err = sm.iam.InstallCertificates(data.Certificates, sm.crypt); err != nil {
-			log.Errorf("Can't install certificates: %s", err)
-		}
 
 	default:
 		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
@@ -431,27 +402,8 @@ func (sm *serviceManager) handleChannels() (err error) {
 
 func (sm *serviceManager) run() (err error) {
 	for {
-		var orgNames []string
-
 		if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
 			log.Fatalf("Can't set users: %s", err)
-		}
-
-		// Get organization names from certificate and use it as discovery URL
-		if orgNames, err = sm.crypt.GetOrganization(); err != nil {
-			log.Warningf("Organization name will be taken from config file: %s", err)
-		} else {
-			// We use the first member of organization list
-			// The certificate should contain only one organization
-			if len(orgNames) == 1 && orgNames[0] != "" {
-				url := url.URL{
-					Scheme: "https",
-					Host:   orgNames[0],
-				}
-				sm.cfg.ServiceDiscoveryURL = url.String() + ":9000"
-			} else {
-				log.Error("Certificate organization name is empty or organization is not a single")
-			}
 		}
 
 		// Connect

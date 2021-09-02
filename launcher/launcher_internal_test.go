@@ -47,7 +47,6 @@ import (
 
 	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
-	"aos_servicemanager/fcrypt"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	"aos_servicemanager/platform"
@@ -119,9 +118,6 @@ type testPermissionsProvider struct {
 type testDeviceManager struct {
 	sync.Mutex
 	isValid bool
-}
-
-type fakeFcrypt struct {
 }
 
 type downloader interface {
@@ -1985,14 +1981,6 @@ func (downloader pythonAOSSecretImage) DownloadAndDecrypt(packageInfo amqp.Decry
 	}
 
 	return outputFile, nil
-}
-
-func (crypt fakeFcrypt) ImportSessionKey(keyInfo fcrypt.CryptoSessionKeyInfo) (fcrypt.SymmetricContextInterface, error) {
-	return nil, nil
-}
-
-func (crypt fakeFcrypt) CreateSignContext() (fcrypt.SignContextInterface, error) {
-	return nil, nil
 }
 
 func newTestMonitor() (monitor *testMonitor, err error) {

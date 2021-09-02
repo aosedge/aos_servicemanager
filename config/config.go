@@ -33,9 +33,7 @@ import (
 
 // Crypt configuration structure with crypto attributes
 type Crypt struct {
-	CACert        string `json:"CACert"`
-	TpmDevice     string `json:"tpmDevice,omitempty"`
-	Pkcs11Library string `json:"pkcs11Library,omitempty"`
+	CACert string `json:"CACert"`
 }
 
 // Duration represents duration in format "00:00:00"
