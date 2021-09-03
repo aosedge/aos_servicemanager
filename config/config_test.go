@@ -39,6 +39,7 @@ func createConfigFile() (err error) {
 	"fcrypt" : {
 		"CACert" : "CACert"
 	},
+	"smServerUrl": "smserver",
 	"certStorage": "/var/aos/crypt/sm/",
 	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
@@ -145,14 +146,14 @@ func TestGetCrypt(t *testing.T) {
 	}
 }
 
-func TestGetServiceDiscoveryURL(t *testing.T) {
+func TestSMServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.ServiceDiscoveryURL != "www.aos.com" {
-		t.Errorf("Wrong server URL value: %s", config.ServiceDiscoveryURL)
+	if config.SMServerURL != "smserver" {
+		t.Errorf("Wrong smServer value: %s", config.SMServerURL)
 	}
 }
 

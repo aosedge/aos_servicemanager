@@ -87,6 +87,7 @@ type Migration struct {
 // Config instance
 type Config struct {
 	Crypt                 Crypt      `json:"fcrypt"`
+	SMServerURL           string     `json:"smServerUrl"`
 	CertStorage           string     `json:"certStorage"`
 	ServiceDiscoveryURL   string     `json:"serviceDiscovery"`
 	VISServerURL          string     `json:"visServer"`
