@@ -46,14 +46,20 @@ import (
 
 // ServiceLauncher services launcher interface
 type ServiceLauncher interface {
+	GetServicesInfo() (services []*pb.ServiceStatus, err error)
+}
+
+type LayerProvider interface {
+	GetLayersInfo() (info []*pb.LayerStatus, err error)
 }
 
 // SMServer SM server instance
 type SMServer struct {
-	url        string
-	launcher   ServiceLauncher
-	grpcServer *grpc.Server
-	listener   net.Listener
+	url           string
+	launcher      ServiceLauncher
+	layerProvider LayerProvider
+	grpcServer    *grpc.Server
+	listener      net.Listener
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -62,8 +68,8 @@ type SMServer struct {
  ******************************************************************************/
 
 // New creates new IAM server instance
-func New(cfg *config.Config, launcher ServiceLauncher, insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher}
+func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, insecure bool) (server *SMServer, err error) {
+	server = &SMServer{launcher: launcher, layerProvider: layerProvider}
 
 	var opts []grpc.ServerOption
 
@@ -117,6 +123,18 @@ func (server *SMServer) SetUsers(ctx context.Context, users *pb.Users) (ret *emp
 
 // GetStatus gets current SM status
 func (server *SMServer) GetStatus(tx context.Context, req *empty.Empty) (status *pb.SMStatus, err error) {
+	status = &pb.SMStatus{}
+
+	status.Services, err = server.launcher.GetServicesInfo()
+	if err != nil {
+		return status, aoserrors.Wrap(err)
+	}
+
+	status.Layers, err = server.layerProvider.GetLayersInfo()
+	if err != nil {
+		return status, aoserrors.Wrap(err)
+	}
+
 	return status, nil
 }
 
