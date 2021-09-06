@@ -32,9 +32,8 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	"gitpct.epam.com/epmd-aepr/aos_common/image"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/layermanager"
 )
@@ -42,10 +41,6 @@ import (
 /*******************************************************************************
  * Types
  ******************************************************************************/
-
-type layerDownloader struct {
-}
-
 type testInfoProvider struct {
 	sync.Mutex
 	layers map[string]layerDesc
@@ -99,7 +94,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemoveLayer(t *testing.T) {
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), newTesInfoProvider())
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, newTesInfoProvider())
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
@@ -109,8 +104,9 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
-		layerManager.InstallLayer(generateLayerFromCloud(layerFile, "LayerId1", digest, 1), nil, nil)})
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1}); err != nil {
+		t.Fatalf("Can't install layer: %s", err)
+	}
 
 	list, err := layerManager.GetLayersInfo()
 	if err != nil {
@@ -121,7 +117,7 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatal("Count of layers should be 1")
 	}
 
-	if list[0].ID != "LayerId1" {
+	if list[0].LayerId != "LayerId1" {
 		t.Error("Layer ID should be LayerId1")
 	}
 
@@ -129,8 +125,9 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Error("Layer AosVersion should be 1")
 	}
 
-	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
-		layerManager.UninstallLayer(digest)})
+	if err = layerManager.UninstallLayer(&pb.RemoveLayerRequest{Digest: digest}); err != nil {
+		t.Fatalf("Can't uninstall layer: %s", err)
+	}
 
 	list, err = layerManager.GetLayersInfo()
 	if err != nil {
@@ -145,7 +142,7 @@ func TestInstallRemoveLayer(t *testing.T) {
 func TestLayerConsistencyCheck(t *testing.T) {
 	infoProvider := newTesInfoProvider()
 
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), infoProvider)
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, infoProvider)
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
@@ -160,10 +157,13 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	checkLayerStatuses(t, []<-chan amqp.LayerInfo{
-		layerManager.InstallLayer(generateLayerFromCloud(layerFile1, "LayerId1", digest1, 1), nil, nil),
-		layerManager.InstallLayer(generateLayerFromCloud(layerFile2, "LayerId2", digest2, 2), nil, nil),
-	})
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1}); err != nil {
+		t.Fatalf("Can't install layer: %s", err)
+	}
+
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1}); err != nil {
+		t.Fatalf("Can't install layer: %s", err)
+	}
 
 	list, err := layerManager.GetLayersInfo()
 	if err != nil {
@@ -192,36 +192,9 @@ func TestLayerConsistencyCheck(t *testing.T) {
 	}
 }
 
-func TestLayersStatus(t *testing.T) {
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, new(layerDownloader), newTesInfoProvider())
-	if err != nil {
-		t.Fatalf("Can't create layer manager: %s", err)
-	}
-
-	layerFile, digest, err := createLayer(path.Join(tmpDir, "layerdir1"))
-	if err != nil {
-		t.Fatalf("Can't create layer: %s", err)
-	}
-
-	if status := waitLayerStatus(layerManager.InstallLayer(
-		generateLayerFromCloud(layerFile, "LayerId1", digest, 1), nil, nil)); status.Status != amqp.InstalledStatus {
-		t.Errorf("Wrong status received: %s", status.Status)
-	}
-
-	if status := waitLayerStatus(layerManager.UninstallLayer(digest)); status.Status != amqp.RemovedStatus {
-		t.Errorf("Wrong status received: %s", status.Status)
-	}
-}
-
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
-
-func (downloader *layerDownloader) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (resultFile string, err error) {
-	return packageInfo.URLs[0], err
-}
-
 func newTesInfoProvider() (infoProvider *testInfoProvider) {
 	return &testInfoProvider{layers: make(map[string]layerDesc)}
 }
@@ -264,13 +237,13 @@ func (infoProvider *testInfoProvider) GetLayerPathByDigest(digest string) (path 
 	return layer.path, nil
 }
 
-func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
+func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
 	for digest, layer := range infoProvider.layers {
-		layersList = append(layersList, amqp.LayerInfo{
-			ID: layer.id, AosVersion: layer.aosVersion, Digest: digest, Status: amqp.InstalledStatus})
+		layersList = append(layersList, &pb.LayerStatus{
+			LayerId: layer.id, AosVersion: layer.aosVersion, Digest: digest})
 	}
 
 	return layersList, nil
@@ -360,7 +333,7 @@ func createLayer(dir string) (layerFile string, digest string, err error) {
 		return "", "", fmt.Errorf("error: %s, code: %s", string(output), err)
 	}
 
-	return layerFile, string(layerDigest), nil
+	return "file://" + layerFile, string(layerDigest), nil
 }
 
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
@@ -380,81 +353,4 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	}
 
 	return retDigest, nil
-}
-
-func generateLayerFromCloud(layerFile, layerID, digest string, aosVersion uint64) (layerInfo amqp.LayerInfoFromCloud) {
-	layerInfo.ID = layerID
-	layerInfo.Digest = digest
-	layerInfo.AosVersion = aosVersion
-
-	layerInfo.URLs = []string{layerFile}
-
-	imageFileInfo, err := image.CreateFileInfo(layerFile)
-	if err != nil {
-		log.Error("error CreateFileInfo", err)
-		return layerInfo
-	}
-
-	recInfo := struct {
-		Serial string `json:"serial"`
-		Issuer []byte `json:"issuer"`
-	}{
-		Serial: "string",
-		Issuer: []byte("issuer"),
-	}
-
-	layerInfo.Sha256 = imageFileInfo.Sha256
-	layerInfo.Sha512 = imageFileInfo.Sha512
-	layerInfo.Size = imageFileInfo.Size
-	layerInfo.DecryptionInfo = &amqp.DecryptionInfo{
-		BlockAlg:     "AES256/CBC/pkcs7",
-		BlockIv:      []byte{},
-		BlockKey:     []byte{},
-		AsymAlg:      "RSA/PKCS1v1_5",
-		ReceiverInfo: &recInfo,
-	}
-	layerInfo.Signs = new(amqp.Signs)
-
-	return layerInfo
-}
-
-func waitLayerStatus(statusChannel <-chan amqp.LayerInfo) (status amqp.LayerInfo) {
-	for {
-		select {
-		case newStatus, ok := <-statusChannel:
-			if !ok {
-				return status
-			}
-
-			log.WithFields(log.Fields{
-				"id":         newStatus.ID,
-				"aosVersion": newStatus.AosVersion,
-				"digest":     newStatus.Digest,
-				"status":     newStatus.Status,
-				"error":      newStatus.Error,
-			}).Debug("Receive layer status")
-
-			status = newStatus
-		}
-	}
-}
-
-func checkLayerStatuses(t *testing.T, statusChannels []<-chan amqp.LayerInfo) {
-	t.Helper()
-
-	var wg sync.WaitGroup
-
-	for _, statusChannel := range statusChannels {
-		wg.Add(1)
-
-		go func(statusChannel <-chan amqp.LayerInfo) {
-			defer wg.Done()
-
-			if status := waitLayerStatus(statusChannel); status.Status == amqp.ErrorStatus {
-				t.Errorf("%s, layer ID %s", status.Error, status.ID)
-			}
-		}(statusChannel)
-	}
-
-	wg.Wait()
 }

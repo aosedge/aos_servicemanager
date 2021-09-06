@@ -19,8 +19,10 @@
 package layermanager
 
 import (
+	"context"
 	"encoding/json"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,8 +30,9 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/utils/action"
 	"aos_servicemanager/utils/imageutils"
@@ -41,7 +44,7 @@ import (
 const (
 	layerDirName       = "layers"
 	extractDirName     = "extract"
-	decryptDirName     = "decrypt"
+	downloadDirName    = "download"
 	layerOCIDescriptor = "layer.json"
 )
 
@@ -54,7 +57,7 @@ type LayerManager struct {
 	layersDir         string
 	layerInfoProvider LayerInfoProvider
 	extractDir        string
-	decryptDir        string
+	downloadDir       string
 	actionHandler     *action.Handler
 }
 
@@ -63,17 +66,8 @@ type LayerInfoProvider interface {
 	AddLayer(digest, layerID, path, osVersion, vendorVersion, description string, aosVersion uint64) (err error)
 	DeleteLayerByDigest(digest string) (err error)
 	GetLayerPathByDigest(digest string) (path string, err error)
-	GetLayersInfo() (layersList []amqp.LayerInfo, err error)
+	GetLayersInfo() (layersList []*pb.LayerStatus, err error)
 }
-
-type installLayerInfo struct {
-	layerInfo    amqp.LayerInfoFromCloud
-	chains       []amqp.CertificateChain
-	certs        []amqp.Certificate
-	statusSender statusSender
-}
-
-type statusSender chan amqp.LayerInfo
 
 /*******************************************************************************
  * Public
@@ -85,7 +79,7 @@ func New(config *config.Config,
 		layersDir:         config.LayersDir,
 		layerInfoProvider: infoProvider,
 		extractDir:        path.Join(config.WorkingDir, extractDirName),
-		decryptDir:        path.Join(config.WorkingDir, decryptDirName),
+		downloadDir:       path.Join(config.WorkingDir, downloadDirName),
 	}
 
 	if layermanager.layersDir == "" {
@@ -100,13 +94,13 @@ func New(config *config.Config,
 		return nil, aoserrors.Wrap(err)
 	}
 
-	os.RemoveAll(layermanager.decryptDir)
+	os.RemoveAll(layermanager.downloadDir)
 
 	return layermanager, nil
 }
 
 // GetLayersInfo provides list of already installed fs layers
-func (layermanager *LayerManager) GetLayersInfo() (info []amqp.LayerInfo, err error) {
+func (layermanager *LayerManager) GetLayersInfo() (info []*pb.LayerStatus, err error) {
 	if info, err = layermanager.layerInfoProvider.GetLayersInfo(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -115,32 +109,144 @@ func (layermanager *LayerManager) GetLayersInfo() (info []amqp.LayerInfo, err er
 }
 
 // InstallLayer installs layer
-func (layermanager *LayerManager) InstallLayer(layerInfo amqp.LayerInfoFromCloud,
-	chains []amqp.CertificateChain, certs []amqp.Certificate) (statusChannel <-chan amqp.LayerInfo) {
-	statusSender := make(statusSender, 1)
+func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
+	log.WithFields(log.Fields{
+		"id":         installInfo.GetLayerId(),
+		"aosVersion": installInfo.GetAosVersion(),
+		"digest":     installInfo.GetDigest()}).Debug("Install layer")
 
-	info := installLayerInfo{
-		layerInfo:    layerInfo,
-		chains:       chains,
-		certs:        certs,
-		statusSender: statusSender,
+	defer func() {
+		if err != nil {
+			log.WithFields(log.Fields{
+				"id":         installInfo.LayerId,
+				"aosVersion": installInfo.AosVersion,
+				"digest":     installInfo.Digest}).Errorf("Can't install layer: %s", err)
+		}
+	}()
+
+	urlVal, err := url.Parse(installInfo.Url)
+	if err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	info.statusSender.sendStatus(info.layerInfo.ID, info.layerInfo.AosVersion,
-		info.layerInfo.Digest, amqp.PendingStatus, "")
+	var destinationFile string
 
-	layermanager.actionHandler.PutInQueue(layerInfo.Digest, info, layermanager.doActionInstall)
+	if urlVal.Scheme != "file" {
+		if destinationFile, err = image.Download(context.Background(), layermanager.downloadDir, installInfo.Url); err != nil {
+			return aoserrors.Wrap(err)
+		}
 
-	return statusSender
+		defer os.RemoveAll(destinationFile)
+	} else {
+		destinationFile = urlVal.Path
+	}
+
+	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
+
+	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer os.RemoveAll(unpackDir)
+
+	var byteValue []byte
+
+	if byteValue, err = ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor)); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	var layerDescriptor imagespec.Descriptor
+
+	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	var layerPath string
+
+	if layerPath, err = getValidLayerPath(layerDescriptor, unpackDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	layerStorageDir := path.Join(layermanager.layersDir, "blobs", (string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
+
+	if err = imageutils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	osVersion := ""
+
+	if layerDescriptor.Platform != nil {
+		osVersion = layerDescriptor.Platform.OSVersion
+	}
+
+	if err = layermanager.layerInfoProvider.AddLayer(installInfo.Digest, installInfo.LayerId,
+		layerStorageDir, osVersion, installInfo.VendorVersion, installInfo.Description,
+		installInfo.AosVersion); err != nil {
+		return aoserrors.Wrap(err)
+
+	}
+
+	log.WithFields(log.Fields{
+		"id":         installInfo.LayerId,
+		"aosVersion": installInfo.AosVersion,
+		"digest":     installInfo.Digest}).Info("Layer successfully installed")
+
+	return nil
 }
 
 // UninstallLayer uninstalls layer
-func (layermanager *LayerManager) UninstallLayer(digest string) (statusChannel <-chan amqp.LayerInfo) {
-	statusSender := make(statusSender, 1)
+func (layermanager *LayerManager) UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error) {
+	digest := removeInfo.GetDigest()
+	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
 
-	layermanager.actionHandler.PutInQueue(digest, statusSender, layermanager.doActionUninstall)
+	defer func() {
+		if err != nil {
+			log.WithFields(log.Fields{"digest": digest}).Errorf("Can't uninstall layer: %s", err)
+		}
+	}()
 
-	return statusSender
+	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	found := false
+
+	for _, info := range layersInfo {
+		if info.Digest == digest {
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		return aoserrors.New("layer not found")
+	}
+
+	if err = layermanager.uninstallLayer(digest); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"digest": digest}).Info("Layer successfully uninstalled")
+
+	return nil
+}
+
+func (layermanager *LayerManager) uninstallLayer(digest string) (err error) {
+	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = os.RemoveAll(layerPath); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = layermanager.layerInfoProvider.DeleteLayerByDigest(digest); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 // CheckLayersConsistency checks layers data to be consistent
@@ -157,8 +263,13 @@ func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		if fi, err := os.Stat(layerPath); err != nil || !fi.Mode().IsDir() {
+		fi, err := os.Stat(layerPath)
+		if err != nil {
 			return aoserrors.Wrap(err)
+		}
+
+		if !fi.Mode().IsDir() {
+			return aoserrors.New("layer is not a dir")
 		}
 	}
 
@@ -196,180 +307,6 @@ func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (laye
 /*******************************************************************************
  * Private
  ******************************************************************************/
-
-func (sender *statusSender) sendStatus(id string, aosVersion uint64, digest, status, errStr string) {
-	*sender <- amqp.LayerInfo{
-		ID:         id,
-		AosVersion: aosVersion,
-		Digest:     digest,
-		Status:     status,
-		Error:      errStr,
-	}
-}
-
-func (layermanager *LayerManager) doActionInstall(id string, data interface{}) {
-	var err error
-
-	installInfo := data.(installLayerInfo)
-
-	log.WithFields(log.Fields{
-		"id":         installInfo.layerInfo.ID,
-		"aosVersion": installInfo.layerInfo.AosVersion,
-		"digest":     installInfo.layerInfo.Digest}).Debug("Install layer")
-
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{
-				"id":         installInfo.layerInfo.ID,
-				"aosVersion": installInfo.layerInfo.AosVersion,
-				"digest":     installInfo.layerInfo.Digest}).Errorf("Can't install layer: %s", err)
-
-			installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,
-				installInfo.layerInfo.Digest, amqp.ErrorStatus, err.Error())
-		}
-
-		close(installInfo.statusSender)
-	}()
-
-	installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,
-		installInfo.layerInfo.Digest, amqp.DownloadingStatus, "")
-
-	var destinationFile string
-	defer os.RemoveAll(destinationFile)
-
-	installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,
-		installInfo.layerInfo.Digest, amqp.InstallingStatus, "")
-
-	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
-
-	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-	defer os.RemoveAll(unpackDir)
-
-	var byteValue []byte
-
-	if byteValue, err = ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor)); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	var layerDescriptor imagespec.Descriptor
-
-	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	var layerPath string
-
-	if layerPath, err = getValidLayerPath(layerDescriptor, unpackDir); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	layerStorageDir := path.Join(layermanager.layersDir, "blobs", (string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
-
-	if err = imageutils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	osVersion := ""
-
-	if layerDescriptor.Platform != nil {
-		osVersion = layerDescriptor.Platform.OSVersion
-	}
-
-	if err = layermanager.layerInfoProvider.AddLayer(installInfo.layerInfo.Digest, installInfo.layerInfo.ID,
-		layerStorageDir, osVersion, installInfo.layerInfo.VendorVersion, installInfo.layerInfo.Description,
-		installInfo.layerInfo.AosVersion); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	installInfo.statusSender.sendStatus(installInfo.layerInfo.ID, installInfo.layerInfo.AosVersion,
-		installInfo.layerInfo.Digest, amqp.InstalledStatus, "")
-
-	log.WithFields(log.Fields{
-		"id":         installInfo.layerInfo.ID,
-		"aosVersion": installInfo.layerInfo.AosVersion,
-		"digest":     installInfo.layerInfo.Digest}).Info("Layer successfully installed")
-}
-
-func (layermanager *LayerManager) doActionUninstall(id string, data interface{}) {
-	var (
-		err       error
-		layerInfo amqp.LayerInfo
-	)
-
-	statusSender := data.(statusSender)
-
-	log.WithFields(log.Fields{"digest": id}).Debug("Uninstall layer")
-
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{"digest": id}).Errorf("Can't uninstall layer: %s", err)
-
-			statusSender.sendStatus(layerInfo.ID, layerInfo.AosVersion, id, amqp.ErrorStatus, err.Error())
-		}
-
-		close(statusSender)
-	}()
-
-	var layersInfo []amqp.LayerInfo
-
-	if layersInfo, err = layermanager.layerInfoProvider.GetLayersInfo(); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	found := false
-
-	for _, info := range layersInfo {
-		if info.Digest == id {
-			layerInfo = info
-			found = true
-
-			break
-		}
-	}
-
-	if !found {
-		err = aoserrors.New("layer not found")
-		return
-	}
-
-	statusSender.sendStatus(layerInfo.ID, layerInfo.AosVersion, layerInfo.Digest, amqp.RemovingStatus, "")
-
-	if err = layermanager.uninstallLayer(id); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
-
-	statusSender.sendStatus(layerInfo.ID, layerInfo.AosVersion, layerInfo.Digest, amqp.RemovedStatus, "")
-
-	log.WithFields(log.Fields{"digest": id}).Info("Layer successfully uninstalled")
-
-}
-
-func (layermanager *LayerManager) uninstallLayer(digest string) (err error) {
-	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = os.RemoveAll(layerPath); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = layermanager.layerInfoProvider.DeleteLayerByDigest(digest); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
 
 func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) {
 	// TODO implement descriptor validation

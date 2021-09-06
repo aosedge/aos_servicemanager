@@ -29,6 +29,7 @@ import (
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -744,7 +745,7 @@ func (db *Database) GetLayerPathByDigest(digest string) (path string, err error)
 }
 
 //GetLayersInfo get all installed layers
-func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
+func (db *Database) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 	rows, err := db.sql.Query("SELECT digest, layerId, aosVersion FROM layers ")
 	if err != nil {
 		return layersList, aoserrors.Wrap(err)
@@ -752,13 +753,13 @@ func (db *Database) GetLayersInfo() (layersList []amqp.LayerInfo, err error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		layer := amqp.LayerInfo{Status: amqp.InstalledStatus}
+		layer := pb.LayerStatus{}
 
-		if err = rows.Scan(&layer.Digest, &layer.ID, &layer.AosVersion); err != nil {
+		if err = rows.Scan(&layer.Digest, &layer.LayerId, &layer.AosVersion); err != nil {
 			return layersList, aoserrors.Wrap(err)
 		}
 
-		layersList = append(layersList, layer)
+		layersList = append(layersList, &layer)
 	}
 
 	return layersList, aoserrors.Wrap(rows.Err())
