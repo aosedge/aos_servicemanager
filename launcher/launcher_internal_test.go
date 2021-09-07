@@ -43,6 +43,7 @@ import (
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"golang.org/x/crypto/sha3"
 
 	amqp "aos_servicemanager/amqphandler"
@@ -120,9 +121,6 @@ type testDeviceManager struct {
 	isValid bool
 }
 
-type downloader interface {
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
@@ -131,11 +129,7 @@ var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
 var permProvider = testPermissionsProvider{}
 var layerProviderForTest = testLayerProvider{}
 var networkProvider *networkmanager.NetworkManager
-
 var deviceManager = testDeviceManager{isValid: true}
-
-var chains []amqp.CertificateChain
-var certs []amqp.Certificate
 
 var tmpDir string
 var testDir string
@@ -177,8 +171,9 @@ func TestMain(m *testing.M) {
 
 func TestInstallRemove(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -194,21 +189,29 @@ func TestInstallRemove(t *testing.T) {
 	numInstallServices := 10
 	numUninstallServices := 5
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numInstallServices+numUninstallServices)
-
 	// install services
 	for i := 0; i < numInstallServices; i++ {
-		statusChannel := launcher.InstallService(
-			amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
-		statusChannels = append(statusChannels, statusChannel)
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
+		}
+
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			ProviderId: "sp1", Url: serviceURL})
+		if err != nil {
+			t.Errorf("Can't install service: %s", err)
+		}
+
+		if status.ServiceId != fmt.Sprintf("service%d", i) {
+			t.Errorf("Incorrect service ID: %s", status.ServiceId)
+		}
 	}
 	// remove services
 	for i := 0; i < numUninstallServices; i++ {
-		statusChannel := launcher.UninstallService(fmt.Sprintf("service%d", i))
-		statusChannels = append(statusChannels, statusChannel)
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+			t.Errorf("Can't uninstall service: %s", err)
+		}
 	}
-
-	checkServiceStatuses(t, statusChannels)
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
@@ -217,23 +220,13 @@ func TestInstallRemove(t *testing.T) {
 	if len(services) != numInstallServices-numUninstallServices {
 		t.Errorf("Wrong service quantity")
 	}
-	for _, service := range services {
-		if service.Status != "installed" {
-			t.Errorf("Service %s error status: %s", service.ID, service.Status)
-		}
-	}
-
-	time.Sleep(time.Second * 2)
-
-	statusChannels = make([]<-chan amqp.ServiceInfo, 0, numInstallServices)
 
 	// remove remaining services
 	for i := numUninstallServices; i < numInstallServices; i++ {
-		statusChannel := launcher.UninstallService(fmt.Sprintf("service%d", i))
-		statusChannels = append(statusChannels, statusChannel)
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+			t.Errorf("Can't uninstall service: %s", err)
+		}
 	}
-
-	checkServiceStatuses(t, statusChannels)
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
@@ -246,8 +239,9 @@ func TestInstallRemove(t *testing.T) {
 
 func TestRemoveAllServices(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -259,16 +253,23 @@ func TestRemoveAllServices(t *testing.T) {
 
 	numInstallServices := 10
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numInstallServices)
-
 	// install services
 	for i := 0; i < numInstallServices; i++ {
-		statusChannel := launcher.InstallService(
-			amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
-		statusChannels = append(statusChannels, statusChannel)
-	}
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
+		}
 
-	checkServiceStatuses(t, statusChannels)
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			ProviderId: "sp1", Url: serviceURL})
+		if err != nil {
+			t.Errorf("Can't install service: %s", err)
+		}
+
+		if status.ServiceId != fmt.Sprintf("service%d", i) {
+			t.Errorf("Incorrect service ID: %s", status.ServiceId)
+		}
+	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
@@ -295,8 +296,9 @@ func TestRemoveAllServices(t *testing.T) {
 
 func TestCheckServicesConsistency(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -311,16 +313,23 @@ func TestCheckServicesConsistency(t *testing.T) {
 
 	numInstallServices := 10
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numInstallServices)
-
 	// install services
 	for i := 0; i < numInstallServices; i++ {
-		statusChannel := launcher.InstallService(
-			amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
-		statusChannels = append(statusChannels, statusChannel)
-	}
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
+		}
 
-	checkServiceStatuses(t, statusChannels)
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			ProviderId: "sp1", Url: serviceURL})
+		if err != nil {
+			t.Errorf("Can't install service: %s", err)
+		}
+
+		if status.ServiceId != fmt.Sprintf("service%d", i) {
+			t.Errorf("Incorrect service ID: %s", status.ServiceId)
+		}
+	}
 
 	services, err := launcher.GetServicesInfo()
 	if err != nil {
@@ -347,8 +356,9 @@ func TestCheckServicesConsistency(t *testing.T) {
 
 func TestAutoStart(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -363,22 +373,29 @@ func TestAutoStart(t *testing.T) {
 
 	numServices := 5
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numServices)
-
 	// install services
 	for i := 0; i < numServices; i++ {
-		statusChannel := launcher.InstallService(
-			amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
-		statusChannels = append(statusChannels, statusChannel)
-	}
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
+		}
 
-	checkServiceStatuses(t, statusChannels)
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			ProviderId: "sp1", Url: serviceURL})
+		if err != nil {
+			t.Errorf("Can't install service: %s", err)
+		}
+
+		if status.ServiceId != fmt.Sprintf("service%d", i) {
+			t.Errorf("Incorrect service ID: %s", status.ServiceId)
+		}
+	}
 
 	launcher.Close()
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err = newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -396,21 +413,12 @@ func TestAutoStart(t *testing.T) {
 	if len(services) != numServices {
 		t.Errorf("Wrong service quantity")
 	}
-	for _, service := range services {
-		if service.Status != "installed" {
-			t.Errorf("Service %s error status: %s", service.ID, service.Status)
-		}
-	}
-
-	statusChannels = make([]<-chan amqp.ServiceInfo, 0, numServices)
-
 	// remove services
 	for i := 0; i < numServices; i++ {
-		statusChannel := launcher.UninstallService(fmt.Sprintf("service%d", i))
-		statusChannels = append(statusChannels, statusChannel)
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+			t.Errorf("Can't uninstall service: %s", err)
+		}
 	}
-
-	checkServiceStatuses(t, statusChannels)
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
@@ -423,8 +431,9 @@ func TestAutoStart(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -439,25 +448,49 @@ func TestErrors(t *testing.T) {
 
 	// test AosVersion mistmatch
 
-	statusChannel := launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 5}}, chains, certs)
-
-	if status := waitServiceStatus(statusChannel); status.AosVersion == 5 && status.Error != "" {
-		t.Errorf("%s, service ID %s, AosVersion: %d", status.Error, status.ID, status.AosVersion)
+	serviceURL, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
 	}
 
-	statusChannel = launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 4}}, chains, certs)
-
-	if status := waitServiceStatus(statusChannel); status.AosVersion == 4 && status.Error == "" {
-		t.Errorf("Service %s AosVersion %d should not be installed", status.ID, status.AosVersion)
+	status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 5,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
 	}
 
-	statusChannel = launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 6}}, chains, certs)
+	if status.AosVersion != 5 {
+		t.Errorf("Incorrect AosVersion: %d", status.AosVersion)
+	}
 
-	if status := waitServiceStatus(statusChannel); status.AosVersion == 6 && status.Error != "" {
-		t.Errorf("%s, service ID %s, AosVersion: %d", status.Error, status.ID, status.AosVersion)
+	serviceURL2, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 4,
+		ProviderId: "sp1", Url: serviceURL2})
+	if err == nil {
+		t.Errorf("Service %s AosVersion %d should not be installed", status.ServiceId, status.AosVersion)
+	}
+
+	if status.AosVersion != 4 {
+		t.Errorf("Incorrect AosVersion: %d", status.AosVersion)
+	}
+
+	serviceURL3, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 6,
+		ProviderId: "sp1", Url: serviceURL3})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
+
+	if status.AosVersion != 6 {
+		t.Errorf("Incorrect AosVersion: %d", status.AosVersion)
 	}
 
 	services, err := launcher.GetServicesInfo()
@@ -473,9 +506,9 @@ func TestErrors(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	sender := newTestSender()
-	imageDownloader := new(pythonImage)
+	imageDownloader := pythonImage{}
 
-	launcher, err := newTestLauncher(imageDownloader, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -502,9 +535,16 @@ func TestUpdate(t *testing.T) {
 	imageDownloader.version = 0
 	imageDownloader.serviceID = "service0"
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := imageDownloader.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
 		t.Fatalf("Can't set read deadline: %s", err)
@@ -525,9 +565,16 @@ func TestUpdate(t *testing.T) {
 
 	imageDownloader.version = 1
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)})
+	serviceURL, err = imageDownloader.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	n, _, err = serverConn.ReadFromUDP(buf)
 	if err != nil {
@@ -543,9 +590,9 @@ func TestUpdate(t *testing.T) {
 
 func TestAOSSecret(t *testing.T) {
 	sender := newTestSender()
-	imageDownloader := new(pythonAOSSecretImage)
+	imageDownloader := pythonAOSSecretImage{}
 
-	launcher, err := newTestLauncher(imageDownloader, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -569,9 +616,16 @@ func TestAOSSecret(t *testing.T) {
 	}
 	defer serverConn.Close()
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := imageDownloader.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	if err := serverConn.SetReadDeadline(time.Now().Add(time.Second * 30)); err != nil {
 		t.Fatalf("Can't set read deadline: %s", err)
@@ -597,7 +651,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 	deviceManager.isValid = false
 
 	// create launcher instance
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -616,8 +670,9 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 
 func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -635,21 +690,26 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	// set fake resource system to invalid state (UT emulation)
 	deviceManager.isValid = false
 
-	statusChannel := launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-		VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)
+	serviceURL, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
 
 	// wait while service will be installed and tried to run
 	// it should be failed because service requests random device
 	// according to aos service configuration that generates on mocked download operation
-	if status := waitServiceStatus(statusChannel); status.Error == "" {
-		t.Fatalf("SM can remove service when device resource is not released")
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+		ProviderId: "sp1", Url: serviceURL})
+	if err == nil {
+		t.Errorf("SM can remove service when device resource is not released")
 	}
 }
 
 func TestVisPermissions(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -662,9 +722,16 @@ func TestVisPermissions(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	permissions, err := launcher.GetServicePermissions("service0")
 	if err != nil {
@@ -678,8 +745,9 @@ func TestVisPermissions(t *testing.T) {
 
 func TestUsersServices(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -706,17 +774,19 @@ func TestUsersServices(t *testing.T) {
 			t.Fatalf("Wrong service quantity")
 		}
 
-		statusChannels := make([]<-chan amqp.ServiceInfo, 0, numServices)
-
 		// install services
 		for j := 0; j < numServices; j++ {
-			statusChannel := launcher.InstallService(
-				amqp.ServiceInfoFromCloud{ID: fmt.Sprintf("user%d_service%d", i, j), ProviderID: "sp1"}, chains, certs)
+			serviceURL, err := testImage.PrepareService()
+			if err != nil {
+				log.Fatal("Can't prepare test service: ", err)
+			}
 
-			statusChannels = append(statusChannels, statusChannel)
+			_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("user%d_service%d", i, j),
+				ProviderId: "sp1", Url: serviceURL})
+			if err != nil {
+				t.Errorf("Can't install service: %s", err)
+			}
 		}
-
-		checkServiceStatuses(t, statusChannels)
 
 		services, err = launcher.serviceProvider.GetServices()
 		if err != nil {
@@ -780,8 +850,9 @@ func TestUsersServices(t *testing.T) {
 
 func TestServiceTTL(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -796,17 +867,19 @@ func TestServiceTTL(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numServices)
-
 	// install services
 	for i := 0; i < numServices; i++ {
-		statusChannel := launcher.InstallService(amqp.ServiceInfoFromCloud{
-			ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
+		}
 
-		statusChannels = append(statusChannels, statusChannel)
+		_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			ProviderId: "sp1", Url: serviceURL})
+		if err != nil {
+			t.Errorf("Can't install service: %s", err)
+		}
 	}
-
-	checkServiceStatuses(t, statusChannels)
 
 	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
@@ -837,6 +910,7 @@ func TestServiceTTL(t *testing.T) {
 	}
 }
 
+/*
 func TestServiceMonitoring(t *testing.T) {
 	sender := newTestSender()
 
@@ -903,12 +977,14 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 }
+*/
 
 func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()
+	ftpService := ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}
 
 	// Set limit for 2 files + some buffer
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -921,9 +997,16 @@ func TestServiceStorage(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -977,8 +1060,9 @@ func TestServiceStorage(t *testing.T) {
 
 func TestServiceState(t *testing.T) {
 	sender := newTestSender()
+	ftpService := ftpImage{"/", 1024 * 24, 256, 0, nil}
 
-	launcher, err := newTestLauncher(&ftpImage{"/", 1024 * 24, 256, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -991,9 +1075,16 @@ func TestServiceState(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -1094,9 +1185,16 @@ func TestServiceState(t *testing.T) {
 
 	// Check state after update
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)})
+	serviceURL, err = ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(5 * time.Second)
@@ -1124,10 +1222,10 @@ func TestServiceState(t *testing.T) {
 
 func TestTmpDir(t *testing.T) {
 	sender := newTestSender()
-
+	ftpService := ftpImage{"/tmp", 0, 0, 0, nil}
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1140,9 +1238,16 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -1156,7 +1261,9 @@ func TestTmpDir(t *testing.T) {
 
 	// Test tmp limit
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 8192, nil}, sender, nil); err != nil {
+	ftpService = ftpImage{"/tmp", 0, 0, 8192, nil}
+
+	if launcher, err = newTestLauncher(sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1164,9 +1271,16 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err = ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -1192,7 +1306,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(&ftpImage{"/tmp", 0, 0, 0, nil}, sender, nil); err != nil {
+	if launcher, err = newTestLauncher(sender, nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1423,7 +1537,9 @@ func TestServiceWithLayers(t *testing.T) {
 
 	digests := []digest.Digest{digest.NewDigestFromBytes(digest.SHA256, []byte(testString))}
 
-	launcher, err := newTestLauncher(&ftpImage{"/layer1", 0, 0, 0, digests}, sender, nil)
+	ftpService := ftpImage{"/layer1", 0, 0, 0, digests}
+
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1432,9 +1548,16 @@ func TestServiceWithLayers(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	serviceURL, err := ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(3 * time.Second)
@@ -1461,7 +1584,7 @@ func TestServiceWithLayers(t *testing.T) {
 }
 
 func TestSetServiceResources(t *testing.T) {
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
+	launcher, err := newTestLauncher(nil, nil)
 	if err != nil {
 		t.Fatalf("Can't create test launcher: %s", err)
 	}
@@ -1503,11 +1626,12 @@ func TestSetServiceResources(t *testing.T) {
 
 func TestNotStartIfInvalidResource(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
 	// set fake resource system to valid state (UT emulation)
 	deviceManager.isValid = true
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1523,23 +1647,16 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	numServices := 5
 
-	statusChannels := make([]<-chan amqp.ServiceInfo, 0, numServices)
-
 	// install services
 	for i := 0; i < numServices; i++ {
-		statusChannel := launcher.InstallService(amqp.ServiceInfoFromCloud{
-			ID: fmt.Sprintf("service%d", i), ProviderID: "sp1"}, chains, certs)
-
-		statusChannels = append(statusChannels, statusChannel)
-	}
-
-	for i := 0; i < numServices; i++ {
-		status := waitServiceStatus(statusChannels[i])
-		if status.Error != "" {
-			t.Errorf("%s, service ID %s", status.Error, status.ID)
+		serviceURL, err := testImage.PrepareService()
+		if err != nil {
+			log.Fatal("Can't prepare test service: ", err)
 		}
-		if serviceProvider.services[status.ID].State != stateRunning {
-			t.Errorf("Service %s state is invalid : %s", status.ID, serviceProvider.services[status.ID].State)
+
+		if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i), AosVersion: 0,
+			ProviderId: "sp1", Url: serviceURL}); err != nil {
+			t.Errorf("Can't install service: %s", err)
 		}
 	}
 
@@ -1550,7 +1667,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err = newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1570,24 +1687,17 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	}
 
 	for _, service := range services {
-		if service.Status != "installed" {
-			t.Errorf("Service %s error status: %s", service.ID, service.Status)
-		}
-		if serviceProvider.services[service.ID].State == stateRunning {
-			t.Errorf("Service %s should be stopped", service.ID)
+		if serviceProvider.services[service.ServiceId].State == stateRunning {
+			t.Errorf("Service %s should be stopped", service.ServiceId)
 		}
 	}
-
-	statusChannels = make([]<-chan amqp.ServiceInfo, 0, numServices)
 
 	// remove services
 	for i := 0; i < numServices; i++ {
-		statusChannel := launcher.UninstallService(fmt.Sprintf("service%d", i))
-
-		statusChannels = append(statusChannels, statusChannel)
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+			t.Errorf("Can't uninstall service: %s", err)
+		}
 	}
-
-	checkServiceStatuses(t, statusChannels)
 
 	services, err = launcher.GetServicesInfo()
 	if err != nil {
@@ -1600,8 +1710,9 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 func TestManifestValidation(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1615,9 +1726,15 @@ func TestManifestValidation(t *testing.T) {
 	}
 
 	// install service
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service1", ProviderID: "sp1"},
-			chains, certs)})
+	serviceURL, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL}); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// stop-start with valid manifest should succeed
 	service, err := launcher.serviceProvider.GetService("service1")
@@ -1659,9 +1776,9 @@ func TestManifestValidation(t *testing.T) {
 
 func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	sender := newTestSender()
-	imageDownloader := new(pythonImage)
+	ftpService := ftpImage{"/home/service/storage", 8192 * 20, 0, 0, nil}
 
-	launcher, err := newTestLauncher(&ftpImage{"/home/service/storage", 8192 * 20, 0, 0, nil}, sender, nil)
+	launcher, err := newTestLauncher(sender, nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1674,12 +1791,15 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	imageDownloader.version = 0
-	imageDownloader.serviceID = "service0"
+	serviceURL, err := ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 0}}, chains, certs)})
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL}); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -1704,12 +1824,16 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 
 	ftp.Quit()
 
-	imageDownloader.version = 1
-
 	// Update service
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "service0", ProviderID: "sp1",
-			VersionFromCloud: amqp.VersionFromCloud{AosVersion: 1}}, chains, certs)})
+	serviceURL, err = ftpService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+		ProviderId: "sp1", Url: serviceURL}); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
@@ -1749,8 +1873,7 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func newTestLauncher(
-	downloader downloader, sender Sender,
+func newTestLauncher(sender Sender,
 	monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
 		DefaultServiceTTLDays: 30, Runner: getRuntime()},
@@ -1762,27 +1885,26 @@ func newTestLauncher(
 	return launcher, err
 }
 
-func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
+func (img pythonImage) PrepareService() (outputURL string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
-		return outputFile, err
+		return outputURL, err
 	}
 	defer os.RemoveAll(imageDir)
 
 	// create dir
 	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	if err := generatePythonContent(imageDir); err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
@@ -1791,50 +1913,49 @@ func (downloader pythonImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStr
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	ociImgSpec := imagespec.Image{}
 	ociImgSpec.OS = "Linux"
 	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
-	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", downloader.serviceID,
-		fmt.Sprintf("%d", downloader.version)}
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", img.serviceID,
+		fmt.Sprintf("%d", img.version)}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputFile, err
+		return outputURL, err
 	}
-	outputFile = imageFile.Name()
+	outputURL = imageFile.Name()
 	imageFile.Close()
 
-	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, err
+	if err = packImage(imageDir, outputURL); err != nil {
+		return outputURL, err
 	}
 
-	return outputFile, nil
+	return "file://" + outputURL, nil
 }
 
-func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
+func (img ftpImage) PrepareService() (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -1847,7 +1968,7 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 		return outputFile, err
 	}
 
-	if err := generateFtpContent(imageDir, downloader.ftpDir); err != nil {
+	if err := generateFtpContent(imageDir, img.ftpDir); err != nil {
 		return outputFile, err
 	}
 
@@ -1858,16 +1979,16 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 
 	aosSrvConfig := generateAosSrvConfig()
 
-	if downloader.storageLimit > 0 {
-		aosSrvConfig.Quotas.StorageLimit = &downloader.storageLimit
+	if img.storageLimit > 0 {
+		aosSrvConfig.Quotas.StorageLimit = &img.storageLimit
 	}
 
-	if downloader.stateLimit > 0 {
-		aosSrvConfig.Quotas.StateLimit = &downloader.stateLimit
+	if img.stateLimit > 0 {
+		aosSrvConfig.Quotas.StateLimit = &img.stateLimit
 	}
 
-	if downloader.tmpLimit > 0 {
-		aosSrvConfig.Quotas.TmpLimit = &downloader.tmpLimit
+	if img.tmpLimit > 0 {
+		aosSrvConfig.Quotas.TmpLimit = &img.tmpLimit
 	}
 
 	data, err := json.Marshal(aosSrvConfig)
@@ -1896,7 +2017,7 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest,
-		&fsDigest, downloader.layersDigest); err != nil {
+		&fsDigest, img.layersDigest); err != nil {
 		return outputFile, err
 	}
 
@@ -1911,11 +2032,10 @@ func (downloader ftpImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct
 		return outputFile, err
 	}
 
-	return outputFile, nil
+	return "file://" + outputFile, nil
 }
 
-func (downloader pythonAOSSecretImage) DownloadAndDecrypt(packageInfo amqp.DecryptDataStruct,
-	chains []amqp.CertificateChain, certs []amqp.Certificate, decryptDir string) (outputFile string, err error) {
+func (img pythonAOSSecretImage) PrepareService() (outputFile string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
@@ -1980,7 +2100,7 @@ func (downloader pythonAOSSecretImage) DownloadAndDecrypt(packageInfo amqp.Decry
 		return outputFile, err
 	}
 
-	return outputFile, nil
+	return "file://" + outputFile, nil
 }
 
 func newTestMonitor() (monitor *testMonitor, err error) {
@@ -2398,7 +2518,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(new(pythonImage), nil, nil)
+	launcher, err := newTestLauncher(nil, nil)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
 	}
@@ -2836,46 +2956,6 @@ func generateAosSrvConfig() (cfg aosServiceConfig) {
 	cfg.Quotas.NoFileLimit = &nofileLimit
 
 	return cfg
-}
-
-func waitServiceStatus(statusChannel <-chan amqp.ServiceInfo) (status amqp.ServiceInfo) {
-	for {
-		select {
-		case newStatus, ok := <-statusChannel:
-			if !ok {
-				return status
-			}
-
-			log.WithFields(log.Fields{
-				"id":         newStatus.ID,
-				"aosVersion": newStatus.AosVersion,
-				"status":     newStatus.Status,
-				"error":      newStatus.Error,
-			}).Debug("Receive service status")
-
-			status = newStatus
-		}
-	}
-}
-
-func checkServiceStatuses(t *testing.T, statusChannels []<-chan amqp.ServiceInfo) {
-	t.Helper()
-
-	var wg sync.WaitGroup
-
-	for _, statusChannel := range statusChannels {
-		wg.Add(1)
-
-		go func(statusChannel <-chan amqp.ServiceInfo) {
-			defer wg.Done()
-
-			if status := waitServiceStatus(statusChannel); status.Status == amqp.ErrorStatus {
-				t.Errorf("%s, service ID %s", status.Error, status.ID)
-			}
-		}(statusChannel)
-	}
-
-	wg.Wait()
 }
 
 func getRuntime() (runtime string) {
