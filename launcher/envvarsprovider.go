@@ -23,8 +23,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-
-	amqp "aos_servicemanager/amqphandler"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"google.golang.org/protobuf/proto"
 )
 
 /*******************************************************************************
@@ -32,18 +32,13 @@ import (
  ******************************************************************************/
 
 type EnvVarsStorage interface {
-	GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error)
-	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []amqp.EnvVarInfo) (err error)
-}
-
-type envVarStatusSender interface {
-	SendOverrideEnvVarsStatus(envs []amqp.EnvVarInfoStatus) (err error)
+	GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error)
+	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []*pb.EnvVarInfo) (err error)
 }
 
 type envVarsProvider struct {
 	storage        EnvVarsStorage
-	sender         envVarStatusSender
-	currentEnvVars []amqp.OverrideEnvsFromCloud
+	currentEnvVars []pb.OverrideEnvVar
 	sync.Mutex
 }
 
@@ -56,8 +51,8 @@ type subjectServicePair struct {
  * private
  ******************************************************************************/
 
-func createEnvVarsProvider(storage EnvVarsStorage, sender envVarStatusSender) (provider *envVarsProvider, err error) {
-	provider = &envVarsProvider{storage: storage, sender: sender}
+func createEnvVarsProvider(storage EnvVarsStorage) (provider *envVarsProvider, err error) {
+	provider = &envVarsProvider{storage: storage}
 
 	if err = provider.syncEnvVarsWithStorage(); err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -70,42 +65,41 @@ func createEnvVarsProvider(storage EnvVarsStorage, sender envVarStatusSender) (p
 	return provider, nil
 }
 
-func (provider *envVarsProvider) getEnvVars(request subjectServicePair) (vars []amqp.EnvVarInfo, err error) {
+func (provider *envVarsProvider) getEnvVars(request subjectServicePair) (vars []*pb.EnvVarInfo, err error) {
 	provider.Lock()
 	defer provider.Unlock()
 
 	for i := range provider.currentEnvVars {
-		if provider.currentEnvVars[i].SubjectID == request.subjectID &&
-			provider.currentEnvVars[i].ServiceID == request.serviseID {
-			return provider.currentEnvVars[i].EnvVars, nil
+		if provider.currentEnvVars[i].SubjectId == request.subjectID &&
+			provider.currentEnvVars[i].ServiceId == request.serviseID {
+			return provider.currentEnvVars[i].Vars, nil
 		}
 	}
 
 	return vars, aoserrors.Errorf("env vars for service %s doesn't exist", request.serviseID)
 }
 
-func (provider *envVarsProvider) processOverrideEnvVars(vars []amqp.OverrideEnvsFromCloud) (
-	servicesToRestart []subjectServicePair, err error) {
+func (provider *envVarsProvider) processOverrideEnvVars(vars []*pb.OverrideEnvVar) (
+	servicesToRestart []subjectServicePair, statuses []*pb.EnvVarStatus, err error) {
 	provider.Lock()
 	defer provider.Unlock()
 
 	var resultError error
-	statuses := []amqp.EnvVarInfoStatus{}
 
 	for currentIndex, currentVar := range provider.currentEnvVars {
 		presentInDesired := false
 
 		for desIndex, desValue := range vars {
-			if desValue.ServiceID == currentVar.ServiceID && desValue.SubjectID == currentVar.SubjectID {
+			if desValue.ServiceId == currentVar.ServiceId && desValue.SubjectId == currentVar.SubjectId {
 				presentInDesired = true
 
-				status := amqp.EnvVarInfoStatus{SubjectID: desValue.SubjectID, ServiceID: desValue.ServiceID}
+				status := pb.EnvVarStatus{SubjectId: desValue.SubjectId, ServiceId: desValue.ServiceId}
 
-				if provider.isEnvVarsEqual(desValue.EnvVars, currentVar.EnvVars) == false {
-					provider.currentEnvVars[currentIndex].EnvVars = desValue.EnvVars
+				if !provider.isEnvVarsEqual(desValue.Vars, currentVar.Vars) {
+					provider.currentEnvVars[currentIndex].Vars = desValue.Vars
 
-					err = provider.storage.UpdateOverrideEnvVars([]string{desValue.SubjectID}, desValue.ServiceID,
-						desValue.EnvVars)
+					err = provider.storage.UpdateOverrideEnvVars([]string{desValue.SubjectId}, desValue.ServiceId,
+						desValue.Vars)
 					if err != nil {
 						log.Error("Can't update env vars in storage: ", err)
 
@@ -115,20 +109,20 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []amqp.OverrideEnvs
 					}
 
 					servicesToRestart = append(servicesToRestart,
-						subjectServicePair{subjectID: currentVar.SubjectID, serviseID: currentVar.ServiceID})
+						subjectServicePair{subjectID: currentVar.SubjectId, serviseID: currentVar.ServiceId})
 				}
 
-				for _, env := range desValue.EnvVars {
-					varStatus := amqp.EnvVarStatus{ID: env.ID}
+				for _, env := range desValue.Vars {
+					varStatus := pb.VarStatus{VarId: env.VarId}
 
 					if err != nil {
 						varStatus.Error = err.Error()
 					}
 
-					status.Statuses = append(status.Statuses, varStatus)
+					status.VarStatus = append(status.VarStatus, &varStatus)
 				}
 
-				statuses = append(statuses, status)
+				statuses = append(statuses, &status)
 
 				vars = append(vars[:desIndex], vars[desIndex+1:]...)
 
@@ -136,32 +130,32 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []amqp.OverrideEnvs
 			}
 		}
 
-		if presentInDesired == false {
-			provider.currentEnvVars[currentIndex].EnvVars = []amqp.EnvVarInfo{}
+		if !presentInDesired {
+			provider.currentEnvVars[currentIndex].Vars = []*pb.EnvVarInfo{}
 
-			if err = provider.storage.UpdateOverrideEnvVars([]string{currentVar.SubjectID}, currentVar.ServiceID,
-				[]amqp.EnvVarInfo{}); err != nil {
+			if err = provider.storage.UpdateOverrideEnvVars([]string{currentVar.SubjectId}, currentVar.ServiceId,
+				[]*pb.EnvVarInfo{}); err != nil {
 				if resultError == nil {
 					resultError = aoserrors.Wrap(err)
 				}
 			}
 
-			if len(currentVar.EnvVars) != 0 {
+			if len(currentVar.Vars) != 0 {
 				servicesToRestart = append(servicesToRestart,
-					subjectServicePair{subjectID: currentVar.SubjectID, serviseID: currentVar.ServiceID})
+					subjectServicePair{subjectID: currentVar.SubjectId, serviseID: currentVar.ServiceId})
 			}
 		}
 	}
 
 	if len(vars) != 0 {
 		for _, notExistVar := range vars {
-			status := amqp.EnvVarInfoStatus{SubjectID: notExistVar.SubjectID, ServiceID: notExistVar.ServiceID}
+			status := pb.EnvVarStatus{SubjectId: notExistVar.SubjectId, ServiceId: notExistVar.ServiceId}
 
-			for _, env := range notExistVar.EnvVars {
-				status.Statuses = append(status.Statuses, amqp.EnvVarStatus{ID: env.ID, Error: "Non-existent subject serviceId pair"})
+			for _, env := range notExistVar.Vars {
+				status.VarStatus = append(status.VarStatus, &pb.VarStatus{VarId: env.VarId, Error: "Non-existent subject serviceId pair"})
 			}
 
-			statuses = append(statuses, status)
+			statuses = append(statuses, &status)
 		}
 
 		if resultError == nil {
@@ -169,15 +163,7 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []amqp.OverrideEnvs
 		}
 	}
 
-	if err := provider.sender.SendOverrideEnvVarsStatus(statuses); err != nil {
-		log.Error("Can't send env vars status: ", err)
-
-		if resultError == nil {
-			resultError = aoserrors.Wrap(err)
-		}
-	}
-
-	return servicesToRestart, aoserrors.Wrap(resultError)
+	return servicesToRestart, statuses, aoserrors.Wrap(resultError)
 }
 
 func (provider *envVarsProvider) syncEnvVarsWithStorage() (err error) {
@@ -199,15 +185,15 @@ func (provider *envVarsProvider) validateEnvVarsTTL() (servicesToRestart []subje
 
 	for i := range provider.currentEnvVars {
 		wasChanged := false
-		actualEnv := []amqp.EnvVarInfo{}
+		actualEnv := []*pb.EnvVarInfo{}
 
-		for _, value := range provider.currentEnvVars[i].EnvVars {
-			if value.TTL == nil {
+		for _, value := range provider.currentEnvVars[i].Vars {
+			if value.Ttl == nil {
 				actualEnv = append(actualEnv, value)
 				continue
 			}
 
-			if currentTime.Before(*value.TTL) {
+			if currentTime.Before(value.Ttl.AsTime()) {
 				actualEnv = append(actualEnv, value)
 				continue
 			}
@@ -216,23 +202,23 @@ func (provider *envVarsProvider) validateEnvVarsTTL() (servicesToRestart []subje
 		}
 
 		if wasChanged {
-			provider.currentEnvVars[i].EnvVars = actualEnv
-			if err = provider.storage.UpdateOverrideEnvVars([]string{provider.currentEnvVars[i].SubjectID},
-				provider.currentEnvVars[i].ServiceID, actualEnv); err != nil {
+			provider.currentEnvVars[i].Vars = actualEnv
+			if err = provider.storage.UpdateOverrideEnvVars([]string{provider.currentEnvVars[i].SubjectId},
+				provider.currentEnvVars[i].ServiceId, actualEnv); err != nil {
 				return servicesToRestart, aoserrors.Wrap(err)
 			}
 
-			provider.currentEnvVars[i].EnvVars = actualEnv
+			provider.currentEnvVars[i].Vars = actualEnv
 
-			servicesToRestart = append(servicesToRestart, subjectServicePair{provider.currentEnvVars[i].SubjectID,
-				provider.currentEnvVars[i].ServiceID})
+			servicesToRestart = append(servicesToRestart, subjectServicePair{provider.currentEnvVars[i].SubjectId,
+				provider.currentEnvVars[i].ServiceId})
 		}
 	}
 
 	return servicesToRestart, nil
 }
 
-func (provider *envVarsProvider) isEnvVarsEqual(desiredVars, currentVars []amqp.EnvVarInfo) (isEqual bool) {
+func (provider *envVarsProvider) isEnvVarsEqual(desiredVars, currentVars []*pb.EnvVarInfo) (isEqual bool) {
 	if len(desiredVars) != len(currentVars) {
 		return false
 	}
@@ -241,13 +227,13 @@ func (provider *envVarsProvider) isEnvVarsEqual(desiredVars, currentVars []amqp.
 		elementWasFound := false
 
 		for _, currentEl := range currentVars {
-			if value == currentEl {
+			if proto.Equal(value, currentEl) {
 				elementWasFound = true
 				break
 			}
 		}
 
-		if elementWasFound == false {
+		if !elementWasFound {
 			return false
 		}
 	}

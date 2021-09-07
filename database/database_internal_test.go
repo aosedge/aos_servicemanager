@@ -32,8 +32,9 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
 )
 
@@ -642,7 +643,8 @@ func TestOverideEnvVars(t *testing.T) {
 
 	ttl := time.Now().UTC()
 
-	envVars := []amqphandler.EnvVarInfo{{ID: "some", Variable: "log=10", TTL: &ttl}}
+	envVars := []*pb.EnvVarInfo{}
+	envVars = append(envVars, &pb.EnvVarInfo{VarId: "some", Variable: "log=10", Ttl: timestamppb.New(ttl)})
 
 	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service2", envVars); err != nil {
 		if strings.Contains(err.Error(), ErrNotExist.Error()) == false {
@@ -663,7 +665,7 @@ func TestOverideEnvVars(t *testing.T) {
 		t.Error("Count of all env vars should be 1")
 	}
 
-	if reflect.DeepEqual(allVars[0].EnvVars, envVars) == false {
+	if reflect.DeepEqual(allVars[0].Vars, envVars) == false {
 		t.Error("Incorrect env vars in get all override env vars request")
 	}
 }

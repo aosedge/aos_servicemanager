@@ -32,7 +32,6 @@ import (
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/launcher"
 )
 
@@ -529,7 +528,7 @@ func (db *Database) RemoveServiceFromAllUsers(serviceID string) (err error) {
 }
 
 // UpdateOverrideEnvVars add/update/remove overrides env vars
-func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars []amqp.EnvVarInfo) (err error) {
+func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars []*pb.EnvVarInfo) (err error) {
 	// TODO: Currunt version support only one user. Should be re-implemented
 	usersJSON, err := json.Marshal(users)
 	if err != nil {
@@ -565,7 +564,7 @@ func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars
 }
 
 // GetAllOverrideEnvVars returns list of env vars for services
-func (db *Database) GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error) {
+func (db *Database) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error) {
 	rows, err := db.sql.Query("SELECT users, serviceid, overrideEnvVars FROM users")
 	if err != nil {
 		return vars, aoserrors.Wrap(err)
@@ -576,9 +575,9 @@ func (db *Database) GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, 
 		varsText := ""
 		usersText := ""
 		users := []string{}
-		var envVar amqp.OverrideEnvsFromCloud
+		var envVar pb.OverrideEnvVar
 
-		err = rows.Scan(&usersText, &envVar.ServiceID, &varsText)
+		err = rows.Scan(&usersText, &envVar.ServiceId, &varsText)
 		if err != nil {
 			return vars, aoserrors.Wrap(err)
 		}
@@ -591,10 +590,10 @@ func (db *Database) GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, 
 			return vars, aoserrors.Wrap(ErrNotExist)
 		}
 
-		envVar.SubjectID = users[0] // TODO: currently support only one user
+		envVar.SubjectId = users[0] // TODO: currently support only one user
 
 		if varsText != "" {
-			if err = json.Unmarshal([]byte(varsText), &envVar.EnvVars); err != nil {
+			if err = json.Unmarshal([]byte(varsText), &envVar.Vars); err != nil {
 				return vars, aoserrors.Wrap(err)
 			}
 		}

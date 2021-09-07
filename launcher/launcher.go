@@ -229,8 +229,8 @@ type ServiceProvider interface {
 	GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error)
 	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
 	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
-	GetAllOverrideEnvVars() (vars []amqp.OverrideEnvsFromCloud, err error)
-	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []amqp.EnvVarInfo) (err error)
+	GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error)
+	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []*pb.EnvVarInfo) (err error)
 }
 
 // ServiceRegistrar provides API to register/unregister service
@@ -248,7 +248,6 @@ type ServiceMonitor interface {
 // Sender provides API to send messages to the cloud
 type Sender interface {
 	SendStateRequest(serviceID string, defaultState bool) (err error)
-	SendOverrideEnvVarsStatus(envs []amqp.EnvVarInfoStatus) (err error)
 }
 
 // NetworkProvider provides network interface
@@ -356,7 +355,7 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if launcher.envVarsProvider, err = createEnvVarsProvider(launcher.serviceProvider, launcher.sender); err != nil {
+	if launcher.envVarsProvider, err = createEnvVarsProvider(launcher.serviceProvider); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -756,15 +755,15 @@ func (launcher *Launcher) GetServicePermissions(serviceID string) (permission st
 }
 
 // ProcessDesiredEnvVarsList override env vars fore services
-func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars amqp.DecodedOverrideEnvVars) (err error) {
-	subjectServiceToRestart, err := launcher.envVarsProvider.processOverrideEnvVars(envVars.OverrideEnvVars)
+func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
+	subjectServiceToRestart, status, err := launcher.envVarsProvider.processOverrideEnvVars(envVars)
 	if err != nil {
-		return err
+		return status, err
 	}
 
 	launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
 
-	return nil
+	return status, nil
 }
 
 func (state ServiceState) String() string {
