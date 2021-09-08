@@ -67,10 +67,7 @@ func createConfigFile() (err error) {
 		"maxPartSize": 1024,
 		"maxPartCount": 10
 	},
-	"alerts": {
-		"sendPeriod": "00:00:20",
-		"maxMessageSize": 1024,
-		"maxOfflineMessages": 32,
+	"alerts": {		
 		"filter": ["(test)", "(regexp)"]
 	},
 	"hostBinds": ["dir0", "dir1", "dir2"],
@@ -292,18 +289,6 @@ func TestGetAlertsConfig(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if config.Alerts.SendPeriod.Duration != 20*time.Second {
-		t.Errorf("Wrong poll period value: %s", config.Alerts.SendPeriod)
-	}
-
-	if config.Alerts.MaxMessageSize != 1024 {
-		t.Errorf("Wrong max message size value: %d", config.Alerts.MaxMessageSize)
-	}
-
-	if config.Alerts.MaxOfflineMessages != 32 {
-		t.Errorf("Wrong max offline message value: %d", config.Alerts.MaxOfflineMessages)
 	}
 
 	filter := []string{"(test)", "(regexp)"}

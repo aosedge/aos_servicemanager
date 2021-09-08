@@ -19,9 +19,7 @@
 package alerts
 
 import (
-	"encoding/json"
 	"errors"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,12 +27,12 @@ import (
 	"syscall"
 	"time"
 
-	"code.cloudfoundry.org/bytefmt"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/launcher"
 )
@@ -44,9 +42,20 @@ import (
  ******************************************************************************/
 
 const (
-	alertsDataAllocSize = 10
-	waitJournalTimeout  = 1 * time.Second
+	AlertTagSystemError = "systemError"
+	AlertTagAosCore     = "aosCore"
+	AlertTagResource    = "resourceAlert"
+	AlertDeviceErrors   = "deviceErrors"
 )
+
+const (
+	waitJournalTimeout = 1 * time.Second
+	journalSavePeriod = 10 * time.Second
+)
+
+const alertChannelSize = 50
+
+
 
 /*******************************************************************************
  * Types
@@ -66,32 +75,17 @@ type CursorStorage interface {
 
 // Alerts instance
 type Alerts struct {
-	AlertsChannel chan amqp.Alerts
-
+	alertsChannel   chan *pb.Alert
 	config          config.Alerts
 	cursorStorage   CursorStorage
 	serviceProvider ServiceProvider
 	filterRegexp    []*regexp.Regexp
-
-	alertsSize       int
-	skippedAlerts    uint32
-	duplicatedAlerts uint32
-	alerts           amqp.Alerts
 
 	sync.Mutex
 
 	journal      *sdjournal.Journal
 	ticker       *time.Ticker
 	closeChannel chan bool
-}
-
-// DownloadAlertStatus instance
-type DownloadAlertStatus struct {
-	Source          string
-	URL             string
-	Progress        int
-	DownloadedBytes uint64
-	TotalBytes      uint64
 }
 
 /*******************************************************************************
@@ -105,6 +99,7 @@ var aosServices = []string{
 	"aos-servicemanager.service",
 	"aos-updatemanager.service",
 	"aos-iamanager.service",
+	"aos-communicationmanager.service",
 }
 
 /*******************************************************************************
@@ -112,8 +107,7 @@ var aosServices = []string{
  ******************************************************************************/
 
 // New creates new alerts object
-func New(config *config.Config,
-	serviceProvider ServiceProvider,
+func New(config *config.Config, serviceProvider ServiceProvider,
 	cursorStorage CursorStorage) (instance *Alerts, err error) {
 	log.Debug("New alerts")
 
@@ -121,14 +115,14 @@ func New(config *config.Config,
 		return nil, ErrDisabled
 	}
 
-	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage, serviceProvider: serviceProvider}
+	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage,
+		serviceProvider: serviceProvider}
 
-	instance.AlertsChannel = make(chan amqp.Alerts, instance.config.MaxOfflineMessages)
+	instance.alertsChannel = make(chan *pb.Alert, alertChannelSize)
+
 	instance.closeChannel = make(chan bool)
 
-	instance.ticker = time.NewTicker(instance.config.SendPeriod.Duration)
-
-	instance.alerts = make([]amqp.AlertItem, 0, alertsDataAllocSize)
+	instance.ticker = time.NewTicker(journalSavePeriod)
 
 	for _, substr := range instance.config.Filter {
 		if len(substr) == 0 {
@@ -160,31 +154,14 @@ func (instance *Alerts) Close() {
 
 	instance.ticker.Stop()
 
+	instance.storeCurrentCursor()
+
 	instance.journal.Close()
 }
 
-// SendResourceAlert sends resource alert
-func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
-	log.WithFields(log.Fields{
-		"timestamp": time,
-		"source":    source,
-		"resource":  resource,
-		"value":     value}).Debug("Resource alert")
-
-	var version *uint64
-
-	if service, err := instance.serviceProvider.GetService(source); err == nil {
-		version = &service.AosVersion
-	}
-
-	instance.addAlert(amqp.AlertItem{
-		Timestamp:  time,
-		Tag:        amqp.AlertTagResource,
-		Source:     source,
-		AosVersion: version,
-		Payload: amqp.ResourceAlert{
-			Parameter: resource,
-			Value:     value}})
+//GetAlertsChannel returns channel with alerts to be sent
+func (instance *Alerts) GetAlertsChannel() (channel <-chan *pb.Alert) {
+	return instance.alertsChannel
 }
 
 // SendValidateResourceAlert sends request/releases resource alert
@@ -196,7 +173,7 @@ func (instance *Alerts) SendValidateResourceAlert(source string, errors map[stri
 		"source":    source,
 		"errors":    errors}).Debug("Validate Resource alert")
 
-	var convertedErrors []amqp.ResourceValidateErrors
+	var convertedErrors []*pb.ResourceValidateErrors
 
 	for name, reason := range errors {
 		var messages []string
@@ -205,119 +182,60 @@ func (instance *Alerts) SendValidateResourceAlert(source string, errors map[stri
 			messages = append(messages, item.Error())
 		}
 
-		err := amqp.ResourceValidateErrors{
-			Name:   name,
-			Errors: messages}
+		resourceError := pb.ResourceValidateErrors{
+			Name:     name,
+			ErrorMsg: messages}
 
-		convertedErrors = append(convertedErrors, err)
+		convertedErrors = append(convertedErrors, &resourceError)
 	}
 
-	instance.addAlert(amqp.AlertItem{
-		Timestamp: time,
-		Tag:       amqp.AlertTagAosCore,
+	alert := pb.Alert{
+		Timestamp: timestamppb.New(time),
+		Tag:       AlertTagAosCore,
 		Source:    source,
-		Payload: amqp.ResourseValidatePayload{
-			Type:   amqp.DeviceErrors,
-			Errors: convertedErrors}})
+		Payload: &pb.Alert_ResourceValidateAlert{
+			ResourceValidateAlert: &pb.ResourceValidateAlert{
+				Type:   AlertDeviceErrors,
+				Errors: convertedErrors}},
+	}
+
+	instance.pushAlert(&alert)
 }
 
-// SendRequestResourceAlert sends request resource alert
-func (instance *Alerts) SendRequestResourceAlert(source string, message string) {
-	time := time.Now()
-
+// SendResourceAlert sends resource alert
+func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
 	log.WithFields(log.Fields{
 		"timestamp": time,
 		"source":    source,
-		"error":     message}).Debug("Request Resource alert")
+		"resource":  resource,
+		"value":     value}).Debug("Resource alert")
 
-	var version *uint64
-
-	if service, err := instance.serviceProvider.GetService(source); err == nil {
-		version = &service.AosVersion
+	alert := pb.Alert{
+		Timestamp: timestamppb.New(time),
+		Tag:       AlertTagResource,
+		Source:    source,
+		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
+			Parameter: resource,
+			Value:     value}},
 	}
 
-	instance.addAlert(amqp.AlertItem{
-		Timestamp:  time,
-		Tag:        amqp.AlertTagAosCore,
-		Source:     source,
-		AosVersion: version,
-		Payload: amqp.SystemAlert{
-			Message: message}})
+	instance.pushAlert(&alert)
 }
 
-// SendDownloadStartedStatusAlert sends download started status alert
-func (instance *Alerts) SendDownloadStartedStatusAlert(downloadStatus DownloadAlertStatus) {
-	message := "Download started"
-	payload := instance.prepareDownloadAlert(downloadStatus, message)
-
-	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
-}
-
-// SendDownloadFinishedStatusAlert sends download finished status alert
-func (instance *Alerts) SendDownloadFinishedStatusAlert(downloadStatus DownloadAlertStatus, code int) {
-	message := "Download finished code: " + strconv.Itoa(code)
-	payload := instance.prepareDownloadAlert(downloadStatus, message)
-
-	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
-}
-
-// SendDownloadInterruptedStatusAlert sends download interrupted status alert
-func (instance *Alerts) SendDownloadInterruptedStatusAlert(downloadStatus DownloadAlertStatus, reason string) {
-	message := "Download interrupted reason: " + reason
-	payload := instance.prepareDownloadAlert(downloadStatus, message)
-
-	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
-}
-
-// SendDownloadResumedStatusAlert sends download resumed status alert
-func (instance *Alerts) SendDownloadResumedStatusAlert(downloadStatus DownloadAlertStatus, reason string) {
-	message := "Download resumed reason: " + reason
-	payload := instance.prepareDownloadAlert(downloadStatus, message)
-
-	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
-}
-
-// SendDownloadStatusAlert sends download status alert
-func (instance *Alerts) SendDownloadStatusAlert(downloadStatus DownloadAlertStatus) {
-	message := "Download status"
-	payload := instance.prepareDownloadAlert(downloadStatus, message)
-
-	instance.sendDownloadStatusAlertMessage(downloadStatus.Source, payload)
+//SendRequestResourceAlert send request resource alert
+func (instance *Alerts) SendRequestResourceAlert(source string, message string) {
+	instance.pushAlert(&pb.Alert{
+		Timestamp: timestamppb.Now(),
+		Tag:       AlertTagAosCore,
+		Source:    source,
+		Payload: &pb.Alert_SystemAlert{
+			SystemAlert: &pb.SystemAlert{
+				Message: message}}})
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
-
-func (instance *Alerts) prepareDownloadAlert(downloadStatus DownloadAlertStatus, message string) amqp.DownloadAlert {
-	payload := amqp.DownloadAlert{
-		Message:         message,
-		Progress:        strconv.Itoa(downloadStatus.Progress) + "%",
-		URL:             downloadStatus.URL,
-		DownloadedBytes: bytefmt.ByteSize(downloadStatus.DownloadedBytes),
-		TotalBytes:      bytefmt.ByteSize(downloadStatus.TotalBytes)}
-
-	return payload
-}
-
-func (instance *Alerts) sendDownloadStatusAlertMessage(source string, payload amqp.DownloadAlert) {
-	time := time.Now()
-
-	log.WithFields(log.Fields{
-		"timestamp":       time,
-		"source":          source,
-		"download status": payload.Message,
-		"progress":        payload.Progress,
-		"url":             payload.URL,
-		"downloadedBytes": payload.DownloadedBytes,
-		"totalBytes":      payload.TotalBytes}).Debug(payload.Message)
-
-	instance.addAlert(amqp.AlertItem{
-		Timestamp: time,
-		Tag:       amqp.AlertTagAosCore,
-		Source:    source,
-		Payload:   payload})
-}
 
 func (instance *Alerts) setupJournal() (err error) {
 	if instance.journal, err = sdjournal.NewJournal(); err != nil {
@@ -377,8 +295,8 @@ func (instance *Alerts) setupJournal() (err error) {
 		for {
 			select {
 			case <-instance.ticker.C:
-				if err = instance.sendAlerts(); err != nil {
-					log.Errorf("Send alerts error: %s", err)
+				if err = instance.storeCurrentCursor(); err != nil {
+					log.Error("Can't store journal cursor: ", err)
 				}
 
 			case <-instance.closeChannel:
@@ -417,9 +335,9 @@ func (instance *Alerts) processJournal() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		var version *uint64
+		var version uint64
 		source := "system"
-		tag := amqp.AlertTagSystemError
+		tag := AlertTagSystemError
 		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
 		if unit == "init.scope" {
@@ -434,12 +352,12 @@ func (instance *Alerts) processJournal() (err error) {
 			service, err := instance.serviceProvider.GetServiceByUnitName(unit)
 			if err == nil {
 				source = service.ID
-				version = &service.AosVersion
+				version = service.AosVersion
 			} else {
 				for _, aosService := range aosServices {
 					if unit == aosService {
 						source = unit
-						tag = amqp.AlertTagAosCore
+						tag = AlertTagAosCore
 					}
 				}
 			}
@@ -466,65 +384,16 @@ func (instance *Alerts) processJournal() (err error) {
 				"source":  source,
 			}).Debug("System alert")
 
-			instance.addAlert(amqp.AlertItem{
-				Timestamp:  t,
+			instance.pushAlert(&pb.Alert{
+				Timestamp:  timestamppb.New(t),
 				Tag:        tag,
 				Source:     source,
 				AosVersion: version,
-				Payload:    amqp.SystemAlert{Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}})
+				Payload: &pb.Alert_SystemAlert{
+					SystemAlert: &pb.SystemAlert{
+						Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}}})
 		}
 	}
-}
-
-func (instance *Alerts) addAlert(item amqp.AlertItem) {
-	instance.Lock()
-	defer instance.Unlock()
-
-	if len(instance.alerts) != 0 &&
-		reflect.DeepEqual(instance.alerts[len(instance.alerts)-1].Payload, item.Payload) {
-		instance.duplicatedAlerts++
-		return
-	}
-
-	data, _ := json.Marshal(item)
-	instance.alertsSize += len(data)
-
-	if int(instance.alertsSize) <= instance.config.MaxMessageSize {
-		instance.alerts = append(instance.alerts, item)
-	} else {
-		instance.skippedAlerts++
-	}
-}
-
-func (instance *Alerts) sendAlerts() (err error) {
-	instance.Lock()
-	defer instance.Unlock()
-
-	if instance.alertsSize != 0 {
-		if len(instance.AlertsChannel) < cap(instance.AlertsChannel) {
-			instance.AlertsChannel <- instance.alerts
-
-			if instance.skippedAlerts != 0 {
-				log.WithField("count", instance.skippedAlerts).Warn("Alerts skipped due to size limit")
-			}
-			if instance.duplicatedAlerts != 0 {
-				log.WithField("count", instance.duplicatedAlerts).Warn("Alerts skipped due to duplication")
-			}
-		} else {
-			log.Warn("Skip sending alerts due to channel is full")
-		}
-
-		instance.alerts = make([]amqp.AlertItem, 0, alertsDataAllocSize)
-		instance.skippedAlerts = 0
-		instance.duplicatedAlerts = 0
-		instance.alertsSize = 0
-
-		if err = instance.storeCurrentCursor(); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
 }
 
 func (instance *Alerts) storeCurrentCursor() (err error) {
@@ -538,4 +407,14 @@ func (instance *Alerts) storeCurrentCursor() (err error) {
 	}
 
 	return nil
+}
+
+func (instance *Alerts) pushAlert(alert *pb.Alert) {
+	if len(instance.alertsChannel) >= cap(instance.alertsChannel) {
+		log.Warn("Skip alert, channel is full")
+
+		return
+	}
+
+	instance.alertsChannel <- alert
 }

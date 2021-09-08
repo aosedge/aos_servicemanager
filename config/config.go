@@ -69,11 +69,8 @@ type Logging struct {
 
 // Alerts configuration for alerts
 type Alerts struct {
-	Disabled           bool     `json:"disabled"`
-	SendPeriod         Duration `json:"sendPeriod"`
-	MaxMessageSize     int      `json:"maxMessagesize"`
-	MaxOfflineMessages int      `json:"maxOfflineMessages"`
-	Filter             []string `json:"filter"`
+	Disabled bool     `json:"disabled"`
+	Filter   []string `json:"filter"`
 }
 
 // Host strunct represent entry in /etc/hosts
@@ -135,10 +132,7 @@ func New(fileName string) (config *Config, err error) {
 		Logging: Logging{
 			MaxPartSize:  524288,
 			MaxPartCount: 20},
-		Alerts: Alerts{
-			SendPeriod:         Duration{10 * time.Second},
-			MaxMessageSize:     65536,
-			MaxOfflineMessages: 25}}
+	}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, aoserrors.Wrap(err)
