@@ -50,8 +50,7 @@ func createConfigFile() (err error) {
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
 		"sendPeriod": "00:05:00",
-		"pollPeriod": "00:00:01",
-		"maxOfflineMessages": 25,
+		"pollPeriod": "00:00:01",		
 		"ram": {
 			"minTimeout": "00:00:10",
 			"minThreshold": 10,

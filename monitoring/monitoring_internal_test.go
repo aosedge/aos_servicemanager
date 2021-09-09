@@ -30,7 +30,6 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/networkmanager"
 )
@@ -52,7 +51,7 @@ func init() {
  * Types
  ******************************************************************************/
 
-type testAlerts struct {
+type testSender struct {
 	callback func(serviceID, resource string, time time.Time, value uint64)
 }
 
@@ -131,13 +130,14 @@ func TestAlertProcessor(t *testing.T) {
 func TestPeriodicReport(t *testing.T) {
 	sendDuration := 2 * time.Second
 
+	sender := &testSender{}
+
 	monitor, err := New(&config.Config{
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
-			MaxOfflineMessages: 10,
-			SendPeriod:         config.Duration{Duration: sendDuration},
-			PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		nil, networkManager)
+			SendPeriod: config.Duration{Duration: sendDuration},
+			PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+		sender, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -149,7 +149,7 @@ func TestPeriodicReport(t *testing.T) {
 
 	for {
 		select {
-		case <-monitor.DataChannel:
+		case <-monitor.GetMonitoringDataChannel():
 			currentTime := time.Now()
 
 			period := currentTime.Sub(sendTime)
@@ -176,13 +176,16 @@ func TestSystemAlerts(t *testing.T) {
 
 	alertMap := make(map[string]int)
 
+	sender := &testSender{callback: func(serviceID, resource string, time time.Time, value uint64) {
+		alertMap[resource] = alertMap[resource] + 1
+	}}
+
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages: 10,
-				SendPeriod:         config.Duration{Duration: sendDuration},
-				PollPeriod:         config.Duration{Duration: 1 * time.Second},
+				SendPeriod: config.Duration{Duration: sendDuration},
+				PollPeriod: config.Duration{Duration: 1 * time.Second},
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
@@ -203,9 +206,8 @@ func TestSystemAlerts(t *testing.T) {
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
 					MaxThreshold: 0}}},
-		&testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
-			alertMap[resource] = alertMap[resource] + 1
-		}}, networkManager)
+		sender,
+		networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -213,7 +215,7 @@ func TestSystemAlerts(t *testing.T) {
 
 	for {
 		select {
-		case <-monitor.DataChannel:
+		case <-monitor.GetMonitoringDataChannel():
 			for resource, numAlerts := range alertMap {
 				if numAlerts != 1 {
 					t.Errorf("Wrong number of %s alerts: %d", resource, numAlerts)
@@ -237,16 +239,18 @@ func TestServices(t *testing.T) {
 
 	alertMap := make(map[string]int)
 
+	sender := &testSender{callback: func(serviceID, resource string, time time.Time, value uint64) {
+		alertMap[resource] = alertMap[resource] + 1
+	}}
+
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages: 10,
-				SendPeriod:         config.Duration{Duration: sendDuration},
-				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		&testAlerts{callback: func(serviceID, resource string, time time.Time, value uint64) {
-			alertMap[resource] = alertMap[resource] + 1
-		}}, networkManager)
+				SendPeriod: config.Duration{Duration: sendDuration},
+				PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+		sender,
+		networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -270,7 +274,7 @@ func TestServices(t *testing.T) {
 			ServiceDir: "tmp/service1",
 			UID:        5000,
 			GID:        5000,
-			ServiceRules: &amqp.ServiceAlertRules{
+			ServiceRules: &ServiceAlertRules{
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
@@ -300,7 +304,7 @@ func TestServices(t *testing.T) {
 			ServiceDir: "tmp/service2",
 			UID:        5002,
 			GID:        5002,
-			ServiceRules: &amqp.ServiceAlertRules{
+			ServiceRules: &ServiceAlertRules{
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
@@ -329,9 +333,9 @@ func TestServices(t *testing.T) {
 
 	for terminate != true {
 		select {
-		case data := <-monitor.DataChannel:
-			if len(data.ServicesData) != 2 {
-				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+		case data := <-monitor.GetMonitoringDataChannel():
+			if len(data.ServiceMonitoring) != 2 {
+				t.Errorf("Wrong number of services: %d", len(data.ServiceMonitoring))
 			}
 
 			for resource, numAlerts := range alertMap {
@@ -362,9 +366,9 @@ func TestServices(t *testing.T) {
 
 	for terminate != true {
 		select {
-		case data := <-monitor.DataChannel:
-			if len(data.ServicesData) != 1 {
-				t.Errorf("Wrong number of services: %d", len(data.ServicesData))
+		case data := <-monitor.GetMonitoringDataChannel():
+			if len(data.ServiceMonitoring) != 1 {
+				t.Errorf("Wrong number of services: %d", len(data.ServiceMonitoring))
 			}
 
 			if len(alertMap) != 0 {
@@ -390,14 +394,15 @@ func TestServices(t *testing.T) {
 func TestTrafficLimit(t *testing.T) {
 	sendDuration := 2 * time.Second
 
+	sender := &testSender{}
+
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				MaxOfflineMessages: 256,
-				SendPeriod:         config.Duration{Duration: sendDuration},
-				PollPeriod:         config.Duration{Duration: 1 * time.Second}}},
-		nil, networkManager)
+				SendPeriod: config.Duration{Duration: sendDuration},
+				PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+		sender, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
@@ -482,7 +487,7 @@ func TestTrafficLimit(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func (instance *testAlerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
+func (instance *testSender) SendResourceAlert(source, resource string, time time.Time, value uint64) {
 	instance.callback(source, resource, time, value)
 }
 

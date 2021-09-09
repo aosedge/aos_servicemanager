@@ -910,16 +910,16 @@ func TestServiceTTL(t *testing.T) {
 	}
 }
 
-/*
 func TestServiceMonitoring(t *testing.T) {
 	sender := newTestSender()
+	testImage := pythonImage{}
 
 	monitor, err := newTestMonitor()
 	if err != nil {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(new(pythonImage), sender, monitor)
+	launcher, err := newTestLauncher(sender, monitor)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -932,7 +932,12 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
-	serviceAlerts := amqp.ServiceAlertRules{
+	serviceURL, err := testImage.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	serviceAlerts := monitoring.ServiceAlertRules{
 		RAM: &config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 30 * time.Second},
 			MinThreshold: 0,
@@ -946,9 +951,16 @@ func TestServiceMonitoring(t *testing.T) {
 			MinThreshold: 0,
 			MaxThreshold: 20}}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.InstallService(amqp.ServiceInfoFromCloud{ID: "Service1", ProviderID: "sp1",
-			AlertRules: &serviceAlerts}, chains, certs)})
+	alertRulesStr, err := json.Marshal(&serviceAlerts)
+	if err != nil {
+		t.Errorf("Can't marshal alert rules: %s", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "Service1",
+		ProviderId: "sp1", Url: serviceURL, AlertRules: string(alertRulesStr)})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
 
 	select {
 	case info := <-monitor.startChannel:
@@ -964,8 +976,9 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 
-	checkServiceStatuses(t, []<-chan amqp.ServiceInfo{
-		launcher.UninstallService("Service1")})
+	if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: "Service1"}); err != nil {
+		t.Errorf("Can't uninstall service: %s", err)
+	}
 
 	select {
 	case serviceID := <-monitor.stopChannel:
@@ -977,7 +990,6 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 }
-*/
 
 func TestServiceStorage(t *testing.T) {
 	sender := newTestSender()

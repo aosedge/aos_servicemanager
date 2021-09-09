@@ -1852,11 +1852,6 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, aoserrors.Wrap(err)
 	}
 
-	alertRules, err := json.Marshal(serviceInfo.GetAlertRules())
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
 	service = Service{
 		ID:              serviceInfo.GetServiceId(),
 		AosVersion:      serviceInfo.GetAosVersion(),
@@ -1869,7 +1864,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		GID:             gid,
 		State:           stateInit,
 		Status:          statusOk,
-		AlertRules:      string(alertRules),
+		AlertRules:      serviceInfo.GetAlertRules(),
 	}
 
 	if service.ServiceProvider == "" {

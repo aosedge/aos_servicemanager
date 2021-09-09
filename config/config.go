@@ -50,15 +50,14 @@ type AlertRule struct {
 
 // Monitoring configuration for system monitoring
 type Monitoring struct {
-	Disabled           bool       `json:"disabled"`
-	SendPeriod         Duration   `json:"sendPeriod"`
-	PollPeriod         Duration   `json:"pollPeriod"`
-	MaxOfflineMessages int        `json:"maxOfflineMessages"`
-	RAM                *AlertRule `json:"ram"`
-	CPU                *AlertRule `json:"cpu"`
-	UsedDisk           *AlertRule `json:"usedDisk"`
-	InTraffic          *AlertRule `json:"inTraffic"`
-	OutTraffic         *AlertRule `json:"outTraffic"`
+	Disabled   bool       `json:"disabled"`
+	SendPeriod Duration   `json:"sendPeriod"`
+	PollPeriod Duration   `json:"pollPeriod"`
+	RAM        *AlertRule `json:"ram"`
+	CPU        *AlertRule `json:"cpu"`
+	UsedDisk   *AlertRule `json:"usedDisk"`
+	InTraffic  *AlertRule `json:"inTraffic"`
+	OutTraffic *AlertRule `json:"outTraffic"`
 }
 
 // Logging configuration for system and service logging
@@ -126,9 +125,9 @@ func New(fileName string) (config *Config, err error) {
 		DownloadFileTTLDays:   3,
 		Runner:                "runc",
 		Monitoring: Monitoring{
-			SendPeriod:         Duration{1 * time.Minute},
-			PollPeriod:         Duration{10 * time.Second},
-			MaxOfflineMessages: 25},
+			SendPeriod: Duration{1 * time.Minute},
+			PollPeriod: Duration{10 * time.Second},
+		},
 		Logging: Logging{
 			MaxPartSize:  524288,
 			MaxPartCount: 20},
