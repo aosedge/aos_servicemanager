@@ -108,19 +108,28 @@ func TestConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	responce, err := client.pbclient.GetStatus(ctx, &emptypb.Empty{})
+	_, err = client.pbclient.SetUsers(ctx, &pb.Users{Users: []string{"user1"}})
+	if err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	response, err := client.pbclient.GetStatus(ctx, &emptypb.Empty{})
 	if err != nil {
 		t.Fatalf("Can't get status: %s", err)
 	}
 
-	if len(responce.GetServices()) != 1 {
-		t.Errorf("incorrect count of services %d", len(responce.GetServices()))
+	if len(response.GetServices()) != 1 {
+		t.Errorf("incorrect count of services %d", len(response.GetServices()))
 	}
 }
 
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
+
+func (launcher *testLauncher) SetUsers(users []string) (err error) {
+	return nil
+}
 
 func (launcher *testLauncher) GetServicesInfo() (currentServices []*pb.ServiceStatus, err error) {
 	currentServices = append(currentServices, &pb.ServiceStatus{ServiceId: "123"})

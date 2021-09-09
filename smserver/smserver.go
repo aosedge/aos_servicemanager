@@ -28,6 +28,7 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"aos_servicemanager/config"
 )
@@ -46,9 +47,11 @@ import (
 
 // ServiceLauncher services launcher interface
 type ServiceLauncher interface {
+	SetUsers(users []string) (err error)
 	GetServicesInfo() (services []*pb.ServiceStatus, err error)
 }
 
+// LayerProvider services layer manager interface
 type LayerProvider interface {
 	GetLayersInfo() (info []*pb.LayerStatus, err error)
 }
@@ -118,7 +121,9 @@ func (server *SMServer) Stop() {
 
 // SetUsers sets current user
 func (server *SMServer) SetUsers(ctx context.Context, users *pb.Users) (ret *empty.Empty, err error) {
-	return ret, err
+	ret = &emptypb.Empty{}
+
+	return ret, server.launcher.SetUsers(users.GetUsers())
 }
 
 // GetStatus gets current SM status
