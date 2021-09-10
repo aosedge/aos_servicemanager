@@ -137,6 +137,16 @@ func TestConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't remove service: %s", err)
 	}
+
+	_, err = client.pbclient.InstallLayer(ctx, &pb.InstallLayerRequest{})
+	if err != nil {
+		t.Fatalf("Can't install layer: %s", err)
+	}
+
+	_, err = client.pbclient.RemoveLayer(ctx, &pb.RemoveLayerRequest{})
+	if err != nil {
+		t.Fatalf("Can't remove layer: %s", err)
+	}
 }
 
 /*******************************************************************************
@@ -163,6 +173,14 @@ func (launcher *testLauncher) UninstallService(removeReq *pb.RemoveServiceReques
 
 func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 	return layersList, nil
+}
+
+func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
+	return nil
+}
+
+func (layerMgr *testLayerManager) UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error) {
+	return nil
 }
 
 /*******************************************************************************
