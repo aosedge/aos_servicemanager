@@ -60,13 +60,20 @@ type LayerProvider interface {
 	UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error)
 }
 
+// AlertsProvider alert data provider interface
+type AlertsProvider interface {
+	GetAlertsChannel() (alertChannel <-chan *pb.Alert)
+}
+
 // SMServer SM server instance
 type SMServer struct {
-	url           string
-	launcher      ServiceLauncher
-	layerProvider LayerProvider
-	grpcServer    *grpc.Server
-	listener      net.Listener
+	url                string
+	launcher           ServiceLauncher
+	layerProvider      LayerProvider
+	grpcServer         *grpc.Server
+	listener           net.Listener
+	notificationStream pb.ServiceManager_SubscribeSMNotificationsServer
+	alertChannel       <-chan *pb.Alert
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -75,8 +82,15 @@ type SMServer struct {
  ******************************************************************************/
 
 // New creates new IAM server instance
-func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher, layerProvider: layerProvider}
+func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
+	insecure bool) (server *SMServer, err error) {
+	server = &SMServer{launcher: launcher, layerProvider: layerProvider,
+		alertChannel: make(chan *pb.Alert, maxChanSize),
+	}
+
+	if alertsProvider != nil {
+		server.alertChannel = alertsProvider.GetAlertsChannel()
+	}
 
 	var opts []grpc.ServerOption
 
@@ -183,7 +197,32 @@ func (server *SMServer) RemoveLayer(ctx context.Context, layer *pb.RemoveLayerRe
 	return &emptypb.Empty{}, server.layerProvider.UninstallLayer(layer)
 }
 
-// SubscribeSmNotification sunscribes for SM notifications
-func (server *SMServer) SubscribeSmNotification(req *empty.Empty, stream pb.ServiceManager_SubscribeSMNotificationsServer) (err error) {
+// SubscribeSMNotifications subscribes for SM notifications
+func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.ServiceManager_SubscribeSMNotificationsServer) (err error) {
+	server.notificationStream = stream
+
+	server.handleChannels()
+
 	return nil
+}
+
+/*******************************************************************************
+ * private
+ ******************************************************************************/
+
+func (server *SMServer) handleChannels() {
+	for {
+		select {
+		case alert := <-server.alertChannel:
+			alertNtf := &pb.SMNotifications_Alert{Alert: alert}
+
+			if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: alertNtf}); err != nil {
+				log.Errorf("Can't send alert: %s ", err)
+				return
+			}
+
+		case <-server.notificationStream.Context().Done():
+			return
+		}
+	}
 }

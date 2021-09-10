@@ -19,6 +19,7 @@ package smserver_test
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -27,8 +28,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"aos_servicemanager/alerts"
 	"aos_servicemanager/config"
 	"aos_servicemanager/smserver"
 )
@@ -54,6 +58,10 @@ type testLayerManager struct {
 type testClient struct {
 	connection *grpc.ClientConn
 	pbclient   pb.ServiceManagerClient
+}
+
+type testAlertProvider struct {
+	alertsChannel chan *pb.Alert
 }
 
 /*******************************************************************************
@@ -91,7 +99,7 @@ func TestConnection(t *testing.T) {
 		SMServerURL: serverURL,
 	}
 
-	smServer, err := smserver.New(&smConfig, launcher, layerMgr, true)
+	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -149,6 +157,117 @@ func TestConnection(t *testing.T) {
 	}
 }
 
+func TestAlertNotifications(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	testAlerts := &testAlertProvider{alertsChannel: make(chan *pb.Alert, 10)}
+
+	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go smServer.Start()
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+	defer client.close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't subscribes: %s", err)
+	}
+
+	systemAlert := &pb.Alert{
+		Timestamp: timestamppb.Now(),
+		Tag:       "core",
+		Source:    "system",
+		Payload: &pb.Alert_SystemAlert{
+			SystemAlert: &pb.SystemAlert{
+				Message: "some alert"}}}
+
+	testAlerts.alertsChannel <- systemAlert
+
+	receivedAlert, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive alert: %s", err)
+	}
+
+	if !proto.Equal(receivedAlert.GetAlert(), systemAlert) {
+		log.Error("received alert != send alert")
+	}
+
+	time := time.Now()
+
+	resourceAlert := &pb.Alert{
+		Timestamp: timestamppb.New(time),
+		Tag:       alerts.AlertTagResource,
+		Source:    "test",
+		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
+			Parameter: "testResource",
+			Value:     42}},
+	}
+
+	testAlerts.alertsChannel <- resourceAlert
+
+	receivedResAlert, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive alert: %s", err)
+	}
+
+	if !proto.Equal(receivedResAlert.GetAlert(), resourceAlert) {
+		log.Error("received resource alert != send alert")
+	}
+
+	deviceErrors := make(map[string][]error)
+	deviceErrors["dev1"] = []error{fmt.Errorf("some error")}
+
+	var convertedErrors []*pb.ResourceValidateErrors
+
+	for name, reason := range deviceErrors {
+		var messages []string
+
+		for _, item := range reason {
+			messages = append(messages, item.Error())
+		}
+
+		resourceError := pb.ResourceValidateErrors{
+			Name:     name,
+			ErrorMsg: messages}
+
+		convertedErrors = append(convertedErrors, &resourceError)
+	}
+
+	validationAlert := &pb.Alert{
+		Timestamp: timestamppb.New(time),
+		Tag:       alerts.AlertTagAosCore,
+		Source:    "test",
+		Payload: &pb.Alert_ResourceValidateAlert{
+			ResourceValidateAlert: &pb.ResourceValidateAlert{
+				Type:   alerts.AlertDeviceErrors,
+				Errors: convertedErrors}},
+	}
+
+	testAlerts.alertsChannel <- validationAlert
+
+	receivedValidationAlert, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive validation alert: %s", err)
+	}
+
+	if !proto.Equal(receivedValidationAlert.GetAlert(), validationAlert) {
+		log.Error("received validation alert != send alert")
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -181,6 +300,10 @@ func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 
 func (layerMgr *testLayerManager) UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error) {
 	return nil
+}
+
+func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan *pb.Alert) {
+	return alerts.alertsChannel
 }
 
 /*******************************************************************************
