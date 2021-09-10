@@ -64,6 +64,10 @@ type testAlertProvider struct {
 	alertsChannel chan *pb.Alert
 }
 
+type testMonitoringProvider struct {
+	monitoringChannel chan *pb.Monitoring
+}
+
 /*******************************************************************************
  * Init
  ******************************************************************************/
@@ -99,7 +103,7 @@ func TestConnection(t *testing.T) {
 		SMServerURL: serverURL,
 	}
 
-	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -164,7 +168,7 @@ func TestAlertNotifications(t *testing.T) {
 
 	testAlerts := &testAlertProvider{alertsChannel: make(chan *pb.Alert, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -268,6 +272,53 @@ func TestAlertNotifications(t *testing.T) {
 	}
 }
 
+func TestMonitoringNotifications(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan *pb.Monitoring, 10)}
+
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go smServer.Start()
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+	defer client.close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't Subscribes: %s", err)
+	}
+
+	monitoringToSend := &pb.Monitoring{SystemMonitoring: &pb.SystemMonitoring{
+		Ram: 10, UsedDisk: 20, Cpu: 30, InTraffic: 40, OutTraffic: 50},
+		Timestamp: timestamppb.Now(),
+		ServiceMonitoring: []*pb.ServiceMonitoring{&pb.ServiceMonitoring{
+			ServiceId: "service1", Ram: 110, UsedDisk: 120, Cpu: 130, InTraffic: 140, OutTraffic: 150}}}
+
+	testMonitoring.monitoringChannel <- monitoringToSend
+
+	receiveMonitoringData, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive monitoring data: %s", err)
+	}
+
+	if !proto.Equal(receiveMonitoringData.GetMonitoring(), monitoringToSend) {
+		log.Error("received monitoring data != sent data")
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -304,6 +355,10 @@ func (layerMgr *testLayerManager) UninstallLayer(removeInfo *pb.RemoveLayerReque
 
 func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan *pb.Alert) {
 	return alerts.alertsChannel
+}
+
+func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (channel <-chan *pb.Monitoring) {
+	return monitoring.monitoringChannel
 }
 
 /*******************************************************************************

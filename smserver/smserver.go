@@ -65,6 +65,11 @@ type AlertsProvider interface {
 	GetAlertsChannel() (alertChannel <-chan *pb.Alert)
 }
 
+// MonitoringDataProvider monitoring data provider interface
+type MonitoringDataProvider interface {
+	GetMonitoringDataChannel() (monitoringChannel <-chan *pb.Monitoring)
+}
+
 // SMServer SM server instance
 type SMServer struct {
 	url                string
@@ -74,6 +79,7 @@ type SMServer struct {
 	listener           net.Listener
 	notificationStream pb.ServiceManager_SubscribeSMNotificationsServer
 	alertChannel       <-chan *pb.Alert
+	monitoringChannel  <-chan *pb.Monitoring
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -83,13 +89,15 @@ type SMServer struct {
 
 // New creates new IAM server instance
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
-	insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher, layerProvider: layerProvider,
-		alertChannel: make(chan *pb.Alert, maxChanSize),
-	}
+	monitoringProvider MonitoringDataProvider, insecure bool) (server *SMServer, err error) {
+	server = &SMServer{launcher: launcher, layerProvider: layerProvider}
 
 	if alertsProvider != nil {
 		server.alertChannel = alertsProvider.GetAlertsChannel()
+	}
+
+	if monitoringProvider != nil {
+		server.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
 	}
 
 	var opts []grpc.ServerOption
@@ -218,6 +226,15 @@ func (server *SMServer) handleChannels() {
 
 			if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: alertNtf}); err != nil {
 				log.Errorf("Can't send alert: %s ", err)
+				return
+			}
+
+		case monitoringData := <-server.monitoringChannel:
+			if err := server.notificationStream.Send(
+				&pb.SMNotifications{
+					SMNotification: &pb.SMNotifications_Monitoring{
+						Monitoring: monitoringData}}); err != nil {
+				log.Errorf("Can't send monitoring notification: %s ", err)
 				return
 			}
 

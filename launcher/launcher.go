@@ -2126,7 +2126,7 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, aosConfig *aosServiceConfig) (err error) {
 	switch state {
 	case stateRunning:
-		var rules amqp.ServiceAlertRules
+		var rules monitoring.ServiceAlertRules
 
 		if err := json.Unmarshal([]byte(service.AlertRules), &rules); err != nil {
 			return aoserrors.Wrap(err)
