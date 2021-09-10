@@ -121,6 +121,22 @@ func TestConnection(t *testing.T) {
 	if len(response.GetServices()) != 1 {
 		t.Errorf("incorrect count of services %d", len(response.GetServices()))
 	}
+
+	service := &pb.InstallServiceRequest{ServiceId: "service1"}
+
+	status, err := client.pbclient.InstallService(ctx, service)
+	if err != nil {
+		t.Fatalf("Can't install service : %s", err)
+	}
+
+	if status.ServiceId != service.ServiceId {
+		t.Errorf("Incorrect service id in response")
+	}
+
+	_, err = client.pbclient.RemoveService(ctx, &pb.RemoveServiceRequest{ServiceId: "service1"})
+	if err != nil {
+		t.Fatalf("Can't remove service: %s", err)
+	}
 }
 
 /*******************************************************************************
@@ -135,6 +151,14 @@ func (launcher *testLauncher) GetServicesInfo() (currentServices []*pb.ServiceSt
 	currentServices = append(currentServices, &pb.ServiceStatus{ServiceId: "123"})
 
 	return currentServices, nil
+}
+
+func (launcher *testLauncher) InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
+	return &pb.ServiceStatus{ServiceId: serviceInfo.ServiceId, StateChecksum: "some state check sum"}, nil
+}
+
+func (launcher *testLauncher) UninstallService(removeReq *pb.RemoveServiceRequest) (err error) {
+	return nil
 }
 
 func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {

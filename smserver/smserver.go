@@ -48,6 +48,8 @@ import (
 // ServiceLauncher services launcher interface
 type ServiceLauncher interface {
 	SetUsers(users []string) (err error)
+	InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error)
+	UninstallService(removeReq *pb.RemoveServiceRequest) (err error)
 	GetServicesInfo() (services []*pb.ServiceStatus, err error)
 }
 
@@ -150,12 +152,12 @@ func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.Boar
 
 // InstallService installs aos service
 func (server *SMServer) InstallService(ctx context.Context, service *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
-	return status, nil
+	return server.launcher.InstallService(service)
 }
 
 // InstallService removes aos service
 func (server *SMServer) RemoveService(ctx context.Context, service *pb.RemoveServiceRequest) (ret *empty.Empty, err error) {
-	return ret, nil
+	return &emptypb.Empty{}, server.launcher.UninstallService(service)
 }
 
 // SetServiceState sets state for aos service
