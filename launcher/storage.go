@@ -32,9 +32,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"golang.org/x/crypto/sha3"
-
-	amqp "aos_servicemanager/amqphandler"
 )
 
 /*******************************************************************************
@@ -59,10 +58,9 @@ type storageHandler struct {
 	serviceProvider ServiceProvider
 	storageDir      string
 	sync.Mutex
-	watcher         *fsnotify.Watcher
-	statesMap       map[string]*stateParams
-	newStateChannel chan<- NewState
-	sender          Sender
+	watcher      *fsnotify.Watcher
+	statesMap    map[string]*stateParams
+	stateChannel chan<- *pb.SMNotifications
 }
 
 type stateParams struct {
@@ -82,12 +80,11 @@ type stateParams struct {
  ******************************************************************************/
 
 func newStorageHandler(storageDir string, serviceProvider ServiceProvider,
-	newStateChannel chan<- NewState, sender Sender) (handler *storageHandler, err error) {
+	stateChannel chan<- *pb.SMNotifications) (handler *storageHandler, err error) {
 	handler = &storageHandler{
 		serviceProvider: serviceProvider,
 		storageDir:      storageDir,
-		newStateChannel: newStateChannel,
-		sender:          sender}
+		stateChannel:    stateChannel}
 
 	if _, err = os.Stat(handler.storageDir); err != nil {
 		if !os.IsNotExist(err) {
@@ -212,12 +209,12 @@ func (handler *storageHandler) StopStateWatching(users []string, service Service
 	return aoserrors.Wrap(handler.stopStateWatching(path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder))
 }
 
-func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) (err error) {
+func (handler *storageHandler) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
 
 	for _, state := range handler.statesMap {
-		if state.correlationID == correlationID {
+		if state.correlationID == acceptance.CorrelationId {
 			if strings.ToLower(acceptance.Result) == "accepted" {
 				state.stateAccepted = true
 			} else {
@@ -237,7 +234,7 @@ func (handler *storageHandler) StateAcceptance(acceptance amqp.StateAcceptance, 
 	return aoserrors.New("correlation ID not found")
 }
 
-func (handler *storageHandler) UpdateState(users []string, service Service, state, checksum string,
+func (handler *storageHandler) UpdateState(users []string, service Service, state []byte, checksum string,
 	stateLimit uint64) (err error) {
 	handler.Lock()
 	defer handler.Unlock()
@@ -261,7 +258,7 @@ func (handler *storageHandler) UpdateState(users []string, service Service, stat
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(path.Join(usersService.StorageFolder, stateFile), []byte(state), 0644); err != nil {
+	if err = ioutil.WriteFile(path.Join(usersService.StorageFolder, stateFile), state, 0644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -313,8 +310,9 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 			"checksum":  hex.EncodeToString(checksum)}).Warn("State file checksum mistmatch. Send state request")
 
 		// Send state request
-		if handler.sender != nil {
-			handler.sender.SendStateRequest(state.serviceID, false)
+		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
+			ServiceStateRequest: &pb.ServiceStateRequest{ServiceId: state.serviceID, Default: false}}}); err != nil {
+			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}
 
@@ -365,8 +363,9 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 		}
 	} else {
 		// Send state request
-		if handler.sender != nil {
-			handler.sender.SendStateRequest(state.serviceID, false)
+		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
+			ServiceStateRequest: &pb.ServiceStateRequest{ServiceId: state.serviceID, Default: false}}}); err != nil {
+			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}
 
@@ -399,19 +398,21 @@ func (handler *storageHandler) stateChanged(fileName string, state *stateParams)
 	state.acceptanceTimer = time.NewTimer(acceptanceWaitTimeout)
 	state.correlationID = uuid.New().String()
 
-	newState := NewState{state.correlationID, state.serviceID, string(stateData), hex.EncodeToString(checksum)}
-
 	go func() {
 		log.WithFields(log.Fields{
-			"serviceID":     newState.ServiceID,
-			"correlationID": newState.CorrelationID,
-			"checksum":      newState.Checksum}).Debug("Send new state")
+			"serviceID":     state.serviceID,
+			"correlationID": state.correlationID,
+			"checksum":      hex.EncodeToString(checksum)}).Debug("Send new state")
 
-		// Send new state under unlocked context: when newStateChannel is full it blocks here.
-		// As result, if in offline mode newStateChannel becomes full, we wait here till online mode.
-		// Drop all changes if channel is full
-		if len(handler.newStateChannel) >= cap(handler.newStateChannel) {
-			log.WithField("serviceID", state.serviceID).Error("New state channel is full")
+		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_NewServiceState{
+			NewServiceState: &pb.NewServiceState{CorrelationId: state.correlationID,
+				ServiceState: &pb.ServiceState{
+					ServiceId:     state.serviceID,
+					StateChecksum: hex.EncodeToString(checksum),
+					State:         stateData,
+				}}}}); err != nil {
+			log.Warn(err.Error())
+
 			handler.Lock()
 			defer handler.Unlock()
 
@@ -420,8 +421,6 @@ func (handler *storageHandler) stateChanged(fileName string, state *stateParams)
 
 			return
 		}
-
-		handler.newStateChannel <- newState
 
 		select {
 		case <-state.acceptanceTimer.C:
@@ -473,6 +472,19 @@ func (handler *storageHandler) processWatcher() {
 			log.Errorf("FS watcher error: %s", err)
 		}
 	}
+}
+
+func (handler *storageHandler) pushServiceStateMessage(msg *pb.SMNotifications) (err error) {
+	// Send new state under unlocked context: when newStateChannel is full it blocks here.
+	// As result, if in offline mode newStateChannel becomes full, we wait here till online mode.
+	// Drop all changes if channel is full
+	if len(handler.stateChannel) >= cap(handler.stateChannel) {
+		return aoserrors.New("state channel is full")
+	}
+
+	handler.stateChannel <- msg
+
+	return nil
 }
 
 func createStorageFolder(path string, uid, gid uint32) (folderName string, err error) {
@@ -540,13 +552,13 @@ func getFileAndChecksum(fileName string) (data []byte, checksum []byte, err erro
 	return data, calcSum[:], nil
 }
 
-func checkChecksum(state, checksum string) (err error) {
+func checkChecksum(state []byte, checksum string) (err error) {
 	sum, err := hex.DecodeString(checksum)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	calcSum := sha3.Sum224([]byte(state))
+	calcSum := sha3.Sum224(state)
 
 	if !reflect.DeepEqual(calcSum[:], sum) {
 		return aoserrors.New("wrong checksum")

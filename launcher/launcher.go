@@ -45,7 +45,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 	"golang.org/x/sys/unix"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
@@ -149,10 +148,9 @@ var defaultHostfsBinds = []string{"bin", "sbin", "lib", "lib64", "usr"}
 
 // Launcher instance
 type Launcher struct {
-	// NewStateChannel used to notify about new service state
-	NewStateChannel chan NewState
+	// ServiceStateChannel used to notify about new service state
+	ServiceStateChannel chan *pb.SMNotifications
 
-	sender           Sender
 	serviceProvider  ServiceProvider
 	monitor          ServiceMonitor
 	network          NetworkProvider
@@ -245,11 +243,6 @@ type ServiceMonitor interface {
 	StopMonitorService(serviceID string) (err error)
 }
 
-// Sender provides API to send messages to the cloud
-type Sender interface {
-	SendStateRequest(serviceID string, defaultState bool) (err error)
-}
-
 // NetworkProvider provides network interface
 type NetworkProvider interface {
 	AddServiceToNetwork(serviceID, spID string, params networkmanager.NetworkParams) (err error)
@@ -267,24 +260,11 @@ type DeviceManagement interface {
 	RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource, err error)
 }
 
-// NewState new state message
-type NewState struct {
-	CorrelationID string
-	ServiceID     string
-	State         string
-	Checksum      string
-}
-
 // ServiceStatus service status
 type ServiceStatus int
 
 // ServiceState service state
 type ServiceState int
-
-type stateAcceptance struct {
-	correlationID string
-	acceptance    amqp.StateAcceptance
-}
 
 type layerProvider interface {
 	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
@@ -295,13 +275,12 @@ type layerProvider interface {
  ******************************************************************************/
 
 // New creates new launcher object
-func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
+func New(config *config.Config, serviceProvider ServiceProvider,
 	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement, serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
 	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
 		config:           config,
-		sender:           sender,
 		serviceProvider:  serviceProvider,
 		layerProvider:    layerProvider,
 		monitor:          monitor,
@@ -313,7 +292,7 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 		downloadDir:      path.Join(config.WorkingDir, downloadDirName),
 	}
 
-	launcher.NewStateChannel = make(chan NewState, stateChannelSize)
+	launcher.ServiceStateChannel = make(chan *pb.SMNotifications, stateChannelSize)
 
 	launcher.ttlStopChannel = make(chan bool, 1)
 
@@ -322,7 +301,7 @@ func New(config *config.Config, sender Sender, serviceProvider ServiceProvider,
 	}
 
 	if launcher.storageHandler, err = newStorageHandler(config.StorageDir, serviceProvider,
-		launcher.NewStateChannel, sender); err != nil {
+		launcher.ServiceStateChannel); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -608,14 +587,47 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 }
 
 // StateAcceptance notifies launcher about new state acceptance
-func (launcher *Launcher) StateAcceptance(acceptance amqp.StateAcceptance, correlationID string) {
-	launcher.actionHandler.PutInQueue(acceptance.ServiceID,
-		stateAcceptance{correlationID, acceptance}, launcher.doStateAcceptance)
+func (launcher *Launcher) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
+	if err := launcher.storageHandler.StateAcceptance(acceptance); err != nil {
+		log.Errorf("Can't set accept state: %s", err)
+
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 // UpdateState updates service state
-func (launcher *Launcher) UpdateState(state amqp.UpdateState) {
-	launcher.actionHandler.PutInQueue(state.ServiceID, state, launcher.doUpdateState)
+func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
+	service, err := launcher.serviceProvider.GetService(state.ServiceId)
+	if err != nil {
+		log.Errorf("Can't get service: %s", err)
+		return aoserrors.Wrap(err)
+	}
+
+	if err = launcher.stopService(service); err != nil {
+		log.Errorf("Can't stop service: %s", err)
+		return aoserrors.Wrap(err)
+	}
+
+	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	if err != nil {
+		log.Errorf("Can't get aos service config: %s", err)
+		return aoserrors.Wrap(err)
+	}
+
+	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.StateChecksum,
+		aosConfig.GetStateLimit()); err != nil {
+		log.Errorf("Can't update state: %s", err)
+		return aoserrors.Wrap(err)
+	}
+
+	if err = launcher.startService(service); err != nil {
+		log.Errorf("Can't start service: %s", err)
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 // Cleanup deletes all AOS services, their storages and states
@@ -764,6 +776,10 @@ func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar
 	launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
 
 	return status, nil
+}
+
+func (launcher *Launcher) GetStateMessageChannel() (channel <-chan *pb.SMNotifications) {
+	return launcher.ServiceStateChannel
 }
 
 func (state ServiceState) String() string {
@@ -1087,55 +1103,6 @@ func (launcher *Launcher) uninstallService(service Service) (err error) {
 	}
 
 	return nil
-}
-
-func (launcher *Launcher) doUpdateState(id string, data interface{}) {
-	service, err := launcher.serviceProvider.GetService(id)
-	if err != nil {
-		log.Errorf("Can't get service: %s", err)
-		return
-	}
-
-	if err = launcher.stopService(service); err != nil {
-		log.Errorf("Can't stop service: %s", err)
-		return
-	}
-
-	state, ok := data.(amqp.UpdateState)
-	if !ok {
-		log.Error("Wrong data type")
-		return
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		log.Errorf("Can't get aos service config: %s", err)
-		return
-	}
-
-	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.Checksum,
-		aosConfig.GetStateLimit()); err != nil {
-		log.Errorf("Can't update state: %s", err)
-		return
-	}
-
-	if err = launcher.startService(service); err != nil {
-		log.Errorf("Can't start service: %s", err)
-		return
-	}
-}
-
-func (launcher *Launcher) doStateAcceptance(id string, data interface{}) {
-	stateAcceptance, ok := data.(stateAcceptance)
-	if !ok {
-		log.Error("Wrong data type")
-		return
-	}
-
-	if err := launcher.storageHandler.StateAcceptance(stateAcceptance.acceptance, stateAcceptance.correlationID); err != nil {
-		log.Errorf("Can't accept state: %s", err)
-		return
-	}
 }
 
 func (launcher *Launcher) updateServiceState(id string, state ServiceState, status ServiceStatus) (err error) {

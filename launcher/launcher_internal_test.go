@@ -46,7 +46,6 @@ import (
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 	"golang.org/x/crypto/sha3"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
@@ -98,6 +97,7 @@ type stateRequest struct {
 
 // Test sender
 type testSender struct {
+	ServiceStateChannel chan *pb.NewServiceState
 	stateRequestChannel chan stateRequest
 }
 
@@ -170,10 +170,9 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestInstallRemove(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -238,10 +237,9 @@ func TestInstallRemove(t *testing.T) {
 }
 
 func TestRemoveAllServices(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -295,10 +293,9 @@ func TestRemoveAllServices(t *testing.T) {
 }
 
 func TestCheckServicesConsistency(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -355,10 +352,9 @@ func TestCheckServicesConsistency(t *testing.T) {
 }
 
 func TestAutoStart(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -395,7 +391,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(sender, nil)
+	launcher, err = newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -430,10 +426,9 @@ func TestAutoStart(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -505,10 +500,9 @@ func TestErrors(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	sender := newTestSender()
 	imageDownloader := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -589,10 +583,9 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestAOSSecret(t *testing.T) {
-	sender := newTestSender()
 	imageDownloader := pythonAOSSecretImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -645,13 +638,11 @@ func TestAOSSecret(t *testing.T) {
 }
 
 func TestDeviceManagementNotValidOnStartup(t *testing.T) {
-	sender := newTestSender()
-
 	// set fake resource system to invalid state (UT emulation)
 	deviceManager.isValid = false
 
 	// create launcher instance
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -669,10 +660,9 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 }
 
 func TestDeviceManagementRequestDeviceFail(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -706,10 +696,9 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 }
 
 func TestVisPermissions(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -744,10 +733,9 @@ func TestVisPermissions(t *testing.T) {
 }
 
 func TestUsersServices(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -849,10 +837,9 @@ func TestUsersServices(t *testing.T) {
 }
 
 func TestServiceTTL(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -911,7 +898,6 @@ func TestServiceTTL(t *testing.T) {
 }
 
 func TestServiceMonitoring(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
 	monitor, err := newTestMonitor()
@@ -919,7 +905,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(sender, monitor)
+	launcher, err := newTestLauncher(monitor)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -992,11 +978,10 @@ func TestServiceMonitoring(t *testing.T) {
 }
 
 func TestServiceStorage(t *testing.T) {
-	sender := newTestSender()
 	ftpService := ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}
 
 	// Set limit for 2 files + some buffer
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1071,10 +1056,9 @@ func TestServiceStorage(t *testing.T) {
 }
 
 func TestServiceState(t *testing.T) {
-	sender := newTestSender()
 	ftpService := ftpImage{"/", 1024 * 24, 256, 0, nil}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1098,6 +1082,27 @@ func TestServiceState(t *testing.T) {
 		t.Errorf("Can't install service: %s", err)
 	}
 
+	// Check new state accept
+
+	select {
+	case stateRequest := <-launcher.ServiceStateChannel:
+		if stateRequest.GetServiceStateRequest() == nil {
+			t.Errorf("Incorrect sm notification type")
+		}
+		stateData := []byte("Default")
+		calcSum := sha3.Sum224([]byte(stateData))
+
+		launcher.SetServiceState(&pb.ServiceState{
+			ServiceId:     "service0",
+			State:         stateData,
+			StateChecksum: hex.EncodeToString(calcSum[:])})
+
+		time.Sleep(1 * time.Second)
+
+	case <-time.After(2 * time.Second):
+		t.Error("No state request event")
+	}
+
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
 
@@ -1107,29 +1112,22 @@ func TestServiceState(t *testing.T) {
 	}
 	defer ftp.Quit()
 
-	// Check new state accept
-
-	stateData := ""
-
-	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
-		t.Errorf("Can't write file: %s", err)
-	}
-
 	time.Sleep(500 * time.Millisecond)
 
-	stateData = "Hello"
+	stateData := []byte("Hello")
 
 	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
 		t.Errorf("Can't write file: %s", err)
 	}
 
 	select {
-	case newState := <-launcher.NewStateChannel:
-		if newState.State != stateData {
-			t.Errorf("Wrong state: %s", newState.State)
+	case newState := <-launcher.ServiceStateChannel:
+		if !reflect.DeepEqual(newState.GetNewServiceState().GetServiceState().GetState(), stateData) {
+			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(amqp.StateAcceptance{Result: "accepted"}, newState.CorrelationID)
+		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result: "accepted"})
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1137,38 +1135,23 @@ func TestServiceState(t *testing.T) {
 
 	// Check new state reject
 
-	stateData = "Hello again"
+	stateData = []byte("Hello again")
 
 	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
 		t.Errorf("Can't write file: %s", err)
 	}
 
 	select {
-	case newState := <-launcher.NewStateChannel:
-		if newState.State != stateData {
-			t.Errorf("Wrong state: %s", newState.State)
+	case newState := <-launcher.ServiceStateChannel:
+		if !reflect.DeepEqual(newState.GetNewServiceState().GetServiceState().GetState(), stateData) {
+			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(amqp.StateAcceptance{Result: "rejected", Reason: "just because"}, newState.CorrelationID)
+		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result: "accepted", Reason: "just because"})
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
-	}
-
-	select {
-	case <-sender.stateRequestChannel:
-		stateData = "Hello"
-		calcSum := sha3.Sum224([]byte(stateData))
-
-		launcher.UpdateState(amqp.UpdateState{
-			ServiceID: "service0",
-			State:     stateData,
-			Checksum:  hex.EncodeToString(calcSum[:])})
-
-		time.Sleep(1 * time.Second)
-
-	case <-time.After(2 * time.Second):
-		t.Error("No state request event")
 	}
 
 	// Wait ftp server ready
@@ -1188,7 +1171,7 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Can't retrieve state file: %s", err)
 		}
 
-		if string(serviceState) != stateData {
+		if !reflect.DeepEqual(serviceState, stateData) {
 			t.Errorf("Wrong state: %s", serviceState)
 		}
 
@@ -1224,7 +1207,7 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Can't retrieve state file: %s", err)
 		}
 
-		if string(serviceState) != stateData {
+		if !reflect.DeepEqual(serviceState, stateData) {
 			t.Errorf("Wrong state: %s", serviceState)
 		}
 
@@ -1233,11 +1216,10 @@ func TestServiceState(t *testing.T) {
 }
 
 func TestTmpDir(t *testing.T) {
-	sender := newTestSender()
 	ftpService := ftpImage{"/tmp", 0, 0, 0, nil}
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1275,7 +1257,7 @@ func TestTmpDir(t *testing.T) {
 
 	ftpService = ftpImage{"/tmp", 0, 0, 8192, nil}
 
-	if launcher, err = newTestLauncher(sender, nil); err != nil {
+	if launcher, err = newTestLauncher(nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1318,7 +1300,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(sender, nil); err != nil {
+	if launcher, err = newTestLauncher(nil); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1545,13 +1527,11 @@ func TestServiceWithLayers(t *testing.T) {
 		t.Fatalf("Can't write layer file: %s", err)
 	}
 
-	sender := newTestSender()
-
 	digests := []digest.Digest{digest.NewDigestFromBytes(digest.SHA256, []byte(testString))}
 
 	ftpService := ftpImage{"/layer1", 0, 0, 0, digests}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1596,7 +1576,7 @@ func TestServiceWithLayers(t *testing.T) {
 }
 
 func TestSetServiceResources(t *testing.T) {
-	launcher, err := newTestLauncher(nil, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create test launcher: %s", err)
 	}
@@ -1637,13 +1617,12 @@ func TestSetServiceResources(t *testing.T) {
 }
 
 func TestNotStartIfInvalidResource(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
 	// set fake resource system to valid state (UT emulation)
 	deviceManager.isValid = true
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1679,7 +1658,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(sender, nil)
+	launcher, err = newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1721,10 +1700,9 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 }
 
 func TestManifestValidation(t *testing.T) {
-	sender := newTestSender()
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1787,10 +1765,9 @@ func TestManifestValidation(t *testing.T) {
 }
 
 func TestServiceCompatibilityAfterUpdate(t *testing.T) {
-	sender := newTestSender()
 	ftpService := ftpImage{"/home/service/storage", 8192 * 20, 0, 0, nil}
 
-	launcher, err := newTestLauncher(sender, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1885,11 +1862,10 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func newTestLauncher(sender Sender,
-	monitor ServiceMonitor) (launcher *Launcher, err error) {
+func newTestLauncher(monitor ServiceMonitor) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
 		DefaultServiceTTLDays: 30, Runner: getRuntime()},
-		sender, &serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
+		&serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -2141,14 +2117,22 @@ func newTestSender() (sender *testSender) {
 	sender = &testSender{}
 
 	sender.stateRequestChannel = make(chan stateRequest, 32)
+	sender.ServiceStateChannel = make(chan *pb.NewServiceState, 32)
 
 	return sender
 }
 
-func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) (err error) {
+func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) {
 	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
+}
 
-	return nil
+func (sender *testSender) SendNewServiceState(correlationID, serviceID, checksum string, state []byte) {
+	sender.ServiceStateChannel <- &pb.NewServiceState{CorrelationId: correlationID,
+		ServiceState: &pb.ServiceState{
+			ServiceId:     serviceID,
+			StateChecksum: checksum,
+			State:         state,
+		}}
 }
 
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
@@ -2526,7 +2510,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(nil, nil)
+	launcher, err := newTestLauncher(nil)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
 	}
