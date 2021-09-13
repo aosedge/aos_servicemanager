@@ -51,6 +51,9 @@ type ServiceLauncher interface {
 	InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error)
 	UninstallService(removeReq *pb.RemoveServiceRequest) (err error)
 	GetServicesInfo() (services []*pb.ServiceStatus, err error)
+	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
+	SetServiceState(state *pb.ServiceState) (err error)
+	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
 }
 
 // LayerProvider services layer manager interface
@@ -80,6 +83,7 @@ type SMServer struct {
 	notificationStream pb.ServiceManager_SubscribeSMNotificationsServer
 	alertChannel       <-chan *pb.Alert
 	monitoringChannel  <-chan *pb.Monitoring
+	stateChannel       <-chan *pb.SMNotifications
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -98,6 +102,10 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 
 	if monitoringProvider != nil {
 		server.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
+	}
+
+	if launcher != nil {
+		server.stateChannel = launcher.GetStateMessageChannel()
 	}
 
 	var opts []grpc.ServerOption
@@ -184,9 +192,14 @@ func (server *SMServer) RemoveService(ctx context.Context, service *pb.RemoveSer
 	return &emptypb.Empty{}, server.launcher.UninstallService(service)
 }
 
+// ServiceStateAcceptance accepts new services state
+func (server *SMServer) ServiceStateAcceptance(ctx context.Context, acceptance *pb.StateAcceptance) (*empty.Empty, error) {
+	return &emptypb.Empty{}, server.launcher.StateAcceptance(acceptance)
+}
+
 // SetServiceState sets state for aos service
 func (server *SMServer) SetServiceState(ctx context.Context, state *pb.ServiceState) (ret *empty.Empty, err error) {
-	return ret, nil
+	return &emptypb.Empty{}, server.launcher.SetServiceState(state)
 }
 
 // OverrideEnvVars overrides entrainment variables for the service
@@ -235,6 +248,12 @@ func (server *SMServer) handleChannels() {
 					SMNotification: &pb.SMNotifications_Monitoring{
 						Monitoring: monitoringData}}); err != nil {
 				log.Errorf("Can't send monitoring notification: %s ", err)
+				return
+			}
+
+		case stateMsg := <-server.stateChannel:
+			if err := server.notificationStream.Send(stateMsg); err != nil {
+				log.Errorf("Can't send state notification :%s ", err)
 				return
 			}
 

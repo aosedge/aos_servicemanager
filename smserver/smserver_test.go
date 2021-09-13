@@ -50,6 +50,7 @@ const (
  ******************************************************************************/
 
 type testLauncher struct {
+	stateChannel chan *pb.SMNotifications
 }
 
 type testLayerManager struct {
@@ -66,6 +67,9 @@ type testAlertProvider struct {
 
 type testMonitoringProvider struct {
 	monitoringChannel chan *pb.Monitoring
+}
+
+type testStateProvider struct {
 }
 
 /*******************************************************************************
@@ -319,6 +323,66 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 }
 
+func TestServiceStateProcessing(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	launcher := &testLauncher{stateChannel: make(chan *pb.SMNotifications, 10)}
+
+	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go smServer.Start()
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+	defer client.close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't subscribe: %s", err)
+	}
+
+	etalonNewStateMsg := &pb.NewServiceState{CorrelationId: "corelationID",
+		ServiceState: &pb.ServiceState{ServiceId: "serviecId1", StateChecksum: "someCheckSum", State: []byte("state1")}}
+
+	launcher.stateChannel <- &pb.SMNotifications{
+		SMNotification: &pb.SMNotifications_NewServiceState{NewServiceState: etalonNewStateMsg}}
+
+	receiveNewSate, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive monitoring data: %s", err)
+	}
+
+	if !proto.Equal(receiveNewSate.GetNewServiceState(), etalonNewStateMsg) {
+		log.Error("received newSate data != sent data")
+	}
+
+	etalonStateRequest := &pb.ServiceStateRequest{ServiceId: "serviceId2", Default: false}
+
+	launcher.stateChannel <- &pb.SMNotifications{
+		SMNotification: &pb.SMNotifications_ServiceStateRequest{
+			ServiceStateRequest: etalonStateRequest}}
+
+	receivedSateRequest, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive monitoring data: %s", err)
+	}
+
+	if !proto.Equal(receivedSateRequest.GetServiceStateRequest(), etalonStateRequest) {
+		log.Error("received state request data != sent data")
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -339,6 +403,18 @@ func (launcher *testLauncher) InstallService(serviceInfo *pb.InstallServiceReque
 
 func (launcher *testLauncher) UninstallService(removeReq *pb.RemoveServiceRequest) (err error) {
 	return nil
+}
+
+func (launcher *testLauncher) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
+	return nil
+}
+
+func (launcher *testLauncher) SetServiceState(state *pb.ServiceState) (err error) {
+	return nil
+}
+
+func (launcher *testLauncher) GetStateMessageChannel() (channel <-chan *pb.SMNotifications) {
+	return launcher.stateChannel
 }
 
 func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
