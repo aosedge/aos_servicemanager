@@ -24,8 +24,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"reflect"
-	"sync"
 	"syscall"
 	"time"
 
@@ -34,7 +32,6 @@ import (
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/alerts"
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/database"
 	"aos_servicemanager/iamclient"
@@ -44,6 +41,7 @@ import (
 	"aos_servicemanager/monitoring"
 	"aos_servicemanager/networkmanager"
 	resource "aos_servicemanager/resourcemanager"
+	"aos_servicemanager/smserver"
 )
 
 /*******************************************************************************
@@ -60,7 +58,7 @@ const dbFileName = "servicemanager.db"
 
 type serviceManager struct {
 	alerts          *alerts.Alerts
-	amqp            *amqp.AmqpHandler
+	smServer        *smserver.SMServer
 	cfg             *config.Config
 	db              *database.Database
 	launcher        *launcher.Launcher
@@ -70,9 +68,6 @@ type serviceManager struct {
 	network         *networkmanager.NetworkManager
 	iam             *iamclient.Client
 	layerMgr        *layermanager.LayerManager
-
-	isDesiredStatusInProcessing bool
-	desiredStatusMutex          sync.Mutex
 }
 
 type journalHook struct {
@@ -172,8 +167,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	// Create amqp
-	if sm.amqp, err = amqp.New(); err != nil {
+	if sm.layerMgr, err = layermanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -205,23 +199,24 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.layerMgr, err = layermanager.New(cfg, sm.db); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	// Create resourcemanager
 	if sm.resourcemanager, err = resource.New(cfg.BoardConfigFile, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.amqp, sm.db, sm.layerMgr, sm.monitor,
+	if sm.launcher, err = launcher.New(cfg, sm.db, sm.layerMgr, sm.monitor,
 		sm.network, sm.resourcemanager, sm.iam); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
 	// Create logging
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.smServer, err = smserver.New(cfg, sm.launcher, sm.layerMgr,
+		sm.alerts, sm.monitor, sm.resourcemanager, sm.logging, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -251,9 +246,9 @@ func (sm *serviceManager) close() {
 		sm.logging.Close()
 	}
 
-	// Close amqp
-	if sm.amqp != nil {
-		sm.amqp.Close()
+	// Close grpc server
+	if sm.smServer != nil {
+		sm.smServer.Stop()
 	}
 
 	// Close launcher
@@ -268,7 +263,7 @@ func (sm *serviceManager) close() {
 
 	// Close network
 	if sm.network != nil {
-		sm.monitor.Close()
+		sm.network.Close()
 	}
 
 	// Close alerts
@@ -292,127 +287,6 @@ func (sm *serviceManager) checkConsistency() (err error) {
 	}
 
 	return nil
-}
-
-func (sm *serviceManager) processAmqpMessage(message amqp.Message) (err error) {
-	switch data := message.Data.(type) {
-	case *amqp.DecodedDesiredStatus:
-
-	case *amqp.DecodedOverrideEnvVars:
-		log.Info("Receive request to override env vars")
-
-		if err := sm.launcher.ProcessDesiredEnvVarsList(*data); err != nil {
-			log.Error("Can't override env vars: ", err)
-		}
-
-	case *amqp.StateAcceptance:
-		log.WithFields(log.Fields{
-			"serviceID": data.ServiceID,
-			"result":    data.Result}).Info("Receive state acceptance")
-
-		sm.launcher.StateAcceptance(*data, message.CorrelationID)
-
-	case *amqp.UpdateState:
-		log.WithFields(log.Fields{
-			"serviceID": data.ServiceID,
-			"checksum":  data.Checksum}).Info("Receive update state")
-
-		sm.launcher.UpdateState(*data)
-
-	case *amqp.RequestServiceLog:
-		log.WithFields(log.Fields{
-			"serviceID": data.ServiceID,
-			"from":      data.From,
-			"till":      data.Till}).Info("Receive request service log")
-
-		sm.logging.GetServiceLog(*data)
-
-	case *amqp.RequestServiceCrashLog:
-		log.WithFields(log.Fields{
-			"serviceID": data.ServiceID}).Info("Receive request service crash log")
-
-		sm.logging.GetServiceCrashLog(*data)
-
-	case *amqp.RequestSystemLog:
-		log.WithFields(log.Fields{
-			"from": data.From,
-			"till": data.Till}).Info("Receive request system log")
-
-		sm.logging.GetSystemLog(*data)
-
-	default:
-		log.Warnf("Receive unsupported amqp message: %s", reflect.TypeOf(data))
-	}
-
-	return nil
-}
-
-func (sm *serviceManager) handleChannels() (err error) {
-	var monitorDataChannel chan amqp.MonitoringData
-	var alertsChannel chan amqp.Alerts
-
-	if sm.monitor != nil {
-		monitorDataChannel = sm.monitor.DataChannel
-	}
-
-	if sm.alerts != nil {
-		alertsChannel = sm.alerts.AlertsChannel
-	}
-
-	for {
-		select {
-		case amqpMessage := <-sm.amqp.MessageChannel:
-			if err, ok := amqpMessage.Data.(error); ok {
-				return aoserrors.Wrap(err)
-			}
-
-			if err = sm.processAmqpMessage(amqpMessage); err != nil {
-				log.Errorf("Error processing amqp result: %s", err)
-			}
-
-		case newState := <-sm.launcher.NewStateChannel:
-			if err := sm.amqp.SendNewState(newState.ServiceID, newState.State,
-				newState.Checksum, newState.CorrelationID); err != nil {
-				log.Errorf("Error send new state message: %s", err)
-			}
-
-		case data := <-monitorDataChannel:
-			if err := sm.amqp.SendMonitoringData(data); err != nil {
-				log.Errorf("Error send monitoring data: %s", err)
-			}
-
-		case logData := <-sm.logging.LogChannel:
-			if err := sm.amqp.SendServiceLog(logData); err != nil {
-				log.Errorf("Error send service log: %s", err)
-			}
-
-		case alerts := <-alertsChannel:
-			if err := sm.amqp.SendAlerts(alerts); err != nil {
-				log.Errorf("Error send alerts: %s", err)
-			}
-		}
-	}
-}
-
-func (sm *serviceManager) run() (err error) {
-	for {
-		// Connect
-		if err = sm.amqp.Connect(sm.cfg.ServiceDiscoveryURL, []string{}); err != nil {
-			log.Errorf("Can't establish connection: %s", err)
-			goto reconnect
-		}
-
-		if err = sm.handleChannels(); err != nil {
-			log.Errorf("Runtime error: %s", err)
-		}
-
-	reconnect:
-		sm.amqp.Disconnect()
-
-		<-time.After(reconnectTimeout)
-
-		log.Debug("Reconnecting...")
-	}
 }
 
 func newJournalHook() (hook *journalHook) {
@@ -520,7 +394,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if err = sm.run(); err != nil {
+	if err = sm.smServer.Start(); err != nil {
 		os.Exit(1)
 	}
 }
