@@ -34,8 +34,9 @@ import (
 
 	"github.com/coreos/go-systemd/v22/dbus"
 	log "github.com/sirupsen/logrus"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/launcher"
 	"aos_servicemanager/logging"
@@ -115,21 +116,21 @@ func TestGetServiceLog(t *testing.T) {
 
 	till := from.Add(5 * time.Second)
 
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice0",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
+	logging.GetServiceLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice0",
+		LogId:     "log0",
+		From:      timestamppb.New(from),
+		Till:      timestamppb.New(till)})
 
-	checkReceivedLog(t, logging.LogChannel, &from, &till)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice0",
-		LogID:     "log0",
-		From:      &from})
+	logging.GetServiceLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice0",
+		LogId:     "log0",
+		From:      timestamppb.New(from)})
 
 	currentTime := time.Now()
-	checkReceivedLog(t, logging.LogChannel, &from, &currentTime)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &currentTime)
 }
 
 func TestGetWrongServiceLog(t *testing.T) {
@@ -142,15 +143,15 @@ func TestGetWrongServiceLog(t *testing.T) {
 	till := time.Now()
 	from := till.Add(-1 * time.Hour)
 
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "nonExisting",
-		LogID:     "log1",
-		From:      &from,
-		Till:      &till})
+	logging.GetServiceLog(&pb.ServiceLogRequest{
+		ServiceId: "nonExisting",
+		LogId:     "log1",
+		From:      timestamppb.New(from),
+		Till:      timestamppb.New(till)})
 
 	select {
-	case result := <-logging.LogChannel:
-		if result.Error == nil {
+	case result := <-logging.GetLogsDataChannel():
+		if result.Error == "" {
 			log.Error("Expect log error")
 		}
 
@@ -179,12 +180,12 @@ func TestGetSystemLog(t *testing.T) {
 
 	till := from.Add(5 * time.Second)
 
-	logging.GetSystemLog(amqp.RequestSystemLog{
-		LogID: "log10",
-		From:  &from,
-		Till:  &till})
+	logging.GetSystemLog(&pb.SystemLogRequest{
+		LogId: "log10",
+		From:  timestamppb.New(from),
+		Till:  timestamppb.New(till)})
 
-	checkReceivedLog(t, logging.LogChannel, nil, nil)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
 }
 
 func TestGetEmptyLog(t *testing.T) {
@@ -204,13 +205,13 @@ func TestGetEmptyLog(t *testing.T) {
 
 	till := time.Now()
 
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice2",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
+	logging.GetServiceLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice2",
+		LogId:     "log0",
+		From:      timestamppb.New(from),
+		Till:      timestamppb.New(till)})
 
-	checkEmptyLog(t, logging.LogChannel)
+	checkEmptyLog(t, logging.GetLogsDataChannel())
 }
 
 func TestGetServiceCrashLog(t *testing.T) {
@@ -238,11 +239,11 @@ func TestGetServiceCrashLog(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
-		ServiceID: "logservice3",
-		LogID:     "log2"})
+	logging.GetServiceCrashLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice3",
+		LogId:     "log2"})
 
-	checkReceivedLog(t, logging.LogChannel, &from, &till)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
 	if err = createService("logservice5"); err != nil {
 		t.Fatalf("Can't create service: %s", err)
@@ -272,14 +273,14 @@ func TestGetServiceCrashLog(t *testing.T) {
 
 	crashService("logservice5")
 
-	logging.GetServiceCrashLog(amqp.RequestServiceCrashLog{
-		ServiceID: "logservice5",
-		LogID:     "log5",
-		From:      &from,
-		Till:      &till,
+	logging.GetServiceCrashLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice5",
+		LogId:     "log5",
+		From:      timestamppb.New(from),
+		Till:      timestamppb.New(till),
 	})
 
-	checkReceivedLog(t, logging.LogChannel, &from, &till)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 }
 
 func TestMaxPartCountLog(t *testing.T) {
@@ -307,17 +308,17 @@ func TestMaxPartCountLog(t *testing.T) {
 
 	till := from.Add(20 * time.Second)
 
-	logging.GetServiceLog(amqp.RequestServiceLog{
-		ServiceID: "logservice4",
-		LogID:     "log0",
-		From:      &from,
-		Till:      &till})
+	logging.GetServiceLog(&pb.ServiceLogRequest{
+		ServiceId: "logservice4",
+		LogId:     "log0",
+		From:      timestamppb.New(from),
+		Till:      timestamppb.New(till)})
 
 	for {
 		select {
-		case result := <-logging.LogChannel:
-			if result.Error != nil {
-				t.Errorf("Error log received: %s", *result.Error)
+		case result := <-logging.GetLogsDataChannel():
+			if result.Error != "" {
+				t.Errorf("Error log received: %s", result.Error)
 				return
 			}
 
@@ -326,23 +327,23 @@ func TestMaxPartCountLog(t *testing.T) {
 				return
 			}
 
-			if result.PartCount == nil {
+			if result.PartCount == 0 {
 				t.Error("Missing part count")
 				return
 			}
 
-			if *result.PartCount != 2 {
-				t.Errorf("Wrong part count received: %d", *result.PartCount)
+			if result.PartCount != 2 {
+				t.Errorf("Wrong part count received: %d", result.PartCount)
 				return
 			}
 
-			if result.Part == nil {
+			if result.Part == 0 {
 				t.Error("Missing part")
 				return
 			}
 
-			if *result.Part > *result.PartCount {
-				t.Errorf("Wrong part received: %d", *result.Part)
+			if result.Part > result.PartCount {
+				t.Errorf("Wrong part received: %d", result.Part)
 				return
 			}
 
@@ -492,14 +493,14 @@ func getTimeRange(logData string) (from, till time.Time, err error) {
 	return from, till, nil
 }
 
-func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, till *time.Time) {
+func checkReceivedLog(t *testing.T, logChannel <-chan *pb.LogData, from, till *time.Time) {
 	receivedLog := ""
 
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != nil {
-				t.Errorf("Error log received: %s", *result.Error)
+			if result.Error != "" {
+				t.Errorf("Error log received: %s", result.Error)
 				return
 			}
 
@@ -508,7 +509,7 @@ func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, t
 				return
 			}
 
-			zr, err := gzip.NewReader(bytes.NewBuffer(*result.Data))
+			zr, err := gzip.NewReader(bytes.NewBuffer(result.Data))
 			if err != nil {
 				t.Errorf("gzip error: %s", err)
 				return
@@ -522,7 +523,7 @@ func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, t
 
 			receivedLog += string(data)
 
-			if *result.Part == *result.PartCount {
+			if result.Part == result.PartCount {
 				if from == nil || till == nil {
 					return
 				}
@@ -551,16 +552,16 @@ func checkReceivedLog(t *testing.T, logChannel chan amqp.PushServiceLog, from, t
 	}
 }
 
-func checkEmptyLog(t *testing.T, logChannel chan amqp.PushServiceLog) {
+func checkEmptyLog(t *testing.T, logChannel <-chan *pb.LogData) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != nil {
-				t.Errorf("Error log received: %s", *result.Error)
+			if result.Error != "" {
+				t.Errorf("Error log received: %s", result.Error)
 				return
 			}
 
-			if (result.Data == nil) || len(*result.Data) != 0 {
+			if (result.Data == nil) || len(result.Data) != 0 {
 				t.Error("Empty log expected")
 				return
 			}

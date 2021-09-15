@@ -26,8 +26,8 @@ import (
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 	"aos_servicemanager/launcher"
 )
@@ -54,7 +54,7 @@ type ServiceProvider interface {
 
 // Logging instance
 type Logging struct {
-	LogChannel chan amqp.PushServiceLog
+	logChannel chan *pb.LogData
 
 	serviceProvider ServiceProvider
 	config          config.Logging
@@ -77,7 +77,7 @@ func New(config *config.Config, serviceProvider ServiceProvider) (instance *Logg
 
 	instance = &Logging{serviceProvider: serviceProvider, config: config.Logging}
 
-	instance.LogChannel = make(chan amqp.PushServiceLog, logChannelSize)
+	instance.logChannel = make(chan *pb.LogData, logChannelSize)
 
 	return instance, nil
 }
@@ -88,46 +88,81 @@ func (instance *Logging) Close() {
 }
 
 // GetServiceLog returns service log
-func (instance *Logging) GetServiceLog(request amqp.RequestServiceLog) {
+func (instance *Logging) GetServiceLog(request *pb.ServiceLogRequest) {
 	log.WithFields(log.Fields{
-		"serviceID": request.ServiceID,
-		"logID":     request.LogID,
+		"serviceID": request.ServiceId,
+		"logID":     request.LogId,
 		"dateFrom":  request.From,
 		"dateTill":  request.Till}).Debug("Get service log")
 
 	logRequest := getLogRequest{
-		serviceID: request.ServiceID,
-		logID:     request.LogID,
-		from:      request.From,
-		till:      request.Till,
+		serviceID: request.ServiceId,
+		logID:     request.LogId,
+	}
+
+	if request.From != nil {
+		localTime := request.GetFrom().AsTime()
+		logRequest.from = &localTime
+	}
+
+	if request.Till != nil {
+		localTime := request.GetTill().AsTime()
+		logRequest.till = &localTime
 	}
 
 	go instance.getLog(logRequest)
 }
 
 // GetServiceCrashLog returns service crash log
-func (instance *Logging) GetServiceCrashLog(request amqp.RequestServiceCrashLog) {
+func (instance *Logging) GetServiceCrashLog(request *pb.ServiceLogRequest) {
 	log.WithFields(log.Fields{
-		"serviceID": request.ServiceID,
-		"logID":     request.LogID}).Debug("Get service crash log")
+		"serviceID": request.ServiceId,
+		"logID":     request.LogId}).Debug("Get service crash log")
 
-	go instance.getServiceCrashLog(request)
+	logRequest := getLogRequest{
+		serviceID: request.ServiceId,
+		logID:     request.LogId,
+	}
+
+	if request.From != nil {
+		localTime := request.GetFrom().AsTime()
+		logRequest.from = &localTime
+	}
+
+	if request.Till != nil {
+		localTime := request.GetTill().AsTime()
+		logRequest.till = &localTime
+	}
+
+	go instance.getServiceCrashLog(logRequest)
 }
 
 // GetSystemLog returns system log
-func (instance *Logging) GetSystemLog(request amqp.RequestSystemLog) {
+func (instance *Logging) GetSystemLog(request *pb.SystemLogRequest) {
 	log.WithFields(log.Fields{
-		"logID":    request.LogID,
+		"logID":    request.LogId,
 		"dateFrom": request.From,
 		"dateTill": request.Till}).Debug("Get system log")
 
 	logRequest := getLogRequest{
-		logID: request.LogID,
-		from:  request.From,
-		till:  request.Till,
+		logID: request.LogId,
+	}
+
+	if request.From != nil {
+		localTime := request.GetFrom().AsTime()
+		logRequest.from = &localTime
+	}
+
+	if request.Till != nil {
+		localTime := request.GetTill().AsTime()
+		logRequest.till = &localTime
 	}
 
 	go instance.getLog(logRequest)
+}
+
+func (instance *Logging) GetLogsDataChannel() (channel <-chan *pb.LogData) {
+	return instance.logChannel
 }
 
 /*******************************************************************************
@@ -179,7 +214,7 @@ func (instance *Logging) getLog(request getLogRequest) {
 
 	var archInstance *archivator
 
-	if archInstance, err = newArchivator(instance.LogChannel,
+	if archInstance, err = newArchivator(instance.logChannel,
 		instance.config.MaxPartSize,
 		instance.config.MaxPartCount); err != nil {
 		err = aoserrors.Wrap(err)
@@ -230,7 +265,7 @@ func (instance *Logging) getLog(request getLogRequest) {
 	}
 }
 
-func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog) {
+func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 	var err error
 
 	// error handling
@@ -238,7 +273,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		if err != nil {
 			log.Error("Can't get service crash logs: ", err)
 
-			instance.sendErrorResponse(err.Error(), request.LogID)
+			instance.sendErrorResponse(err.Error(), request.logID)
 		}
 	}()
 
@@ -251,18 +286,18 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 	}
 	defer journal.Close()
 
-	if _, err = instance.addServiceIDFilter(journal, unitField, request.ServiceID); err != nil {
+	if _, err = instance.addServiceIDFilter(journal, unitField, request.serviceID); err != nil {
 		err = aoserrors.Wrap(err)
 		return
 	}
 
-	if request.Till == nil {
+	if request.till == nil {
 		if err = journal.SeekTail(); err != nil {
 			err = aoserrors.Wrap(err)
 			return
 		}
 	} else {
-		if err = journal.SeekRealtimeUsec(uint64(request.Till.UnixNano() / 1000)); err != nil {
+		if err = journal.SeekRealtimeUsec(uint64(request.till.UnixNano() / 1000)); err != nil {
 			err = aoserrors.Wrap(err)
 			return
 		}
@@ -290,8 +325,8 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 			return
 		}
 
-		if request.From != nil {
-			if logEntry.RealtimeTimestamp <= uint64(request.From.UnixNano()/1000) {
+		if request.from != nil {
+			if logEntry.RealtimeTimestamp <= uint64(request.from.UnixNano()/1000) {
 				break
 			}
 		}
@@ -301,7 +336,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 				crashTime = logEntry.MonotonicTimestamp
 
 				log.WithFields(log.Fields{
-					"serviceID": request.ServiceID,
+					"serviceID": request.serviceID,
 					"time":      getLogDate(logEntry)}).Debug("Crash detected")
 			}
 		} else {
@@ -313,7 +348,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 	var archInstance *archivator
 
-	if archInstance, err = newArchivator(instance.LogChannel,
+	if archInstance, err = newArchivator(instance.logChannel,
 		instance.config.MaxPartSize,
 		instance.config.MaxPartCount); err != nil {
 		err = aoserrors.Wrap(err)
@@ -328,7 +363,7 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 
 		var unitName string
 
-		unitName, err = instance.addServiceIDFilter(journal, serviceField, request.ServiceID)
+		unitName, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID)
 		if err != nil {
 			err = aoserrors.Wrap(err)
 			return
@@ -367,18 +402,18 @@ func (instance *Logging) getServiceCrashLog(request amqp.RequestServiceCrashLog)
 		}
 	}
 
-	if err = archInstance.sendLog(request.LogID); err != nil {
+	if err = archInstance.sendLog(request.logID); err != nil {
 		err = aoserrors.Wrap(err)
 		return
 	}
 }
 
 func (instance *Logging) sendErrorResponse(errorStr, logID string) {
-	response := amqp.PushServiceLog{
-		LogID: logID,
-		Error: &errorStr}
+	response := &pb.LogData{
+		LogId: logID,
+		Error: errorStr}
 
-	instance.LogChannel <- response
+	instance.logChannel <- response
 }
 
 func (instance *Logging) addServiceIDFilter(journal *sdjournal.Journal,

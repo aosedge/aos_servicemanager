@@ -24,8 +24,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-
-	amqp "aos_servicemanager/amqphandler"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
 )
 
 /*******************************************************************************
@@ -35,7 +34,7 @@ import (
 type archivator struct {
 	zw           *gzip.Writer
 	logBuffers   []bytes.Buffer
-	logChannel   chan<- amqp.PushServiceLog
+	logChannel   chan<- *pb.LogData
 	partCount    uint64
 	partSize     uint64
 	maxPartSize  uint64
@@ -52,7 +51,7 @@ var errMaxPartCount = errors.New("max part count reached")
  * Private
  ******************************************************************************/
 
-func newArchivator(logChannel chan<- amqp.PushServiceLog, maxPartSize, maxPartCount uint64) (instance *archivator, err error) {
+func newArchivator(logChannel chan<- *pb.LogData, maxPartSize, maxPartCount uint64) (instance *archivator, err error) {
 	instance = &archivator{logChannel: logChannel, maxPartSize: maxPartSize, maxPartCount: maxPartCount}
 
 	instance.logBuffers = make([]bytes.Buffer, 1)
@@ -106,11 +105,11 @@ func (instance *archivator) sendLog(logID string) (err error) {
 	if instance.partCount == 0 {
 		var part uint64 = 1
 
-		instance.logChannel <- amqp.PushServiceLog{
-			LogID:     logID,
-			PartCount: &part,
-			Part:      &part,
-			Data:      &[]byte{}}
+		instance.logChannel <- &pb.LogData{
+			LogId:     logID,
+			PartCount: part,
+			Part:      part,
+			Data:      []byte{}}
 
 		log.WithFields(log.Fields{
 			"part": part,
@@ -129,11 +128,11 @@ func (instance *archivator) sendLog(logID string) (err error) {
 			"part": part,
 			"size": len(data)}).Debugf("Push log")
 
-		instance.logChannel <- amqp.PushServiceLog{
-			LogID:     logID,
-			PartCount: &instance.partCount,
-			Part:      &part,
-			Data:      &data}
+		instance.logChannel <- &pb.LogData{
+			LogId:     logID,
+			PartCount: instance.partCount,
+			Part:      part,
+			Data:      data}
 	}
 
 	return nil
