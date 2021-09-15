@@ -1,0 +1,236 @@
+syntax = "proto3";
+ 
+option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+package servicemanager.v1;
+ 
+service ServiceManager {    
+    rpc SetUsers(Users) returns (google.protobuf.Empty) {}
+    rpc GetStatus(google.protobuf.Empty) returns (SMStatus) {}
+    rpc GetBoardConfigStatus(google.protobuf.Empty) returns (BoardConfigStatus) {}
+    rpc CheckBoardConfig(BoardConfig) returns (BoardConfigStatus) {}
+    rpc SetBoardConfig(BoardConfig)  returns (google.protobuf.Empty)  {}
+    rpc InstallService(InstallServiceRequest) returns (ServiceStatus) {}
+    rpc RemoveService(RemoveServiceRequest) returns (google.protobuf.Empty) {}
+    rpc ServiceStateAcceptance(StateAcceptance) returns (google.protobuf.Empty) {}
+    rpc SetServiceState(ServiceState) returns (google.protobuf.Empty) {}
+    rpc OverrideEnvVars(OverrideEnvVarsRequest) returns (OverrideEnvVarStatus) {}
+    rpc InstallLayer(InstallLayerRequest) returns (google.protobuf.Empty) {}
+    rpc RemoveLayer(RemoveLayerRequest) returns (google.protobuf.Empty) {}
+    rpc SubscribeSMNotifications(google.protobuf.Empty) returns (stream SMNotifications) {}
+    rpc GetSystemLog(SystemLogRequest) returns (google.protobuf.Empty){}
+    rpc GetServiceLog(ServiceLogRequest) returns (google.protobuf.Empty){}
+    rpc GetServiceCrashLog(ServiceLogRequest) returns (google.protobuf.Empty){}
+}
+
+message Users {
+    repeated string users = 1;
+}
+
+message SMStatus {
+    repeated ServiceStatus services = 1;
+    repeated LayerStatus layers = 2;
+}
+
+message BoardConfig {
+    string board_config = 1;
+}
+
+message BoardConfigStatus {
+    string vendor_version = 1;
+}
+
+message ServiceStatus {
+    string service_id = 1;    
+    uint64 aos_version = 2;
+    string vendor_version = 3;
+    string state_checksum = 4;
+}
+
+message InstallServiceRequest {
+    string url = 1;
+    string service_id = 2;
+    string provider_id = 3;
+    uint64 aos_version = 4;
+    string vendor_version = 5;
+    string alert_rules = 6;
+    string description = 7;
+    bytes sha256 = 8;
+    bytes sha512 = 9;
+    uint64 size = 10;
+}
+
+message RemoveServiceRequest {
+    string service_id = 1;
+    uint64 aos_version = 2;
+    string vendor_version = 3;
+}
+
+message ServiceStateRequest {
+    string service_id = 1;
+    bool default = 2;
+}
+
+message StateAcceptance {
+    string correlation_id =1;
+    string service_id = 2;
+    string state_checksum = 3;
+    string result = 4;
+    string reason = 5;
+}
+
+message ServiceState{
+    string service_id = 1;
+    string state_checksum = 2;
+    bytes state = 3;
+}
+
+message NewServiceState {
+    string correlation_id = 1;
+    ServiceState service_state = 2;
+}
+
+message OverrideEnvVarsRequest {
+    repeated OverrideEnvVar env_vars = 1; 
+}
+
+message OverrideEnvVar {
+    string service_id = 1;
+    string subject_id = 2;
+    repeated EnvVarInfo vars = 3;
+}
+
+message EnvVarInfo {
+    string var_id = 1;
+    string variable = 2;
+    google.protobuf.Timestamp ttl = 3;
+}
+
+message OverrideEnvVarStatus{
+    repeated EnvVarStatus env_var_status= 1;
+}
+
+message EnvVarStatus {
+    string service_id = 1;
+    string subject_id = 2;
+    repeated VarStatus var_status = 3;
+}
+
+message VarStatus {
+    string var_id = 1;
+    string error = 2;
+}
+
+message LayerStatus {
+    string layer_id = 1;    
+    uint64 aos_version = 2;
+    string vendor_version = 3;
+    string digest = 4;
+}
+
+message InstallLayerRequest {
+    string url = 1;
+    string layer_id = 2;
+    uint64 aos_version = 3;
+    string vendor_version = 4 ;
+    string digest = 5;
+    string description = 6;
+    bytes sha256 = 7;
+    bytes sha512 = 8;
+    uint64 size = 9;
+}
+
+message RemoveLayerRequest {
+    string layer_id = 1;
+    uint64 aos_version = 2;
+    string vendor_version = 3 ;
+    string digest = 4;
+}
+
+message SMNotifications {
+    oneof SMNotification {
+        Monitoring monitoring = 1;
+        Alert alert = 2;
+        ServiceStateRequest service_state_request = 3;
+        NewServiceState new_service_state = 4;
+        LogData log = 5;
+    }
+}
+
+message Monitoring {
+    google.protobuf.Timestamp timestamp = 1;
+    SystemMonitoring system_monitoring = 2;
+    repeated ServiceMonitoring service_monitoring = 3;
+}
+
+message SystemMonitoring {
+    uint64 ram = 1;
+    uint64 cpu = 2;
+    uint64 used_disk = 3;
+    uint64 in_traffic = 4;
+    uint64 out_traffic = 5;
+}
+
+message ServiceMonitoring {    
+    string service_id = 1;
+    uint64 ram = 2;
+    uint64 cpu = 3;
+    uint64 used_disk = 4;
+    uint64 in_traffic = 5;
+    uint64 out_traffic = 6;
+}
+
+message Alert {
+    google.protobuf.Timestamp timestamp = 1;
+    string tag = 2;
+    string source = 3;
+    uint64 aosVersion = 4;
+    oneof Payload {
+        ResourceAlert resource_alert = 5;
+        ResourceValidateAlert resource_validate_alert = 6;
+        SystemAlert system_alert = 7;
+    }
+}
+
+message ResourceAlert {
+    string parameter = 1;
+    uint64 value = 2;
+}
+
+message ResourceValidateAlert {
+    string  type = 1;
+    repeated ResourceValidateErrors errors = 2;
+}
+
+message ResourceValidateErrors {
+    string name =1 ;
+    repeated string errorMsg = 2;
+}
+
+message SystemAlert {
+    string message = 1;
+}
+
+message SystemLogRequest {
+    string log_id = 1;
+    google.protobuf.Timestamp from = 2;
+    google.protobuf.Timestamp till = 3;
+}
+
+message ServiceLogRequest {
+    string log_id = 1;
+    string service_id = 2;
+    google.protobuf.Timestamp from = 3;
+    google.protobuf.Timestamp till = 4;
+}
+
+message LogData {
+    string log_id = 1;
+    uint64 part_count = 2;
+    uint64 part = 3;
+    bytes data = 4;
+    string error = 5;
+}
