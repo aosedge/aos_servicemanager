@@ -54,6 +54,8 @@ type ServiceLauncher interface {
 	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
 	SetServiceState(state *pb.ServiceState) (err error)
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
+	StartServices()
+	StopServices()
 }
 
 // LayerProvider services layer manager interface
@@ -73,17 +75,25 @@ type MonitoringDataProvider interface {
 	GetMonitoringDataChannel() (monitoringChannel <-chan *pb.Monitoring)
 }
 
+// BoardConfigProcessor board configuration handler
+type BoardConfigProcessor interface {
+	GetBoardConfigInfo() (version string)
+	CheckBoardConfig(configJSON string) (vendorVersion string, err error)
+	UpdateBoardConfig(configJSON string) (err error)
+}
+
 // SMServer SM server instance
 type SMServer struct {
-	url                string
-	launcher           ServiceLauncher
-	layerProvider      LayerProvider
-	grpcServer         *grpc.Server
-	listener           net.Listener
-	notificationStream pb.ServiceManager_SubscribeSMNotificationsServer
-	alertChannel       <-chan *pb.Alert
-	monitoringChannel  <-chan *pb.Monitoring
-	stateChannel       <-chan *pb.SMNotifications
+	url                  string
+	launcher             ServiceLauncher
+	layerProvider        LayerProvider
+	grpcServer           *grpc.Server
+	listener             net.Listener
+	boardConfigProcessor BoardConfigProcessor
+	notificationStream   pb.ServiceManager_SubscribeSMNotificationsServer
+	alertChannel         <-chan *pb.Alert
+	monitoringChannel    <-chan *pb.Monitoring
+	stateChannel         <-chan *pb.SMNotifications
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -93,8 +103,9 @@ type SMServer struct {
 
 // New creates new IAM server instance
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
-	monitoringProvider MonitoringDataProvider, insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher, layerProvider: layerProvider}
+	monitoringProvider MonitoringDataProvider,
+	boardConfigProcessor BoardConfigProcessor, insecure bool) (server *SMServer, err error) {
+	server = &SMServer{launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor}
 
 	if alertsProvider != nil {
 		server.alertChannel = alertsProvider.GetAlertsChannel()
@@ -177,9 +188,29 @@ func (server *SMServer) GetStatus(tx context.Context, req *empty.Empty) (status 
 	return status, nil
 }
 
+// GetBoardConfigStatus gets current board configuration status
+func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (status *pb.BoardConfigStatus, err error) {
+	return &pb.BoardConfigStatus{VendorVersion: server.boardConfigProcessor.GetBoardConfigInfo()}, nil
+}
+
+// CheckBoardConfig checks new board configuration
+func (server *SMServer) CheckBoardConfig(ctx context.Context,
+	boardConfig *pb.BoardConfig) (status *pb.BoardConfigStatus, err error) {
+	version, err := server.boardConfigProcessor.CheckBoardConfig(boardConfig.GetBoardConfig())
+
+	return &pb.BoardConfigStatus{VendorVersion: version}, err
+}
+
 // SetBoardConfig sets new board configuration
 func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.BoardConfig) (ret *empty.Empty, err error) {
-	return ret, nil
+	if err = server.boardConfigProcessor.UpdateBoardConfig(boardConfig.GetBoardConfig()); err != nil {
+		return &emptypb.Empty{}, err
+	}
+
+	server.launcher.StopServices()
+	server.launcher.StartServices()
+
+	return &emptypb.Empty{}, nil
 }
 
 // InstallService installs aos service

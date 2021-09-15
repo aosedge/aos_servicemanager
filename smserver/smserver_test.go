@@ -72,6 +72,10 @@ type testMonitoringProvider struct {
 type testStateProvider struct {
 }
 
+type testResourceManager struct {
+	version string
+}
+
 /*******************************************************************************
  * Init
  ******************************************************************************/
@@ -102,12 +106,13 @@ func TestConnection(t *testing.T) {
 
 	launcher := &testLauncher{}
 	layerMgr := &testLayerManager{}
+	resourseManager := &testResourceManager{version: "1.0"}
 
 	smConfig := config.Config{
 		SMServerURL: serverURL,
 	}
 
-	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, nil, resourseManager, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -136,6 +141,11 @@ func TestConnection(t *testing.T) {
 
 	if len(response.GetServices()) != 1 {
 		t.Errorf("incorrect count of services %d", len(response.GetServices()))
+	}
+
+	responceBoardCfg, err := client.pbclient.GetBoardConfigStatus(ctx, &emptypb.Empty{})
+	if responceBoardCfg.GetVendorVersion() != "1.0" {
+		t.Errorf("incorrect boardConfig version %s", responceBoardCfg.GetVendorVersion())
 	}
 
 	service := &pb.InstallServiceRequest{ServiceId: "service1"}
@@ -172,7 +182,7 @@ func TestAlertNotifications(t *testing.T) {
 
 	testAlerts := &testAlertProvider{alertsChannel: make(chan *pb.Alert, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -283,7 +293,7 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan *pb.Monitoring, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -330,7 +340,7 @@ func TestServiceStateProcessing(t *testing.T) {
 
 	launcher := &testLauncher{stateChannel: make(chan *pb.SMNotifications, 10)}
 
-	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -417,6 +427,9 @@ func (launcher *testLauncher) GetStateMessageChannel() (channel <-chan *pb.SMNot
 	return launcher.stateChannel
 }
 
+func (launcher *testLauncher) StartServices() {}
+func (launcher *testLauncher) StopServices()  {}
+
 func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 	return layersList, nil
 }
@@ -435,6 +448,18 @@ func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan *pb.Alert) {
 
 func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (channel <-chan *pb.Monitoring) {
 	return monitoring.monitoringChannel
+}
+
+func (resMgr *testResourceManager) GetBoardConfigInfo() (version string) {
+	return resMgr.version
+}
+
+func (resMgr *testResourceManager) CheckBoardConfig(configJSON string) (vendorVersion string, err error) {
+	return resMgr.version, nil
+}
+
+func (resMgr *testResourceManager) UpdateBoardConfig(configJSON string) (err error) {
+	return nil
 }
 
 /*******************************************************************************
