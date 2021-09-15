@@ -41,14 +41,11 @@ test:
     - sm_ci
   stage: test
   script:
-    - sudo iptables -P FORWARD ACCEPT
-    - sudo systemctl start rabbitmq-server.service
-    - sudo cp ./ci/crt.pem  /etc/ssl/certs/
+    - sudo iptables -P FORWARD ACCEPT    
     - echo "-------   Run Unit tests   -------"
     - sudo -E /usr/local/go/bin/go test $(/usr/local/go/bin/go list ./... | grep -v "/vendor") -p=1 -failfast -v -coverprofile .testCoverage.txt
     - /usr/local/go/bin/go tool cover -func=.testCoverage.txt
-    - sudo rm .testCoverage.txt
-    - sudo systemctl stop rabbitmq-server.service --no-block
+    - sudo rm .testCoverage.txt    
 
 test_crun:
   tags:
