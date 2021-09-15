@@ -32,7 +32,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
-	amqp "aos_servicemanager/amqphandler"
 	"aos_servicemanager/config"
 )
 
@@ -133,17 +132,15 @@ func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *Reso
 }
 
 // GetBoardConfigInfo returns board config info
-func (resourcemanager *ResourceManager) GetBoardConfigInfo() (info []amqp.BoardConfigInfo, err error) {
+func (resourcemanager *ResourceManager) GetBoardConfigInfo() (version string) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	info = append(info, resourcemanager.getCurrentBoardConfigInfo())
-
-	return info, nil
+	return resourcemanager.boardConfiguration.VendorVersion
 }
 
 // CheckBoardConfig checks board config
-func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON json.RawMessage) (vendorVersion string, err error) {
+func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) (vendorVersion string, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -151,7 +148,7 @@ func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON json.RawMess
 }
 
 // UpdateBoardConfig updates board configuration
-func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON json.RawMessage) (err error) {
+func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) (err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -162,7 +159,7 @@ func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON json.RawMes
 
 	log.WithField("newVersion", newVendorVersion).Debug("Update board configuration")
 
-	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, configJSON, 0644); err != nil {
+	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -304,10 +301,10 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID s
  * Private
  ******************************************************************************/
 
-func (resourcemanager *ResourceManager) checkBoardConfig(configJSON json.RawMessage) (vendorVersion string, err error) {
+func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) (vendorVersion string, err error) {
 	boardConfig := BoardConfiguration{VendorVersion: "unknown"}
 
-	if err = json.Unmarshal(configJSON, &boardConfig); err != nil {
+	if err = json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
 		return boardConfig.VendorVersion, aoserrors.Wrap(err)
 	}
 
@@ -320,18 +317,6 @@ func (resourcemanager *ResourceManager) checkBoardConfig(configJSON json.RawMess
 	}
 
 	return boardConfig.VendorVersion, nil
-}
-
-func (resourcemanager *ResourceManager) getCurrentBoardConfigInfo() (info amqp.BoardConfigInfo) {
-	info.VendorVersion = resourcemanager.boardConfiguration.VendorVersion
-	info.Status = amqp.InstalledStatus
-
-	if resourcemanager.boardConfigError != nil {
-		info.Error = resourcemanager.boardConfigError.Error()
-		info.Status = amqp.ErrorStatus
-	}
-
-	return info
 }
 
 func handleDir(device string) (hostDevices []string, err error) {

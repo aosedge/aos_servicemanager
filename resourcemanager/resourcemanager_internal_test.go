@@ -18,8 +18,6 @@
 package resourcemanager
 
 import (
-	amqp "aos_servicemanager/amqphandler"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -43,10 +41,6 @@ const STDIN_DEV_PATH = "/dev/stdin"
  ******************************************************************************/
 
 type alertSender struct {
-}
-
-type statusSender struct {
-	boardConfigInfoChannel chan []amqp.BoardConfigInfo
 }
 
 /*******************************************************************************
@@ -465,17 +459,10 @@ func TestGetBoardConfigInfo(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	info, err := rm.GetBoardConfigInfo()
-	if err != nil {
-		t.Fatalf("Can't get board config info: %s", err)
-	}
+	version := rm.GetBoardConfigInfo()
 
-	if len(info) != 1 {
-		t.Fatalf("Wrong board config info len: %d", len(info))
-	}
-
-	if info[0].VendorVersion != vendorVersion {
-		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
+	if version != vendorVersion {
+		t.Errorf("Wrong board config version: %s", version)
 	}
 }
 
@@ -495,21 +482,10 @@ func TestUpdateBoardConfig(t *testing.T) {
 		t.Fatalf("Can't update board config: %s", err)
 	}
 
-	info, err := rm.GetBoardConfigInfo()
-	if err != nil {
-		t.Fatalf("Can't get board config info: %s", err)
-	}
+	version := rm.GetBoardConfigInfo()
 
-	if len(info) != 1 {
-		t.Fatalf("Wrong board config info len: %d", len(info))
-	}
-
-	if info[0].VendorVersion != newVendorVersion {
-		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
-	}
-
-	if info[0].Status != amqp.InstalledStatus {
-		t.Errorf("Wrong board config status: %s", info[0].Status)
+	if version != newVendorVersion {
+		t.Errorf("Wrong board config version: %s", version)
 	}
 }
 
@@ -529,21 +505,9 @@ func TestUpdateErrorBoardConfig(t *testing.T) {
 		t.Errorf("Update should fail")
 	}
 
-	info, err := rm.GetBoardConfigInfo()
-	if err != nil {
-		t.Fatalf("Can't get board config info: %s", err)
-	}
-
-	if len(info) != 1 {
-		t.Fatalf("Wrong board config info len: %d", len(info))
-	}
-
-	if info[0].VendorVersion != currentConfigVersion {
-		t.Errorf("Wrong board config version: %s", info[0].VendorVersion)
-	}
-
-	if info[0].Status != amqp.InstalledStatus {
-		t.Errorf("Wrong board config status: %s", info[0].Status)
+	version := rm.GetBoardConfigInfo()
+	if version != currentConfigVersion {
+		t.Errorf("Wrong board config version: %s", version)
 	}
 }
 
@@ -594,8 +558,8 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createWrongVersionBoardConfigJSON() (configJSON json.RawMessage) {
-	return json.RawMessage(`{
+func createWrongVersionBoardConfigJSON() (configJSON string) {
+	return `{
 	"formatVersion": 256,
 	"vendorVersion": "1.0",
 	"devices": [
@@ -617,11 +581,11 @@ func createWrongVersionBoardConfigJSON() (configJSON json.RawMessage) {
 			]
 		}
 	]
-}`)
+}`
 }
 
-func createTestBoardConfigJSON(version string) (configJSON json.RawMessage) {
-	return json.RawMessage(fmt.Sprintf(`{
+func createTestBoardConfigJSON(version string) (configJSON string) {
+	return fmt.Sprintf(`{
 	"formatVersion": 1,
 	"vendorVersion": "%s", 
 	"devices": [
@@ -677,11 +641,11 @@ func createTestBoardConfigJSON(version string) (configJSON json.RawMessage) {
 			"env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
 		}
 	]
-}`, version))
+}`, version)
 }
 
-func createInvalidBoardConfigJSON() (configJSON json.RawMessage) {
-	return json.RawMessage(`{
+func createInvalidBoardConfigJSON() (configJSON string) {
+	return `{
 	"formatVersion": 1,
 	"vendorVersion": "3.5",
 	"devices": [
@@ -696,19 +660,19 @@ func createInvalidBoardConfigJSON() (configJSON json.RawMessage) {
 			]
 		}
 	]
-}`)
+}`
 }
 
-func createEmptyBoardConfigJSON() (configJSON json.RawMessage) {
-	return json.RawMessage(`{
+func createEmptyBoardConfigJSON() (configJSON string) {
+	return `{
 		"formatVersion": 1,
 		"vendorVersion": "1.0",
 		"devices": []
-}`)
+}`
 }
 
-func writeTestBoardConfigFile(content []byte) (err error) {
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), content, 0644); err != nil {
+func writeTestBoardConfigFile(content string) (err error) {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(content), 0644); err != nil {
 		return err
 	}
 
@@ -721,8 +685,4 @@ func (sender *alertSender) SendValidateResourceAlert(source string, errors map[s
 
 func (sender *alertSender) SendRequestResourceAlert(source string, message string) {
 	log.Debugf("SendRequestResourceAlert source %s, message %s", source, message)
-}
-
-func (sender *statusSender) SendBoardConfigStatus(info []amqp.BoardConfigInfo) {
-	sender.boardConfigInfoChannel <- info
 }
