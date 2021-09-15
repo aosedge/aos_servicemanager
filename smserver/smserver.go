@@ -82,6 +82,14 @@ type BoardConfigProcessor interface {
 	UpdateBoardConfig(configJSON string) (err error)
 }
 
+// LogsProvider logs data provider interface
+type LogsProvider interface {
+	GetServiceLog(request *pb.ServiceLogRequest)
+	GetServiceCrashLog(request *pb.ServiceLogRequest)
+	GetSystemLog(request *pb.SystemLogRequest)
+	GetLogsDataChannel() (channel <-chan *pb.LogData)
+}
+
 // SMServer SM server instance
 type SMServer struct {
 	url                  string
@@ -90,10 +98,12 @@ type SMServer struct {
 	grpcServer           *grpc.Server
 	listener             net.Listener
 	boardConfigProcessor BoardConfigProcessor
+	logsProvider         LogsProvider
 	notificationStream   pb.ServiceManager_SubscribeSMNotificationsServer
 	alertChannel         <-chan *pb.Alert
 	monitoringChannel    <-chan *pb.Monitoring
 	stateChannel         <-chan *pb.SMNotifications
+	logsChannel          <-chan *pb.LogData
 	pb.UnimplementedServiceManagerServer
 }
 
@@ -104,8 +114,10 @@ type SMServer struct {
 // New creates new IAM server instance
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
 	monitoringProvider MonitoringDataProvider,
-	boardConfigProcessor BoardConfigProcessor, insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor}
+	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider,
+	insecure bool) (server *SMServer, err error) {
+	server = &SMServer{launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
+		logsProvider: logsProvider}
 
 	if alertsProvider != nil {
 		server.alertChannel = alertsProvider.GetAlertsChannel()
@@ -117,6 +129,10 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 
 	if launcher != nil {
 		server.stateChannel = launcher.GetStateMessageChannel()
+	}
+
+	if logsProvider != nil {
+		server.logsChannel = logsProvider.GetLogsDataChannel()
 	}
 
 	var opts []grpc.ServerOption
@@ -258,6 +274,27 @@ func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.Ser
 	return nil
 }
 
+//GetSystemLog gets system logs
+func (server *SMServer) GetSystemLog(ctx context.Context, req *pb.SystemLogRequest) (ret *empty.Empty, err error) {
+	server.logsProvider.GetSystemLog(req)
+
+	return &emptypb.Empty{}, nil
+}
+
+//GetServiceLog gets the service logs
+func (server *SMServer) GetServiceLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
+	server.logsProvider.GetServiceLog(req)
+
+	return &emptypb.Empty{}, nil
+}
+
+//GetServiceCrashLog gets the service crash logs
+func (server *SMServer) GetServiceCrashLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
+	server.logsProvider.GetServiceCrashLog(req)
+
+	return &emptypb.Empty{}, nil
+}
+
 /*******************************************************************************
  * private
  ******************************************************************************/
@@ -285,6 +322,14 @@ func (server *SMServer) handleChannels() {
 		case stateMsg := <-server.stateChannel:
 			if err := server.notificationStream.Send(stateMsg); err != nil {
 				log.Errorf("Can't send state notification :%s ", err)
+				return
+			}
+
+		case logs := <-server.logsChannel:
+			if err := server.notificationStream.Send(
+				&pb.SMNotifications{
+					SMNotification: &pb.SMNotifications_Log{Log: logs}}); err != nil {
+				log.Errorf("Can't send logs: %s ", err)
 				return
 			}
 
