@@ -377,7 +377,7 @@ func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 	// TODO: all services should have their own certificates
 	// this mound for demo only and should be removed
 	// mount /etc/ssl
-	etcItems := []string{"ssl"}
+	etcItems := []string{"nsswitch.conf", "ssl"}
 
 	for _, item := range etcItems {
 		// Check if in working dir
