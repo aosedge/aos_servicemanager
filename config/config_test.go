@@ -36,17 +36,13 @@ import (
 
 func createConfigFile() (err error) {
 	configContent := `{
-	"fcrypt" : {
-		"CACert" : "CACert"
-	},
+	"CACert" : "CACert",	
 	"smServerUrl": "smserver",
-	"certStorage": "/var/aos/crypt/sm/",
-	"serviceDiscovery" : "www.aos.com",
 	"workingDir" : "workingDir",
+	"certStorage": "/var/aos/crypt/sm/",	
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
-	"visServer" : "wss://localhost:8088",
 	"iamServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"monitoring": {
@@ -141,8 +137,8 @@ func TestGetCrypt(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Crypt.CACert != "CACert" {
-		t.Errorf("Wrong CACert value: %s", config.Crypt.CACert)
+	if config.CACert != "CACert" {
+		t.Errorf("Wrong CACert value: %s", config.CACert)
 	}
 }
 
@@ -198,17 +194,6 @@ func TestGetLayersDir(t *testing.T) {
 
 	if config.LayersDir != "/var/aos/srvlib" {
 		t.Errorf("Wrong storageDir value: %s", config.LayersDir)
-	}
-}
-
-func TestGetVisServerURL(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %s", err)
-	}
-
-	if config.VISServerURL != "wss://localhost:8088" {
-		t.Errorf("Wrong VIS server value: %s", config.VISServerURL)
 	}
 }
 

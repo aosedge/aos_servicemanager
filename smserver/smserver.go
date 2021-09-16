@@ -138,7 +138,7 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 	var opts []grpc.ServerOption
 
 	if !insecure {
-		tlsConfig, err := cryptutils.GetServerMutualTLSConfig(cfg.Crypt.CACert, cfg.CertStorage)
+		tlsConfig, err := cryptutils.GetServerMutualTLSConfig(cfg.CACert, cfg.CertStorage)
 		if err != nil {
 			return nil, aoserrors.Wrap(err)
 		}

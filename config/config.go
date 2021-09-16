@@ -31,11 +31,6 @@ import (
  * Types
  ******************************************************************************/
 
-// Crypt configuration structure with crypto attributes
-type Crypt struct {
-	CACert string `json:"CACert"`
-}
-
 // Duration represents duration in format "00:00:00"
 type Duration struct {
 	time.Duration
@@ -86,20 +81,15 @@ type Migration struct {
 
 // Config instance
 type Config struct {
-	Crypt                 Crypt      `json:"fcrypt"`
+	CACert                string     `json:"CACert"`
 	SMServerURL           string     `json:"smServerUrl"`
 	CertStorage           string     `json:"certStorage"`
-	ServiceDiscoveryURL   string     `json:"serviceDiscovery"`
-	VISServerURL          string     `json:"visServer"`
 	IAMServerURL          string     `json:"iamServer"`
 	WorkingDir            string     `json:"workingDir"`
-	DownloadDir           string     `json:"downloadDir"`
 	StorageDir            string     `json:"storageDir"`
 	LayersDir             string     `json:"layersDir"`
 	BoardConfigFile       string     `json:"boardConfigFile"`
 	DefaultServiceTTLDays uint64     `json:"defaultServiceTTLDays"`
-	DownloadFileTTLDays   uint64     `json:"downloadFileTTLDays"`
-	UnitStatusTimeoutSec  uint64     `json:"unitStatusTimeoutSec"`
 	Monitoring            Monitoring `json:"monitoring"`
 	Logging               Logging    `json:"logging"`
 	Alerts                Alerts     `json:"alerts"`
@@ -122,8 +112,6 @@ func New(fileName string) (config *Config, err error) {
 
 	config = &Config{
 		DefaultServiceTTLDays: 30,
-		UnitStatusTimeoutSec:  30,
-		DownloadFileTTLDays:   3,
 		Runner:                "runc",
 		Monitoring: Monitoring{
 			SendPeriod: Duration{1 * time.Minute},
@@ -148,10 +136,6 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.LayersDir == "" {
 		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
-	}
-
-	if config.DownloadDir == "" {
-		config.DownloadDir = path.Join(config.WorkingDir, "download")
 	}
 
 	if config.BoardConfigFile == "" {

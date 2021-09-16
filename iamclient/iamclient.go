@@ -80,7 +80,7 @@ func New(config *config.Config, insecure bool) (client *Client, err error) {
 	if insecure {
 		secureOpt = grpc.WithInsecure()
 	} else {
-		tlsConfig, err := cryptutils.GetClientMutualTLSConfig(config.Crypt.CACert, config.CertStorage)
+		tlsConfig, err := cryptutils.GetClientMutualTLSConfig(config.CACert, config.CertStorage)
 		if err != nil {
 			return client, aoserrors.Wrap(err)
 		}
