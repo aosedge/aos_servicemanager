@@ -112,7 +112,7 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 		reqPermissions[key] = &pb.Permissions{Permissions: value}
 	}
 
-	req := &pb.RegisterServiceReq{ServiceId: serviceID, Permissions: reqPermissions}
+	req := &pb.RegisterServiceRequest{ServiceId: serviceID, Permissions: reqPermissions}
 
 	response, err := client.pbclient.RegisterService(ctx, req)
 	if err != nil {
@@ -129,7 +129,7 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	req := &pb.UnregisterServiceReq{ServiceId: serviceID}
+	req := &pb.UnregisterServiceRequest{ServiceId: serviceID}
 
 	_, err = client.pbclient.UnregisterService(ctx, req)
 	if err != nil {
@@ -146,7 +146,7 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	req := &pb.GetPermissionsReq{Secret: secret, FunctionalServerId: funcServerID}
+	req := &pb.PermissionsRequest{Secret: secret, FunctionalServerId: funcServerID}
 
 	response, err := client.pbclientPublic.GetPermissions(ctx, req)
 	if err != nil {

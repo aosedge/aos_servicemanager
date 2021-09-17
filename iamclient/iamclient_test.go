@@ -54,6 +54,8 @@ const (
 type testServer struct {
 	grpcServer       *grpc.Server
 	permissionsCache map[string]servicePermissions
+	pb.UnimplementedIAManagerServer
+	pb.UnimplementedIAManagerPublicServer
 }
 
 type servicePermissions struct {
@@ -216,52 +218,9 @@ func (server *testServer) close() (err error) {
 	return nil
 }
 
-func (server *testServer) CreateKey(context context.Context, req *pb.CreateKeyReq) (rsp *pb.CreateKeyRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) ApplyCert(context context.Context, req *pb.ApplyCertReq) (rsp *pb.ApplyCertRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) GetCert(context context.Context, req *pb.GetCertReq) (rsp *pb.GetCertRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) GetCertTypes(context context.Context, req *empty.Empty) (rsp *pb.GetCertTypesRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) FinishProvisioning(context context.Context, req *empty.Empty) (rsp *empty.Empty, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) Clear(context context.Context, req *pb.ClearReq) (rsp *empty.Empty, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) SetOwner(context context.Context, req *pb.SetOwnerReq) (rsp *empty.Empty, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) GetSystemInfo(context context.Context, req *empty.Empty) (rsp *pb.GetSystemInfoRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) SetUsers(context context.Context, req *pb.SetUsersReq) (rsp *empty.Empty, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.GetUsersRsp, err error) {
-	return rsp, nil
-}
-
-func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAManager_SubscribeUsersChangedServer) (err error) {
-	return nil
-}
-
-func (server *testServer) RegisterService(context context.Context, req *pb.RegisterServiceReq) (rsp *pb.RegisterServiceRsp, err error) {
-	rsp = &pb.RegisterServiceRsp{}
+func (server *testServer) RegisterService(context context.Context,
+	req *pb.RegisterServiceRequest) (rsp *pb.RegisterServiceResponse, err error) {
+	rsp = &pb.RegisterServiceResponse{}
 
 	secret := server.findServiceID(req.ServiceId)
 	if secret != "" {
@@ -281,7 +240,7 @@ func (server *testServer) RegisterService(context context.Context, req *pb.Regis
 	return rsp, nil
 }
 
-func (server *testServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceReq) (rsp *empty.Empty, err error) {
+func (server *testServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
 
 	secret := server.findServiceID(req.ServiceId)
@@ -294,8 +253,8 @@ func (server *testServer) UnregisterService(ctx context.Context, req *pb.Unregis
 	return rsp, nil
 }
 
-func (server *testServer) GetPermissions(ctx context.Context, req *pb.GetPermissionsReq) (rsp *pb.GetPermissionsRsp, err error) {
-	rsp = &pb.GetPermissionsRsp{}
+func (server *testServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse, err error) {
+	rsp = &pb.PermissionsResponse{}
 
 	funcServersPermissions, ok := server.permissionsCache[req.Secret]
 	if !ok {
@@ -311,10 +270,6 @@ func (server *testServer) GetPermissions(ctx context.Context, req *pb.GetPermiss
 	rsp.ServiceId = funcServersPermissions.serviceID
 
 	return rsp, nil
-}
-
-func (server *testServer) EncryptDisk(context.Context, *pb.EncryptDiskReq) (*empty.Empty, error) {
-	return nil, nil
 }
 
 func (server *testServer) findServiceID(serviceID string) (secret string) {
