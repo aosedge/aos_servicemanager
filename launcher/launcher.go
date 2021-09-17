@@ -1021,6 +1021,11 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 		serviceImage = urlVal.Path
 	}
 
+	if err = image.CheckFileInfo(context.Background(), serviceImage, image.FileInfo{Sha256: installInfo.Sha256,
+		Sha512: installInfo.Sha512, Size: installInfo.Size}); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	if err = imageutils.UnpackTarImage(serviceImage, unpackDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
