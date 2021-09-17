@@ -141,6 +141,11 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 		destinationFile = urlVal.Path
 	}
 
+	if err = image.CheckFileInfo(context.Background(), destinationFile, image.FileInfo{Sha256: installInfo.Sha256,
+		Sha512: installInfo.Sha512, Size: installInfo.Size}); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
 
 	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {

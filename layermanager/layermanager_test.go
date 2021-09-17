@@ -18,6 +18,7 @@
 package layermanager_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/layermanager"
@@ -99,12 +101,13 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
 
-	layerFile, digest, err := createLayer(path.Join(tmpDir, "layerdir1"))
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"))
 	if err != nil {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1,
+		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -147,21 +150,23 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
 
-	layerFile1, digest1, err := createLayer(path.Join(tmpDir, "layerdir1"))
+	layerFile1, digest1, fileInfo1, err := createLayer(path.Join(tmpDir, "layerdir1"))
 	if err != nil {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	layerFile2, digest2, err := createLayer(path.Join(tmpDir, "layerdir2"))
+	layerFile2, digest2, fileInfo2, err := createLayer(path.Join(tmpDir, "layerdir2"))
 	if err != nil {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1,
+		Sha256: fileInfo1.Sha256, Sha512: fileInfo1.Sha512, Size: fileInfo1.Size}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1,
+		Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -267,45 +272,45 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createLayer(dir string) (layerFile string, digest string, err error) {
+func createLayer(dir string) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 	defer os.RemoveAll(dir)
 
 	tmpLayerFolder := path.Join(tmpDir, "tmpLayerDir")
 	if err := os.MkdirAll(tmpLayerFolder, 0755); err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	data := []byte("this is layer data in layer " + dir)
 
 	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0644); err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 	defer os.RemoveAll(tmpLayerFolder)
 
 	tarFile := path.Join(dir, "layer.tar")
 
 	if output, err := exec.Command("tar", "-C", tmpLayerFolder, "-cf", tarFile, "./").CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fileInfo, fmt.Errorf("error: %s, code: %s", string(output), err)
 	}
 	defer os.Remove(tarFile)
 
 	file, err := os.Open(tarFile)
 	if err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 	defer file.Close()
 
 	byteValue, err := ioutil.ReadAll(file)
 	if err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	layerDigest, err := generateAndSaveDigest(dir, byteValue)
 	if err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	layerDescriptor := imagespec.Descriptor{
@@ -316,24 +321,28 @@ func createLayer(dir string) (layerFile string, digest string, err error) {
 
 	dataJSON, err := json.Marshal(layerDescriptor)
 	if err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	jsonFile, err := os.Create(path.Join(dir, "layer.json"))
 	if err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	if _, err := jsonFile.Write(dataJSON); err != nil {
-		return "", "", err
+		return "", "", fileInfo, err
 	}
 
 	layerFile = path.Join(tmpDir, layerDigest.Hex()+".tar.gz")
 	if output, err := exec.Command("tar", "-C", dir, "-czf", layerFile, "./").CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fileInfo, fmt.Errorf("error: %s, code: %s", string(output), err)
 	}
 
-	return "file://" + layerFile, string(layerDigest), nil
+	if fileInfo, err = image.CreateFileInfo(context.Background(), layerFile); err != nil {
+		return "", "", fileInfo, err
+	}
+
+	return "file://" + layerFile, string(layerDigest), fileInfo, nil
 }
 
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
