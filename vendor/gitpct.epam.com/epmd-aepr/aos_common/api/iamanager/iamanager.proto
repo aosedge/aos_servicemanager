@@ -6,100 +6,80 @@ import "google/protobuf/empty.proto";
 
 import "iamanagercommon.proto";
 
-package iamanager;
+package iamanager.v1;
 
 service IAManager {
-    rpc GetCertTypes(google.protobuf.Empty) returns (GetCertTypesRsp) {}
+    rpc GetCertTypes(google.protobuf.Empty) returns (CertTypes) {}
     rpc FinishProvisioning(google.protobuf.Empty) returns (google.protobuf.Empty) {}
-    rpc Clear(ClearReq) returns (google.protobuf.Empty) {}
-    rpc SetOwner(SetOwnerReq) returns (google.protobuf.Empty) {}
-    rpc CreateKey(CreateKeyReq) returns (CreateKeyRsp) {}
-    rpc ApplyCert(ApplyCertReq) returns (ApplyCertRsp) {}
-    rpc GetCert(GetCertReq) returns (GetCertRsp) {}
-    rpc GetSystemInfo(google.protobuf.Empty) returns (GetSystemInfoRsp) {}
-    rpc SetUsers(SetUsersReq) returns (google.protobuf.Empty) {}
-    rpc GetUsers(google.protobuf.Empty) returns (GetUsersRsp) {}
-    rpc SubscribeUsersChanged(google.protobuf.Empty) returns (stream UsersChangedNtf) {}
-    rpc RegisterService(RegisterServiceReq) returns (RegisterServiceRsp) {}
-    rpc UnregisterService(UnregisterServiceReq) returns (google.protobuf.Empty) {}
-    rpc EncryptDisk(EncryptDiskReq) returns (google.protobuf.Empty) {}
+    rpc Clear(ClearRequest) returns (google.protobuf.Empty) {}
+    rpc SetOwner(SetOwnerRequest) returns (google.protobuf.Empty) {}
+    rpc CreateKey(CreateKeyRequest) returns (CreateKeyResponse) {}
+    rpc ApplyCert(ApplyCertRequest) returns (ApplyCertResponse) {}
+    rpc GetCert(GetCertRequest) returns (GetCertResponse) {}
+    rpc SetUsers(Users) returns (google.protobuf.Empty) {}
+    rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse) {}
+    rpc UnregisterService(UnregisterServiceRequest) returns (google.protobuf.Empty) {}
+    rpc EncryptDisk(EncryptDiskRequest) returns (google.protobuf.Empty) {}
 }
 
-message GetCertTypesRsp {
+message CertTypes {
     repeated string types = 1;
 }
 
-message ClearReq {
+message ClearRequest {
     string type = 1;
 }
 
-message SetOwnerReq {
-    string type = 1;
-    string password = 2;
-}
-
-message CreateKeyReq {
+message SetOwnerRequest {
     string type = 1;
     string password = 2;
 }
 
-message CreateKeyRsp {
+message CreateKeyRequest {
+    string type = 1;
+    string password = 2;
+}
+
+message CreateKeyResponse {
     string type = 1;
     string csr = 2;
 }
 
-message ApplyCertReq {
+message ApplyCertRequest {
     string type = 1;
     string cert = 2;
 }
 
-message ApplyCertRsp {
+message ApplyCertResponse {
     string type = 1;
     string cert_url = 2;
 }
 
-message GetCertReq {
+message GetCertRequest {
     string type = 1;
     bytes issuer = 2;
     string serial = 3;
 }
 
-message GetCertRsp {
+message GetCertResponse {
     string type = 1;
     string cert_url = 2;
     string key_url = 3;
 }
 
-message GetSystemInfoRsp {
-    string system_id = 1;
-    string board_model = 2;
-}
-
-message SetUsersReq {
-    repeated string users = 1;
-}
-
-message GetUsersRsp {
-    repeated string users = 1;
-}
-
-message UsersChangedNtf {
-    repeated string users = 1;
-}
-
-message RegisterServiceReq {
+message RegisterServiceRequest {
     string service_id = 1;
     map<string, Permissions> permissions = 2;
 }
 
-message RegisterServiceRsp {
+message RegisterServiceResponse {
     string secret = 1;
 }
 
-message UnregisterServiceReq {
+message UnregisterServiceRequest {
     string service_id = 1;
 }
 
-message EncryptDiskReq {    
+message EncryptDiskRequest {
     string password = 1;
 }

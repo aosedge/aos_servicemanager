@@ -32,7 +32,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210921140409-99300ed4ec3e
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210922072818-fb91af0d4d5d
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
 	google.golang.org/grpc v1.33.1

@@ -2,8 +2,12 @@ syntax = "proto3";
 
 option go_package = "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager";
 
-package iamanager;
+package iamanager.v1;
 
 message Permissions {
     map<string, string> permissions = 1;
+}
+
+message Users {
+    repeated string users = 1;
 }
