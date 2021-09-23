@@ -56,6 +56,7 @@ type ServiceLauncher interface {
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
 	StartServices()
 	StopServices()
+	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
 }
 
 // LayerProvider services layer manager interface
@@ -252,7 +253,9 @@ func (server *SMServer) SetServiceState(ctx context.Context, state *pb.ServiceSt
 // OverrideEnvVars overrides entrainment variables for the service
 func (server *SMServer) OverrideEnvVars(ctx context.Context,
 	envVars *pb.OverrideEnvVarsRequest) (status *pb.OverrideEnvVarStatus, err error) {
-	return status, nil
+	varsStatus, err := server.launcher.ProcessDesiredEnvVarsList(envVars.GetEnvVars())
+
+	return &pb.OverrideEnvVarStatus{EnvVarStatus: varsStatus}, err
 }
 
 // InstallLayer installs the layer
