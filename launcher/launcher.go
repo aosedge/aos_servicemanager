@@ -64,12 +64,6 @@ import (
 // services and their storages before first start.
 const OperationVersion = 6
 
-// Service status
-const (
-	statusOk = iota
-	statusError
-)
-
 // Service state
 const (
 	stateInit = iota
@@ -183,20 +177,19 @@ type Launcher struct {
 
 // Service describes service structure
 type Service struct {
-	ID              string        // service id
-	AosVersion      uint64        // service aosVersion
-	VendorVersion   string        // service vendorVersion
-	ServiceProvider string        // service provider
-	Path            string        // path to service bundle
-	UnitName        string        // systemd unit name
-	UID             uint32        // service userID
-	GID             uint32        // service gid
-	State           ServiceState  // service state
-	Status          ServiceStatus // service status
-	StartAt         time.Time     // time at which service was started
-	AlertRules      string        // alert rules in json format
-	Description     string        // service description
-	ManifestDigest  []byte        // sha256 of service manifest
+	ID              string       // service id
+	AosVersion      uint64       // service aosVersion
+	VendorVersion   string       // service vendorVersion
+	ServiceProvider string       // service provider
+	Path            string       // path to service bundle
+	UnitName        string       // systemd unit name
+	UID             uint32       // service userID
+	GID             uint32       // service gid
+	State           ServiceState // service state
+	StartAt         time.Time    // time at which service was started
+	AlertRules      string       // alert rules in json format
+	Description     string       // service description
+	ManifestDigest  []byte       // sha256 of service manifest
 }
 
 // UsersService describes users service structure
@@ -216,7 +209,6 @@ type ServiceProvider interface {
 	GetServices() (services []Service, err error)
 	GetServiceProviderServices(serviceProvider string) (services []Service, err error)
 	GetServiceByUnitName(unitName string) (service Service, err error)
-	SetServiceStatus(serviceID string, status ServiceStatus) (err error)
 	SetServiceState(serviceID string, state ServiceState) (err error)
 	SetServiceStartTime(serviceID string, time time.Time) (err error)
 	AddServiceToUsers(users []string, serviceID string) (err error)
@@ -259,9 +251,6 @@ type DeviceManagement interface {
 	ReleaseDevice(device string, serviceID string) (err error)
 	RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource, err error)
 }
-
-// ServiceStatus service status
-type ServiceStatus int
 
 // ServiceState service state
 type ServiceState int
@@ -788,10 +777,6 @@ func (state ServiceState) String() string {
 	return [...]string{"Init", "Running", "Stopped"}[state]
 }
 
-func (status ServiceStatus) String() string {
-	return [...]string{"installed", "Error"}[status]
-}
-
 /*******************************************************************************
  * Private
  ******************************************************************************/
@@ -1115,7 +1100,7 @@ func (launcher *Launcher) uninstallService(service Service) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) updateServiceState(id string, state ServiceState, status ServiceStatus) (err error) {
+func (launcher *Launcher) updateServiceState(id string, state ServiceState) (err error) {
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
 		return aoserrors.Wrap(err)
@@ -1125,14 +1110,6 @@ func (launcher *Launcher) updateServiceState(id string, state ServiceState, stat
 		log.WithField("id", id).Debugf("Set service state: %s", state)
 
 		if err = launcher.serviceProvider.SetServiceState(id, state); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if service.Status != status {
-		log.WithField("id", id).Debugf("Set service status: %s", status)
-
-		if err = launcher.serviceProvider.SetServiceStatus(id, status); err != nil {
 			return aoserrors.Wrap(err)
 		}
 	}
@@ -1479,7 +1456,7 @@ func (launcher *Launcher) startService(service Service) (err error) {
 		}
 	}
 
-	if err = launcher.updateServiceState(service.ID, stateRunning, statusOk); err != nil {
+	if err = launcher.updateServiceState(service.ID, stateRunning); err != nil {
 		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
 	}
 
@@ -1584,7 +1561,7 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 		}
 	}
 
-	if err := launcher.updateServiceState(service.ID, stateStopped, statusOk); err != nil {
+	if err := launcher.updateServiceState(service.ID, stateStopped); err != nil {
 		if retErr == nil {
 			log.WithField("id", service.ID).Errorf("Can't update service state: %s", err)
 			retErr = err
@@ -1843,7 +1820,6 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		UID:             uid,
 		GID:             gid,
 		State:           stateInit,
-		Status:          statusOk,
 		AlertRules:      serviceInfo.GetAlertRules(),
 	}
 
@@ -1924,7 +1900,7 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.updateServiceState(oldService.ID, stateStopped, statusOk); err != nil {
+	if err = launcher.updateServiceState(oldService.ID, stateStopped); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
