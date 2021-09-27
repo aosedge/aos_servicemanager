@@ -358,6 +358,10 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 		}
 	}
 
+	if err = launcher.addServicesToSystemd(); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
 	os.RemoveAll(launcher.downloadDir)
 
 	return launcher, nil
@@ -518,10 +522,6 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	if isUsersEqual(launcher.users, users) {
 		return nil
-	}
-
-	if err = launcher.addUserServicesToSystemd(users); err != nil {
-		return aoserrors.Wrap(err)
 	}
 
 	launcher.StopServices()
@@ -873,25 +873,27 @@ func (launcher *Launcher) restartServicesBySubjectServiceID(subjectServiceToRest
 	launcher.startServices(servicesToRestart)
 }
 
-func (launcher *Launcher) addUserServicesToSystemd(users []string) (err error) {
-	services, err := launcher.serviceProvider.GetUsersServices(users)
+func (launcher *Launcher) addServicesToSystemd() (err error) {
+	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return aoserrors.Wrap(err)
+		return err
 	}
 
 	for _, service := range services {
 		fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
 		if err != nil {
-			return aoserrors.Wrap(err)
+			log.Error("Can't create service file path: ", err)
+			continue
 		}
 
 		if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
-			return aoserrors.Wrap(err)
+			log.Error("Can't link service file: ", err)
+			continue
 		}
 	}
 
 	if err = launcher.systemd.Reload(); err != nil {
-		return aoserrors.Wrap(err)
+		return err
 	}
 
 	return nil
