@@ -18,6 +18,7 @@
 package alerts_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -437,7 +438,7 @@ func setup() (err error) {
 		log.Fatalf("Error create temporary dir: %s", err)
 	}
 
-	if systemd, err = dbus.NewSystemConnection(); err != nil {
+	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
 		return err
 	}
 
@@ -450,7 +451,8 @@ func cleanup() {
 			log.Errorf("Can't stop service: %s", err)
 		}
 
-		if _, err := systemd.DisableUnitFiles([]string{service.UnitName}, false); err != nil {
+		if _, err := systemd.DisableUnitFilesContext(context.Background(),
+			[]string{service.UnitName}, false); err != nil {
 			log.Errorf("Can't disable service: %s", err)
 		}
 	}
@@ -564,11 +566,11 @@ func createSystemdUnit(serviceType, command, fileName string) (err error) {
 		return err
 	}
 
-	if _, err = systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
 		return err
 	}
 
-	if err = systemd.Reload(); err != nil {
+	if err = systemd.ReloadContext(context.Background()); err != nil {
 		return err
 	}
 
@@ -578,7 +580,7 @@ func createSystemdUnit(serviceType, command, fileName string) (err error) {
 func startSystemdUnit(name string) (err error) {
 	channel := make(chan string)
 
-	if _, err = systemd.RestartUnit(name, "replace", channel); err != nil {
+	if _, err = systemd.RestartUnitContext(context.Background(), name, "replace", channel); err != nil {
 		return err
 	}
 
@@ -590,7 +592,8 @@ func startSystemdUnit(name string) (err error) {
 func stopService(serviceID string) (err error) {
 	channel := make(chan string)
 
-	if _, err = systemd.StopUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+	if _, err = systemd.StopUnitContext(context.Background(),
+		"aos_"+serviceID+".service", "replace", channel); err != nil {
 		return err
 	}
 
@@ -600,7 +603,7 @@ func stopService(serviceID string) (err error) {
 }
 
 func crashService(serviceID string) {
-	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
+	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }
 
 func compareValidateAlerts(first validateAlert, second validateAlert) (result bool) {

@@ -20,6 +20,7 @@ package logging_test
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -388,7 +389,8 @@ func cleanup() {
 			log.Errorf("Can't stop service: %s", err)
 		}
 
-		if _, err := systemd.DisableUnitFiles([]string{service.UnitName}, false); err != nil {
+		if _, err := systemd.DisableUnitFilesContext(context.Background(),
+			[]string{service.UnitName}, false); err != nil {
 			log.Errorf("Can't disable service: %s", err)
 		}
 	}
@@ -432,11 +434,11 @@ func createService(serviceID string) (err error) {
 		return err
 	}
 
-	if _, err = systemd.LinkUnitFiles([]string{fileName}, false, true); err != nil {
+	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
 		return err
 	}
 
-	if err = systemd.Reload(); err != nil {
+	if err = systemd.ReloadContext(context.Background()); err != nil {
 		return err
 	}
 
@@ -446,7 +448,8 @@ func createService(serviceID string) (err error) {
 func startService(serviceID string) (err error) {
 	channel := make(chan string)
 
-	if _, err = systemd.RestartUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+	if _, err = systemd.RestartUnitContext(context.Background(),
+		"aos_"+serviceID+".service", "replace", channel); err != nil {
 		return err
 	}
 
@@ -458,7 +461,8 @@ func startService(serviceID string) (err error) {
 func stopService(serviceID string) (err error) {
 	channel := make(chan string)
 
-	if _, err = systemd.StopUnit("aos_"+serviceID+".service", "replace", channel); err != nil {
+	if _, err = systemd.StopUnitContext(context.Background(),
+		"aos_"+serviceID+".service", "replace", channel); err != nil {
 		return err
 	}
 
@@ -468,7 +472,7 @@ func stopService(serviceID string) (err error) {
 }
 
 func crashService(serviceID string) {
-	systemd.KillUnit("aos_"+serviceID+".service", int32(syscall.SIGSEGV))
+	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }
 
 func getTimeRange(logData string) (from, till time.Time, err error) {

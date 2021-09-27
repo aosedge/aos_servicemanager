@@ -570,7 +570,7 @@ func (launcher *Launcher) RemoveAllServices() (err error) {
 		<-statusChannel
 	}
 
-	err = launcher.systemd.Reload()
+	err = launcher.systemd.ReloadContext(context.Background())
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -632,13 +632,13 @@ func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
 
 // Cleanup deletes all AOS services, their storages and states
 func Cleanup(cfg *config.Config) (err error) {
-	systemd, err := dbus.NewSystemConnection()
+	systemd, err := dbus.NewSystemConnectionContext(context.Background())
 	if err != nil {
 		log.Errorf("Can't connect to systemd: %s", err)
 	}
 
 	if systemd != nil {
-		unitFiles, err := systemd.ListUnitFiles()
+		unitFiles, err := systemd.ListUnitFilesContext(context.Background())
 		if err != nil {
 			log.Errorf("Can't list systemd units: %s", err)
 		} else {
@@ -649,7 +649,7 @@ func Cleanup(cfg *config.Config) (err error) {
 					continue
 				}
 
-				desc, err := systemd.GetUnitProperty(serviceName, "Description")
+				desc, err := systemd.GetUnitPropertyContext(context.Background(), serviceName, "Description")
 				if err != nil {
 					log.WithField("name", serviceName).Errorf("Can't get unit property: %s", err)
 					continue
@@ -665,20 +665,22 @@ func Cleanup(cfg *config.Config) (err error) {
 					log.WithField("name", serviceName).Debug("Deleting systemd service")
 
 					channel := make(chan string)
-					if _, err := systemd.StopUnit(serviceName, "replace", channel); err != nil {
+					if _, err := systemd.StopUnitContext(context.Background(),
+						serviceName, "replace", channel); err != nil {
 						log.WithField("name", serviceName).Errorf("Can't stop unit: %s", err)
 					} else {
 						<-channel
 					}
 
-					if _, err := systemd.DisableUnitFiles([]string{serviceName}, true); err != nil {
+					if _, err := systemd.DisableUnitFilesContext(context.Background(),
+						[]string{serviceName}, true); err != nil {
 						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
 					}
 				}
 			}
 		}
 
-		if err := systemd.Reload(); err != nil {
+		if err := systemd.ReloadContext(context.Background()); err != nil {
 			log.Errorf("Can't reload systemd: %s", err)
 		}
 	}
@@ -886,13 +888,14 @@ func (launcher *Launcher) addServicesToSystemd() (err error) {
 			continue
 		}
 
-		if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
+		if _, err = launcher.systemd.LinkUnitFilesContext(context.Background(),
+			[]string{fileName}, true, true); err != nil {
 			log.Error("Can't link service file: ", err)
 			continue
 		}
 	}
 
-	if err = launcher.systemd.Reload(); err != nil {
+	if err = launcher.systemd.ReloadContext(context.Background()); err != nil {
 		return err
 	}
 
@@ -1421,11 +1424,12 @@ func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if _, err = launcher.systemd.LinkUnitFiles([]string{fileName}, true, true); err != nil {
+	if _, err = launcher.systemd.LinkUnitFilesContext(context.Background(),
+		[]string{fileName}, true, true); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.systemd.Reload(); err != nil {
+	if err = launcher.systemd.ReloadContext(context.Background()); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1461,7 +1465,8 @@ func (launcher *Launcher) startService(service Service) (err error) {
 	}
 
 	channel := make(chan string)
-	if _, err = launcher.systemd.StartUnit(service.UnitName, "replace", channel); err != nil {
+	if _, err = launcher.systemd.StartUnitContext(context.Background(),
+		service.UnitName, "replace", channel); err != nil {
 		return aoserrors.Wrap(err)
 	}
 	status := <-channel
@@ -1553,7 +1558,8 @@ func (launcher *Launcher) stopService(service Service) (retErr error) {
 	}
 
 	channel := make(chan string)
-	if _, err := launcher.systemd.StopUnit(service.UnitName, "replace", channel); err != nil {
+	if _, err := launcher.systemd.StopUnitContext(context.Background(),
+		service.UnitName, "replace", channel); err != nil {
 		if strings.Contains(err.Error(), errNotLoaded) {
 			log.WithField("id", service.ID).Warn("Service not loaded")
 		} else {
@@ -1963,14 +1969,15 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		}
 	}
 
-	if _, err := launcher.systemd.DisableUnitFiles([]string{service.UnitName}, true); err != nil {
+	if _, err := launcher.systemd.DisableUnitFilesContext(context.Background(),
+		[]string{service.UnitName}, true); err != nil {
 		if retErr == nil {
 			log.WithField("name", service.ID).Errorf("Can't disable systemd unit: %s", err)
 			retErr = err
 		}
 	}
 
-	if err := launcher.systemd.Reload(); err != nil {
+	if err := launcher.systemd.ReloadContext(context.Background()); err != nil {
 		log.Errorf("Can't reload systemd: %s", err)
 	}
 
