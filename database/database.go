@@ -842,16 +842,14 @@ func (db *Database) createConfigTable() (err error) {
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
 			operationVersion INTEGER,
-			cursor TEXT,
-			componentsUpdateInfo BLOB)`); err != nil {
+			cursor TEXT)`); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
 			operationVersion,
-			cursor, 
-			componentsUpdateInfo) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
+			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
