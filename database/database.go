@@ -45,7 +45,7 @@ const (
 	syncMode    = "NORMAL"
 )
 
-const dbVersion = 4
+const dbVersion = 5
 
 /*******************************************************************************
  * Vars
@@ -120,14 +120,14 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 
 // AddService adds new service
 func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(service.ID, service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.Status, service.StartAt,
+		service.UID, service.GID, service.State, service.StartAt,
 		service.AlertRules, service.VendorVersion, service.Description, service.ManifestDigest)
 
 	return aoserrors.Wrap(err)
@@ -137,7 +137,7 @@ func (db *Database) AddService(service launcher.Service) (err error) {
 func (db *Database) UpdateService(service launcher.Service) (err error) {
 	stmt, err := db.sql.Prepare(`UPDATE services
 								 SET aosVersion = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?,
-								 state = ?, status = ?, startat = ?, alertRules = ?, vendorVersion = ?,
+								 state = ?, startat = ?, alertRules = ?, vendorVersion = ?,
 								 description = ?, manifestDigest = ? WHERE id = ?`)
 
 	if err != nil {
@@ -147,7 +147,7 @@ func (db *Database) UpdateService(service launcher.Service) (err error) {
 	defer stmt.Close()
 
 	result, err := stmt.Exec(service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.Status, service.StartAt, service.AlertRules,
+		service.UID, service.GID, service.State, service.StartAt, service.AlertRules,
 		service.VendorVersion, service.Description, service.ManifestDigest, service.ID)
 	if err != nil {
 		log.Error("error exec")
@@ -188,7 +188,7 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	defer stmt.Close()
 
 	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
+		&service.UnitName, &service.UID, &service.GID, &service.State,
 		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 
 	if err == sql.ErrNoRows {
@@ -213,7 +213,7 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 		var service launcher.Service
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
+			&service.UnitName, &service.UID, &service.GID, &service.State,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
 			return services, aoserrors.Wrap(err)
@@ -237,7 +237,7 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 		var service launcher.Service
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
+			&service.UnitName, &service.UID, &service.GID, &service.State,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
 			return services, aoserrors.Wrap(err)
@@ -258,7 +258,7 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	defer stmt.Close()
 
 	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
+		&service.UnitName, &service.UID, &service.GID, &service.State,
 		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 	if err == sql.ErrNoRows {
 		return service, ErrNotExist
@@ -268,31 +268,6 @@ func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Serv
 	}
 
 	return service, aoserrors.Wrap(err)
-}
-
-// SetServiceStatus sets service status
-func (db *Database) SetServiceStatus(serviceID string, status launcher.ServiceStatus) (err error) {
-	stmt, err := db.sql.Prepare("UPDATE services SET status = ? WHERE id = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(status, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
 }
 
 // SetServiceState sets service state
@@ -502,7 +477,7 @@ func (db *Database) GetUsersServices(users []string) (usersServices []launcher.S
 		var service launcher.Service
 
 		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State, &service.Status,
+			&service.UnitName, &service.UID, &service.GID, &service.State,
 			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
 		if err != nil {
 			return usersServices, aoserrors.Wrap(err)
@@ -893,8 +868,7 @@ func (db *Database) createServiceTable() (err error) {
 															   unit TEXT,
 															   uid INTEGER,
 															   gid INTEGER,															   
-															   state INTEGER,
-															   status INTEGER,
+															   state INTEGER,															   
 															   startat TIMESTAMP,															   
 															   alertRules TEXT,															   														   
 															   vendorVersion TEXT,

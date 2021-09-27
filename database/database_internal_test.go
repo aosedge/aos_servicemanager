@@ -94,7 +94,7 @@ func TestMain(m *testing.M) {
 func TestAddService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
-		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0, StartAt: time.Now().UTC(),
+		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, StartAt: time.Now().UTC(),
 		AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -121,7 +121,7 @@ func TestAddService(t *testing.T) {
 func TestUpdateService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -130,7 +130,7 @@ func TestUpdateService(t *testing.T) {
 	}
 
 	service1 = launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	// UpdateService
@@ -164,39 +164,9 @@ func TestNotExistService(t *testing.T) {
 	}
 }
 
-func TestSetServiceStatus(t *testing.T) {
-	// AddService
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// SetServiceStatus
-	err = db.SetServiceStatus("service1", 1)
-	if err != nil {
-		t.Errorf("Can't set service status: %s", err)
-	}
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-	if service.Status != 1 {
-		t.Errorf("Service status mismatch")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
 func TestSetServiceState(t *testing.T) {
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -225,7 +195,7 @@ func TestSetServiceState(t *testing.T) {
 
 func TestSetServiceStartTime(t *testing.T) {
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -256,7 +226,7 @@ func TestSetServiceStartTime(t *testing.T) {
 func TestRemoveService(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -278,7 +248,7 @@ func TestRemoveService(t *testing.T) {
 func TestGetServices(t *testing.T) {
 	// Add service 1
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
@@ -288,7 +258,7 @@ func TestGetServices(t *testing.T) {
 
 	// Add service 2
 	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err = db.AddService(service2)
@@ -319,7 +289,7 @@ func TestGetServices(t *testing.T) {
 func TestGetServiceProviderServices(t *testing.T) {
 	// Add service 1
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err := db.AddService(service1)
 	if err != nil {
@@ -328,7 +298,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 2
 	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service2)
 	if err != nil {
@@ -337,7 +307,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 3
 	service3 := launcher.Service{ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0, Status: 0,
+		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service3)
 	if err != nil {
@@ -346,7 +316,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 	// Add service 4
 	service4 := launcher.Service{ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0, Status: 0,
+		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service4)
 	if err != nil {
@@ -390,7 +360,7 @@ func TestGetServiceProviderServices(t *testing.T) {
 func TestAddUsersService(t *testing.T) {
 	// Add services
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err := db.AddService(service1)
 	if err != nil {
@@ -398,7 +368,7 @@ func TestAddUsersService(t *testing.T) {
 	}
 
 	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0, Status: 0,
+		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 	err = db.AddService(service2)
 	if err != nil {
@@ -738,7 +708,7 @@ func TestCursor(t *testing.T) {
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
 	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, Status: 0,
+		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
 		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
 
 	err := db.AddService(service1)
