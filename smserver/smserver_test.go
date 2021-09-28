@@ -26,7 +26,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -58,7 +58,7 @@ type testLayerManager struct {
 
 type testClient struct {
 	connection *grpc.ClientConn
-	pbclient   pb.ServiceManagerClient
+	pbclient   pb.SMServiceClient
 }
 
 type testAlertProvider struct {
@@ -480,7 +480,7 @@ func newTestClient(url string) (client *testClient, err error) {
 		return nil, err
 	}
 
-	client.pbclient = pb.NewServiceManagerClient(client.connection)
+	client.pbclient = pb.NewSMServiceClient(client.connection)
 
 	return client, nil
 }

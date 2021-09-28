@@ -24,7 +24,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -100,12 +100,12 @@ type SMServer struct {
 	listener             net.Listener
 	boardConfigProcessor BoardConfigProcessor
 	logsProvider         LogsProvider
-	notificationStream   pb.ServiceManager_SubscribeSMNotificationsServer
+	notificationStream   pb.SMService_SubscribeSMNotificationsServer
 	alertChannel         <-chan *pb.Alert
 	monitoringChannel    <-chan *pb.Monitoring
 	stateChannel         <-chan *pb.SMNotifications
 	logsChannel          <-chan *pb.LogData
-	pb.UnimplementedServiceManagerServer
+	pb.UnimplementedSMServiceServer
 }
 
 /*******************************************************************************
@@ -153,7 +153,7 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 
 	server.grpcServer = grpc.NewServer(opts...)
 
-	pb.RegisterServiceManagerServer(server.grpcServer, server)
+	pb.RegisterSMServiceServer(server.grpcServer, server)
 
 	return server, nil
 }
@@ -269,7 +269,7 @@ func (server *SMServer) RemoveLayer(ctx context.Context, layer *pb.RemoveLayerRe
 }
 
 // SubscribeSMNotifications subscribes for SM notifications
-func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.ServiceManager_SubscribeSMNotificationsServer) (err error) {
+func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.SMService_SubscribeSMNotificationsServer) (err error) {
 	server.notificationStream = stream
 
 	server.handleChannels()

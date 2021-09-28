@@ -33,7 +33,7 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	"aos_servicemanager/config"

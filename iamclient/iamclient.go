@@ -24,7 +24,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager/v1"
 	"gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -50,8 +50,8 @@ type Client struct {
 	sync.Mutex
 
 	connection     *grpc.ClientConn
-	pbclient       pb.IAManagerClient
-	pbclientPublic pb.IAManagerPublicClient
+	pbclient       pb.IAMProtectedServiceClient
+	pbclientPublic pb.IAMPublicServiceClient
 
 	closeChannel        chan struct{}
 	usersChangedChannel chan []string
@@ -92,8 +92,8 @@ func New(config *config.Config, insecure bool) (client *Client, err error) {
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclient = pb.NewIAManagerClient(client.connection)
-	client.pbclientPublic = pb.NewIAManagerPublicClient(client.connection)
+	client.pbclient = pb.NewIAMProtectedServiceClient(client.connection)
+	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.connection)
 
 	log.Debug("Connected to IAM")
 

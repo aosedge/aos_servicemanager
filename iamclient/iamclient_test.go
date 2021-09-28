@@ -30,7 +30,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/iamanager/v1"
 	"google.golang.org/grpc"
 
 	"aos_servicemanager/config"
@@ -54,8 +54,8 @@ const (
 type testServer struct {
 	grpcServer       *grpc.Server
 	permissionsCache map[string]servicePermissions
-	pb.UnimplementedIAManagerServer
-	pb.UnimplementedIAManagerPublicServer
+	pb.UnimplementedIAMProtectedServiceServer
+	pb.UnimplementedIAMPublicServiceServer
 }
 
 type servicePermissions struct {
@@ -200,8 +200,8 @@ func newTestServer(url string) (server *testServer, err error) {
 	}
 	server.grpcServer = grpc.NewServer()
 
-	pb.RegisterIAManagerServer(server.grpcServer, server)
-	pb.RegisterIAManagerPublicServer(server.grpcServer, server)
+	pb.RegisterIAMProtectedServiceServer(server.grpcServer, server)
+	pb.RegisterIAMPublicServiceServer(server.grpcServer, server)
 
 	server.permissionsCache = make(map[string]servicePermissions)
 

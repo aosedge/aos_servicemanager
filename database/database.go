@@ -29,7 +29,7 @@ import (
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
 	"aos_servicemanager/launcher"

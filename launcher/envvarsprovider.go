@@ -23,7 +23,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager"
+	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"google.golang.org/protobuf/proto"
 )
 
