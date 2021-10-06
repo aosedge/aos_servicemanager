@@ -113,7 +113,10 @@ func TestMain(m *testing.M) {
 func TestGetSystemError(t *testing.T) {
 	const numMessages = 5
 
-	alertsHandler, err := alerts.New(&config.Config{},
+	alertsHandler, err := alerts.New(&config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -191,7 +194,10 @@ func TestGetSystemError(t *testing.T) {
 }
 
 func TestGetServiceError(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{},
+	alertsHandler, err := alerts.New(&config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -236,7 +242,10 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 		t.Fatalf("Can't create systemd unit: %s", err)
 	}
 
-	alertsHandler, err := alerts.New(&config.Config{},
+	alertsHandler, err := alerts.New(&config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -258,7 +267,10 @@ func TestMessageFilter(t *testing.T) {
 
 	filter := []string{"test", "regexp"}
 
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{Filter: filter}},
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		ServiceAlertPriority: 4,
+		SystemAlertPriority:  3,
+		Filter:               filter}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -314,7 +326,10 @@ func TestMessageFilter(t *testing.T) {
 }
 
 func TestWrongFilter(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{Filter: []string{"", "*(test)^"}}},
+	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
+		Filter:               []string{"", "*(test)^"},
+		ServiceAlertPriority: 4,
+		SystemAlertPriority:  3}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -323,7 +338,10 @@ func TestWrongFilter(t *testing.T) {
 }
 
 func TestOtheralerts(t *testing.T) {
-	alertsHandler, err := alerts.New(&config.Config{},
+	alertsHandler, err := alerts.New(&config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)

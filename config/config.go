@@ -24,7 +24,19 @@ import (
 	"path"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+)
+
+/*******************************************************************************
+ * Consts
+ ******************************************************************************/
+
+const (
+	defaultServiceAlertPriority = 4
+	defaultSystemAlertPriority  = 3
+	maxAlertPriorityLevel       = 7
+	minAlertPriorityLevel       = 0
 )
 
 /*******************************************************************************
@@ -63,8 +75,10 @@ type Logging struct {
 
 // Alerts configuration for alerts
 type Alerts struct {
-	Disabled bool     `json:"disabled"`
-	Filter   []string `json:"filter"`
+	Disabled             bool     `json:"disabled"`
+	Filter               []string `json:"filter"`
+	ServiceAlertPriority int      `json:"serviceAlertPriority"`
+	SystemAlertPriority  int      `json:"systemAlertPriority"`
 }
 
 // Host strunct represent entry in /etc/hosts
@@ -120,7 +134,9 @@ func New(fileName string) (config *Config, err error) {
 		Logging: Logging{
 			MaxPartSize:  524288,
 			MaxPartCount: 20},
-	}
+		Alerts: Alerts{
+			SystemAlertPriority:  defaultSystemAlertPriority,
+			ServiceAlertPriority: defaultServiceAlertPriority}}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, aoserrors.Wrap(err)
@@ -148,6 +164,16 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.Migration.MergedMigrationPath == "" {
 		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
+	}
+
+	if config.Alerts.ServiceAlertPriority > maxAlertPriorityLevel || config.Alerts.ServiceAlertPriority < minAlertPriorityLevel {
+		log.Warnf("Default value %d for service alert priority is assigned", defaultServiceAlertPriority)
+		config.Alerts.ServiceAlertPriority = defaultServiceAlertPriority
+	}
+
+	if config.Alerts.SystemAlertPriority > maxAlertPriorityLevel || config.Alerts.SystemAlertPriority < minAlertPriorityLevel {
+		log.Warnf("Default value %d for system alert priority is assigned", defaultSystemAlertPriority)
+		config.Alerts.SystemAlertPriority = defaultSystemAlertPriority
 	}
 
 	return config, nil

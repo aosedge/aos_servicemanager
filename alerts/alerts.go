@@ -20,6 +20,7 @@ package alerts
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,12 +51,10 @@ const (
 
 const (
 	waitJournalTimeout = 1 * time.Second
-	journalSavePeriod = 10 * time.Second
+	journalSavePeriod  = 10 * time.Second
 )
 
 const alertChannelSize = 50
-
-
 
 /*******************************************************************************
  * Types
@@ -242,20 +241,10 @@ func (instance *Alerts) setupJournal() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = instance.journal.AddMatch("PRIORITY=0"); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = instance.journal.AddMatch("PRIORITY=1"); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = instance.journal.AddMatch("PRIORITY=2"); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = instance.journal.AddMatch("PRIORITY=3"); err != nil {
-		return aoserrors.Wrap(err)
+	for priorityLevel := 0; priorityLevel <= instance.config.SystemAlertPriority; priorityLevel++ {
+		if err = instance.journal.AddMatch(fmt.Sprintf("PRIORITY=%d", priorityLevel)); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	if err = instance.journal.AddDisjunction(); err != nil {
@@ -341,7 +330,7 @@ func (instance *Alerts) processJournal() (err error) {
 		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
 		if unit == "init.scope" {
-			if priority, err := strconv.Atoi(entry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY]); err != nil || priority > 4 {
+			if priority, err := strconv.Atoi(entry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY]); err != nil || priority > instance.config.ServiceAlertPriority {
 				continue
 			}
 
