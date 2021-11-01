@@ -8,33 +8,33 @@ require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/anexia-it/fsquota v0.1.3
 	github.com/apparentlymart/go-cidr v1.1.0
-	github.com/containernetworking/cni v0.8.1
-	github.com/containernetworking/plugins v0.9.1
-	github.com/coreos/go-iptables v0.5.0
+	github.com/containernetworking/cni v1.0.1
+	github.com/containernetworking/plugins v1.0.1
+	github.com/coreos/go-iptables v0.6.0
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/docker/docker v17.12.1-ce+incompatible // indirect
-	github.com/fsnotify/fsnotify v1.4.7
-	github.com/golang/protobuf v1.5.0
-	github.com/google/uuid v1.1.2
+	github.com/fsnotify/fsnotify v1.4.9
+	github.com/golang/protobuf v1.5.2
+	github.com/google/uuid v1.2.0
 	github.com/hashicorp/go-version v1.3.0 // indirect
 	github.com/jinzhu/copier v0.3.2
-	github.com/jlaffaye/ftp v0.0.0-20210307004419-5d4190119067
+	github.com/jlaffaye/ftp v0.0.0-20211029032751-b1140299f4df
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runc v1.0.2
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pkg/errors v0.9.1
-	github.com/shirou/gopsutil v3.21.8+incompatible
+	github.com/shirou/gopsutil v3.21.10+incompatible
 	github.com/sirupsen/logrus v1.8.1
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
-	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
-	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
+	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
+	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
 	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210928130140-41cdb2842108
-	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
+	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
 	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
-	google.golang.org/grpc v1.33.1
+	google.golang.org/grpc v1.33.2
 	google.golang.org/protobuf v1.26.0
 )
