@@ -33,7 +33,7 @@ import (
 	"github.com/containernetworking/cni/libcni"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/allocator"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
