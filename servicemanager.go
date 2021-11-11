@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -240,6 +241,18 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	return sm, nil
 }
 
+func (sm *serviceManager) handleChannels(ctx context.Context) (err error) {
+	for {
+		select {
+		case users := <-sm.iam.GetUsersChangedChannel():
+			sm.launcher.SetUsers(users)
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func (sm *serviceManager) close() {
 	// Close logging
 	if sm.logging != nil {
@@ -382,12 +395,22 @@ func main() {
 	}
 	defer sm.close()
 
+	if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
+		log.Errorf("Can't set users: %s", err)
+	}
+
+	ctx, fnCancel := context.WithCancel(context.Background())
+
+	go sm.handleChannels(ctx)
+
 	// Handle SIGTERM
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-terminateChannel
+
+		fnCancel()
 
 		sm.close()
 
