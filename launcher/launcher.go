@@ -257,6 +257,8 @@ type ServiceState int
 
 type layerProvider interface {
 	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
+	UninstallLayer(digest string) (err error)
+	GetLayersInfo() (info []*pb.LayerStatus, err error)
 }
 
 /*******************************************************************************
@@ -2030,6 +2032,57 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 	return aoserrors.Wrap(retErr)
 }
 
+func (launcher *Launcher) cleanupLayers() (retErr error) {
+	layersToRemove, retErr := launcher.layerProvider.GetLayersInfo()
+	if retErr != nil {
+		aoserrors.Wrap(retErr)
+	}
+
+	if len(layersToRemove) == 0 {
+		return nil
+	}
+
+	allServices, retErr := launcher.serviceProvider.GetServices()
+	if retErr != nil {
+		return aoserrors.Wrap(retErr)
+	}
+
+	for _, serviceToCheck := range allServices {
+		if len(layersToRemove) == 0 {
+			return nil
+		}
+
+		layersDigest, err := getServiceLayers(serviceToCheck.Path)
+		if err != nil {
+			if retErr == nil {
+				log.WithField("name", serviceToCheck.ID).Errorf("Can't get layers from installed service: %s", err)
+				retErr = err
+			}
+			continue
+		}
+
+		for _, digest := range layersDigest {
+			for i, layerToRemove := range layersToRemove {
+				if layerToRemove.Digest == digest {
+					layersToRemove = append(layersToRemove[:i], layersToRemove[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+
+	for _, layerToRemove := range layersToRemove {
+		if err := launcher.layerProvider.UninstallLayer(layerToRemove.Digest); err != nil {
+			if retErr == nil {
+				log.Errorf("Can't delete layer: %s", err)
+				retErr = err
+			}
+		}
+	}
+
+	return aoserrors.Wrap(retErr)
+}
+
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	fileName := path.Join(workingDir, serviceTemplateFile)
 	fileContent, err := ioutil.ReadFile(fileName)
@@ -2194,6 +2247,12 @@ func (launcher *Launcher) cleanServicesDB() (err error) {
 	// Wait all services are removed
 	for i := 0; i < servicesToBeRemoved; i++ {
 		<-statusChannel
+	}
+
+	if servicesToBeRemoved > 0 {
+		if err := launcher.cleanupLayers(); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil

@@ -211,13 +211,28 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 
 	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), string(rootFSDigest.Hex()))
 
+	parts.layersDigest = getLayersFromManifest(manifest)
+
+	return parts, nil
+}
+
+func getServiceLayers(installDir string) (layers []string, err error) {
+	manifest, err := getImageManifest(installDir)
+	if err != nil {
+		return layers, aoserrors.Wrap(err)
+	}
+
+	return getLayersFromManifest(manifest), nil
+}
+
+func getLayersFromManifest(manifest *serviceManifest) (layers []string) {
 	manifest.Layers = manifest.Layers[1:]
 
 	for _, layer := range manifest.Layers {
-		parts.layersDigest = append(parts.layersDigest, string(layer.Digest))
+		layers = append(layers, string(layer.Digest))
 	}
 
-	return parts, nil
+	return layers
 }
 
 func getManifestChecksum(installDir string) (digest []byte, err error) {

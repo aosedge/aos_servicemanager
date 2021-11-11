@@ -199,45 +199,9 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 }
 
 // UninstallLayer uninstalls layer
-func (layermanager *LayerManager) UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error) {
-	digest := removeInfo.GetDigest()
+func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
 	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
 
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{"digest": digest}).Errorf("Can't uninstall layer: %s", err)
-		}
-	}()
-
-	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	found := false
-
-	for _, info := range layersInfo {
-		if info.Digest == digest {
-			found = true
-
-			break
-		}
-	}
-
-	if !found {
-		return aoserrors.New("layer not found")
-	}
-
-	if err = layermanager.uninstallLayer(digest); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	log.WithFields(log.Fields{"digest": digest}).Info("Layer successfully uninstalled")
-
-	return nil
-}
-
-func (layermanager *LayerManager) uninstallLayer(digest string) (err error) {
 	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
@@ -250,6 +214,8 @@ func (layermanager *LayerManager) uninstallLayer(digest string) (err error) {
 	if err = layermanager.layerInfoProvider.DeleteLayerByDigest(digest); err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	log.WithFields(log.Fields{"digest": digest}).Info("Layer successfully uninstalled")
 
 	return nil
 }
@@ -289,7 +255,7 @@ func (layermanager *LayerManager) Cleanup() (err error) {
 	}
 
 	for _, layerInfo := range layersInfo {
-		if curErr := layermanager.uninstallLayer(layerInfo.Digest); curErr != nil {
+		if curErr := layermanager.UninstallLayer(layerInfo.Digest); curErr != nil {
 			if err == nil {
 				err = aoserrors.Wrap(curErr)
 			}

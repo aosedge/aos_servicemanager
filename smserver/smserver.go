@@ -63,7 +63,6 @@ type ServiceLauncher interface {
 type LayerProvider interface {
 	GetLayersInfo() (info []*pb.LayerStatus, err error)
 	InstallLayer(installInfo *pb.InstallLayerRequest) (err error)
-	UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error)
 }
 
 // AlertsProvider alert data provider interface
@@ -261,11 +260,6 @@ func (server *SMServer) OverrideEnvVars(ctx context.Context,
 // InstallLayer installs the layer
 func (server *SMServer) InstallLayer(ctx context.Context, layer *pb.InstallLayerRequest) (ret *empty.Empty, err error) {
 	return &emptypb.Empty{}, server.layerProvider.InstallLayer(layer)
-}
-
-// RemoveLayer removes the layer
-func (server *SMServer) RemoveLayer(ctx context.Context, layer *pb.RemoveLayerRequest) (ret *empty.Empty, err error) {
-	return &emptypb.Empty{}, server.layerProvider.UninstallLayer(layer)
 }
 
 // SubscribeSMNotifications subscribes for SM notifications

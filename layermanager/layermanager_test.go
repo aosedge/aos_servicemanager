@@ -128,7 +128,7 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Error("Layer AosVersion should be 1")
 	}
 
-	if err = layerManager.UninstallLayer(&pb.RemoveLayerRequest{Digest: digest}); err != nil {
+	if err = layerManager.UninstallLayer(digest); err != nil {
 		t.Fatalf("Can't uninstall layer: %s", err)
 	}
 

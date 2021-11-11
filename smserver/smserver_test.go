@@ -168,11 +168,6 @@ func TestConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
-
-	_, err = client.pbclient.RemoveLayer(ctx, &pb.RemoveLayerRequest{})
-	if err != nil {
-		t.Fatalf("Can't remove layer: %s", err)
-	}
 }
 
 func TestAlertNotifications(t *testing.T) {
@@ -440,10 +435,6 @@ func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus,
 }
 
 func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
-	return nil
-}
-
-func (layerMgr *testLayerManager) UninstallLayer(removeInfo *pb.RemoveLayerRequest) (err error) {
 	return nil
 }
 

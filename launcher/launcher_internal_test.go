@@ -2404,8 +2404,12 @@ func (layerProvider *testLayerProvider) GetLayerPathByDigest(layerDigest string)
 	return path.Join(testDir, "layerStorage"), nil
 }
 
-func (layerProvider *testLayerProvider) DeleteUnneededLayers() (err error) {
+func (layerProvider *testLayerProvider) UninstallLayer(digest string) (err error) {
 	return nil
+}
+
+func (layerProvider *testLayerProvider) GetLayersInfo() (info []*pb.LayerStatus, err error) {
+	return info, nil
 }
 
 func (deviceManager *testDeviceManager) GetBoardConfigError() (err error) {
