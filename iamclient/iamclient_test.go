@@ -52,8 +52,10 @@ const (
  ******************************************************************************/
 
 type testServer struct {
-	grpcServer       *grpc.Server
-	permissionsCache map[string]servicePermissions
+	grpcServer          *grpc.Server
+	users               []string
+	usersChangedChannel chan []string
+	permissionsCache    map[string]servicePermissions
 	pb.UnimplementedIAMProtectedServiceServer
 	pb.UnimplementedIAMPublicServiceServer
 }
@@ -106,6 +108,41 @@ func TestMain(m *testing.M) {
 /*******************************************************************************
  * Tests
  ******************************************************************************/
+
+func TestGetUsers(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %s", err)
+	}
+	defer server.close()
+
+	server.users = []string{"user1", "user2", "user3"}
+
+	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
+	if err != nil {
+		t.Fatalf("Can't create IAM client: %s", err)
+	}
+	defer client.Close()
+
+	if !reflect.DeepEqual(server.users, client.GetUsers()) {
+		t.Errorf("Invalid users: %s", client.GetUsers())
+	}
+
+	newUsers := []string{"newUser1", "newUser2", "newUser3"}
+
+	server.usersChangedChannel <- newUsers
+
+	select {
+	case users := <-client.GetUsersChangedChannel():
+		if !reflect.DeepEqual(users, newUsers) {
+			t.Errorf("Invalid users: %s", users)
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Error("Wait users changed timeout")
+	}
+}
+
 func TestRegisterService(t *testing.T) {
 	server, err := newTestServer(serverURL)
 	if err != nil {
@@ -192,7 +229,7 @@ func TestGetPermissions(t *testing.T) {
  ******************************************************************************/
 
 func newTestServer(url string) (server *testServer, err error) {
-	server = &testServer{}
+	server = &testServer{usersChangedChannel: make(chan []string, 1)}
 
 	listener, err := net.Listen("tcp", url)
 	if err != nil {
@@ -270,6 +307,24 @@ func (server *testServer) GetPermissions(ctx context.Context, req *pb.Permission
 	rsp.ServiceId = funcServersPermissions.serviceID
 
 	return rsp, nil
+}
+
+func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.Users, err error) {
+	rsp = &pb.Users{Users: server.users}
+
+	return rsp, nil
+}
+
+func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAMPublicService_SubscribeUsersChangedServer) (err error) {
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+
+		case users := <-server.usersChangedChannel:
+			stream.Send(&pb.Users{Users: users})
+		}
+	}
 }
 
 func (server *testServer) findServiceID(serviceID string) (secret string) {
