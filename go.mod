@@ -16,11 +16,11 @@ require (
 	github.com/docker/docker v17.12.1-ce+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/golang/protobuf v1.5.2
-	github.com/google/uuid v1.2.0
+	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-version v1.3.0 // indirect
 	github.com/jinzhu/copier v0.3.2
 	github.com/jlaffaye/ftp v0.0.0-20211029032751-b1140299f4df
-	github.com/mattn/go-sqlite3 v1.10.0
+	github.com/mattn/go-sqlite3 v1.14.9
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runc v1.0.2
@@ -32,9 +32,9 @@ require (
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
 	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20210928130140-41cdb2842108
-	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
+	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20211119160812-d09d4d10f76e
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
-	google.golang.org/grpc v1.33.2
-	google.golang.org/protobuf v1.26.0
+	google.golang.org/grpc v1.41.0
+	google.golang.org/protobuf v1.27.1
 )
