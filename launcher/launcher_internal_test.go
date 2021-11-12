@@ -183,7 +183,8 @@ func TestInstallRemove(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -198,7 +199,8 @@ func TestInstallRemove(t *testing.T) {
 		}
 
 		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+			Users: &pb.Users{Users: users}})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -209,7 +211,8 @@ func TestInstallRemove(t *testing.T) {
 	}
 	// remove services
 	for i := 0; i < numUninstallServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			Users: &pb.Users{Users: users}}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -224,7 +227,8 @@ func TestInstallRemove(t *testing.T) {
 
 	// remove remaining services
 	for i := numUninstallServices; i < numInstallServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			Users: &pb.Users{Users: users}}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -247,7 +251,8 @@ func TestRemoveAllServices(t *testing.T) {
 	}
 	defer launcher.Close()
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -261,7 +266,8 @@ func TestRemoveAllServices(t *testing.T) {
 		}
 
 		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+			Users: &pb.Users{Users: users}})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -306,7 +312,8 @@ func TestCheckServicesConsistency(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -320,7 +327,8 @@ func TestCheckServicesConsistency(t *testing.T) {
 		}
 
 		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+			Users: &pb.Users{Users: users}})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -365,7 +373,8 @@ func TestAutoStart(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -379,7 +388,8 @@ func TestAutoStart(t *testing.T) {
 		}
 
 		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+			Users: &pb.Users{Users: users}})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -398,7 +408,7 @@ func TestAutoStart(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -413,7 +423,8 @@ func TestAutoStart(t *testing.T) {
 	}
 	// remove services
 	for i := 0; i < numServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			Users: &pb.Users{Users: users}}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -439,7 +450,8 @@ func TestErrors(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -451,7 +463,8 @@ func TestErrors(t *testing.T) {
 	}
 
 	status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 5,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -466,7 +479,8 @@ func TestErrors(t *testing.T) {
 	}
 
 	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 4,
-		ProviderId: "sp1", Url: serviceURL2, Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size})
+		ProviderId: "sp1", Url: serviceURL2, Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size,
+		Users: &pb.Users{Users: users}})
 	if err == nil {
 		t.Errorf("Service %s AosVersion %d should not be installed", status.ServiceId, status.AosVersion)
 	}
@@ -481,7 +495,8 @@ func TestErrors(t *testing.T) {
 	}
 
 	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 6,
-		ProviderId: "sp1", Url: serviceURL3, Sha256: fileInfo3.Sha256, Sha512: fileInfo3.Sha512, Size: fileInfo3.Size})
+		ProviderId: "sp1", Url: serviceURL3, Sha256: fileInfo3.Sha256, Sha512: fileInfo3.Sha512, Size: fileInfo3.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -513,7 +528,8 @@ func TestUpdate(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -537,7 +553,8 @@ func TestUpdate(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -567,7 +584,8 @@ func TestUpdate(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -596,7 +614,8 @@ func TestAOSSecret(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -617,7 +636,8 @@ func TestAOSSecret(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -656,7 +676,8 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 
 	// run stored service configuration. In case if service is invalid we do not start services,
 	// but return no error.
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Error executing SetUsers command")
 	}
 }
@@ -675,7 +696,8 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	})
 
 	// run stored service configuration only in case system resources are valid
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("SM can start services when device resources are invalid")
 	}
 
@@ -691,7 +713,8 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	// it should be failed because service requests random device
 	// according to aos service configuration that generates on mocked download operation
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err == nil {
 		t.Errorf("SM can remove service when device resource is not released")
 	}
@@ -709,7 +732,8 @@ func TestVisPermissions(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -719,7 +743,8 @@ func TestVisPermissions(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -772,7 +797,8 @@ func TestUsersServices(t *testing.T) {
 			}
 
 			_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("user%d_service%d", i, j),
-				ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+				ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+				Users: &pb.Users{Users: users}})
 			if err != nil {
 				t.Errorf("Can't install service: %s", err)
 			}
@@ -852,7 +878,8 @@ func TestServiceTTL(t *testing.T) {
 
 	numServices := 3
 
-	if err = launcher.SetUsers([]string{"user0"}); err != nil {
+	users := []string{"user0"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -864,7 +891,8 @@ func TestServiceTTL(t *testing.T) {
 		}
 
 		_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+			Users: &pb.Users{Users: users}})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -916,7 +944,8 @@ func TestServiceMonitoring(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"user0"}); err != nil {
+	users := []string{"user0"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -946,7 +975,7 @@ func TestServiceMonitoring(t *testing.T) {
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "Service1",
 		ProviderId: "sp1", Url: serviceURL, AlertRules: string(alertRulesStr),
-		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -965,7 +994,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 
-	if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: "Service1"}); err != nil {
+	if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: "Service1", Users: &pb.Users{Users: users}}); err != nil {
 		t.Errorf("Can't uninstall service: %s", err)
 	}
 
@@ -993,7 +1022,8 @@ func TestServiceStorage(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1003,7 +1033,8 @@ func TestServiceStorage(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1070,7 +1101,8 @@ func TestServiceState(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1080,7 +1112,8 @@ func TestServiceState(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1189,7 +1222,8 @@ func TestServiceState(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1231,7 +1265,8 @@ func TestTmpDir(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1241,7 +1276,8 @@ func TestTmpDir(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1264,7 +1300,7 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1274,7 +1310,8 @@ func TestTmpDir(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1307,7 +1344,7 @@ func TestTmpDir(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1539,7 +1576,8 @@ func TestServiceWithLayers(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1549,7 +1587,8 @@ func TestServiceWithLayers(t *testing.T) {
 	}
 
 	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size})
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1635,7 +1674,8 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1650,7 +1690,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 		if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i), AosVersion: 0,
 			ProviderId: "sp1", Url: serviceURL,
-			Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
+			Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users}}); err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
 	}
@@ -1667,7 +1707,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1689,7 +1729,8 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	// remove services
 	for i := 0; i < numServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i)}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+			Users: &pb.Users{Users: users}}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -1715,7 +1756,8 @@ func TestManifestValidation(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1726,7 +1768,8 @@ func TestManifestValidation(t *testing.T) {
 	}
 
 	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 
@@ -1780,7 +1823,8 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		launcher.Close()
 	})
 
-	if err = launcher.SetUsers([]string{"User1"}); err != nil {
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
 		t.Fatalf("Can't set users: %s", err)
 	}
 
@@ -1790,7 +1834,8 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	}
 
 	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 
@@ -1824,7 +1869,8 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	}
 
 	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
-		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 

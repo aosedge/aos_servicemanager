@@ -439,7 +439,7 @@ func (launcher *Launcher) UninstallService(removeReq *pb.RemoveServiceRequest) (
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.uninstallService(service); err != nil {
+	if err = launcher.uninstallService(service, removeReq.GetUsers().Users); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -982,12 +982,14 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 
 	// If same service version exists, just start the service
 	if serviceExists && installInfo.GetAosVersion() == service.AosVersion {
-		if err = launcher.addServiceToCurrentUsers(installInfo.GetServiceId()); err != nil {
+		if err = launcher.addServiceToUsers(installInfo.GetServiceId(), installInfo.GetUsers().Users); err != nil {
 			return aoserrors.Wrap(err)
 		}
 
-		if err = launcher.startService(service); err != nil {
-			return aoserrors.Wrap(err)
+		if isUsersEqual(launcher.users, installInfo.GetUsers().Users) {
+			if err = launcher.startService(service); err != nil {
+				return aoserrors.Wrap(err)
+			}
 		}
 
 		return nil
@@ -1059,11 +1061,11 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 	}
 
 	if !serviceExists {
-		if err = launcher.addService(newService); err != nil {
+		if err = launcher.addService(newService, installInfo.GetUsers().Users); err != nil {
 			return aoserrors.Wrap(err)
 		}
 	} else {
-		if err = launcher.updateService(service, newService); err != nil {
+		if err = launcher.updateService(service, newService, installInfo.GetUsers().Users); err != nil {
 			return aoserrors.Wrap(err)
 		}
 	}
@@ -1071,16 +1073,18 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 	return nil
 }
 
-func (launcher *Launcher) uninstallService(service Service) (err error) {
+func (launcher *Launcher) uninstallService(service Service, users []string) (err error) {
 	if launcher.users == nil {
 		return aoserrors.New("users are not set")
 	}
 
-	if err := launcher.stopService(service); err != nil {
-		return aoserrors.Wrap(err)
+	if isUsersEqual(launcher.users, users) {
+		if err := launcher.stopService(service); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
-	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
+	userService, err := launcher.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -1095,7 +1099,7 @@ func (launcher *Launcher) uninstallService(service Service) (err error) {
 		}
 	}
 
-	if err = launcher.serviceProvider.RemoveServiceFromUsers(launcher.users, service.ID); err != nil {
+	if err = launcher.serviceProvider.RemoveServiceFromUsers(users, service.ID); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1837,7 +1841,7 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	return service, nil
 }
 
-func (launcher *Launcher) addService(service Service) (err error) {
+func (launcher *Launcher) addService(service Service, users []string) (err error) {
 	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
 	// handled by parent function
 
@@ -1863,22 +1867,25 @@ func (launcher *Launcher) addService(service Service) (err error) {
 		}
 	}()
 
-	if err = launcher.addServiceToCurrentUsers(service.ID); err != nil {
+	if err = launcher.addServiceToUsers(service.ID, users); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.addServiceToSystemd(service); err != nil {
-		return aoserrors.Wrap(err)
-	}
+	if isUsersEqual(launcher.users, users) {
 
-	if err = launcher.startService(service); err != nil {
-		return aoserrors.Wrap(err)
+		if err = launcher.addServiceToSystemd(service); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		if err = launcher.startService(service); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return aoserrors.Wrap(err)
 }
 
-func (launcher *Launcher) updateService(oldService, newService Service) (err error) {
+func (launcher *Launcher) updateService(oldService, newService Service, users []string) (err error) {
 	defer func() {
 		if err != nil {
 			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
@@ -1906,32 +1913,34 @@ func (launcher *Launcher) updateService(oldService, newService Service) (err err
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.addServiceToCurrentUsers(newService.ID); err != nil {
+	if err = launcher.addServiceToUsers(newService.ID, users); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
-		newService.UID, newService.GID); err != nil {
-		return aoserrors.Wrap(err)
+	if isUsersEqual(launcher.users, users) {
+		if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
+			newService.UID, newService.GID); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		if err = launcher.stopService(oldService); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		if err = launcher.addServiceToSystemd(newService); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		if err = launcher.startService(newService); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
-	if err = launcher.stopService(oldService); err != nil {
+	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	if err = os.RemoveAll(oldService.Path); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.addServiceToSystemd(newService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.startService(newService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -2170,8 +2179,8 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 	return nil
 }
 
-func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error) {
-	_, err = launcher.serviceProvider.GetUsersService(launcher.users, serviceID)
+func (launcher *Launcher) addServiceToUsers(serviceID string, users []string) (err error) {
+	_, err = launcher.serviceProvider.GetUsersService(users, serviceID)
 	if err == nil {
 		return nil
 	}
@@ -2180,7 +2189,7 @@ func (launcher *Launcher) addServiceToCurrentUsers(serviceID string) (err error)
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.serviceProvider.AddServiceToUsers(launcher.users, serviceID); err != nil {
+	if err = launcher.serviceProvider.AddServiceToUsers(users, serviceID); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
