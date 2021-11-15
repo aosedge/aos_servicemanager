@@ -51,6 +51,7 @@ type ServiceLauncher interface {
 	InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error)
 	UninstallService(removeReq *pb.RemoveServiceRequest) (err error)
 	GetServicesInfo() (services []*pb.ServiceStatus, err error)
+	GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus, layersInfo []*pb.LayerStatus, err error)
 	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
 	SetServiceState(state *pb.ServiceState) (err error)
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
@@ -180,15 +181,20 @@ func (server *SMServer) Stop() {
 	}
 }
 
-// SetUsers sets current user
-func (server *SMServer) SetUsers(ctx context.Context, users *pb.Users) (ret *empty.Empty, err error) {
-	ret = &emptypb.Empty{}
+// GetUsersStatus gets current SM status for user
+func (server *SMServer) GetUsersStatus(ctx context.Context, users *pb.Users) (status *pb.SMStatus, err error) {
+	status = &pb.SMStatus{}
 
-	return ret, server.launcher.SetUsers(users.GetUsers())
+	status.Services, status.Layers, err = server.launcher.GetServicesLayersInfoByUsers(users.GetUsers())
+	if err != nil {
+		return status, aoserrors.Wrap(err)
+	}
+
+	return status, nil
 }
 
-// GetStatus gets current SM status
-func (server *SMServer) GetStatus(tx context.Context, req *empty.Empty) (status *pb.SMStatus, err error) {
+// GetAllStatus gets current SM status
+func (server *SMServer) GetAllStatus(ctx context.Context, req *empty.Empty) (status *pb.SMStatus, err error) {
 	status = &pb.SMStatus{}
 
 	status.Services, err = server.launcher.GetServicesInfo()

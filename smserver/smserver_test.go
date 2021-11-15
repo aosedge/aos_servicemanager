@@ -129,12 +129,7 @@ func TestConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	_, err = client.pbclient.SetUsers(ctx, &pb.Users{Users: []string{"user1"}})
-	if err != nil {
-		t.Fatalf("Can't set users: %s", err)
-	}
-
-	response, err := client.pbclient.GetStatus(ctx, &emptypb.Empty{})
+	response, err := client.pbclient.GetAllStatus(ctx, &emptypb.Empty{})
 	if err != nil {
 		t.Fatalf("Can't get status: %s", err)
 	}
@@ -428,6 +423,11 @@ func (launcher *testLauncher) StopServices()  {}
 
 func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
 	return status, nil
+}
+
+func (launcher *testLauncher) GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus,
+	layersInfo []*pb.LayerStatus, err error) {
+	return servicesInfo, layersInfo, nil
 }
 
 func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
