@@ -739,6 +739,27 @@ func (db *Database) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
 	return layersList, aoserrors.Wrap(rows.Err())
 }
 
+// GetLayerInfoByDigest returns layers information by layer digest
+func (db *Database) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+	stmt, err := db.sql.Prepare("SELECT layerId, aosVersion FROM layers WHERE digest = ?")
+	if err != nil {
+		return layer, aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(digest).Scan(&layer.LayerId, &layer.AosVersion)
+	if err == sql.ErrNoRows {
+		return layer, ErrNotExist
+	}
+	if err != nil {
+		return layer, aoserrors.Wrap(err)
+	}
+
+	layer.Digest = digest
+
+	return layer, nil
+}
+
 // Close closes database
 func (db *Database) Close() {
 	db.sql.Close()

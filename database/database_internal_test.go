@@ -803,6 +803,15 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Path form db %s != path2", path)
 	}
 
+	layerInfo, err := db.GetLayerInfoByDigest("sha256:3")
+	if err != nil {
+		t.Errorf("Can't get layer ino by digest path %s", err)
+	}
+
+	if layerInfo.LayerId != "id3" {
+		t.Error("Incorrect layerID ", layerInfo.LayerId)
+	}
+
 	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
 		t.Errorf("Should be error: entry does not exist")
 	}
