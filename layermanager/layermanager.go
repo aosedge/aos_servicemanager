@@ -67,6 +67,7 @@ type LayerInfoProvider interface {
 	DeleteLayerByDigest(digest string) (err error)
 	GetLayerPathByDigest(digest string) (path string, err error)
 	GetLayersInfo() (layersList []*pb.LayerStatus, err error)
+	GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error)
 }
 
 /*******************************************************************************
@@ -273,6 +274,11 @@ func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (laye
 	}
 
 	return layerPath, nil
+}
+
+//GetLayerInfoByDigest get layers information by layer digest
+func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+	return layermanager.layerInfoProvider.GetLayerInfoByDigest(digest)
 }
 
 /*******************************************************************************

@@ -259,6 +259,7 @@ type layerProvider interface {
 	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
 	UninstallLayer(digest string) (err error)
 	GetLayersInfo() (info []*pb.LayerStatus, err error)
+	GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error)
 }
 
 /*******************************************************************************
@@ -479,7 +480,7 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 func (launcher *Launcher) GetServicesInfo() (info []*pb.ServiceStatus, err error) {
 	log.Debug("Get services info")
 
-	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
+	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
 		return info, aoserrors.Wrap(err)
 	}
@@ -488,23 +489,63 @@ func (launcher *Launcher) GetServicesInfo() (info []*pb.ServiceStatus, err error
 
 	for i, service := range services {
 		info[i] = &pb.ServiceStatus{ServiceId: service.ID, AosVersion: service.AosVersion}
+	}
 
-		userService, err := launcher.serviceProvider.GetUsersService(launcher.users, service.ID)
+	return info, nil
+}
+
+func (launcher *Launcher) GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus,
+	layersInfo []*pb.LayerStatus, err error) {
+	log.Debug("Get services and layers info by users")
+
+	services, err := launcher.serviceProvider.GetUsersServices(users)
+	if err != nil {
+		return servicesInfo, layersInfo, aoserrors.Wrap(err)
+	}
+
+	servicesInfo = make([]*pb.ServiceStatus, len(services))
+
+	for i, service := range services {
+		servicesInfo[i] = &pb.ServiceStatus{ServiceId: service.ID, AosVersion: service.AosVersion}
+
+		userService, err := launcher.serviceProvider.GetUsersService(users, service.ID)
 		if err != nil {
-			return info, aoserrors.Wrap(err)
+			return servicesInfo, layersInfo, aoserrors.Wrap(err)
 		}
 
 		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 		if err != nil {
-			return info, aoserrors.Wrap(err)
+			return servicesInfo, layersInfo, aoserrors.Wrap(err)
 		}
 
 		if aosConfig.GetStateLimit() != 0 {
-			info[i].StateChecksum = hex.EncodeToString(userService.StateChecksum)
+			servicesInfo[i].StateChecksum = hex.EncodeToString(userService.StateChecksum)
+		}
+
+		layersDigest, err := getServiceLayers(service.Path)
+		if err != nil {
+			return servicesInfo, layersInfo, aoserrors.Wrap(err)
+		}
+
+	layersLoop:
+		for _, layerDigest := range layersDigest {
+			for _, layer := range layersInfo {
+				if layer.Digest == layerDigest {
+					continue layersLoop
+				}
+			}
+
+			layerInfo, err := launcher.layerProvider.GetLayerInfoByDigest(layerDigest)
+			if err != nil {
+				log.Warnf("Can't get layer info by digest %s", layerDigest)
+				continue
+			}
+
+			layersInfo = append(layersInfo, &layerInfo)
 		}
 	}
 
-	return info, nil
+	return servicesInfo, layersInfo, nil
 }
 
 // SetUsers sets users for services

@@ -254,6 +254,18 @@ func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []*pb.LayerSta
 	return layersList, nil
 }
 
+func (infoProvider *testInfoProvider) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+	infoProvider.Lock()
+	defer infoProvider.Unlock()
+
+	layerInfo, ok := infoProvider.layers[digest]
+	if !ok {
+		return layer, aoserrors.New("layer does't exist")
+	}
+
+	return pb.LayerStatus{LayerId: layerInfo.id, Digest: digest, AosVersion: layerInfo.aosVersion}, nil
+}
+
 /*******************************************************************************
  * Private
  ******************************************************************************/

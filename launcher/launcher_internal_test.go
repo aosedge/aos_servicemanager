@@ -217,7 +217,7 @@ func TestInstallRemove(t *testing.T) {
 		}
 	}
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -233,7 +233,7 @@ func TestInstallRemove(t *testing.T) {
 		}
 	}
 
-	services, err = launcher.GetServicesInfo()
+	services, _, err = launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -277,7 +277,7 @@ func TestRemoveAllServices(t *testing.T) {
 		}
 	}
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -290,7 +290,7 @@ func TestRemoveAllServices(t *testing.T) {
 		t.Errorf("Can't cleanup all services: %s", err)
 	}
 
-	services, err = launcher.GetServicesInfo()
+	services, _, err = launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -338,7 +338,7 @@ func TestCheckServicesConsistency(t *testing.T) {
 		}
 	}
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -414,7 +414,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -429,7 +429,7 @@ func TestAutoStart(t *testing.T) {
 		}
 	}
 
-	services, err = launcher.GetServicesInfo()
+	services, _, err = launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -505,7 +505,7 @@ func TestErrors(t *testing.T) {
 		t.Errorf("Incorrect AosVersion: %d", status.AosVersion)
 	}
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -1713,7 +1713,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	services, err := launcher.GetServicesInfo()
+	services, _, err := launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -1735,7 +1735,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 		}
 	}
 
-	services, err = launcher.GetServicesInfo()
+	services, _, err = launcher.GetServicesLayersInfoByUsers(users)
 	if err != nil {
 		t.Errorf("Can't get services info: %s", err)
 	}
@@ -1906,6 +1906,116 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	if bytes.Compare(writeBuf, readBuf) != 0 {
 		t.Error("Read and write buffers should be equal")
 	}
+}
+
+func TestChangeUsers(t *testing.T) {
+	layerDir := path.Join(testDir, "layerStorage", "layer1")
+	if err := os.MkdirAll(layerDir, 0755); err != nil {
+		t.Fatalf("Can't create layer dir: %s", err)
+	}
+
+	file, err := os.Create(path.Join(layerDir, "someFile.txt"))
+	if err != nil {
+		t.Fatalf("Can't create layer file: %s", err)
+	}
+	defer file.Close()
+
+	testString := "This is test layer file"
+	_, err = file.Write([]byte(testString))
+	if err != nil {
+		t.Fatalf("Can't write layer file: %s", err)
+	}
+
+	digests := []digest.Digest{digest.NewDigestFromBytes(digest.SHA256, []byte(testString))}
+
+	ftpService := ftpImage{"/layer1", 0, 0, 0, digests}
+
+	launcher, err := newTestLauncher(nil)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %s", err)
+	}
+
+	users := []string{"User1"}
+	if err = launcher.SetUsers(users); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	serviceURL, fileInfo, err := ftpService.PrepareService()
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %s", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
+	if err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
+
+	services, layers, err := launcher.GetServicesLayersInfoByUsers(users)
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+	if len(services) != 1 {
+		t.Errorf("Wrong service quantity")
+	}
+	if len(layers) != 1 {
+		t.Errorf("Wrong layers quantity")
+	}
+	// Wait ftp server ready
+	time.Sleep(3 * time.Second)
+
+	ftp, err := launcher.connectToFtp("service0")
+	if err != nil {
+		t.Error("Can't connect to server")
+		return
+	}
+
+	resp, err := ftp.Retr("someFile.txt")
+	if err != nil {
+		t.Error("No files")
+	}
+	defer resp.Close()
+
+	ftp.Quit()
+
+	users2 := []string{"User2"}
+	if err = launcher.SetUsers(users2); err != nil {
+		t.Fatalf("Can't set users: %s", err)
+	}
+
+	services, layers, err = launcher.GetServicesLayersInfoByUsers(users)
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+	if len(services) != 1 {
+		t.Errorf("Wrong service quantity")
+	}
+	if len(layers) != 1 {
+		t.Errorf("Wrong layers quantity")
+	}
+
+	services, layers, err = launcher.GetServicesLayersInfoByUsers(users2)
+	if err != nil {
+		t.Errorf("Can't get services info: %s", err)
+	}
+	if len(services) != 0 {
+		t.Errorf("Wrong service quantity")
+	}
+	if len(layers) != 0 {
+		t.Errorf("Wrong layers quantity")
+	}
+
+	_, err = launcher.connectToFtp("service0")
+	if err == nil {
+		t.Error("Should be error")
+	}
+
+	if err := launcher.RemoveAllServices(); err != nil {
+		t.Errorf("Can't cleanup all services: %s", err)
+	}
+
+	launcher.Close()
 }
 
 /*******************************************************************************
@@ -2456,6 +2566,10 @@ func (layerProvider *testLayerProvider) UninstallLayer(digest string) (err error
 
 func (layerProvider *testLayerProvider) GetLayersInfo() (info []*pb.LayerStatus, err error) {
 	return info, nil
+}
+
+func (layerProvider *testLayerProvider) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+	return layer, nil
 }
 
 func (deviceManager *testDeviceManager) GetBoardConfigError() (err error) {
