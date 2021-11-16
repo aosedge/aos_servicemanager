@@ -311,7 +311,9 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 
 		// Send state request
 		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
-			ServiceStateRequest: &pb.ServiceStateRequest{ServiceId: state.serviceID, Default: false}}}); err != nil {
+			ServiceStateRequest: &pb.ServiceStateRequest{
+				ServiceId: state.serviceID, Default: false, Users: &pb.Users{Users: users},
+			}}}); err != nil {
 			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}
@@ -364,7 +366,9 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 	} else {
 		// Send state request
 		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
-			ServiceStateRequest: &pb.ServiceStateRequest{ServiceId: state.serviceID, Default: false}}}); err != nil {
+			ServiceStateRequest: &pb.ServiceStateRequest{
+				ServiceId: state.serviceID, Default: false, Users: &pb.Users{Users: state.users},
+			}}}); err != nil {
 			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}

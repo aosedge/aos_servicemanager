@@ -637,15 +637,17 @@ func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.stopService(service); err != nil {
-		log.Errorf("Can't stop service: %s", err)
-		return aoserrors.Wrap(err)
-	}
-
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
 		log.Errorf("Can't get aos service config: %s", err)
 		return aoserrors.Wrap(err)
+	}
+
+	if isUsersEqual(state.Users.Users, launcher.users) {
+		if err = launcher.stopService(service); err != nil {
+			log.Errorf("Can't stop service: %s", err)
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.StateChecksum,
@@ -654,9 +656,11 @@ func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = launcher.startService(service); err != nil {
-		log.Errorf("Can't start service: %s", err)
-		return aoserrors.Wrap(err)
+	if isUsersEqual(state.Users.Users, launcher.users) {
+		if err = launcher.startService(service); err != nil {
+			log.Errorf("Can't start service: %s", err)
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil

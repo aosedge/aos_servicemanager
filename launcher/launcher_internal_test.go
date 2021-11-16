@@ -1130,6 +1130,7 @@ func TestServiceState(t *testing.T) {
 
 		launcher.SetServiceState(&pb.ServiceState{
 			ServiceId:     "service0",
+			Users:         &pb.Users{Users: users},
 			State:         stateData,
 			StateChecksum: hex.EncodeToString(calcSum[:])})
 
