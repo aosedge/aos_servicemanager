@@ -129,6 +129,7 @@ const defaultServiceProvider = "default"
 const errNotLoaded = "not loaded"
 
 const ttlValidatePeriod = 1 * time.Minute
+const ttlRemoveServices = 24 * time.Hour
 
 /*******************************************************************************
  * Vars
@@ -161,7 +162,8 @@ type Launcher struct {
 	storageHandler *storageHandler
 	idsPool        *identifierPool
 
-	ttlTicker *time.Ticker
+	ttlTicker         *time.Ticker
+	ttlRemoveServices *time.Ticker
 
 	downloadDir string
 
@@ -562,8 +564,8 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 
 	launcher.StartServices()
 
-	if err = launcher.cleanServicesDB(); err != nil {
-		log.Errorf("Error cleaning DB: %s", err)
+	if err = launcher.cleanCache(); err != nil {
+		log.Errorf("Error cleaning cache: %s", err)
 	}
 
 	go launcher.validateTTLs()
@@ -2245,8 +2247,8 @@ func (launcher *Launcher) addServiceToUsers(serviceID string, users []string) (e
 	return nil
 }
 
-func (launcher *Launcher) cleanServicesDB() (err error) {
-	log.Debug("Clean services DB")
+func (launcher *Launcher) cleanCache() (err error) {
+	log.Debug("Clean cached services and layers")
 
 	startedServices, err := launcher.serviceProvider.GetUsersServices(launcher.users)
 	if err != nil {
@@ -2357,6 +2359,9 @@ func (launcher *Launcher) validateTTLs() {
 	launcher.ttlTicker = time.NewTicker(ttlValidatePeriod)
 	defer launcher.ttlTicker.Stop()
 
+	launcher.ttlRemoveServices = time.NewTicker(ttlRemoveServices)
+	defer launcher.ttlRemoveServices.Stop()
+
 	launcher.Unlock()
 
 	for {
@@ -2369,6 +2374,11 @@ func (launcher *Launcher) validateTTLs() {
 			}
 
 			launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
+
+		case <-launcher.ttlRemoveServices.C:
+			if err := launcher.cleanCache(); err != nil {
+				log.Errorf("Error cleaning cache: %s", err)
+			}
 
 		case <-launcher.ttlStopChannel:
 			return
