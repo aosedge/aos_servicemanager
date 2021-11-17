@@ -125,6 +125,11 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 		}
 	}()
 
+	if _, errNoLayer := layermanager.layerInfoProvider.GetLayerInfoByDigest(installInfo.GetDigest()); errNoLayer == nil {
+		//layer already installed
+		return nil
+	}
+
 	urlVal, err := url.Parse(installInfo.Url)
 	if err != nil {
 		return aoserrors.Wrap(err)
