@@ -55,8 +55,7 @@ type ServiceLauncher interface {
 	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
 	SetServiceState(state *pb.ServiceState) (err error)
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
-	StartServices()
-	StopServices()
+	RestartServices()
 	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
 }
 
@@ -229,8 +228,7 @@ func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.Boar
 		return &emptypb.Empty{}, err
 	}
 
-	server.launcher.StopServices()
-	server.launcher.StartServices()
+	server.launcher.RestartServices()
 
 	return &emptypb.Empty{}, nil
 }

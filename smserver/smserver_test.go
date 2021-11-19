@@ -418,8 +418,7 @@ func (launcher *testLauncher) GetStateMessageChannel() (channel <-chan *pb.SMNot
 	return launcher.stateChannel
 }
 
-func (launcher *testLauncher) StartServices() {}
-func (launcher *testLauncher) StopServices()  {}
+func (launcher *testLauncher) RestartServices() {}
 
 func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
 	return status, nil

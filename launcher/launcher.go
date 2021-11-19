@@ -174,6 +174,8 @@ type Launcher struct {
 	serviceTemplate string
 	runnerPath      string
 
+	usersMutex sync.RWMutex
+
 	sync.Mutex
 }
 
@@ -365,7 +367,7 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 func (launcher *Launcher) Close() {
 	log.Debug("Close launcher")
 
-	launcher.StopServices()
+	launcher.stopCurrentUserServices()
 
 	launcher.systemd.Close()
 
@@ -407,6 +409,9 @@ func (launcher *Launcher) InstallService(serviceInfo *pb.InstallServiceRequest) 
 
 	}()
 
+	launcher.usersMutex.RLock()
+	defer launcher.usersMutex.RUnlock()
+
 	if err = launcher.installService(serviceInfo); err != nil {
 		return status, aoserrors.Wrap(err)
 	}
@@ -441,6 +446,9 @@ func (launcher *Launcher) UninstallService(removeReq *pb.RemoveServiceRequest) (
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	launcher.usersMutex.RLock()
+	defer launcher.usersMutex.RUnlock()
 
 	if err = launcher.uninstallService(service, removeReq.GetUsers().Users); err != nil {
 		return aoserrors.Wrap(err)
@@ -558,11 +566,14 @@ func (launcher *Launcher) SetUsers(users []string) (err error) {
 		return nil
 	}
 
-	launcher.StopServices()
+	launcher.usersMutex.Lock()
+	defer launcher.usersMutex.Unlock()
+
+	launcher.stopCurrentUserServices()
 
 	launcher.users = users
 
-	launcher.StartServices()
+	launcher.startCurrentUserServices()
 
 	if err = launcher.cleanCache(); err != nil {
 		log.Errorf("Error cleaning cache: %s", err)
@@ -633,6 +644,9 @@ func (launcher *Launcher) StateAcceptance(acceptance *pb.StateAcceptance) (err e
 
 // UpdateState updates service state
 func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
+	launcher.usersMutex.RLock()
+	defer launcher.usersMutex.RUnlock()
+
 	service, err := launcher.serviceProvider.GetService(state.ServiceId)
 	if err != nil {
 		log.Errorf("Can't get service: %s", err)
@@ -748,43 +762,6 @@ func Cleanup(cfg *config.Config) (err error) {
 	return nil
 }
 
-// StartServices starts current users services
-func (launcher *Launcher) StartServices() {
-	log.WithField("users", launcher.users).Debug("Start user services")
-
-	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
-	if err != nil {
-		log.Errorf("Can't start services: %s", err)
-		return
-	}
-
-	launcher.startServices(services)
-}
-
-// StopServices stops current users services
-func (launcher *Launcher) StopServices() {
-	log.WithField("users", launcher.users).Debug("Stop user services")
-
-	var services []Service
-	var err error
-
-	if launcher.users == nil {
-		services, err = launcher.serviceProvider.GetServices()
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-			return
-		}
-	} else {
-		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-			return
-		}
-	}
-
-	launcher.stopServices(services)
-}
-
 // GetServicePermissions returns service permissions
 func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
 	service, err := launcher.serviceProvider.GetService(serviceID)
@@ -804,6 +781,15 @@ func (launcher *Launcher) GetServicePermissions(serviceID string) (permission st
 	}
 
 	return string(jsonPermissions), nil
+}
+
+// RestartServices restarts current users services
+func (launcher *Launcher) RestartServices() {
+	launcher.usersMutex.Lock()
+	defer launcher.usersMutex.Unlock()
+
+	launcher.stopCurrentUserServices()
+	launcher.startCurrentUserServices()
 }
 
 // ProcessDesiredEnvVarsList override env vars fore services
@@ -829,6 +815,41 @@ func (state ServiceState) String() string {
 /*******************************************************************************
  * Private
  ******************************************************************************/
+
+func (launcher *Launcher) startCurrentUserServices() {
+	log.WithField("users", launcher.users).Debug("Start user services")
+
+	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
+	if err != nil {
+		log.Errorf("Can't start services: %s", err)
+		return
+	}
+
+	launcher.startServices(services)
+}
+
+func (launcher *Launcher) stopCurrentUserServices() {
+	log.WithField("users", launcher.users).Debug("Stop user services")
+
+	var services []Service
+	var err error
+
+	if launcher.users == nil {
+		services, err = launcher.serviceProvider.GetServices()
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+			return
+		}
+	} else {
+		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
+		if err != nil {
+			log.Errorf("Can't stop services: %s", err)
+			return
+		}
+	}
+
+	launcher.stopServices(services)
+}
 
 func (launcher *Launcher) startServices(services []Service) {
 	var err error
