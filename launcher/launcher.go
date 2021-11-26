@@ -412,6 +412,10 @@ func (launcher *Launcher) InstallService(serviceInfo *pb.InstallServiceRequest) 
 	launcher.usersMutex.RLock()
 	defer launcher.usersMutex.RUnlock()
 
+	if !isUsersEqual(launcher.users, serviceInfo.Users.Users) {
+		return status, aoserrors.New("users missmatch")
+	}
+
 	if err = launcher.installService(serviceInfo); err != nil {
 		return status, aoserrors.Wrap(err)
 	}
@@ -441,6 +445,10 @@ func (launcher *Launcher) UninstallService(removeReq *pb.RemoveServiceRequest) (
 			log.WithFields(log.Fields{"id": id}).Errorf("Can't uninstall service: %s", err)
 		}
 	}()
+
+	if !isUsersEqual(launcher.users, removeReq.Users.Users) {
+		return aoserrors.New("users missmatch")
+	}
 
 	service, err := launcher.serviceProvider.GetService(id)
 	if err != nil {
@@ -1054,10 +1062,8 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 			return aoserrors.Wrap(err)
 		}
 
-		if isUsersEqual(launcher.users, installInfo.GetUsers().Users) {
-			if err = launcher.startService(service); err != nil {
-				return aoserrors.Wrap(err)
-			}
+		if err = launcher.startService(service); err != nil {
+			return aoserrors.Wrap(err)
 		}
 
 		return nil
@@ -1146,10 +1152,8 @@ func (launcher *Launcher) uninstallService(service Service, users []string) (err
 		return aoserrors.New("users are not set")
 	}
 
-	if isUsersEqual(launcher.users, users) {
-		if err := launcher.stopService(service); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err := launcher.stopService(service); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	userService, err := launcher.serviceProvider.GetUsersService(users, service.ID)
@@ -1939,15 +1943,12 @@ func (launcher *Launcher) addService(service Service, users []string) (err error
 		return aoserrors.Wrap(err)
 	}
 
-	if isUsersEqual(launcher.users, users) {
+	if err = launcher.addServiceToSystemd(service); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-		if err = launcher.addServiceToSystemd(service); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		if err = launcher.startService(service); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = launcher.startService(service); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	return aoserrors.Wrap(err)
@@ -1985,23 +1986,21 @@ func (launcher *Launcher) updateService(oldService, newService Service, users []
 		return aoserrors.Wrap(err)
 	}
 
-	if isUsersEqual(launcher.users, users) {
-		if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
-			newService.UID, newService.GID); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
+		newService.UID, newService.GID); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-		if err = launcher.stopService(oldService); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = launcher.stopService(oldService); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-		if err = launcher.addServiceToSystemd(newService); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = launcher.addServiceToSystemd(newService); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-		if err = launcher.startService(newService); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = launcher.startService(newService); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
