@@ -1959,11 +1959,11 @@ func (launcher *Launcher) updateService(oldService, newService Service, users []
 		if err != nil {
 			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
 
-			if err = launcher.stopService(newService); err != nil {
+			if err := launcher.stopService(newService); err != nil {
 				log.WithField("id", newService.ID).Errorf("Can't stop service: %s", err)
 			}
 
-			if err = os.RemoveAll(newService.Path); err != nil {
+			if err := os.RemoveAll(newService.Path); err != nil {
 				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
 			}
 
