@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/daemon"
 	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
 	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
@@ -396,7 +397,12 @@ func main() {
 	defer sm.close()
 
 	if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
-		log.Errorf("Can't set users: %s", err)
+		log.Fatalf("Can't set users: %s", err)
+	}
+
+	// Notify systemd
+	if _, err = daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+		log.Errorf("Can't notify systemd: %s", err)
 	}
 
 	ctx, fnCancel := context.WithCancel(context.Background())
