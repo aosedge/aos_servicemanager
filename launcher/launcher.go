@@ -62,7 +62,7 @@ import (
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
 // services and their storages before first start.
-const OperationVersion = 6
+const OperationVersion = 7
 
 // Service state
 const (
@@ -93,6 +93,9 @@ const serviceTemplate = `# This is template file used to launch AOS services
 [Unit]
 Description=AOS Service
 After=network.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
 
 [Service]
 Type=forking
