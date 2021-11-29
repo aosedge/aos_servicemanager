@@ -115,6 +115,11 @@ WantedBy=multi-user.target
 
 const serviceTemplateFile = "template.service"
 
+const (
+	unitStatusFailed = "failed"
+	unitStatusActive = "active"
+)
+
 const downloadDirName = "download"
 
 const (
@@ -316,7 +321,7 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 	}
 
 	// Create systemd connection
-	launcher.systemd, err = dbus.NewSystemConnection()
+	launcher.systemd, err = dbus.NewSystemConnectionContext(context.Background())
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -2006,6 +2011,10 @@ func (launcher *Launcher) updateService(oldService, newService Service, users []
 		return aoserrors.Wrap(err)
 	}
 
+	if err = launcher.checkServiceHealth(newService.UnitName); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -2405,6 +2414,50 @@ func (launcher *Launcher) validateTTLs() {
 
 		case <-launcher.ttlStopChannel:
 			return
+		}
+	}
+}
+
+func (launcher *Launcher) checkServiceHealth(serviceName string) (err error) {
+	subSet := launcher.systemd.NewSubscriptionSet()
+
+	subSet.Add(serviceName)
+
+	evChan, errChan := subSet.Subscribe()
+
+	var curretActiveStatus string
+
+	timeoutChannel := time.After(launcher.config.ServiceHealthCheckTimeout.Duration)
+
+	for {
+		select {
+		case changes := <-evChan:
+			unitStatus, ok := changes[serviceName]
+			if !ok {
+				break
+			}
+
+			if unitStatus == nil {
+				return aoserrors.Errorf("service %s disabled", serviceName)
+			}
+
+			if unitStatus.Name == serviceName {
+				if unitStatus.ActiveState == unitStatusFailed {
+					return aoserrors.Errorf("service %s failed", serviceName)
+				}
+
+				curretActiveStatus = unitStatus.ActiveState
+			}
+
+		case err = <-errChan:
+			return aoserrors.Wrap(err)
+
+		case <-timeoutChannel:
+			if curretActiveStatus != unitStatusActive {
+				return aoserrors.Errorf("waiting for activating service %s timeout", serviceName)
+			}
+
+			return nil
 		}
 	}
 }

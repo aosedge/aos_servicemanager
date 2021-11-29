@@ -115,6 +115,9 @@ type testLayerProvider struct {
 type pythonAOSSecretImage struct {
 }
 
+type failedServiceImage struct {
+}
+
 type testPermissionsProvider struct {
 }
 
@@ -174,7 +177,7 @@ func TestMain(m *testing.M) {
 func TestInstallRemove(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -245,7 +248,7 @@ func TestInstallRemove(t *testing.T) {
 func TestRemoveAllServices(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -303,7 +306,7 @@ func TestRemoveAllServices(t *testing.T) {
 func TestCheckServicesConsistency(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -364,7 +367,7 @@ func TestCheckServicesConsistency(t *testing.T) {
 func TestAutoStart(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -403,7 +406,7 @@ func TestAutoStart(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(nil)
+	launcher, err = newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -441,7 +444,7 @@ func TestAutoStart(t *testing.T) {
 func TestErrors(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -519,7 +522,7 @@ func TestErrors(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	imageDownloader := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 10*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -576,6 +579,40 @@ func TestUpdate(t *testing.T) {
 		}
 	}
 
+	failedService := failedServiceImage{}
+
+	serviceURL, fileInfo, err = failedService.PrepareService()
+	if err != nil {
+		log.Fatal("Can't prepare test service: ", err)
+	}
+
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+		Users: &pb.Users{Users: users}})
+	if err == nil {
+		t.Error("Service aos_service0.service should have installation failed")
+	}
+
+	version, err := launcher.GetServiceVersion("service0")
+	if err != nil {
+		t.Errorf("Can't get service version: %s", err)
+	}
+
+	if version != 0 {
+		t.Error("Service version missmatch")
+	}
+
+	n, _, err = serverConn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("Can't read from UDP: %s", err)
+	}
+
+	message := string(buf[:n])
+
+	if message != "service0, version: 0" {
+		t.Fatalf("Wrong service content: %s", message)
+	}
+
 	imageDownloader.version = 1
 
 	serviceURL, fileInfo, err = imageDownloader.PrepareService()
@@ -605,7 +642,7 @@ func TestUpdate(t *testing.T) {
 func TestAOSSecret(t *testing.T) {
 	imageDownloader := pythonAOSSecretImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -664,7 +701,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 	deviceManager.isValid = false
 
 	// create launcher instance
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -685,7 +722,7 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -723,7 +760,7 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 func TestVisPermissions(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -762,7 +799,7 @@ func TestVisPermissions(t *testing.T) {
 func TestUsersServices(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -867,7 +904,7 @@ func TestUsersServices(t *testing.T) {
 func TestServiceTTL(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -935,7 +972,7 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Fatalf("Can't create monitor: %s", err)
 	}
 
-	launcher, err := newTestLauncher(monitor)
+	launcher, err := newTestLauncher(monitor, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1013,7 +1050,7 @@ func TestServiceStorage(t *testing.T) {
 	ftpService := ftpImage{"/home/service/storage", 8192*2 + 8192*20, 0, 0, nil}
 
 	// Set limit for 2 files + some buffer
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1092,7 +1129,7 @@ func TestServiceStorage(t *testing.T) {
 func TestServiceState(t *testing.T) {
 	ftpService := ftpImage{"/", 1024 * 24, 256, 0, nil}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1257,7 +1294,7 @@ func TestTmpDir(t *testing.T) {
 	ftpService := ftpImage{"/tmp", 0, 0, 0, nil}
 	// Test no tmp limit
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1297,7 +1334,7 @@ func TestTmpDir(t *testing.T) {
 
 	ftpService = ftpImage{"/tmp", 0, 0, 8192, nil}
 
-	if launcher, err = newTestLauncher(nil); err != nil {
+	if launcher, err = newTestLauncher(nil, 1*time.Second); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1341,7 +1378,7 @@ func TestTmpDir(t *testing.T) {
 
 	launcher.Close()
 
-	if launcher, err = newTestLauncher(nil); err != nil {
+	if launcher, err = newTestLauncher(nil, 1*time.Second); err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
 
@@ -1572,7 +1609,7 @@ func TestServiceWithLayers(t *testing.T) {
 
 	ftpService := ftpImage{"/layer1", 0, 0, 0, digests}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1619,7 +1656,7 @@ func TestServiceWithLayers(t *testing.T) {
 }
 
 func TestSetServiceResources(t *testing.T) {
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create test launcher: %s", err)
 	}
@@ -1665,7 +1702,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	// set fake resource system to valid state (UT emulation)
 	deviceManager.isValid = true
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1703,7 +1740,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 
-	launcher, err = newTestLauncher(nil)
+	launcher, err = newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1748,7 +1785,7 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 func TestManifestValidation(t *testing.T) {
 	testImage := pythonImage{}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1815,7 +1852,7 @@ func TestManifestValidation(t *testing.T) {
 func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	ftpService := ftpImage{"/home/service/storage", 8192 * 20, 0, 0, nil}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -1931,7 +1968,7 @@ func TestChangeUsers(t *testing.T) {
 
 	ftpService := ftpImage{"/layer1", 0, 0, 0, digests}
 
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
@@ -2023,9 +2060,9 @@ func TestChangeUsers(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func newTestLauncher(monitor ServiceMonitor) (launcher *Launcher, err error) {
+func newTestLauncher(monitor ServiceMonitor, serviceHealthCheck time.Duration) (launcher *Launcher, err error) {
 	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTLDays: 30, Runner: getRuntime()},
+		DefaultServiceTTLDays: 30, Runner: getRuntime(), ServiceHealthCheckTimeout: config.Duration{serviceHealthCheck}},
 		&serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
 		return nil, err
@@ -2262,6 +2299,71 @@ func (img pythonAOSSecretImage) PrepareService() (outputFile string, fileInfo im
 	}
 
 	return "file://" + outputFile, fileInfo, nil
+}
+
+func (img failedServiceImage) PrepareService() (outputURL string, fileInfo image.FileInfo, err error) {
+	imageDir, err := ioutil.TempDir("", "aos_")
+	if err != nil {
+		log.Error("Can't create image dir : ", err)
+		return outputURL, fileInfo, err
+	}
+	defer os.RemoveAll(imageDir)
+
+	// create dir
+	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	aosSrvConfig := generateAosSrvConfig()
+
+	data, err := json.Marshal(aosSrvConfig)
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	ociImgSpec := imagespec.Image{}
+	ociImgSpec.OS = "Linux"
+	ociImgSpec.Config.Cmd = []string{"python3", "/home/NO_FILE"}
+	dataImgSpec, err := json.Marshal(ociImgSpec)
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	imageFile, err := ioutil.TempFile("", "aos_")
+	if err != nil {
+		return outputURL, fileInfo, err
+	}
+	outputURL = imageFile.Name()
+	imageFile.Close()
+
+	if err = packImage(imageDir, outputURL); err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	if fileInfo, err = image.CreateFileInfo(context.Background(), outputURL); err != nil {
+		return outputURL, fileInfo, err
+	}
+
+	return "file://" + outputURL, fileInfo, nil
 }
 
 func newTestMonitor() (monitor *testMonitor, err error) {
@@ -2678,7 +2780,7 @@ func setup() (err error) {
 }
 
 func cleanup() (err error) {
-	launcher, err := newTestLauncher(nil)
+	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
 	}
