@@ -95,22 +95,23 @@ type Migration struct {
 
 // Config instance
 type Config struct {
-	CACert                string     `json:"CACert"`
-	SMServerURL           string     `json:"smServerUrl"`
-	CertStorage           string     `json:"certStorage"`
-	IAMServerURL          string     `json:"iamServer"`
-	WorkingDir            string     `json:"workingDir"`
-	StorageDir            string     `json:"storageDir"`
-	LayersDir             string     `json:"layersDir"`
-	BoardConfigFile       string     `json:"boardConfigFile"`
-	DefaultServiceTTLDays uint64     `json:"defaultServiceTTLDays"`
-	Monitoring            Monitoring `json:"monitoring"`
-	Logging               Logging    `json:"logging"`
-	Alerts                Alerts     `json:"alerts"`
-	HostBinds             []string   `json:"hostBinds"`
-	Hosts                 []Host     `json:"hosts,omitempty"`
-	Migration             Migration  `json:"migration"`
-	Runner                string     `json:"runner"`
+	CACert                    string     `json:"CACert"`
+	SMServerURL               string     `json:"smServerUrl"`
+	CertStorage               string     `json:"certStorage"`
+	IAMServerURL              string     `json:"iamServer"`
+	WorkingDir                string     `json:"workingDir"`
+	StorageDir                string     `json:"storageDir"`
+	LayersDir                 string     `json:"layersDir"`
+	BoardConfigFile           string     `json:"boardConfigFile"`
+	DefaultServiceTTLDays     uint64     `json:"defaultServiceTTLDays"`
+	ServiceHealthCheckTimeout Duration   `json:"serviceHealthCheckTimeout"`
+	Monitoring                Monitoring `json:"monitoring"`
+	Logging                   Logging    `json:"logging"`
+	Alerts                    Alerts     `json:"alerts"`
+	HostBinds                 []string   `json:"hostBinds"`
+	Hosts                     []Host     `json:"hosts,omitempty"`
+	Migration                 Migration  `json:"migration"`
+	Runner                    string     `json:"runner"`
 }
 
 /*******************************************************************************
@@ -125,8 +126,9 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		DefaultServiceTTLDays: 30,
-		Runner:                "runc",
+		DefaultServiceTTLDays:     30,
+		ServiceHealthCheckTimeout: Duration{35 * time.Second},
+		Runner:                    "runc",
 		Monitoring: Monitoring{
 			SendPeriod: Duration{1 * time.Minute},
 			PollPeriod: Duration{10 * time.Second},

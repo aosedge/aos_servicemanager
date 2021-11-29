@@ -45,6 +45,7 @@ func createConfigFile() (err error) {
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
+	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
 		"sendPeriod": "00:05:00",
 		"pollPeriod": "00:00:01",		
@@ -349,5 +350,16 @@ func TestCertStorage(t *testing.T) {
 
 	if config.CertStorage != "/var/aos/crypt/sm/" {
 		t.Errorf("Wrong CertStorage value: %s", config.CertStorage)
+	}
+}
+
+func TestServiceHealthCheckTimeout(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.ServiceHealthCheckTimeout.Duration != time.Duration(10*time.Second) {
+		t.Errorf("Wrong ServiceHealthCheckTimeout value: %s", config.ServiceHealthCheckTimeout.String())
 	}
 }
