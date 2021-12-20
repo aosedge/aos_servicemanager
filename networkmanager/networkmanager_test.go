@@ -29,9 +29,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/networkmanager"

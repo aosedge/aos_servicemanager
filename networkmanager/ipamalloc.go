@@ -22,8 +22,8 @@ package networkmanager
 import (
 	"net"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
