@@ -5,8 +5,8 @@ go 1.14
 replace github.com/ThalesIgnite/crypto11 => github.com/xen-troops/crypto11 v1.2.5-0.20210607075540-0b6da74b5450
 
 require (
-	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/anexia-it/fsquota v0.1.3
+	github.com/aoscloud/aos_common v0.0.0-20211220123623-d23b9d38e838
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/containernetworking/cni v1.0.1
 	github.com/containernetworking/plugins v1.0.1
@@ -18,21 +18,21 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-version v1.3.0 // indirect
-	github.com/jinzhu/copier v0.3.2
-	github.com/jlaffaye/ftp v0.0.0-20211029032751-b1140299f4df
+	github.com/jinzhu/copier v0.3.4
+	github.com/jlaffaye/ftp v0.0.0-20211117213618-11820403398b
 	github.com/mattn/go-sqlite3 v1.14.9
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
-	github.com/opencontainers/runc v1.0.2
+	github.com/opencontainers/runc v1.0.3
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pkg/errors v0.9.1
-	github.com/shirou/gopsutil v3.21.10+incompatible
+	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.8.1
 	github.com/speijnik/go-errortree v1.0.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
 	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
-	gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20211119160812-d09d4d10f76e
+	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
 	google.golang.org/grpc v1.41.0
