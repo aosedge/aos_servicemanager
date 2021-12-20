@@ -1,9 +1,16 @@
-# github.com/StackExchange/wmi v1.2.1
-## explicit
-github.com/StackExchange/wmi
 # github.com/anexia-it/fsquota v0.1.3
 ## explicit
 github.com/anexia-it/fsquota
+# github.com/aoscloud/aos_common v0.0.0-20211220123623-d23b9d38e838
+## explicit
+github.com/aoscloud/aos_common/aoserrors
+github.com/aoscloud/aos_common/api/iamanager/v1
+github.com/aoscloud/aos_common/api/servicemanager/v1
+github.com/aoscloud/aos_common/fs
+github.com/aoscloud/aos_common/image
+github.com/aoscloud/aos_common/migration
+github.com/aoscloud/aos_common/utils/contextreader
+github.com/aoscloud/aos_common/utils/cryptutils
 # github.com/apparentlymart/go-cidr v1.1.0
 ## explicit
 github.com/apparentlymart/go-cidr/cidr
@@ -48,7 +55,7 @@ github.com/docker/docker/pkg/mount
 # github.com/fsnotify/fsnotify v1.4.9
 ## explicit
 github.com/fsnotify/fsnotify
-# github.com/go-ole/go-ole v1.2.5
+# github.com/go-ole/go-ole v1.2.6
 github.com/go-ole/go-ole
 github.com/go-ole/go-ole/oleutil
 # github.com/godbus/dbus/v5 v5.0.4
@@ -79,10 +86,10 @@ github.com/hashicorp/go-multierror
 # github.com/hashicorp/go-version v1.3.0
 ## explicit
 github.com/hashicorp/go-version
-# github.com/jinzhu/copier v0.3.2
+# github.com/jinzhu/copier v0.3.4
 ## explicit
 github.com/jinzhu/copier
-# github.com/jlaffaye/ftp v0.0.0-20211029032751-b1140299f4df
+# github.com/jlaffaye/ftp v0.0.0-20211117213618-11820403398b
 ## explicit
 github.com/jlaffaye/ftp
 # github.com/lib/pq v1.10.3
@@ -101,7 +108,7 @@ github.com/opencontainers/go-digest
 ## explicit
 github.com/opencontainers/image-spec/specs-go
 github.com/opencontainers/image-spec/specs-go/v1
-# github.com/opencontainers/runc v1.0.2
+# github.com/opencontainers/runc v1.0.3
 ## explicit
 github.com/opencontainers/runc/libcontainer/cgroups
 github.com/opencontainers/runc/libcontainer/configs
@@ -122,7 +129,7 @@ github.com/pkg/errors
 github.com/safchain/ethtool
 # github.com/seccomp/libseccomp-golang v0.9.1
 github.com/seccomp/libseccomp-golang
-# github.com/shirou/gopsutil v3.21.10+incompatible
+# github.com/shirou/gopsutil v3.21.11+incompatible
 ## explicit
 github.com/shirou/gopsutil/cpu
 github.com/shirou/gopsutil/disk
@@ -149,16 +156,9 @@ github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
 ## explicit
 github.com/vishvananda/netns
-# gitpct.epam.com/epmd-aepr/aos_common v0.0.0-20211119160812-d09d4d10f76e
+# github.com/yusufpapurcu/wmi v1.2.2
 ## explicit
-gitpct.epam.com/epmd-aepr/aos_common/aoserrors
-gitpct.epam.com/epmd-aepr/aos_common/api/iamanager/v1
-gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1
-gitpct.epam.com/epmd-aepr/aos_common/fs
-gitpct.epam.com/epmd-aepr/aos_common/image
-gitpct.epam.com/epmd-aepr/aos_common/migration
-gitpct.epam.com/epmd-aepr/aos_common/utils/contextreader
-gitpct.epam.com/epmd-aepr/aos_common/utils/cryptutils
+github.com/yusufpapurcu/wmi
 # golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 ## explicit
 golang.org/x/crypto/sha3
