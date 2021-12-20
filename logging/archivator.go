@@ -22,9 +22,9 @@ import (
 	"compress/gzip"
 	"errors"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 )
 
 /*******************************************************************************

@@ -36,13 +36,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/image"
 	"github.com/coreos/go-systemd/v22/dbus"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
-	"gitpct.epam.com/epmd-aepr/aos_common/image"
 	"golang.org/x/sys/unix"
 
 	"aos_servicemanager/config"

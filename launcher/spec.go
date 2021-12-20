@@ -31,11 +31,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 	"golang.org/x/sys/unix"
 )
 

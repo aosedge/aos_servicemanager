@@ -26,10 +26,10 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/apparentlymart/go-cidr/cidr"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 func getNetworkRoutes() (routeIPList []netlink.Route, err error) {

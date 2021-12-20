@@ -28,11 +28,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"golang.org/x/crypto/sha3"
 )
 

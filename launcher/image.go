@@ -30,9 +30,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 )
 
 /*******************************************************************************
