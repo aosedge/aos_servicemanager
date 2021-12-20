@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/containernetworking/cni/libcni"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
@@ -38,7 +39,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netns"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 )

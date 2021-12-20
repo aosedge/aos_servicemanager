@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/fs"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	"gitpct.epam.com/epmd-aepr/aos_common/fs"
 	"golang.org/x/sys/unix"
 )
 

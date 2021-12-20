@@ -38,14 +38,14 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/image"
 	"github.com/jlaffaye/ftp"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
-	"gitpct.epam.com/epmd-aepr/aos_common/image"
 	"golang.org/x/crypto/sha3"
 
 	"aos_servicemanager/config"

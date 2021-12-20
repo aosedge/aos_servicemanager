@@ -26,11 +26,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/migration"
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
-	"gitpct.epam.com/epmd-aepr/aos_common/migration"
 
 	"aos_servicemanager/launcher"
 )

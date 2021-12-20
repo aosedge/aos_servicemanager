@@ -25,7 +25,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 )

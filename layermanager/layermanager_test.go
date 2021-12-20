@@ -29,12 +29,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/image"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
-	"gitpct.epam.com/epmd-aepr/aos_common/image"
 
 	"aos_servicemanager/config"
 	"aos_servicemanager/layermanager"

@@ -28,9 +28,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/jinzhu/copier"
 	log "github.com/sirupsen/logrus"
-	"gitpct.epam.com/epmd-aepr/aos_common/aoserrors"
 
 	"aos_servicemanager/config"
 )

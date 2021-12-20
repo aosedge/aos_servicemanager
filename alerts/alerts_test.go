@@ -31,10 +31,10 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	pb "gitpct.epam.com/epmd-aepr/aos_common/api/servicemanager/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
