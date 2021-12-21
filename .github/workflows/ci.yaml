@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  tests:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      
+      - name: Build        
+        run: go build
+
+      - name: Test
+        run: sudo env "PATH=$PATH" go test ./... -p=1 -failfast -v
