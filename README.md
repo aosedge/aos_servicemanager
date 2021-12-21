@@ -3,13 +3,14 @@
 
 [![CI](https://github.com/aoscloud/aos_servicemanager/workflows/CI/badge.svg)](https://github.com/aoscloud/aos_servicemanager/actions?query=workflow%3ACI)
 
-AOS Service Manager (SM) is a part of AOS system which resides on the vehicle side and stands for the following tasks:
 
-* communicate with the backend;
-* install, remove, start, stop AOS services;
-* configure AOS services network;
-* configure and monitor AOS services and system resource usage;
-* provide persistent storage and state handling for AOS services.
+Aos Service Manager (SM) is a part of Aos system which resides on the device side and stands for the following tasks:
+
+* communicate with the communication manager;
+* install, remove, start, stop Aos services;
+* configure Aos services network;
+* configure and monitor Aos services and system resource usage;
+* provide persistent storage and state handling for Aos services.
 
 See architecture [document](doc/architecture.md) for more details.
 
@@ -21,7 +22,6 @@ All requires GO packages exist under `vendor` folder. Content of this folder is 
 
 ```bash
 export GO111MODULE=on
-export GOPRIVATE=gitpct.epam.com/*
 ```
 
 ```golang
@@ -32,18 +32,6 @@ go mod vendor
 ## Required native packages
 
 * libsystemd-dev
-
-## Identification module selection
-
-For authentication with the cloud, SM requires to get the `system id` and `user claims` parameters. These parameters are platform-specific. There are identification packages under `identification` folder. One of identification instance should be explicitly created in the  main function:
-
-```golang
-	// Create identifier
-	// Use appropriate identifier from identification folder
-	if sm.identifier, err = visidentifier.New(cfg.Identifier); err != nil {
-		goto err
-	}
-```
 
 ## Native build
 
@@ -98,17 +86,13 @@ To override system network configuration, a custom version of the above files ca
 
 ## Required packages
 
-SM needs aos_vis to be running and configured (see aos_vis [readme](https://gitpct.epam.com/epmd-aepr/aos_vis/blob/master/README.md)) before start.
+SM needs CM and IAM to be running and configured (see [CM](https://github.com/aoscloud/aos_communicationmanager#readme) and [IAM](https://github.com/aoscloud/aos_iamanager#readme)) before start.
 
 SM requires following applications to be available in the system or placed in SM working directory:
-* [runc](https://github.com/opencontainers/runc) - launch service containers
-* [wondershaper](https://github.com/magnific0/wondershaper) - set network UL/DL speed limit
-* [iperf](https://sourceforge.net/projects/iperf2/) - a network traffic tool for measuring TCP and UDP performance. 
-
+* [runc](https://github.com/opencontainers/runc) or [crun](https://github.com/containers/crun) - launch service containers
 ## Test required packages
 
-* [libssl-dev]  - headers for TPM simulator
-* [rabbitmq-server] - AMQP server 
+* [libssl-dev] - headers for TPM simulator
 * [pyftpdlib] - light python ftp server
 
 ## Required Python3 packages
@@ -148,5 +132,5 @@ Install all necessary dependencies:
 Test all packages:
 
 ```
-sudo -E go test ./... -v
+sudo env "PATH=$PATH" go test ./... -v
 ```
