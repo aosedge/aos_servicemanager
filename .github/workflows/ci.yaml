@@ -15,9 +15,14 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
-      
-      - name: Build        
+
+      - name: Build
         run: go build
 
       - name: Test
-        run: sudo env "PATH=$PATH" go test ./... -p=1 -failfast -v
+        run:
+          sudo env "PATH=$PATH" go test ./... -p=1 -failfast -v -coverprofile=coverage.out -covermode=atomic
+          sudo chmod 666 coverage.out
+
+      - name: Code coverage
+        run: bash <(curl -s https://codecov.io/bash)
