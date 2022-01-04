@@ -28,13 +28,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v1"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/iamclient"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/iamclient"
 )
 
 /*******************************************************************************
@@ -52,12 +53,12 @@ const (
  ******************************************************************************/
 
 type testServer struct {
+	pb.UnimplementedIAMProtectedServiceServer
+	pb.UnimplementedIAMPublicServiceServer
 	grpcServer          *grpc.Server
 	users               []string
 	usersChangedChannel chan []string
 	permissionsCache    map[string]servicePermissions
-	pb.UnimplementedIAMProtectedServiceServer
-	pb.UnimplementedIAMPublicServiceServer
 }
 
 type servicePermissions struct {
@@ -79,7 +80,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -114,6 +116,7 @@ func TestGetUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
+
 	defer server.close()
 
 	server.users = []string{"user1", "user2", "user3"}
@@ -148,12 +151,14 @@ func TestRegisterService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
+
 	defer server.close()
 
 	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %s", err)
 	}
+
 	defer client.Close()
 
 	permissions := map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
@@ -184,17 +189,20 @@ func TestGetPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
+
 	defer server.close()
 
 	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %s", err)
 	}
+
 	defer client.Close()
 
 	permissions := map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
 
 	registerServiceID := "serviceID"
+
 	secret, err := client.RegisterService(registerServiceID, permissions)
 	if err != nil || secret == "" {
 		t.Errorf("Can't send a request: %s", err)
@@ -233,8 +241,9 @@ func newTestServer(url string) (server *testServer, err error) {
 
 	listener, err := net.Listen("tcp", url)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
+
 	server.grpcServer = grpc.NewServer()
 
 	pb.RegisterIAMProtectedServiceServer(server.grpcServer, server)
@@ -242,29 +251,30 @@ func newTestServer(url string) (server *testServer, err error) {
 
 	server.permissionsCache = make(map[string]servicePermissions)
 
-	go server.grpcServer.Serve(listener)
+	go func() {
+		if err := server.grpcServer.Serve(listener); err != nil {
+			log.Errorf("Can't serve grpc server: %s", err)
+		}
+	}()
 
 	return server, nil
 }
 
-func (server *testServer) close() (err error) {
+func (server *testServer) close() {
 	if server.grpcServer != nil {
 		server.grpcServer.Stop()
 	}
-
-	return nil
 }
 
 func (server *testServer) RegisterService(context context.Context,
 	req *pb.RegisterServiceRequest) (rsp *pb.RegisterServiceResponse, err error) {
 	rsp = &pb.RegisterServiceResponse{}
 
-	secret := server.findServiceID(req.ServiceId)
-	if secret != "" {
-		return rsp, fmt.Errorf("service %s is already registered", req.ServiceId)
+	if secret := server.findServiceID(req.ServiceId); secret != "" {
+		return rsp, aoserrors.New(fmt.Sprintf("service %s is already registered", req.ServiceId))
 	}
 
-	secret = randomString()
+	secret := randomString()
 	rsp.Secret = secret
 
 	permissions := make(map[string]map[string]string)
@@ -277,12 +287,13 @@ func (server *testServer) RegisterService(context context.Context,
 	return rsp, nil
 }
 
-func (server *testServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty, err error) {
+func (server *testServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty,
+	err error) {
 	rsp = &empty.Empty{}
 
 	secret := server.findServiceID(req.ServiceId)
 	if secret == "" {
-		return rsp, fmt.Errorf("service %s is not registered ", req.ServiceId)
+		return rsp, aoserrors.New(fmt.Sprintf("service %s is not registered ", req.ServiceId))
 	}
 
 	delete(server.permissionsCache, secret)
@@ -290,17 +301,18 @@ func (server *testServer) UnregisterService(ctx context.Context, req *pb.Unregis
 	return rsp, nil
 }
 
-func (server *testServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse, err error) {
+func (server *testServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse,
+	err error) {
 	rsp = &pb.PermissionsResponse{}
 
 	funcServersPermissions, ok := server.permissionsCache[req.Secret]
 	if !ok {
-		return rsp, fmt.Errorf("secret not found")
+		return rsp, aoserrors.New("secret not found")
 	}
 
 	permissions, ok := funcServersPermissions.permissions[req.FunctionalServerId]
 	if !ok {
-		return rsp, fmt.Errorf("permissions for functional server not found")
+		return rsp, aoserrors.New("permissions for functional server not found")
 	}
 
 	rsp.Permissions = &pb.Permissions{Permissions: permissions}
@@ -315,14 +327,19 @@ func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (r
 	return rsp, nil
 }
 
-func (server *testServer) SubscribeUsersChanged(req *empty.Empty, stream pb.IAMPublicService_SubscribeUsersChangedServer) (err error) {
+func (server *testServer) SubscribeUsersChanged(req *empty.Empty,
+	stream pb.IAMPublicService_SubscribeUsersChangedServer) (err error) {
 	for {
 		select {
 		case <-stream.Context().Done():
 			return nil
 
 		case users := <-server.usersChangedChannel:
-			stream.Send(&pb.Users{Users: users})
+			if err := stream.Send(&pb.Users{Users: users}); err != nil {
+				return aoserrors.Wrap(err)
+			}
+
+			return nil
 		}
 	}
 }
@@ -343,7 +360,7 @@ func randomString() string {
 	rand.Seed(time.Now().UnixNano())
 
 	for i := range secret {
-		secret[i] = secretSymbols[rand.Intn(len(secretSymbols))]
+		secret[i] = secretSymbols[rand.Intn(len(secretSymbols))] //nolint
 	}
 
 	return string(secret)

@@ -89,14 +89,14 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 
 	monitor.iptables, err = iptables.New()
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	monitor.inChain = "AOS_SYSTEM_IN"
 	monitor.outChain = "AOS_SYSTEM_OUT"
 
 	if err = monitor.deleteAllTrafficChains(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	// We have to count only interned traffic.  Skip local sub networks and netns
@@ -112,15 +112,15 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 	monitor.skipAddresses = strings.Join(skipNetworks, ",")
 
 	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT", "0/0"); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = monitor.processTrafficMonitor(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return monitor, nil
@@ -193,19 +193,19 @@ func (monitor *trafficMonitoring) setChainState(chain, addresses string, enable 
 
 	if enable {
 		if err = monitor.deleteAllRules(chain, addrType, addresses, "-j", "DROP"); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	} else {
 		if err = monitor.deleteAllRules(chain, addrType, addresses); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if err = monitor.iptables.Append("filter", chain, addrType, addresses, "-j", "DROP"); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -220,7 +220,7 @@ func (monitor *trafficMonitoring) deleteAllRules(chain string, rulespec ...strin
 				return nil
 			}
 
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 }
@@ -241,29 +241,29 @@ func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses
 	}
 
 	if err = monitor.iptables.NewChain("filter", chain); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = monitor.iptables.Insert("filter", rootChain, 1, "-j", chain); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	// This addresses will be not count but returned back to the root chain
 	if monitor.skipAddresses != "" {
 		if err = monitor.iptables.Append("filter", chain, skipAddrType, monitor.skipAddresses, "-j", "RETURN"); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = monitor.iptables.Append("filter", chain, addrType, addresses); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	traffic := trafficData{addresses: addresses}
 
 	if traffic.lastUpdate, traffic.initialValue, err =
 		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && !strings.Contains(err.Error(), "not exist") {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	monitor.trafficMap[chain] = &traffic
@@ -276,21 +276,24 @@ func (monitor *trafficMonitoring) deleteTrafficChain(chain, rootChain string) (e
 
 	// Store traffic data to DB
 	if traffic, ok := monitor.trafficMap[chain]; ok {
-		monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue)
+		if err := monitor.trafficStorage.SetTrafficMonitorData(chain,
+			traffic.lastUpdate, traffic.currentValue); err != nil {
+			log.Errorf("Can't set traffic monitoring: %s", err)
+		}
 	}
 
 	delete(monitor.trafficMap, chain)
 
 	if err = monitor.deleteAllRules(rootChain, "-j", chain); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = monitor.iptables.ClearChain("filter", chain); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = monitor.iptables.DeleteChain("filter", chain); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -366,7 +369,7 @@ func (monitor *trafficMonitoring) deleteAllTrafficChains() (err error) {
 	// Delete all aos related chains
 	chainList, err := monitor.iptables.ListChains("filter")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, chain := range chainList {
@@ -406,20 +409,20 @@ func (monitor *trafficMonitoring) startTrafficMonitor(serviceID, IPAddress strin
 	serviceChains := trafficChains{inChain: "AOS_" + chainBase + "_IN", outChain: "AOS_" + chainBase + "_OUT"}
 
 	if err = monitor.createTrafficChain(serviceChains.inChain, "FORWARD", IPAddress); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	monitor.trafficMap[serviceChains.inChain].limit = downloadLimit
 
 	if err = monitor.createTrafficChain(serviceChains.outChain, "FORWARD", IPAddress); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	monitor.trafficMap[serviceChains.outChain].limit = uploadLimit
 	monitor.serviceChainsMap[serviceID] = &serviceChains
 
 	if err = monitor.processTrafficMonitor(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil

@@ -178,8 +178,13 @@ func (resourcemanager *ResourceManager) RequestDeviceResourceByName(name string)
 	log.Debugf("ResourceManager: RequestDeviceResourceByName(%s)", name)
 
 	tempDeviceResource, err := resourcemanager.getAvailableDeviceByName(name)
+	if err != nil {
+		return deviceResource, aoserrors.Wrap(err)
+	}
 
-	copier.Copy(&deviceResource, &tempDeviceResource)
+	if err = copier.Copy(&deviceResource, &tempDeviceResource); err != nil {
+		return deviceResource, aoserrors.Wrap(err)
+	}
 
 	//Cleanup host devices, releasing allocated memory
 	deviceResource.HostDevices = nil
@@ -390,7 +395,7 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 		line, err := reader.ReadString('\n')
 
 		// skip all line starting with #
-		if strings.HasPrefix(line, "#") != true {
+		if !strings.HasPrefix(line, "#") {
 			// get group name
 			lineSlice := strings.Split(line, ":")
 
@@ -455,7 +460,7 @@ func (resourcemanager *ResourceManager) validateDeviceResources(devices []Device
 	for _, avaliableDevice := range devices {
 		// check devices
 		for _, availableHostDevice := range avaliableDevice.HostDevices {
-			if contains(resourcemanager.hostDevices, availableHostDevice) != true {
+			if !contains(resourcemanager.hostDevices, availableHostDevice) {
 				deviceErrors[avaliableDevice.Name] = append(deviceErrors[avaliableDevice.Name],
 					aoserrors.Errorf("device: %s is not presented on system", availableHostDevice))
 			}
@@ -463,7 +468,7 @@ func (resourcemanager *ResourceManager) validateDeviceResources(devices []Device
 
 		// check additional groups
 		for _, additionalGroup := range avaliableDevice.Groups {
-			if contains(resourcemanager.hostGroups, additionalGroup) != true {
+			if !contains(resourcemanager.hostGroups, additionalGroup) {
 				deviceErrors[avaliableDevice.Name] = append(deviceErrors[avaliableDevice.Name],
 					aoserrors.Errorf("%s group is not presented on system", additionalGroup))
 			}

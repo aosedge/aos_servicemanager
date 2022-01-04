@@ -15,15 +15,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package launcher
+package launcher //nolint
 
 import (
-	"fmt"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -45,7 +45,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -53,12 +54,16 @@ func init() {
 func TestEnvVarsProviderCreate(t *testing.T) {
 	testStorage := testEnvVarsStorage{}
 
-	time1 := time.Now().Add(time.Duration(1 * time.Hour))
-	time2 := time.Now().Add(time.Duration(-1 * time.Hour))
+	time1 := time.Now().Add(1 * time.Hour)
+	time2 := time.Now().Add(-1 * time.Hour)
 
-	testStorage.envVarsData = []pb.OverrideEnvVar{{SubjectId: "subject1", ServiceId: "service1",
-		Vars: []*pb.EnvVarInfo{{VarId: "1234", Variable: "LEVEL=Debug", Ttl: timestamppb.New(time1)},
-			{VarId: "0000", Variable: "HELLO", Ttl: timestamppb.New(time2)}}}}
+	testStorage.envVarsData = []pb.OverrideEnvVar{{
+		SubjectId: "subject1", ServiceId: "service1",
+		Vars: []*pb.EnvVarInfo{
+			{VarId: "1234", Variable: "LEVEL=Debug", Ttl: timestamppb.New(time1)},
+			{VarId: "0000", Variable: "HELLO", Ttl: timestamppb.New(time2)},
+		},
+	}}
 
 	_, err := createEnvVarsProvider(&testStorage)
 	if err != nil {
@@ -77,17 +82,34 @@ func TestEnvVarsProviderCreate(t *testing.T) {
 func TestProcessprocessOverrideEnvVars(t *testing.T) {
 	testStorage := testEnvVarsStorage{}
 
-	time1 := time.Now().Add(time.Duration(1 * time.Hour))
+	time1 := time.Now().Add(1 * time.Hour)
 
 	testStorage.envVarsData = []pb.OverrideEnvVar{
-		{SubjectId: "subject0", ServiceId: "service0",
-			Vars: []*pb.EnvVarInfo{}},
-		{SubjectId: "subject1", ServiceId: "service1",
-			Vars: []*pb.EnvVarInfo{{VarId: "1111", Variable: "LEVEL=Debug", Ttl: timestamppb.New(time1)}, {VarId: "2222", Variable: "HELLO", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject2", ServiceId: "service2",
-			Vars: []*pb.EnvVarInfo{{VarId: "3333", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)}, {VarId: "4444", Variable: "HELLO2", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject3", ServiceId: "service3",
-			Vars: []*pb.EnvVarInfo{{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)}, {VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)}}},
+		{
+			SubjectId: "subject0", ServiceId: "service0",
+			Vars: []*pb.EnvVarInfo{},
+		},
+		{
+			SubjectId: "subject1", ServiceId: "service1",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "1111", Variable: "LEVEL=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "2222", Variable: "HELLO", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject2", ServiceId: "service2",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "3333", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "4444", Variable: "HELLO2", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject3", ServiceId: "service3",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)},
+			},
+		},
 	}
 
 	provider, err := createEnvVarsProvider(&testStorage)
@@ -96,12 +118,27 @@ func TestProcessprocessOverrideEnvVars(t *testing.T) {
 	}
 
 	desiredEnv := []*pb.OverrideEnvVar{
-		{SubjectId: "subject0", ServiceId: "service0",
-			Vars: []*pb.EnvVarInfo{{VarId: "0_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)}, {VarId: "00_new", Variable: "NEW", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject2", ServiceId: "service2",
-			Vars: []*pb.EnvVarInfo{{VarId: "3333_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)}, {VarId: "4444_new", Variable: "NEW", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject3", ServiceId: "service3",
-			Vars: []*pb.EnvVarInfo{{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)}, {VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)}}},
+		{
+			SubjectId: "subject0", ServiceId: "service0",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "0_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "00_new", Variable: "NEW", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject2", ServiceId: "service2",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "3333_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "4444_new", Variable: "NEW", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject3", ServiceId: "service3",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)},
+			},
+		},
 	}
 
 	result, statuses, err := provider.processOverrideEnvVars(desiredEnv)
@@ -109,9 +146,11 @@ func TestProcessprocessOverrideEnvVars(t *testing.T) {
 		t.Error("Can't process override env vars: ", err)
 	}
 
-	servicesToRestart := []subjectServicePair{{"subject0", "service0"},
+	servicesToRestart := []subjectServicePair{
+		{"subject0", "service0"},
 		{"subject1", "service1"},
-		{"subject2", "service2"}}
+		{"subject2", "service2"},
+	}
 
 	if reflect.DeepEqual(result, servicesToRestart) == false {
 		t.Error("incorrect services to restart")
@@ -131,14 +170,34 @@ func TestProcessprocessOverrideEnvVars(t *testing.T) {
 
 	// test desired env var list contain Non-existent subject serviceId pair
 	desiredEnv = []*pb.OverrideEnvVar{
-		{SubjectId: "subject0", ServiceId: "service0",
-			Vars: []*pb.EnvVarInfo{{VarId: "0_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)}, {VarId: "00_new", Variable: "NEW", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject2", ServiceId: "service2",
-			Vars: []*pb.EnvVarInfo{{VarId: "3333_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)}, {VarId: "4444_new", Variable: "NEW", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "subject3", ServiceId: "service3",
-			Vars: []*pb.EnvVarInfo{{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)}, {VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)}}},
-		{SubjectId: "NOT_EXIST", ServiceId: "NOT_EXIST",
-			Vars: []*pb.EnvVarInfo{{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)}, {VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)}}},
+		{
+			SubjectId: "subject0", ServiceId: "service0",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "0_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "00_new", Variable: "NEW", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject2", ServiceId: "service2",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "3333_new", Variable: "LEVEL_NEW=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "4444_new", Variable: "NEW", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "subject3", ServiceId: "service3",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)},
+			},
+		},
+		{
+			SubjectId: "NOT_EXIST", ServiceId: "NOT_EXIST",
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "5555", Variable: "LEVEL2=Debug", Ttl: timestamppb.New(time1)},
+				{VarId: "6666", Variable: "HELLO2", Ttl: timestamppb.New(time1)},
+			},
+		},
 	}
 
 	result, statuses, err = provider.processOverrideEnvVars(desiredEnv)
@@ -156,13 +215,17 @@ func TestProcessprocessOverrideEnvVars(t *testing.T) {
 		{SubjectId: "subject2", ServiceId: "service2", VarStatus: []*pb.VarStatus{{VarId: "3333_new"}, {VarId: "4444_new"}}},
 		{SubjectId: "subject3", ServiceId: "service3", VarStatus: []*pb.VarStatus{{VarId: "5555"}, {VarId: "6666"}}},
 		{SubjectId: "NOT_EXIST", ServiceId: "NOT_EXIST", VarStatus: []*pb.VarStatus{
-			{VarId: "5555", Error: "Non-existent subject serviceId pair"}, {VarId: "6666", Error: "Non-existent subject serviceId pair"}}},
+			{
+				VarId: "5555",
+				Error: "Non-existent subject serviceId pair",
+			},
+			{VarId: "6666", Error: "Non-existent subject serviceId pair"},
+		}},
 	}
 
 	if reflect.DeepEqual(validsStatus, statuses) == false {
 		t.Error("incorrect env vrs status")
 	}
-
 }
 
 func (storage *testEnvVarsStorage) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error) {
@@ -172,13 +235,14 @@ func (storage *testEnvVarsStorage) GetAllOverrideEnvVars() (vars []pb.OverrideEn
 	return storage.envVarsData, nil
 }
 
-func (storage *testEnvVarsStorage) UpdateOverrideEnvVars(subjects []string, serviceVarId string, vars []*pb.EnvVarInfo) (err error) {
+func (storage *testEnvVarsStorage) UpdateOverrideEnvVars(subjects []string, serviceVarID string,
+	vars []*pb.EnvVarInfo) (err error) {
 	for i := range storage.envVarsData {
-		if storage.envVarsData[i].SubjectId == subjects[0] && storage.envVarsData[i].ServiceId == serviceVarId {
+		if storage.envVarsData[i].SubjectId == subjects[0] && storage.envVarsData[i].ServiceId == serviceVarID {
 			storage.envVarsData[i].Vars = vars
 			return nil
 		}
 	}
 
-	return fmt.Errorf("Env doesn't exist")
+	return aoserrors.New("Env doesn't exist")
 }

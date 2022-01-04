@@ -63,11 +63,12 @@ const monitoringChannelSize = 64
  * Types
  ******************************************************************************/
 
-// ResourceAlertSender interface to send resource alerts
-type MonitoringAndAlertSender interface {
+// MonitoringAndAlertSender interface to send resource alerts.
+type MonitoringAndAlertSender interface { //nolint
 	SendResourceAlert(source, resource string, time time.Time, value uint64)
 }
 
+// TrafficMonitoring interface to get network traffic.
 type TrafficMonitoring interface {
 	GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error)
 	GetServiceTraffic(serviceID string) (inputTraffic, outputTraffic uint64, err error)
@@ -113,16 +114,6 @@ type ServiceMonitoringConfig struct {
 	UploadLimit   uint64
 	DownloadLimit uint64
 	ServiceRules  *ServiceAlertRules
-}
-
-type trafficMonitoring struct {
-	disabled     bool
-	addresses    string
-	currentValue uint64
-	initialValue uint64
-	subValue     uint64
-	limit        uint64
-	lastUpdate   time.Time
 }
 
 type serviceMonitoring struct {
@@ -219,7 +210,11 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
 
-	go monitor.run()
+	go func() {
+		if err := monitor.run(); err != nil {
+			log.Errorf("Can't run minitoring: %s", err)
+		}
+	}()
 
 	return monitor, nil
 }
@@ -241,7 +236,7 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 	monitor.Lock()
 	defer monitor.Unlock()
 
-	load.Misc()
+	_, _ = load.Misc()
 
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		log.WithField("id", serviceID).Warning("Service already under monitoring")
@@ -250,7 +245,8 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 
 	log.WithFields(log.Fields{
 		"id": serviceID,
-		"ip": monitoringConfig.IPAddress}).Debug("Start service monitoring")
+		"ip": monitoringConfig.IPAddress,
+	}).Debug("Start service monitoring")
 
 	// convert id to hashed u64 value
 	hash := fnv.New64a()
@@ -261,7 +257,9 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		uid:        monitoringConfig.UID,
 		gid:        monitoringConfig.GID,
 		monitoringData: pb.ServiceMonitoring{
-			ServiceId: serviceID}}
+			ServiceId: serviceID,
+		},
+	}
 
 	rules := monitoringConfig.ServiceRules
 
@@ -399,11 +397,11 @@ func (monitor *Monitor) sendMonitoringData() {
 	channelData.ServiceMonitoring = make([]*pb.ServiceMonitoring, 0, len(monitor.serviceMap))
 
 	for _, service := range monitor.serviceMap {
-		serviceMonitoringData := service.monitoringData
+		serviceMonitoringData := service.monitoringData // nolint
 		channelData.ServiceMonitoring = append(channelData.ServiceMonitoring, &serviceMonitoringData)
 	}
 
-	currentSystemMonitoring := monitor.currentSystemData
+	currentSystemMonitoring := monitor.currentSystemData // nolint
 	channelData.SystemMonitoring = &currentSystemMonitoring
 	channelData.Timestamp = timestamppb.Now()
 
@@ -438,7 +436,8 @@ func (monitor *Monitor) getCurrentSystemData() {
 		"RAM":  monitor.currentSystemData.Ram,
 		"Disk": monitor.currentSystemData.UsedDisk,
 		"IN":   monitor.currentSystemData.InTraffic,
-		"OUT":  monitor.currentSystemData.OutTraffic}).Debug("Monitoring data")
+		"OUT":  monitor.currentSystemData.OutTraffic,
+	}).Debug("Monitoring data")
 }
 
 func (monitor *Monitor) getCurrentServicesData() {
@@ -471,7 +470,8 @@ func (monitor *Monitor) getCurrentServicesData() {
 			"RAM":  value.monitoringData.Ram,
 			"Disk": value.monitoringData.UsedDisk,
 			"IN":   value.monitoringData.InTraffic,
-			"OUT":  value.monitoringData.OutTraffic}).Debug("Service monitoring data")
+			"OUT":  value.monitoringData.OutTraffic,
+		}).Debug("Service monitoring data")
 	}
 }
 

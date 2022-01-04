@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/google/uuid"
@@ -51,7 +52,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -68,25 +70,18 @@ type testCursorStorage struct {
 	cursor string
 }
 
-type validateAlert struct {
-	source  string
-	message map[string][]error
-}
-
-type testAlerts struct {
-	AlertsChannel chan pb.Alert
-}
-
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
 var systemd *dbus.Conn
 
-var errTimeout = errors.New("timeout")
+var errTimeout = aoserrors.New("timeout")
 
-var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
-var cursorStorage testCursorStorage
+var (
+	serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
+	cursorStorage   testCursorStorage
+)
 
 var tmpDir string
 
@@ -116,7 +111,9 @@ func TestGetSystemError(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
-			SystemAlertPriority:  3}},
+			SystemAlertPriority:  3,
+		},
+	},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -178,17 +175,17 @@ func TestGetSystemError(t *testing.T) {
 				for _, originMessage := range messages {
 					systemAlert := alert.GetSystemAlert()
 					if systemAlert == nil {
-						return false, errors.New("wrong alert type")
+						return false, aoserrors.New("wrong alert type")
 					}
 
 					if originMessage == systemAlert.Message {
-						return false, fmt.Errorf("unexpected message: %s", systemAlert.Message)
+						return false, aoserrors.New("unexpected message: " + systemAlert.Message)
 					}
 				}
 			}
 
 			return false, nil
-		}); err != nil && err != errTimeout {
+		}); err != nil && !errors.Is(err, errTimeout) {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -197,7 +194,9 @@ func TestGetServiceError(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
-			SystemAlertPriority:  3}},
+			SystemAlertPriority:  3,
+		},
+	},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -218,7 +217,8 @@ func TestGetServiceError(t *testing.T) {
 
 	messages := []string{
 		"aos_alertservice0.service: Main process exited, code=dumped, status=11/SEGV",
-		"aos_alertservice0.service: Failed with result 'core-dump'."}
+		"aos_alertservice0.service: Failed with result 'core-dump'.",
+	}
 
 	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second,
 		alerts.AlertTagSystemError, "alertservice0", 0, messages); err != nil {
@@ -235,7 +235,8 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 		messages = append(messages, uuid.New().String())
 	}
 
-	command := fmt.Sprintf("/usr/bin/systemd-cat -p3 /bin/bash -c 'for message in %s ; do echo $message ; done'", strings.Join(messages, " "))
+	command := fmt.Sprintf("/usr/bin/systemd-cat -p3 /bin/bash -c 'for message in %s ; do echo $message ; done'",
+		strings.Join(messages, " "))
 
 	if err := createSystemdUnit("oneshot", command,
 		path.Join(tmpDir, "aos-servicemanager.service")); err != nil {
@@ -245,7 +246,9 @@ func TestGetServiceManagerAlerts(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
-			SystemAlertPriority:  3}},
+			SystemAlertPriority:  3,
+		},
+	},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -270,7 +273,8 @@ func TestMessageFilter(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
 		ServiceAlertPriority: 4,
 		SystemAlertPriority:  3,
-		Filter:               filter}},
+		Filter:               filter,
+	}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -301,21 +305,23 @@ func TestMessageFilter(t *testing.T) {
 			func(alert *pb.Alert) (success bool, err error) {
 				systemAlert := (alert.GetSystemAlert())
 				if systemAlert == nil {
-					return false, errors.New("wrong alert type")
+					return false, aoserrors.New("wrong alert type")
 				}
 
 				if systemAlert.Message != validMessage {
-					return false, errors.New("Receive unexpected alert mesage")
+					return false, aoserrors.New("Receive unexpected alert mesage")
 				}
+
 				return true, nil
 			})
 
 		if err == nil {
 			foundCount++
+
 			continue
 		}
 
-		if err != errTimeout {
+		if !errors.Is(err, errTimeout) {
 			t.Errorf("Result failed: %s", err)
 		}
 	}
@@ -329,7 +335,8 @@ func TestWrongFilter(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
 		Filter:               []string{"", "*(test)^"},
 		ServiceAlertPriority: 4,
-		SystemAlertPriority:  3}},
+		SystemAlertPriority:  3,
+	}},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -341,7 +348,9 @@ func TestOtheralerts(t *testing.T) {
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
-			SystemAlertPriority:  3}},
+			SystemAlertPriority:  3,
+		},
+	},
 		&serviceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
@@ -357,12 +366,13 @@ func TestOtheralerts(t *testing.T) {
 		Source:    "test",
 		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
 			Parameter: "testResource",
-			Value:     42}},
+			Value:     42,
+		}},
 	}
 
 	if err = waitResult(alertsHandler.GetAlertsChannel(), 5, func(alert *pb.Alert) (success bool, err error) {
 		if !proto.Equal(alert, &resourceAlert) {
-			return false, errors.New("received resource alert != send alert")
+			return false, aoserrors.New("received resource alert != send alert")
 		}
 
 		return true, nil
@@ -371,11 +381,11 @@ func TestOtheralerts(t *testing.T) {
 	}
 
 	deviceErrors := make(map[string][]error)
-	deviceErrors["dev1"] = []error{fmt.Errorf("some error")}
+	deviceErrors["dev1"] = []error{aoserrors.New("some error")}
 
 	alertsHandler.SendValidateResourceAlert("test", deviceErrors)
 
-	var convertedErrors []*pb.ResourceValidateErrors
+	convertedErrors := make([]*pb.ResourceValidateErrors, 0)
 
 	for name, reason := range deviceErrors {
 		var messages []string
@@ -386,7 +396,8 @@ func TestOtheralerts(t *testing.T) {
 
 		resourceError := pb.ResourceValidateErrors{
 			Name:     name,
-			ErrorMsg: messages}
+			ErrorMsg: messages,
+		}
 
 		convertedErrors = append(convertedErrors, &resourceError)
 	}
@@ -398,13 +409,15 @@ func TestOtheralerts(t *testing.T) {
 		Payload: &pb.Alert_ResourceValidateAlert{
 			ResourceValidateAlert: &pb.ResourceValidateAlert{
 				Type:   alerts.AlertDeviceErrors,
-				Errors: convertedErrors}},
+				Errors: convertedErrors,
+			},
+		},
 	}
 
 	if err = waitResult(alertsHandler.GetAlertsChannel(), 5, func(alert *pb.Alert) (success bool, err error) {
 		alert.Timestamp = validationAlert.Timestamp
 		if !proto.Equal(alert, &validationAlert) {
-			return false, errors.New("received validation alert != send alert")
+			return false, aoserrors.New("received validation alert != send alert")
 		}
 
 		return true, nil
@@ -420,20 +433,21 @@ func TestOtheralerts(t *testing.T) {
 func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
 	s, ok := serviceProvider.services[serviceID]
 	if !ok {
-		return service, fmt.Errorf("service %s does not exist", serviceID)
+		return service, aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
 	}
 
 	return *s, nil
 }
 
-func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
+func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service launcher.Service,
+	err error) {
 	for _, s := range serviceProvider.services {
 		if s.UnitName == unitName {
 			return *s, nil
 		}
 	}
 
-	return service, fmt.Errorf("service with unit %s does not exist", unitName)
+	return service, aoserrors.New(fmt.Sprintf("service with unit %s does not exist", unitName))
 }
 
 func (cursorStorage *testCursorStorage) SetJournalCursor(cursor string) (err error) {
@@ -457,7 +471,7 @@ func setup() (err error) {
 	}
 
 	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -482,13 +496,14 @@ func cleanup() {
 	}
 }
 
-func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration, checkAlert func(alert *pb.Alert) (success bool, err error)) (err error) {
+func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration,
+	checkAlert func(alert *pb.Alert) (success bool, err error)) (err error) {
 	for {
 		select {
 		case alert := <-alertsChannel:
 			success, err := checkAlert(alert)
 			if err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			if success {
@@ -501,10 +516,6 @@ func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration, checkAler
 	}
 }
 
-func (alertChecker *testAlerts) SendAlert(alert pb.Alert) {
-	alertChecker.AlertsChannel <- alert
-}
-
 func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 	tag, source string, version uint64, data []string) (err error) {
 	return waitResult(alertsChannel, timeout, func(alert *pb.Alert) (success bool, err error) {
@@ -514,7 +525,7 @@ func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 
 		systemAlert := alert.GetSystemAlert()
 		if systemAlert == nil {
-			return false, errors.New("wrong alert type")
+			return false, aoserrors.New("wrong alert type")
 		}
 
 		for i, message := range data {
@@ -522,11 +533,11 @@ func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 				data = append(data[:i], data[i+1:]...)
 
 				if alert.Source != source {
-					return false, fmt.Errorf("wrong alert source: %s", alert.Source)
+					return false, aoserrors.New("wrong alert source: " + alert.Source)
 				}
 
 				if !reflect.DeepEqual(alert.AosVersion, version) {
-					return false, errors.New("AosVersion field missing")
+					return false, aoserrors.New("AosVersion field missing")
 				}
 
 				if len(data) == 0 {
@@ -545,14 +556,15 @@ func createService(serviceID string) (err error) {
 	serviceName := "aos_" + serviceID + ".service"
 
 	if _, ok := serviceProvider.services[serviceID]; ok {
-		return errors.New("service already exists")
+		return aoserrors.New("service already exists")
 	}
 
 	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
 
 	if err = createSystemdUnit("simple",
-		`/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'`, path.Join(tmpDir, serviceName)); err != nil {
-		return err
+		`/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'`,
+		path.Join(tmpDir, serviceName)); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -560,7 +572,7 @@ func createService(serviceID string) (err error) {
 
 func startService(serviceID string) (err error) {
 	if err = startSystemdUnit("aos_" + serviceID + ".service"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -580,16 +592,16 @@ func createSystemdUnit(serviceType, command, fileName string) (err error) {
 
 	serviceContent := fmt.Sprintf(serviceTemplate, serviceType, command)
 
-	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0644); err != nil {
-		return err
+	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0o600); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = systemd.ReloadContext(context.Background()); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -599,7 +611,7 @@ func startSystemdUnit(name string) (err error) {
 	channel := make(chan string)
 
 	if _, err = systemd.RestartUnitContext(context.Background(), name, "replace", channel); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	<-channel
@@ -612,7 +624,7 @@ func stopService(serviceID string) (err error) {
 
 	if _, err = systemd.StopUnitContext(context.Background(),
 		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	<-channel
@@ -622,12 +634,4 @@ func stopService(serviceID string) (err error) {
 
 func crashService(serviceID string) {
 	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
-}
-
-func compareValidateAlerts(first validateAlert, second validateAlert) (result bool) {
-	if first.source != second.source {
-		return false
-	}
-
-	return reflect.DeepEqual(first.message, second.message)
 }

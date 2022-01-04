@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -53,8 +54,7 @@ type testLauncher struct {
 	stateChannel chan *pb.SMNotifications
 }
 
-type testLayerManager struct {
-}
+type testLayerManager struct{}
 
 type testClient struct {
 	connection *grpc.ClientConn
@@ -69,9 +69,6 @@ type testMonitoringProvider struct {
 	monitoringChannel chan *pb.Monitoring
 }
 
-type testStateProvider struct {
-}
-
 type testResourceManager struct {
 	version string
 }
@@ -84,7 +81,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -117,7 +115,11 @@ func TestConnection(t *testing.T) {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -139,6 +141,10 @@ func TestConnection(t *testing.T) {
 	}
 
 	responceBoardCfg, err := client.pbclient.GetBoardConfigStatus(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get board configuration: %s", err)
+	}
+
 	if responceBoardCfg.GetVendorVersion() != "1.0" {
 		t.Errorf("incorrect boardConfig version %s", responceBoardCfg.GetVendorVersion())
 	}
@@ -178,7 +184,11 @@ func TestAlertNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server: %s", err)
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -201,7 +211,10 @@ func TestAlertNotifications(t *testing.T) {
 		Source:    "system",
 		Payload: &pb.Alert_SystemAlert{
 			SystemAlert: &pb.SystemAlert{
-				Message: "some alert"}}}
+				Message: "some alert",
+			},
+		},
+	}
 
 	testAlerts.alertsChannel <- systemAlert
 
@@ -222,7 +235,8 @@ func TestAlertNotifications(t *testing.T) {
 		Source:    "test",
 		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
 			Parameter: "testResource",
-			Value:     42}},
+			Value:     42,
+		}},
 	}
 
 	testAlerts.alertsChannel <- resourceAlert
@@ -250,7 +264,8 @@ func TestAlertNotifications(t *testing.T) {
 
 		resourceError := pb.ResourceValidateErrors{
 			Name:     name,
-			ErrorMsg: messages}
+			ErrorMsg: messages,
+		}
 
 		convertedErrors = append(convertedErrors, &resourceError)
 	}
@@ -262,7 +277,9 @@ func TestAlertNotifications(t *testing.T) {
 		Payload: &pb.Alert_ResourceValidateAlert{
 			ResourceValidateAlert: &pb.ResourceValidateAlert{
 				Type:   alerts.AlertDeviceErrors,
-				Errors: convertedErrors}},
+				Errors: convertedErrors,
+			},
+		},
 	}
 
 	testAlerts.alertsChannel <- validationAlert
@@ -289,7 +306,11 @@ func TestMonitoringNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -306,11 +327,15 @@ func TestMonitoringNotifications(t *testing.T) {
 		t.Fatalf("Can't Subscribes: %s", err)
 	}
 
-	monitoringToSend := &pb.Monitoring{SystemMonitoring: &pb.SystemMonitoring{
-		Ram: 10, UsedDisk: 20, Cpu: 30, InTraffic: 40, OutTraffic: 50},
+	monitoringToSend := &pb.Monitoring{
+		SystemMonitoring: &pb.SystemMonitoring{
+			Ram: 10, UsedDisk: 20, Cpu: 30, InTraffic: 40, OutTraffic: 50,
+		},
 		Timestamp: timestamppb.Now(),
-		ServiceMonitoring: []*pb.ServiceMonitoring{&pb.ServiceMonitoring{
-			ServiceId: "service1", Ram: 110, UsedDisk: 120, Cpu: 130, InTraffic: 140, OutTraffic: 150}}}
+		ServiceMonitoring: []*pb.ServiceMonitoring{{
+			ServiceId: "service1", Ram: 110, UsedDisk: 120, Cpu: 130, InTraffic: 140, OutTraffic: 150,
+		}},
+	}
 
 	testMonitoring.monitoringChannel <- monitoringToSend
 
@@ -336,7 +361,11 @@ func TestServiceStateProcessing(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go smServer.Start()
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
@@ -353,11 +382,14 @@ func TestServiceStateProcessing(t *testing.T) {
 		t.Fatalf("Can't subscribe: %s", err)
 	}
 
-	etalonNewStateMsg := &pb.NewServiceState{CorrelationId: "corelationID",
-		ServiceState: &pb.ServiceState{ServiceId: "serviecId1", StateChecksum: "someCheckSum", State: []byte("state1")}}
+	etalonNewStateMsg := &pb.NewServiceState{
+		CorrelationId: "corelationID",
+		ServiceState:  &pb.ServiceState{ServiceId: "serviecId1", StateChecksum: "someCheckSum", State: []byte("state1")},
+	}
 
 	launcher.stateChannel <- &pb.SMNotifications{
-		SMNotification: &pb.SMNotifications_NewServiceState{NewServiceState: etalonNewStateMsg}}
+		SMNotification: &pb.SMNotifications_NewServiceState{NewServiceState: etalonNewStateMsg},
+	}
 
 	receiveNewSate, err := notifications.Recv()
 	if err != nil {
@@ -372,7 +404,9 @@ func TestServiceStateProcessing(t *testing.T) {
 
 	launcher.stateChannel <- &pb.SMNotifications{
 		SMNotification: &pb.SMNotifications_ServiceStateRequest{
-			ServiceStateRequest: etalonStateRequest}}
+			ServiceStateRequest: etalonStateRequest,
+		},
+	}
 
 	receivedSateRequest, err := notifications.Recv()
 	if err != nil {
@@ -464,10 +498,11 @@ func (resMgr *testResourceManager) UpdateBoardConfig(configJSON string) (err err
 func newTestClient(url string) (client *testClient, err error) {
 	client = &testClient{}
 
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	if client.connection, err = grpc.DialContext(ctx, url, grpc.WithInsecure(), grpc.WithBlock()); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	client.pbclient = pb.NewSMServiceClient(client.connection)

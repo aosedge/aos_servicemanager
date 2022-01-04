@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
@@ -42,7 +43,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -69,10 +71,13 @@ type testTrafficStorage struct {
  ******************************************************************************/
 
 var trafficStorage = testTrafficStorage{
-	chainData: make(map[string]chainData)}
+	chainData: make(map[string]chainData),
+}
 
-var networkManager *networkmanager.NetworkManager
-var tmpDir string
+var (
+	networkManager *networkmanager.NetworkManager
+	tmpDir         string
+)
 
 /*******************************************************************************
  * Main
@@ -110,7 +115,8 @@ func TestAlertProcessor(t *testing.T) {
 		config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 3 * time.Second},
 			MinThreshold: 80,
-			MaxThreshold: 90})
+			MaxThreshold: 90,
+		})
 
 	values := []uint64{50, 91, 79, 92, 93, 94, 95, 94, 79, 91, 92, 93, 94, 32, 91, 92, 93, 94, 95, 96}
 	alertsCount := []int{0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3}
@@ -119,6 +125,7 @@ func TestAlertProcessor(t *testing.T) {
 
 	for i, value := range values {
 		sourceValue = value
+
 		alert.checkAlertDetection(currentTime)
 		if alertsCount[i] != len(destination) {
 			t.Errorf("Wrong alert count %d at %d", len(destination), i)
@@ -136,7 +143,9 @@ func TestPeriodicReport(t *testing.T) {
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
 			SendPeriod: config.Duration{Duration: sendDuration},
-			PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+			PollPeriod: config.Duration{Duration: 1 * time.Second},
+		},
+	},
 		sender, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
@@ -189,23 +198,30 @@ func TestSystemAlerts(t *testing.T) {
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				RAM: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				UsedDisk: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				InTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}},
+					MaxThreshold: 0,
+				},
+			},
+		},
 		sender,
 		networkManager)
 	if err != nil {
@@ -248,7 +264,9 @@ func TestServices(t *testing.T) {
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
 				SendPeriod: config.Duration{Duration: sendDuration},
-				PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+				PollPeriod: config.Duration{Duration: 1 * time.Second},
+			},
+		},
 		sender,
 		networkManager)
 	if err != nil {
@@ -269,7 +287,7 @@ func TestServices(t *testing.T) {
 	// Wait while .ip amd .pid files are created
 	time.Sleep(1 * time.Second)
 
-	err = monitor.StartMonitorService("service1",
+	if err = monitor.StartMonitorService("service1",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service1",
 			UID:        5000,
@@ -278,28 +296,34 @@ func TestServices(t *testing.T) {
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				RAM: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				UsedDisk: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				InTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}})
-	if err != nil {
+					MaxThreshold: 0,
+				},
+			},
+		}); err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	monitor.StartMonitorService("service2",
+	if err = monitor.StartMonitorService("service2",
 		ServiceMonitoringConfig{
 			ServiceDir: "tmp/service2",
 			UID:        5002,
@@ -308,24 +332,30 @@ func TestServices(t *testing.T) {
 				CPU: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				RAM: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				UsedDisk: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				InTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0},
+					MaxThreshold: 0,
+				},
 				OutTraffic: &config.AlertRule{
 					MinTimeout:   config.Duration{},
 					MinThreshold: 0,
-					MaxThreshold: 0}}})
-	if err != nil {
+					MaxThreshold: 0,
+				},
+			},
+		}); err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
@@ -387,8 +417,9 @@ func TestServices(t *testing.T) {
 		t.Fatalf("Can't stop monitoring service: %s", err)
 	}
 
-	runContainerWait("service1", cmd1)
-	runContainerWait("service2", cmd2)
+	_ = runContainerWait("service1", cmd1)
+
+	_ = runContainerWait("service2", cmd2)
 }
 
 func TestTrafficLimit(t *testing.T) {
@@ -401,7 +432,9 @@ func TestTrafficLimit(t *testing.T) {
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
 				SendPeriod: config.Duration{Duration: sendDuration},
-				PollPeriod: config.Duration{Duration: 1 * time.Second}}},
+				PollPeriod: config.Duration{Duration: 1 * time.Second},
+			},
+		},
 		sender, networkManager)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
@@ -433,7 +466,8 @@ func TestTrafficLimit(t *testing.T) {
 			ServiceDir: "tmp/service1",
 			IPAddress:  ipAddress,
 			UID:        5001,
-			GID:        5001})
+			GID:        5001,
+		})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
@@ -468,14 +502,13 @@ func TestTrafficLimit(t *testing.T) {
 			ServiceDir: "tmp/service1",
 			IPAddress:  ipAddress,
 			UID:        5001,
-			GID:        5001})
+			GID:        5001,
+		})
 	if err != nil {
 		t.Fatalf("Can't start monitoring service: %s", err)
 	}
 
-	if err = runContainerWait("service1", cmd1); err != nil {
-		t.Errorf("Wait for service error: %s", err)
-	}
+	_ = runContainerWait("service1", cmd1)
 
 	err = monitor.StopMonitorService("service1")
 	if err != nil {
@@ -522,19 +555,19 @@ func (storage *testTrafficStorage) RemoveTrafficMonitorData(chain string) (err e
 
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if networkManager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, &trafficStorage); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = createOCIContainer(path.Join(tmpDir, "service1"), "service1", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -556,11 +589,11 @@ func cleanup() (err error) {
 
 func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
 	if err = os.RemoveAll(imagePath); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
@@ -570,17 +603,17 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 
 	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := addHostResolvFiles(imagePath); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	var spec runtimespec.Spec
 
 	if err = json.Unmarshal(specJSON, &spec); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	spec.Process.Terminal = false
@@ -595,13 +628,17 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	}
 
 	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
-			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
+			Destination: mount,
+			Type:        "bind", Source: mount, Options: []string{"bind", "ro"},
+		})
 	}
 
 	for _, mount := range []string{"hosts", "resolv.conf"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
-			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
+			Destination: path.Join("/etc", mount),
+			Type:        "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"},
+		})
 	}
 
 	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
@@ -611,11 +648,11 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	spec.Process.Capabilities.Ambient = append(spec.Process.Capabilities.Ambient, "CAP_NET_RAW")
 
 	if specJSON, err = json.Marshal(&spec); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -625,15 +662,15 @@ func addHostResolvFiles(pathToContainer string) (err error) {
 	etcPath := path.Join(pathToContainer, "etc")
 
 	if err = os.MkdirAll(etcPath, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = os.Create(path.Join(etcPath, "hosts")); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = os.Create(path.Join(etcPath, "resolv.conf")); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -643,15 +680,16 @@ func runContainerCmd(imagePath string, containerID string, downloadLimit, upload
 	err = networkManager.AddServiceToNetwork(containerID, "default",
 		networkmanager.NetworkParams{
 			DownloadLimit: downloadLimit,
-			UploadLimit:   uploadLimit})
+			UploadLimit:   uploadLimit,
+		})
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	cmd = exec.Command("runc", "run", "--pid-file", path.Join(imagePath, ".pid"), "-b", imagePath, containerID)
 
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return cmd, nil
@@ -660,7 +698,11 @@ func runContainerCmd(imagePath string, containerID string, downloadLimit, upload
 func runContainerWait(containerID string, cmd *exec.Cmd) (err error) {
 	err = cmd.Wait()
 
-	networkManager.RemoveServiceFromNetwork(containerID, "default")
+	if netErr := networkManager.RemoveServiceFromNetwork(containerID, "default"); netErr != nil {
+		if err == nil {
+			return aoserrors.Wrap(netErr)
+		}
+	}
 
-	return err
+	return aoserrors.Wrap(err)
 }

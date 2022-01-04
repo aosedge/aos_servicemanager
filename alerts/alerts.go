@@ -56,23 +56,25 @@ const (
 
 const alertChannelSize = 50
 
+const microSecondsinSecond = 1000000
+
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-// ServiceProvider provides service info
+// ServiceProvider provides service info.
 type ServiceProvider interface {
 	GetService(serviceID string) (service launcher.Service, err error)
 	GetServiceByUnitName(unitName string) (service launcher.Service, err error)
 }
 
-// CursorStorage provides API to set and get journal cursor
+// CursorStorage provides API to set and get journal cursor.
 type CursorStorage interface {
 	SetJournalCursor(cursor string) (err error)
 	GetJournalCursor() (cursor string, err error)
 }
 
-// Alerts instance
+// Alerts instance.
 type Alerts struct {
 	alertsChannel   chan *pb.Alert
 	config          config.Alerts
@@ -91,7 +93,7 @@ type Alerts struct {
  * Variable
  ******************************************************************************/
 
-// ErrDisabled indicates that alerts is disable in the config
+// ErrDisabled indicates that alerts is disable in the config.
 var ErrDisabled = errors.New("alerts is disabled")
 
 var aosServices = []string{
@@ -105,7 +107,7 @@ var aosServices = []string{
  * Public
  ******************************************************************************/
 
-// New creates new alerts object
+// New creates new alerts object.
 func New(config *config.Config, serviceProvider ServiceProvider,
 	cursorStorage CursorStorage) (instance *Alerts, err error) {
 	log.Debug("New alerts")
@@ -114,8 +116,10 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 		return nil, ErrDisabled
 	}
 
-	instance = &Alerts{config: config.Alerts, cursorStorage: cursorStorage,
-		serviceProvider: serviceProvider}
+	instance = &Alerts{
+		config: config.Alerts, cursorStorage: cursorStorage,
+		serviceProvider: serviceProvider,
+	}
 
 	instance.alertsChannel = make(chan *pb.Alert, alertChannelSize)
 
@@ -126,12 +130,14 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 	for _, substr := range instance.config.Filter {
 		if len(substr) == 0 {
 			log.Warning("Filter value has an empty string")
+
 			continue
 		}
 
 		tmpRegexp, err := regexp.Compile(substr)
 		if err != nil {
 			log.Errorf("Regexp compile error. Incorrect regexp: %s, error is: %s", substr, err)
+
 			continue
 		}
 
@@ -145,7 +151,7 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 	return instance, nil
 }
 
-// Close closes logging
+// Close closes logging.
 func (instance *Alerts) Close() {
 	log.Debug("Close Alerts")
 
@@ -153,26 +159,29 @@ func (instance *Alerts) Close() {
 
 	instance.ticker.Stop()
 
-	instance.storeCurrentCursor()
+	if err := instance.storeCurrentCursor(); err != nil {
+		log.Errorf("Can't store cursor: %s", err)
+	}
 
 	instance.journal.Close()
 }
 
-//GetAlertsChannel returns channel with alerts to be sent
+// GetAlertsChannel returns channel with alerts to be sent.
 func (instance *Alerts) GetAlertsChannel() (channel <-chan *pb.Alert) {
 	return instance.alertsChannel
 }
 
-// SendValidateResourceAlert sends request/releases resource alert
+// SendValidateResourceAlert sends request/releases resource alert.
 func (instance *Alerts) SendValidateResourceAlert(source string, errors map[string][]error) {
 	time := time.Now()
 
 	log.WithFields(log.Fields{
 		"timestamp": time,
 		"source":    source,
-		"errors":    errors}).Debug("Validate Resource alert")
+		"errors":    errors,
+	}).Debug("Validate Resource alert")
 
-	var convertedErrors []*pb.ResourceValidateErrors
+	convertedErrors := make([]*pb.ResourceValidateErrors, 0)
 
 	for name, reason := range errors {
 		var messages []string
@@ -183,7 +192,8 @@ func (instance *Alerts) SendValidateResourceAlert(source string, errors map[stri
 
 		resourceError := pb.ResourceValidateErrors{
 			Name:     name,
-			ErrorMsg: messages}
+			ErrorMsg: messages,
+		}
 
 		convertedErrors = append(convertedErrors, &resourceError)
 	}
@@ -195,19 +205,22 @@ func (instance *Alerts) SendValidateResourceAlert(source string, errors map[stri
 		Payload: &pb.Alert_ResourceValidateAlert{
 			ResourceValidateAlert: &pb.ResourceValidateAlert{
 				Type:   AlertDeviceErrors,
-				Errors: convertedErrors}},
+				Errors: convertedErrors,
+			},
+		},
 	}
 
 	instance.pushAlert(&alert)
 }
 
-// SendResourceAlert sends resource alert
+// SendResourceAlert sends resource alert.
 func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
 	log.WithFields(log.Fields{
 		"timestamp": time,
 		"source":    source,
 		"resource":  resource,
-		"value":     value}).Debug("Resource alert")
+		"value":     value,
+	}).Debug("Resource alert")
 
 	alert := pb.Alert{
 		Timestamp: timestamppb.New(time),
@@ -215,13 +228,14 @@ func (instance *Alerts) SendResourceAlert(source, resource string, time time.Tim
 		Source:    source,
 		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
 			Parameter: resource,
-			Value:     value}},
+			Value:     value,
+		}},
 	}
 
 	instance.pushAlert(&alert)
 }
 
-//SendRequestResourceAlert send request resource alert
+// SendRequestResourceAlert send request resource alert.
 func (instance *Alerts) SendRequestResourceAlert(source string, message string) {
 	instance.pushAlert(&pb.Alert{
 		Timestamp: timestamppb.Now(),
@@ -229,7 +243,10 @@ func (instance *Alerts) SendRequestResourceAlert(source string, message string) 
 		Source:    source,
 		Payload: &pb.Alert_SystemAlert{
 			SystemAlert: &pb.SystemAlert{
-				Message: message}}})
+				Message: message,
+			},
+		},
+	})
 }
 
 /*******************************************************************************
@@ -325,12 +342,16 @@ func (instance *Alerts) processJournal() (err error) {
 		}
 
 		var version uint64
+
 		source := "system"
+
 		tag := AlertTagSystemError
+
 		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
 		if unit == "init.scope" {
-			if priority, err := strconv.Atoi(entry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY]); err != nil || priority > instance.config.ServiceAlertPriority {
+			if priority, err := strconv.Atoi(entry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY]); err != nil ||
+				priority > instance.config.ServiceAlertPriority {
 				continue
 			}
 
@@ -352,8 +373,8 @@ func (instance *Alerts) processJournal() (err error) {
 			}
 		}
 
-		t := time.Unix(int64(entry.RealtimeTimestamp/1000000),
-			int64((entry.RealtimeTimestamp%1000000)*1000))
+		t := time.Unix(int64(entry.RealtimeTimestamp/microSecondsinSecond),
+			int64((entry.RealtimeTimestamp%microSecondsinSecond)*1000)) // nolint
 
 		skipsend := false
 
@@ -380,7 +401,10 @@ func (instance *Alerts) processJournal() (err error) {
 				AosVersion: version,
 				Payload: &pb.Alert_SystemAlert{
 					SystemAlert: &pb.SystemAlert{
-						Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}}})
+						Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
+					},
+				},
+			})
 		}
 	}
 }

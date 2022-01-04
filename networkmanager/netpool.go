@@ -16,7 +16,6 @@
 // limitations under the License.
 
 // Package networkmanager provides set of API to configure network
-
 package networkmanager
 
 import (
@@ -29,8 +28,14 @@ import (
  * Var
  ******************************************************************************/
 
-var predefinedPrivateNetworks = []*networkToSplit{{"172.17.0.0/16", 16}, {"172.18.0.0/16", 16},
-	{"172.19.0.0/16", 16}, {"172.20.0.0/14", 16}, {"172.24.0.0/14", 16}, {"172.28.0.0/14", 16}}
+var predefinedPrivateNetworks = []*networkToSplit{
+	{"172.17.0.0/16", 16},
+	{"172.18.0.0/16", 16},
+	{"172.19.0.0/16", 16},
+	{"172.20.0.0/14", 16},
+	{"172.24.0.0/14", 16},
+	{"172.28.0.0/14", 16},
+}
 
 /*******************************************************************************
  * Types

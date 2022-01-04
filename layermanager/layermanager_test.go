@@ -43,6 +43,7 @@ import (
 /*******************************************************************************
  * Types
  ******************************************************************************/
+
 type testInfoProvider struct {
 	sync.Mutex
 	layers map[string]layerDesc
@@ -68,7 +69,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -84,9 +86,7 @@ func TestMain(m *testing.M) {
 
 	ret := m.Run()
 
-	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
-	}
+	cleanup()
 
 	os.Exit(ret)
 }
@@ -106,8 +106,10 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1,
-		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
+		Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1,
+		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
+	}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -160,13 +162,17 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1,
-		Sha256: fileInfo1.Sha256, Sha512: fileInfo1.Sha512, Size: fileInfo1.Size}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
+		Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1,
+		Sha256: fileInfo1.Sha256, Sha512: fileInfo1.Sha512, Size: fileInfo1.Size,
+	}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1,
-		Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size}); err != nil {
+	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
+		Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1,
+		Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size,
+	}); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -212,7 +218,8 @@ func (infoProvider *testInfoProvider) AddLayer(digest, layerID, path, osVersion,
 	infoProvider.layers[digest] = layerDesc{
 		id:         layerID,
 		aosVersion: aosVersion,
-		path:       path}
+		path:       path,
+	}
 
 	return nil
 }
@@ -248,7 +255,8 @@ func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []*pb.LayerSta
 
 	for digest, layer := range infoProvider.layers {
 		layersList = append(layersList, &pb.LayerStatus{
-			LayerId: layer.id, AosVersion: layer.aosVersion, Digest: digest})
+			LayerId: layer.id, AosVersion: layer.aosVersion, Digest: digest,
+		})
 	}
 
 	return layersList, nil
@@ -260,7 +268,7 @@ func (infoProvider *testInfoProvider) GetLayerInfoByDigest(digest string) (layer
 
 	layerInfo, ok := infoProvider.layers[digest]
 	if !ok {
-		return layer, aoserrors.New("layer does't exist")
+		return layer, aoserrors.New("layer does't exist") // nolint
 	}
 
 	return pb.LayerStatus{LayerId: layerInfo.id, Digest: digest, AosVersion: layerInfo.aosVersion}, nil
@@ -272,86 +280,84 @@ func (infoProvider *testInfoProvider) GetLayerInfoByDigest(digest string) (layer
 
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func cleanup() (err error) {
+func cleanup() {
 	os.RemoveAll(tmpDir)
-
-	return nil
 }
 
 func createLayer(dir string) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(dir)
 
 	tmpLayerFolder := path.Join(tmpDir, "tmpLayerDir")
 	if err := os.MkdirAll(tmpLayerFolder, 0755); err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	data := []byte("this is layer data in layer " + dir)
 
 	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0644); err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(tmpLayerFolder)
 
 	tarFile := path.Join(dir, "layer.tar")
 
 	if output, err := exec.Command("tar", "-C", tmpLayerFolder, "-cf", tarFile, "./").CombinedOutput(); err != nil {
-		return "", "", fileInfo, fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fileInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
 	}
 	defer os.Remove(tarFile)
 
 	file, err := os.Open(tarFile)
 	if err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	byteValue, err := ioutil.ReadAll(file)
 	if err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	layerDigest, err := generateAndSaveDigest(dir, byteValue)
 	if err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	layerDescriptor := imagespec.Descriptor{
 		MediaType: "application/vnd.aos.image.layer.v1.tar+gzip",
 		Digest:    layerDigest,
-		//TODO fullfill
+		// TODO fulfill
 	}
 
 	dataJSON, err := json.Marshal(layerDescriptor)
 	if err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	jsonFile, err := os.Create(path.Join(dir, "layer.json"))
 	if err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	if _, err := jsonFile.Write(dataJSON); err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	layerFile = path.Join(tmpDir, layerDigest.Hex()+".tar.gz")
 	if output, err := exec.Command("tar", "-C", dir, "-czf", layerFile, "./").CombinedOutput(); err != nil {
-		return "", "", fileInfo, fmt.Errorf("error: %s, code: %s", string(output), err)
+		return "", "", fileInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), layerFile); err != nil {
-		return "", "", fileInfo, err
+		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	return "file://" + layerFile, string(layerDigest), fileInfo, nil
@@ -365,12 +371,12 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 
 	file, err := os.Create(path.Join(folder, retDigest.Hex()))
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	if _, err = file.Write(data); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	return retDigest, nil
