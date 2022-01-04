@@ -26,7 +26,6 @@ import (
 	"os/signal"
 	"path"
 	"syscall"
-	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/coreos/go-systemd/daemon"
@@ -49,8 +48,6 @@ import (
 /*******************************************************************************
  * Consts
  ******************************************************************************/
-
-const reconnectTimeout = 10 * time.Second
 
 const dbFileName = "servicemanager.db"
 
@@ -242,11 +239,13 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	return sm, nil
 }
 
-func (sm *serviceManager) handleChannels(ctx context.Context) (err error) {
+func (sm *serviceManager) handleChannels(ctx context.Context) {
 	for {
 		select {
 		case users := <-sm.iam.GetUsersChangedChannel():
-			sm.launcher.SetUsers(users)
+			if err := sm.launcher.SetUsers(users); err != nil {
+				log.Errorf("Can't set users: %s", err)
+			}
 
 		case <-ctx.Done():
 			return

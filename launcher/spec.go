@@ -16,7 +16,6 @@
 // limitations under the License.
 
 // Package launcher provides set of API to controls services lifecycle
-
 package launcher
 
 import (
@@ -49,13 +48,13 @@ const defaultCPUPeriod uint64 = 100000
  * Types
  ******************************************************************************/
 
-//serviceManifest OCI image manifest with aos sevice config
+// serviceManifest OCI image manifest with aos service config.
 type serviceManifest struct {
 	imagespec.Manifest
 	AosService *imagespec.Descriptor `json:"aosService,omitempty"`
 }
 
-// Device configuration for system and service logging
+// Device configuration for system and service logging.
 type Device struct {
 	Name        string `json:"name"`
 	Permissions string `json:"permissions"`
@@ -66,7 +65,7 @@ type aosServiceConfig struct {
 	Author     string             `json:"author"`
 	Hostname   *string            `json:"hostname,omitempty"`
 	Sysctl     *map[string]string `json:"sysctl,omitempty"`
-	ServiceTTL *uint64            `json:"serviceTTL,omitempty"`
+	ServiceTTL *uint64            `json:"serviceTtl,omitempty"`
 	Quotas     struct {
 		StateLimit    *uint64 `json:"stateLimit,omitempty"`
 		StorageLimit  *uint64 `json:"storageLimit,omitempty"`
@@ -151,6 +150,7 @@ func loadServiceSpec(fileName string) (spec *serviceSpec, err error) {
 
 	return spec, nil
 }
+
 func getImageSpecFromImageConfig(fileImageConfigPath string) (spec imagespec.Image, err error) {
 	var imageConfig imagespec.Image
 
@@ -219,17 +219,21 @@ func (spec *serviceSpec) applyAosServiceConfig(aosConfig *aosServiceConfig) (err
 
 		spec.ocSpec.Linux.Resources.Pids.Limit = *aosConfig.Quotas.PidsLimit
 
-		ociRlimit := runtimespec.POSIXRlimit{Type: "RLIMIT_NPROC",
+		ociRlimit := runtimespec.POSIXRlimit{
+			Type: "RLIMIT_NPROC",
 			Hard: (uint64)(spec.ocSpec.Linux.Resources.Pids.Limit),
-			Soft: (uint64)(spec.ocSpec.Linux.Resources.Pids.Limit)}
+			Soft: (uint64)(spec.ocSpec.Linux.Resources.Pids.Limit),
+		}
 
 		spec.addRlimit(ociRlimit)
 	}
 
 	if aosConfig.Quotas.NoFileLimit != nil {
-		ociRlimit := runtimespec.POSIXRlimit{Type: "RLIMIT_NOFILE",
+		ociRlimit := runtimespec.POSIXRlimit{
+			Type: "RLIMIT_NOFILE",
 			Hard: *aosConfig.Quotas.NoFileLimit,
-			Soft: *aosConfig.Quotas.NoFileLimit}
+			Soft: *aosConfig.Quotas.NoFileLimit,
+		}
 
 		spec.addRlimit(ociRlimit)
 	}
@@ -246,14 +250,15 @@ func (spec *serviceSpec) applyAosServiceConfig(aosConfig *aosServiceConfig) (err
 		spec.ocSpec.Linux.Resources.CPU.Quota = &cpuQuota
 	}
 
-	//add tmp folder
+	// add tmp folder
 	if aosConfig.Quotas.TmpLimit != nil {
 		sizeStr := "size=" + strconv.FormatUint(*aosConfig.Quotas.TmpLimit, 10)
 		newMount := runtimespec.Mount{
 			Destination: "/tmp",
 			Type:        "tmpfs",
 			Source:      "tmpfs",
-			Options:     []string{"nosuid", "strictatime", "mode=1777", sizeStr}}
+			Options:     []string{"nosuid", "strictatime", "mode=1777", sizeStr},
+		}
 
 		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, newMount)
 	}
@@ -337,7 +342,8 @@ func (spec *serviceSpec) addBindMount(source, destination, attr string) (err err
 		Destination: destination,
 		Type:        "bind",
 		Source:      absSource,
-		Options:     []string{"bind", attr}}
+		Options:     []string{"bind", attr},
+	}
 
 	return aoserrors.Wrap(spec.addMount(newMount))
 }
@@ -386,18 +392,10 @@ func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
 			absPath = path.Join("/etc", item)
 		}
 
-		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"}})
+		spec.ocSpec.Mounts = append(spec.ocSpec.Mounts, runtimespec.Mount{
+			Destination: path.Join("/etc", item), Type: "bind", Source: absPath, Options: []string{"bind", "ro"},
+		})
 	}
-
-	return nil
-}
-
-func (spec *serviceSpec) createPrestartHook(path string, args []string) (err error) {
-	if spec.ocSpec.Hooks == nil {
-		spec.ocSpec.Hooks = &runtimespec.Hooks{}
-	}
-
-	spec.ocSpec.Hooks.Prestart = []runtimespec.Hook{{Path: path, Args: args}}
 
 	return nil
 }
@@ -435,11 +433,11 @@ func addDevice(hostDevice Device, uid, gid uint32) (device *runtimespec.LinuxDev
 	}
 
 	if strings.Contains(hostDevice.Permissions, "r") {
-		mode = mode | unix.S_IRUSR
+		mode |= unix.S_IRUSR
 	}
 
 	if strings.Contains(hostDevice.Permissions, "w") {
-		mode = mode | unix.S_IWUSR
+		mode |= unix.S_IWUSR
 	}
 
 	return &runtimespec.LinuxDevice{
@@ -474,8 +472,11 @@ func addDevices(hostDevice Device, uid, gid uint32) (devices []runtimespec.Linux
 				continue
 
 			default:
-				dirDevice := Device{Name: path.Join(hostDevice.Name, file.Name()),
-					Permissions: hostDevice.Permissions}
+				dirDevice := Device{
+					Name:        path.Join(hostDevice.Name, file.Name()),
+					Permissions: hostDevice.Permissions,
+				}
+
 				dirDevices, err := addDevices(dirDevice, uid, gid)
 				if err != nil {
 					return nil, aoserrors.Wrap(err)

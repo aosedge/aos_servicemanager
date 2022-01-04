@@ -107,11 +107,11 @@ func (pool *identifierPool) remove(uid, gid uint32) (err error) {
 	defer pool.Unlock()
 
 	if err = removeID(&pool.lockedUIDs, uid); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = removeID(&pool.lockedGIDs, gid); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil

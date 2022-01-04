@@ -48,7 +48,7 @@ const usersChangedChannelSize = 1
  * Types
  ******************************************************************************/
 
-// Client IAM client instance
+// Client IAM client instance.
 type Client struct {
 	sync.Mutex
 
@@ -66,12 +66,15 @@ type Client struct {
  * Public
  ******************************************************************************/
 
-// New creates new IAM client
+// New creates new IAM client.
 func New(config *config.Config, insecure bool) (client *Client, err error) {
 	log.Debug("Connecting to IAM...")
 
-	client = &Client{closeChannel: make(chan struct{}, 1),
-		usersChangedChannel: make(chan []string, usersChangedChannelSize)}
+	client = &Client{
+		closeChannel:        make(chan struct{}, 1),
+		usersChangedChannel: make(chan []string, usersChangedChannelSize),
+	}
+
 	defer func() {
 		if err != nil {
 			client.Close()
@@ -112,7 +115,7 @@ func New(config *config.Config, insecure bool) (client *Client, err error) {
 	return client, nil
 }
 
-// GetUsers returns current users
+// GetUsers returns current users.
 func (client *Client) GetUsers() (users []string) {
 	client.Lock()
 	defer client.Unlock()
@@ -120,13 +123,14 @@ func (client *Client) GetUsers() (users []string) {
 	return client.users
 }
 
-// GetUsersChangedChannel returns users changed channel
+// GetUsersChangedChannel returns users changed channel.
 func (client *Client) GetUsersChangedChannel() (channel <-chan []string) {
 	return client.usersChangedChannel
 }
 
-// RegisterService registers new service with permissions and create secret
-func (client *Client) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error) {
+// RegisterService registers new service with permissions and create secret.
+func (client *Client) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string,
+	err error) {
 	log.WithField("serviceID", serviceID).Debug("Register service")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -147,7 +151,7 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 	return response.Secret, nil
 }
 
-// UnregisterService unregisters service
+// UnregisterService unregisters service.
 func (client *Client) UnregisterService(serviceID string) (err error) {
 	log.WithField("serviceID", serviceID).Debug("Unregister service")
 
@@ -164,8 +168,9 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 	return nil
 }
 
-// GetPermissions gets permissions by secret and functional server ID
-func (client *Client) GetPermissions(secret, funcServerID string) (serviceID string, permissions map[string]string, err error) {
+// GetPermissions gets permissions by secret and functional server ID.
+func (client *Client) GetPermissions(secret, funcServerID string) (serviceID string,
+	permissions map[string]string, err error) {
 	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -181,7 +186,7 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 	return response.ServiceId, response.Permissions.Permissions, nil
 }
 
-// Close closes IAM client
+// Close closes IAM client.
 func (client *Client) Close() (err error) {
 	if client.connection != nil {
 		client.closeChannel <- struct{}{}

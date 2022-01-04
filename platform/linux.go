@@ -20,7 +20,6 @@ package platform
 import (
 	"fmt"
 	"os/user"
-	"sync"
 
 	"github.com/anexia-it/fsquota"
 	"github.com/aoscloud/aos_common/aoserrors"
@@ -30,8 +29,6 @@ import (
 /*******************************************************************************
  * Variables
  ******************************************************************************/
-
-var userMutex sync.Mutex
 
 /*******************************************************************************
  * Public
@@ -53,7 +50,7 @@ func SetUserFSQuota(path string, limit uint64, uid, gid uint32) (err error) {
 
 	limits.Bytes.SetHard(limit)
 
-	if _, err := fsquota.SetUserQuota(path, &user, limits); err != nil {
+	if _, err := fsquota.SetUserQuota(path, &user, limits); err != nil { // nolint
 		return aoserrors.Wrap(err)
 	}
 

@@ -16,14 +16,12 @@
 // limitations under the License.
 
 // Package launcher provides set of API to controls services lifecycle
-
 package launcher
 
 import (
 	"os"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/fs"
@@ -35,19 +33,9 @@ import (
  * Consts
  ******************************************************************************/
 
-const umountRetry = 3
-const umountDelay = 1 * time.Second
-
 /*******************************************************************************
  * Types
  ******************************************************************************/
-
-type mountInfo struct {
-	source       string
-	destintation string
-	mountType    string
-	options      string
-}
 
 /*******************************************************************************
  * Private
@@ -108,7 +96,7 @@ func overlayMount(mountPoint string, lowerDirs []string, workDir, upperDir strin
 	return nil
 }
 
-func umountWithRetry(mountPoint string, flags int) (err error) {
+func umountWithRetry(mountPoint string) (err error) {
 	isMounted, err := isOverlayMount(mountPoint)
 	if err != nil {
 		log.Errorf("Can't check overlay mount: %s", err)

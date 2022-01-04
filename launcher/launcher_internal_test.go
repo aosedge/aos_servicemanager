@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -38,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/jlaffaye/ftp"
@@ -60,6 +60,8 @@ import (
  ******************************************************************************/
 
 const secretService = "secret1"
+
+const osLinux = "Linux"
 
 /*******************************************************************************
  * Types
@@ -92,34 +94,19 @@ type testMonitor struct {
 	stopChannel  chan string
 }
 
-type stateRequest struct {
-	serviceID    string
-	defaultState bool
-}
-
-// Test sender
-type testSender struct {
-	ServiceStateChannel chan *pb.NewServiceState
-	stateRequestChannel chan stateRequest
-}
-
 type testServiceProvider struct {
 	sync.Mutex
 	services      map[string]*Service
 	usersServices []*UsersService
 }
 
-type testLayerProvider struct {
-}
+type testLayerProvider struct{}
 
-type pythonAOSSecretImage struct {
-}
+type pythonAOSSecretImage struct{}
 
-type failedServiceImage struct {
-}
+type failedServiceImage struct{}
 
-type testPermissionsProvider struct {
-}
+type testPermissionsProvider struct{}
 
 type testDeviceManager struct {
 	sync.Mutex
@@ -130,14 +117,18 @@ type testDeviceManager struct {
  * Vars
  ******************************************************************************/
 
-var serviceProvider = testServiceProvider{services: make(map[string]*Service)}
-var permProvider = testPermissionsProvider{}
-var layerProviderForTest = testLayerProvider{}
-var networkProvider *networkmanager.NetworkManager
-var deviceManager = testDeviceManager{isValid: true}
+var (
+	serviceProvider      = testServiceProvider{services: make(map[string]*Service)}
+	permProvider         = testPermissionsProvider{}
+	layerProviderForTest = testLayerProvider{}
+	networkProvider      *networkmanager.NetworkManager
+	deviceManager        = testDeviceManager{isValid: true}
+)
 
-var tmpDir string
-var testDir string
+var (
+	tmpDir  string
+	testDir string
+)
 
 /*******************************************************************************
  * Init
@@ -147,7 +138,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -163,9 +155,7 @@ func TestMain(m *testing.M) {
 
 	ret := m.Run()
 
-	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
-	}
+	cleanup()
 
 	os.Exit(ret)
 }
@@ -181,8 +171,9 @@ func TestInstallRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -198,12 +189,14 @@ func TestInstallRemove(t *testing.T) {
 	for i := 0; i < numInstallServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Fatal("Can't prepare test service: ", err)
 		}
 
-		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId:  fmt.Sprintf("service%d", i),
 			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-			Users: &pb.Users{Users: users}})
+			Users: &pb.Users{Users: users},
+		})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -214,8 +207,10 @@ func TestInstallRemove(t *testing.T) {
 	}
 	// remove services
 	for i := 0; i < numUninstallServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			Users: &pb.Users{Users: users}}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{
+			ServiceId: fmt.Sprintf("service%d", i),
+			Users:     &pb.Users{Users: users},
+		}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -230,8 +225,10 @@ func TestInstallRemove(t *testing.T) {
 
 	// remove remaining services
 	for i := numUninstallServices; i < numInstallServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			Users: &pb.Users{Users: users}}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{
+			ServiceId: fmt.Sprintf("service%d", i),
+			Users:     &pb.Users{Users: users},
+		}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -265,12 +262,14 @@ func TestRemoveAllServices(t *testing.T) {
 	for i := 0; i < numInstallServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Errorf("Can't prepare test service: %s", err)
 		}
 
-		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId:  fmt.Sprintf("service%d", i),
 			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-			Users: &pb.Users{Users: users}})
+			Users: &pb.Users{Users: users},
+		})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -310,8 +309,9 @@ func TestCheckServicesConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -326,12 +326,14 @@ func TestCheckServicesConsistency(t *testing.T) {
 	for i := 0; i < numInstallServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Fatal("Can't prepare test service: ", err)
 		}
 
-		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId:  fmt.Sprintf("service%d", i),
 			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-			Users: &pb.Users{Users: users}})
+			Users: &pb.Users{Users: users},
+		})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -354,8 +356,8 @@ func TestCheckServicesConsistency(t *testing.T) {
 		t.Error("Expected services to be consistent")
 	}
 
-	cmd := exec.Command("rm", "-rf", path.Join(testDir, "storage"))
-	if res, err := cmd.CombinedOutput(); err != nil {
+	storagePath := path.Join(testDir, "storage")
+	if res, err := exec.Command("rm", "-rf", storagePath).CombinedOutput(); err != nil {
 		t.Fatalf("Can't remove services dir contents: %s %s", err, res)
 	}
 
@@ -371,8 +373,9 @@ func TestAutoStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -387,12 +390,14 @@ func TestAutoStart(t *testing.T) {
 	for i := 0; i < numServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Fatal("Can't prepare test service: ", err)
 		}
 
-		status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+		status, err := launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId:  fmt.Sprintf("service%d", i),
 			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-			Users: &pb.Users{Users: users}})
+			Users: &pb.Users{Users: users},
+		})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -426,8 +431,10 @@ func TestAutoStart(t *testing.T) {
 	}
 	// remove services
 	for i := 0; i < numServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			Users: &pb.Users{Users: users}}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{
+			ServiceId: fmt.Sprintf("service%d", i),
+			Users:     &pb.Users{Users: users},
+		}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -448,8 +455,9 @@ func TestErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -462,12 +470,14 @@ func TestErrors(t *testing.T) {
 
 	serviceURL, fileInfo, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	status, err := launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 5,
+	status, err := launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 5,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -478,12 +488,14 @@ func TestErrors(t *testing.T) {
 
 	serviceURL2, fileInfo2, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 4,
+	status, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 4,
 		ProviderId: "sp1", Url: serviceURL2, Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err == nil {
 		t.Errorf("Service %s AosVersion %d should not be installed", status.ServiceId, status.AosVersion)
 	}
@@ -494,12 +506,14 @@ func TestErrors(t *testing.T) {
 
 	serviceURL3, fileInfo3, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	status, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 6,
+	status, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 6,
 		ProviderId: "sp1", Url: serviceURL3, Sha256: fileInfo3.Sha256, Sha512: fileInfo3.Sha512, Size: fileInfo3.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -526,8 +540,9 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -552,12 +567,14 @@ func TestUpdate(t *testing.T) {
 
 	serviceURL, fileInfo, err := imageDownloader.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -583,12 +600,14 @@ func TestUpdate(t *testing.T) {
 
 	serviceURL, fileInfo, err = failedService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 1,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err == nil {
 		t.Error("Service aos_service0.service should have installation failed")
 	}
@@ -607,9 +626,7 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("Can't read from UDP: %s", err)
 	}
 
-	message := string(buf[:n])
-
-	if message != "service0, version: 0" {
+	if message := string(buf[:n]); message != "service0, version: 0" {
 		t.Fatalf("Wrong service content: %s", message)
 	}
 
@@ -617,12 +634,14 @@ func TestUpdate(t *testing.T) {
 
 	serviceURL, fileInfo, err = imageDownloader.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 1,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -646,8 +665,9 @@ func TestAOSSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -669,12 +689,14 @@ func TestAOSSecret(t *testing.T) {
 
 	serviceURL, fileInfo, err := imageDownloader.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -690,8 +712,7 @@ func TestAOSSecret(t *testing.T) {
 		t.Fatalf("Can't read from UDP: %s", err)
 	}
 
-	message := string(buf[:n])
-	if message != secretService {
+	if message := string(buf[:n]); message != secretService {
 		t.Fatalf("Wrong service content: %s", message)
 	}
 }
@@ -705,8 +726,9 @@ func TestDeviceManagementNotValidOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -726,8 +748,9 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -743,15 +766,17 @@ func TestDeviceManagementRequestDeviceFail(t *testing.T) {
 
 	serviceURL, fileInfo, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
 	// wait while service will be installed and tried to run
 	// it should be failed because service requests random device
 	// according to aos service configuration that generates on mocked download operation
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 1,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err == nil {
 		t.Errorf("SM can remove service when device resource is not released")
 	}
@@ -764,8 +789,9 @@ func TestVisPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -776,12 +802,14 @@ func TestVisPermissions(t *testing.T) {
 
 	serviceURL, fileInfo, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -803,8 +831,9 @@ func TestUsersServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -830,12 +859,14 @@ func TestUsersServices(t *testing.T) {
 		for j := 0; j < numServices; j++ {
 			serviceURL, fileInfo, err := testImage.PrepareService()
 			if err != nil {
-				log.Fatal("Can't prepare test service: ", err)
+				t.Fatal("Can't prepare test service: ", err)
 			}
 
-			_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("user%d_service%d", i, j),
+			_, err = launcher.InstallService(&pb.InstallServiceRequest{
+				ServiceId:  fmt.Sprintf("user%d_service%d", i, j),
 				ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-				Users: &pb.Users{Users: users}})
+				Users: &pb.Users{Users: users},
+			})
 			if err != nil {
 				t.Errorf("Can't install service: %s", err)
 			}
@@ -847,6 +878,7 @@ func TestUsersServices(t *testing.T) {
 		}
 
 		count := 0
+
 		for _, service := range services {
 			if service.State == stateRunning {
 				_, err = launcher.serviceProvider.GetUsersService(users, service.ID)
@@ -880,6 +912,7 @@ func TestUsersServices(t *testing.T) {
 		}
 
 		count := 0
+
 		for _, service := range services {
 			if service.State == stateRunning {
 				_, err = launcher.serviceProvider.GetUsersService(users, service.ID)
@@ -908,8 +941,9 @@ func TestServiceTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -924,12 +958,14 @@ func TestServiceTTL(t *testing.T) {
 	for i := 0; i < numServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Fatal("Can't prepare test service: ", err)
 		}
 
-		_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
+		_, err = launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId:  fmt.Sprintf("service%d", i),
 			ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-			Users: &pb.Users{Users: users}})
+			Users: &pb.Users{Users: users},
+		})
 		if err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
@@ -967,17 +1003,15 @@ func TestServiceTTL(t *testing.T) {
 func TestServiceMonitoring(t *testing.T) {
 	testImage := pythonImage{}
 
-	monitor, err := newTestMonitor()
-	if err != nil {
-		t.Fatalf("Can't create monitor: %s", err)
-	}
+	monitor := newTestMonitor()
 
 	launcher, err := newTestLauncher(monitor, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -988,31 +1022,37 @@ func TestServiceMonitoring(t *testing.T) {
 
 	serviceURL, fileInfo, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service :", err)
+		t.Fatal("Can't prepare test service :", err)
 	}
 
 	serviceAlerts := monitoring.ServiceAlertRules{
 		RAM: &config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 30 * time.Second},
 			MinThreshold: 0,
-			MaxThreshold: 80},
+			MaxThreshold: 80,
+		},
 		CPU: &config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 1 * time.Minute},
 			MinThreshold: 0,
-			MaxThreshold: 20},
+			MaxThreshold: 20,
+		},
 		UsedDisk: &config.AlertRule{
 			MinTimeout:   config.Duration{Duration: 5 * time.Minute},
 			MinThreshold: 0,
-			MaxThreshold: 20}}
+			MaxThreshold: 20,
+		},
+	}
 
 	alertRulesStr, err := json.Marshal(&serviceAlerts)
 	if err != nil {
 		t.Errorf("Can't marshal alert rules: %s", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "Service1",
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId:  "Service1",
 		ProviderId: "sp1", Url: serviceURL, AlertRules: string(alertRulesStr),
-		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users}})
+		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1031,7 +1071,10 @@ func TestServiceMonitoring(t *testing.T) {
 		t.Errorf("Waiting for service monitor timeout")
 	}
 
-	if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: "Service1", Users: &pb.Users{Users: users}}); err != nil {
+	if err := launcher.UninstallService(&pb.RemoveServiceRequest{
+		ServiceId: "Service1",
+		Users:     &pb.Users{Users: users},
+	}); err != nil {
 		t.Errorf("Can't uninstall service: %s", err)
 	}
 
@@ -1054,8 +1097,9 @@ func TestServiceStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1066,12 +1110,14 @@ func TestServiceStorage(t *testing.T) {
 
 	serviceURL, fileInfo, err := ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1083,7 +1129,12 @@ func TestServiceStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	service, err := launcher.serviceProvider.GetService("service0")
 	if err != nil {
@@ -1133,8 +1184,9 @@ func TestServiceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1145,12 +1197,14 @@ func TestServiceState(t *testing.T) {
 
 	serviceURL, fileInfo, err := ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1162,14 +1216,17 @@ func TestServiceState(t *testing.T) {
 		if stateRequest.GetServiceStateRequest() == nil {
 			t.Errorf("Incorrect sm notification type")
 		}
-		stateData := []byte("Default")
+		stateData := "Default"
 		calcSum := sha3.Sum224([]byte(stateData))
 
-		launcher.SetServiceState(&pb.ServiceState{
+		if err := launcher.SetServiceState(&pb.ServiceState{
 			ServiceId:     "service0",
 			Users:         &pb.Users{Users: users},
-			State:         stateData,
-			StateChecksum: hex.EncodeToString(calcSum[:])})
+			State:         []byte(stateData),
+			StateChecksum: hex.EncodeToString(calcSum[:]),
+		}); err != nil {
+			t.Errorf("Can't set service state: %s", err)
+		}
 
 		time.Sleep(1 * time.Second)
 
@@ -1184,13 +1241,13 @@ func TestServiceState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() { _ = ftp.Quit() }()
 
 	time.Sleep(500 * time.Millisecond)
 
 	stateData := []byte("Hello")
 
-	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
+	if err := ftp.Stor("state.dat", bytes.NewReader(stateData)); err != nil {
 		t.Errorf("Can't write file: %s", err)
 	}
 
@@ -1200,8 +1257,12 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
-			Result: "accepted"})
+		if err := launcher.StateAcceptance(&pb.StateAcceptance{
+			CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result:        "accepted",
+		}); err != nil {
+			t.Errorf("Can't call state acceptance: %s", err)
+		}
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1211,7 +1272,7 @@ func TestServiceState(t *testing.T) {
 
 	stateData = []byte("Hello again")
 
-	if err := ftp.Stor("state.dat", bytes.NewReader([]byte(stateData))); err != nil {
+	if err := ftp.Stor("state.dat", bytes.NewReader(stateData)); err != nil {
 		t.Errorf("Can't write file: %s", err)
 	}
 
@@ -1221,8 +1282,12 @@ func TestServiceState(t *testing.T) {
 			t.Errorf("Wrong state: %s", string(newState.GetNewServiceState().GetServiceState().GetState()))
 		}
 
-		launcher.StateAcceptance(&pb.StateAcceptance{CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
-			Result: "accepted", Reason: "just because"})
+		if err := launcher.StateAcceptance(&pb.StateAcceptance{
+			CorrelationId: newState.GetNewServiceState().GetCorrelationId(),
+			Result:        "accepted", Reason: "just because",
+		}); err != nil {
+			t.Errorf("Can't call state acceptance: %s", err)
+		}
 
 	case <-time.After(2 * time.Second):
 		t.Error("No new state event")
@@ -1234,7 +1299,7 @@ func TestServiceState(t *testing.T) {
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() { _ = ftp.Quit() }()
 
 	response, err := ftp.Retr("state.dat")
 	if err != nil {
@@ -1256,12 +1321,14 @@ func TestServiceState(t *testing.T) {
 
 	serviceURL, fileInfo, err = ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 1,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1272,7 +1339,11 @@ func TestServiceState(t *testing.T) {
 	if ftp, err = launcher.connectToFtp("service0"); err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	if response, err = ftp.Retr("state.dat"); err != nil {
 		t.Errorf("Can't retrieve state file: %s", err)
@@ -1298,8 +1369,9 @@ func TestTmpDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1310,12 +1382,14 @@ func TestTmpDir(t *testing.T) {
 
 	serviceURL, fileInfo, err := ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1323,8 +1397,7 @@ func TestTmpDir(t *testing.T) {
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
 
-	ftp, err := launcher.connectToFtp("service0")
-	if err == nil {
+	if _, err = launcher.connectToFtp("service0"); err == nil {
 		t.Error("Unexpected nil error")
 	}
 
@@ -1344,12 +1417,14 @@ func TestTmpDir(t *testing.T) {
 
 	serviceURL, fileInfo, err = ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service1", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1357,7 +1432,7 @@ func TestTmpDir(t *testing.T) {
 	// Wait ftp server ready
 	time.Sleep(2 * time.Second)
 
-	ftp, err = launcher.connectToFtp("service1")
+	ftp, err := launcher.connectToFtp("service1")
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
@@ -1372,7 +1447,9 @@ func TestTmpDir(t *testing.T) {
 		t.Error("Unexpected nil error")
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	// Test tmp works after restarts
 
@@ -1398,7 +1475,9 @@ func TestTmpDir(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 }
 
 func TestSpec(t *testing.T) {
@@ -1621,12 +1700,14 @@ func TestServiceWithLayers(t *testing.T) {
 
 	serviceURL, fileInfo, err := ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -1646,7 +1727,9 @@ func TestServiceWithLayers(t *testing.T) {
 	}
 	defer resp.Close()
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	if err := launcher.RemoveAllServices(); err != nil {
 		t.Errorf("Can't cleanup all services: %s", err)
@@ -1679,7 +1762,8 @@ func TestSetServiceResources(t *testing.T) {
 	etalonMounts := []runtimespec.Mount{
 		{
 			Destination: "/orig1",
-			Source:      "/orig2"},
+			Source:      "/orig2",
+		},
 		{
 			Destination: "/destination",
 			Source:      "/source",
@@ -1706,8 +1790,9 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		deviceManager.isValid = true
 		launcher.Close()
 	})
@@ -1723,12 +1808,14 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 	for i := 0; i < numServices; i++ {
 		serviceURL, fileInfo, err := testImage.PrepareService()
 		if err != nil {
-			log.Fatal("Can't prepare test service: ", err)
+			t.Fatal("Can't prepare test service: ", err)
 		}
 
-		if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: fmt.Sprintf("service%d", i), AosVersion: 0,
+		if _, err = launcher.InstallService(&pb.InstallServiceRequest{
+			ServiceId: fmt.Sprintf("service%d", i), AosVersion: 0,
 			ProviderId: "sp1", Url: serviceURL,
-			Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users}}); err != nil {
+			Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size, Users: &pb.Users{Users: users},
+		}); err != nil {
 			t.Errorf("Can't install service: %s", err)
 		}
 	}
@@ -1767,8 +1854,10 @@ func TestNotStartIfInvalidResource(t *testing.T) {
 
 	// remove services
 	for i := 0; i < numServices; i++ {
-		if err := launcher.UninstallService(&pb.RemoveServiceRequest{ServiceId: fmt.Sprintf("service%d", i),
-			Users: &pb.Users{Users: users}}); err != nil {
+		if err := launcher.UninstallService(&pb.RemoveServiceRequest{
+			ServiceId: fmt.Sprintf("service%d", i),
+			Users:     &pb.Users{Users: users},
+		}); err != nil {
 			t.Errorf("Can't uninstall service: %s", err)
 		}
 	}
@@ -1789,8 +1878,9 @@ func TestManifestValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1802,12 +1892,14 @@ func TestManifestValidation(t *testing.T) {
 	// install service
 	serviceURL, fileInfo, err := testImage.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service1", AosVersion: 0,
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service1", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}}); err != nil {
+		Users: &pb.Users{Users: users},
+	}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 
@@ -1835,17 +1927,14 @@ func TestManifestValidation(t *testing.T) {
 
 	// change service manifest digest
 	h := sha256.New()
-	h.Write([]byte(service.ManifestDigest))
+	h.Write(service.ManifestDigest)
 	service.ManifestDigest = h.Sum(nil)
 
 	err = launcher.startService(service)
 	if err == nil {
 		t.Error("Start service with invalid manifest digest should failed")
-	} else {
-		// check error message
-		if !strings.Contains(err.Error(), "digest does not match") {
-			t.Errorf("Unexpected error: %s", err)
-		}
+	} else if !strings.Contains(err.Error(), "digest does not match") {
+		t.Errorf("Unexpected error: %s", err)
 	}
 }
 
@@ -1856,8 +1945,9 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create launcher: %s", err)
 	}
+
 	t.Cleanup(func() {
-		launcher.RemoveAllServices()
+		_ = launcher.RemoveAllServices()
 		launcher.Close()
 	})
 
@@ -1868,12 +1958,14 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 
 	serviceURL, fileInfo, err := ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}}); err != nil {
+		Users: &pb.Users{Users: users},
+	}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 
@@ -1898,17 +1990,21 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Errorf("Can't write file: %s", err)
 	}
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	// Update service
 	serviceURL, fileInfo, err = ftpService.PrepareService()
 	if err != nil {
-		log.Fatal("Can't prepare test service: ", err)
+		t.Fatal("Can't prepare test service: ", err)
 	}
 
-	if _, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 1,
+	if _, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 1,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}}); err != nil {
+		Users: &pb.Users{Users: users},
+	}); err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
 
@@ -1928,7 +2024,11 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't connect to ftp: %s", err)
 	}
-	defer ftp.Quit()
+	defer func() {
+		if err := ftp.Quit(); err != nil {
+			t.Errorf("Can't quit ftp server: %s", err)
+		}
+	}()
 
 	r, err := ftp.Retr("test1.dat")
 	if err != nil {
@@ -1941,7 +2041,7 @@ func TestServiceCompatibilityAfterUpdate(t *testing.T) {
 		t.Errorf("Failed to read ftp buffer %s", err)
 	}
 
-	if bytes.Compare(writeBuf, readBuf) != 0 {
+	if !bytes.Equal(writeBuf, readBuf) {
 		t.Error("Read and write buffers should be equal")
 	}
 }
@@ -1983,9 +2083,11 @@ func TestChangeUsers(t *testing.T) {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
-	_, err = launcher.InstallService(&pb.InstallServiceRequest{ServiceId: "service0", AosVersion: 0,
+	_, err = launcher.InstallService(&pb.InstallServiceRequest{
+		ServiceId: "service0", AosVersion: 0,
 		ProviderId: "sp1", Url: serviceURL, Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-		Users: &pb.Users{Users: users}})
+		Users: &pb.Users{Users: users},
+	})
 	if err != nil {
 		t.Errorf("Can't install service: %s", err)
 	}
@@ -2015,7 +2117,9 @@ func TestChangeUsers(t *testing.T) {
 	}
 	defer resp.Close()
 
-	ftp.Quit()
+	if err := ftp.Quit(); err != nil {
+		t.Errorf("Can't quit ftp server: %s", err)
+	}
 
 	users2 := []string{"User2"}
 	if err = launcher.SetUsers(users2); err != nil {
@@ -2061,11 +2165,14 @@ func TestChangeUsers(t *testing.T) {
  ******************************************************************************/
 
 func newTestLauncher(monitor ServiceMonitor, serviceHealthCheck time.Duration) (launcher *Launcher, err error) {
-	launcher, err = New(&config.Config{WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
-		DefaultServiceTTLDays: 30, Runner: getRuntime(), ServiceHealthCheckTimeout: config.Duration{serviceHealthCheck}},
+	launcher, err = New(&config.Config{
+		WorkingDir: testDir, StorageDir: path.Join(testDir, "storage"),
+		DefaultServiceTTLDays: 30, Runner: getRuntime(),
+		ServiceHealthCheckTimeout: config.Duration{Duration: serviceHealthCheck},
+	},
 		&serviceProvider, &layerProviderForTest, monitor, networkProvider, &deviceManager, &permProvider)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return launcher, err
@@ -2075,22 +2182,22 @@ func (img pythonImage) PrepareService() (outputURL string, fileInfo image.FileIn
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(imageDir)
 
 	// create dir
 	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := generatePythonContent(imageDir); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
@@ -2099,47 +2206,49 @@ func (img pythonImage) PrepareService() (outputURL string, fileInfo image.FileIn
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	ociImgSpec := imagespec.Image{}
-	ociImgSpec.OS = "Linux"
+	ociImgSpec.OS = osLinux
 	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
-	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py", img.serviceID,
-		fmt.Sprintf("%d", img.version)}
+	ociImgSpec.Config.Cmd = []string{
+		"python3", "/home/service.py", img.serviceID,
+		fmt.Sprintf("%d", img.version),
+	}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 	outputURL = imageFile.Name()
 	imageFile.Close()
 
 	if err = packImage(imageDir, outputURL); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), outputURL); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	return "file://" + outputURL, fileInfo, nil
@@ -2149,22 +2258,22 @@ func (img ftpImage) PrepareService() (outputFile string, fileInfo image.FileInfo
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(imageDir)
 
 	// create dir
 	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := generateFtpContent(imageDir, img.ftpDir); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
@@ -2183,47 +2292,47 @@ func (img ftpImage) PrepareService() (outputFile string, fileInfo image.FileInfo
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	ociImgSpec := imagespec.Image{}
-	ociImgSpec.OS = "Linux"
+	ociImgSpec.OS = osLinux
 	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py"}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest,
 		&fsDigest, img.layersDigest); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 	outputFile = imageFile.Name()
 	imageFile.Close()
 
 	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), outputFile); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	return "file://" + outputFile, fileInfo, nil
@@ -2233,22 +2342,22 @@ func (img pythonAOSSecretImage) PrepareService() (outputFile string, fileInfo im
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(imageDir)
 
 	// create dir
 	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := generatePythonContentReadAOSSecret(imageDir); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
@@ -2256,46 +2365,46 @@ func (img pythonAOSSecretImage) PrepareService() (outputFile string, fileInfo im
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	ociImgSpec := imagespec.Image{}
-	ociImgSpec.OS = "Linux"
+	ociImgSpec.OS = osLinux
 	ociImgSpec.Config.Env = append(ociImgSpec.Config.Env, "PYTHONDONTWRITEBYTECODE=1")
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/service.py"}
 
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 	outputFile = imageFile.Name()
 	imageFile.Close()
 
 	if err = packImage(imageDir, outputFile); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), outputFile); err != nil {
-		return outputFile, fileInfo, err
+		return outputFile, fileInfo, aoserrors.Wrap(err)
 	}
 
 	return "file://" + outputFile, fileInfo, nil
@@ -2305,78 +2414,78 @@ func (img failedServiceImage) PrepareService() (outputURL string, fileInfo image
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
 		log.Error("Can't create image dir : ", err)
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(imageDir)
 
 	// create dir
 	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0755); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfig := generateAosSrvConfig()
 
 	data, err := json.Marshal(aosSrvConfig)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), data)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	ociImgSpec := imagespec.Image{}
-	ociImgSpec.OS = "Linux"
+	ociImgSpec.OS = osLinux
 	ociImgSpec.Config.Cmd = []string{"python3", "/home/NO_FILE"}
 	dataImgSpec, err := json.Marshal(ociImgSpec)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, "blobs"), dataImgSpec)
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if err := genarateImageManfest(imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, nil); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 	outputURL = imageFile.Name()
 	imageFile.Close()
 
 	if err = packImage(imageDir, outputURL); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), outputURL); err != nil {
-		return outputURL, fileInfo, err
+		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
 	return "file://" + outputURL, fileInfo, nil
 }
 
-func newTestMonitor() (monitor *testMonitor, err error) {
+func newTestMonitor() (monitor *testMonitor) {
 	monitor = &testMonitor{}
 
 	monitor.startChannel = make(chan *testMonitorInfo, 100)
 	monitor.stopChannel = make(chan string, 100)
 
-	return monitor, nil
+	return monitor
 }
 
-func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig monitoring.ServiceMonitoringConfig) (err error) {
-
+func (monitor *testMonitor) StartMonitorService(serviceID string, monitorConfig monitoring.ServiceMonitoringConfig) (
+	err error) {
 	monitor.startChannel <- &testMonitorInfo{serviceID, monitorConfig}
 
 	return nil
@@ -2388,34 +2497,12 @@ func (monitor *testMonitor) StopMonitorService(serviceID string) (err error) {
 	return nil
 }
 
-func newTestSender() (sender *testSender) {
-	sender = &testSender{}
-
-	sender.stateRequestChannel = make(chan stateRequest, 32)
-	sender.ServiceStateChannel = make(chan *pb.NewServiceState, 32)
-
-	return sender
-}
-
-func (sender *testSender) SendStateRequest(serviceID string, defaultState bool) {
-	sender.stateRequestChannel <- stateRequest{serviceID, defaultState}
-}
-
-func (sender *testSender) SendNewServiceState(correlationID, serviceID, checksum string, state []byte) {
-	sender.ServiceStateChannel <- &pb.NewServiceState{CorrelationId: correlationID,
-		ServiceState: &pb.ServiceState{
-			ServiceId:     serviceID,
-			StateChecksum: checksum,
-			State:         state,
-		}}
-}
-
 func (serviceProvider *testServiceProvider) AddService(service Service) (err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
 	if _, ok := serviceProvider.services[service.ID]; ok {
-		return fmt.Errorf("service %s already exists", service.ID)
+		return aoserrors.New(fmt.Sprintf("service %s already exists", service.ID))
 	}
 
 	serviceProvider.services[service.ID] = &service
@@ -2428,7 +2515,7 @@ func (serviceProvider *testServiceProvider) UpdateService(service Service) (err 
 	defer serviceProvider.Unlock()
 
 	if _, ok := serviceProvider.services[service.ID]; !ok {
-		return fmt.Errorf("service %s does not exist", service.ID)
+		return aoserrors.New(fmt.Sprintf("service %s does not exist", service.ID))
 	}
 
 	serviceProvider.services[service.ID] = &service
@@ -2441,7 +2528,7 @@ func (serviceProvider *testServiceProvider) RemoveService(serviceID string) (err
 	defer serviceProvider.Unlock()
 
 	if _, ok := serviceProvider.services[serviceID]; !ok {
-		return fmt.Errorf("service %s does not exist", serviceID)
+		return aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
 	}
 
 	delete(serviceProvider.services, serviceID)
@@ -2455,7 +2542,7 @@ func (serviceProvider *testServiceProvider) GetService(serviceID string) (servic
 
 	servicePtr, ok := serviceProvider.services[serviceID]
 	if !ok {
-		return service, fmt.Errorf("service %s does not exist", serviceID)
+		return service, aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
 	}
 
 	return *servicePtr, nil
@@ -2495,7 +2582,7 @@ func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string
 		}
 	}
 
-	return service, fmt.Errorf("service with unit %s does not exist", unitName)
+	return service, aoserrors.New(fmt.Sprintf("service with unit %s does not exist", unitName))
 }
 
 func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, state ServiceState) (err error) {
@@ -2503,7 +2590,7 @@ func (serviceProvider *testServiceProvider) SetServiceState(serviceID string, st
 	defer serviceProvider.Unlock()
 
 	if _, ok := serviceProvider.services[serviceID]; !ok {
-		return fmt.Errorf("service %s does not exist", serviceID)
+		return aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
 	}
 
 	serviceProvider.services[serviceID].State = state
@@ -2516,7 +2603,7 @@ func (serviceProvider *testServiceProvider) SetServiceStartTime(serviceID string
 	defer serviceProvider.Unlock()
 
 	if _, ok := serviceProvider.services[serviceID]; !ok {
-		return fmt.Errorf("service %s does not exist", serviceID)
+		return aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
 	}
 
 	serviceProvider.services[serviceID].StartAt = time
@@ -2530,11 +2617,13 @@ func (serviceProvider *testServiceProvider) AddServiceToUsers(users []string, se
 
 	for _, usersServicePtr := range serviceProvider.usersServices {
 		if reflect.DeepEqual(usersServicePtr.Users, users) && usersServicePtr.ServiceID == serviceID {
-			return fmt.Errorf("service %s already in users", serviceID)
+			return aoserrors.New(fmt.Sprintf("service %s already in users", serviceID))
 		}
 	}
 
-	serviceProvider.usersServices = append(serviceProvider.usersServices, &UsersService{Users: users, ServiceID: serviceID})
+	serviceProvider.usersServices = append(serviceProvider.usersServices, &UsersService{
+		Users: users, ServiceID: serviceID,
+	})
 
 	return nil
 }
@@ -2565,7 +2654,7 @@ func (serviceProvider *testServiceProvider) GetUsersServices(users []string) (se
 		if reflect.DeepEqual(usersService.Users, users) {
 			service, ok := serviceProvider.services[usersService.ServiceID]
 			if !ok {
-				return nil, fmt.Errorf("service %s does not exist", usersService.ServiceID)
+				return nil, aoserrors.New(fmt.Sprintf("service %s does not exist", usersService.ServiceID))
 			}
 
 			services = append(services, *service)
@@ -2593,7 +2682,8 @@ func (serviceProvider *testServiceProvider) RemoveServiceFromAllUsers(serviceID 
 	return nil
 }
 
-func (serviceProvider *testServiceProvider) GetUsersService(users []string, serviceID string) (userService UsersService, err error) {
+func (serviceProvider *testServiceProvider) GetUsersService(users []string, serviceID string) (userService UsersService,
+	err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
@@ -2603,10 +2693,11 @@ func (serviceProvider *testServiceProvider) GetUsersService(users []string, serv
 		}
 	}
 
-	return userService, fmt.Errorf("service %s does not exist in users", serviceID)
+	return userService, aoserrors.New(fmt.Sprintf("service %s does not exist in users", serviceID))
 }
 
-func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error) {
+func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceID string) (userServices []UsersService,
+	err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
@@ -2617,7 +2708,8 @@ func (serviceProvider *testServiceProvider) GetUsersServicesByServiceID(serviceI
 	return userServices, nil
 }
 
-func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
+func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string, serviceID string,
+	storageFolder string) (err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
@@ -2629,10 +2721,11 @@ func (serviceProvider *testServiceProvider) SetUsersStorageFolder(users []string
 		}
 	}
 
-	return fmt.Errorf("service %s does not exist in users", serviceID)
+	return aoserrors.New(fmt.Sprintf("service %s does not exist in users", serviceID))
 }
 
-func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
+func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string, serviceID string,
+	checksum []byte) (err error) {
 	serviceProvider.Lock()
 	defer serviceProvider.Unlock()
 
@@ -2644,7 +2737,7 @@ func (serviceProvider *testServiceProvider) SetUsersStateChecksum(users []string
 		}
 	}
 
-	return fmt.Errorf("service %s does not exist in users", serviceID)
+	return aoserrors.New(fmt.Sprintf("service %s does not exist in users", serviceID))
 }
 
 func (serviceProvider *testServiceProvider) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error) {
@@ -2655,7 +2748,8 @@ func (serviceProvider *testServiceProvider) GetAllOverrideEnvVars() (vars []pb.O
 	return vars, nil
 }
 
-func (serviceProvider *testServiceProvider) UpdateOverrideEnvVars(subjects []string, serviceID string, vars []*pb.EnvVarInfo) (err error) {
+func (serviceProvider *testServiceProvider) UpdateOverrideEnvVars(subjects []string, serviceID string,
+	vars []*pb.EnvVarInfo) (err error) {
 	return nil
 }
 
@@ -2672,7 +2766,7 @@ func (layerProvider *testLayerProvider) GetLayersInfo() (info []*pb.LayerStatus,
 }
 
 func (layerProvider *testLayerProvider) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	return layer, nil
+	return layer, nil //nolint
 }
 
 func (deviceManager *testDeviceManager) GetBoardConfigError() (err error) {
@@ -2680,7 +2774,7 @@ func (deviceManager *testDeviceManager) GetBoardConfigError() (err error) {
 	defer deviceManager.Unlock()
 
 	if deviceManager.isValid == false {
-		return errors.New("this device isn't presented on System")
+		return aoserrors.New("this device isn't presented on System")
 	}
 
 	return nil
@@ -2692,11 +2786,13 @@ func (deviceManager *testDeviceManager) RequestDeviceResourceByName(
 	defer deviceManager.Unlock()
 
 	if deviceManager.isValid == false {
-		return resourcemanager.DeviceResource{}, errors.New("device resources are not valid")
+		return resourcemanager.DeviceResource{}, aoserrors.New("device resources are not valid")
 	}
 
-	return resourcemanager.DeviceResource{Name: "random", Groups: []string{"root"},
-		HostDevices: []string{"/dev/random"}}, nil
+	return resourcemanager.DeviceResource{
+		Name: "random", Groups: []string{"root"},
+		HostDevices: []string{"/dev/random"},
+	}, nil
 }
 
 func (deviceManager *testDeviceManager) RequestDevice(device string, serviceID string) (err error) {
@@ -2704,7 +2800,7 @@ func (deviceManager *testDeviceManager) RequestDevice(device string, serviceID s
 	defer deviceManager.Unlock()
 
 	if deviceManager.isValid == false {
-		return errors.New("device resources are not valid")
+		return aoserrors.New("device resources are not valid")
 	}
 
 	return nil
@@ -2716,8 +2812,9 @@ func (deviceManager *testDeviceManager) ReleaseDevice(device string, serviceID s
 
 	return nil
 }
-func (deviceManager *testDeviceManager) RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource,
-	err error) {
+
+func (deviceManager *testDeviceManager) RequestBoardResourceByName(name string) (
+	boardResource resourcemanager.BoardResource, err error) {
 	switch name {
 	case "dbus":
 		boardResource := resourcemanager.BoardResource{
@@ -2727,25 +2824,30 @@ func (deviceManager *testDeviceManager) RequestBoardResourceByName(name string) 
 				Source:      "/source",
 			}},
 		}
+
 		return boardResource, nil
 
 	case "wifi":
 		boardResource := resourcemanager.BoardResource{
 			Env: []string{"BUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"},
-			Mounts: []resourcemanager.FileSystemMount{{
-				Destination: "/destination",
-				Source:      "/source"},
+			Mounts: []resourcemanager.FileSystemMount{
+				{
+					Destination: "/destination",
+					Source:      "/source",
+				},
 			},
 			Groups: []string{"bin"},
 		}
+
 		return boardResource, nil
 
 	default:
-		return boardResource, errors.New("Resource doesn't exist")
+		return boardResource, aoserrors.New("Resource doesn't exist")
 	}
 }
 
-func (perm *testPermissionsProvider) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error) {
+func (perm *testPermissionsProvider) RegisterService(serviceID string,
+	permissions map[string]map[string]string) (secret string, err error) {
 	return secretService, nil
 }
 
@@ -2759,27 +2861,27 @@ func (perm *testPermissionsProvider) UnregisterService(serviceID string) (err er
 
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	testDir = path.Join(tmpDir, "testDir")
 
 	if err := createTestPartition(testDir, "ext4", 16); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(path.Join(testDir, "storage"), 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if networkProvider, err = networkmanager.New(&config.Config{WorkingDir: testDir}, nil); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func cleanup() (err error) {
+func cleanup() {
 	launcher, err := newTestLauncher(nil, 1*time.Second)
 	if err != nil {
 		log.Errorf("Can't create test launcher: %s", err)
@@ -2808,43 +2910,42 @@ func cleanup() (err error) {
 	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp folder: %s", err)
 	}
-
-	return nil
 }
 
 func createTestPartition(mountPoint string, fsType string, size uint64) (err error) {
 	defer func() {
 		if err != nil {
-			deleteTestPartition(mountPoint)
+			_ = deleteTestPartition(mountPoint)
 		}
 	}()
 
 	var output []byte
-	imagePath := path.Join(tmpDir, "storage.img")
 
-	if output, err = exec.Command("dd", "if=/dev/zero", "of="+imagePath, "bs=1M",
+	imagePath := path.Join(tmpDir, "storage.img")
+	if output, err = exec.Command("dd", "if=/dev/zero", "of="+imagePath, "bs=1M", //nolint
 		"count="+strconv.FormatUint(size, 10)).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
-	if output, err = exec.Command("mkfs."+fsType, "-b", "4096", imagePath).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+	if output, err = exec.Command("mkfs."+fsType, "-b", "4096", imagePath).CombinedOutput(); err != nil { //nolint
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
 	if err = os.MkdirAll(mountPoint, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
-	if output, err = exec.Command("mount", "-o,usrjquota=aquota.user,jqfmt=vfsv0", imagePath, mountPoint).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+	if output, err = exec.Command("mount", "-o,usrjquota=aquota.user,jqfmt=vfsv0",
+		imagePath, mountPoint).CombinedOutput(); err != nil {
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
 	if output, err = exec.Command("quotacheck", "-favum").CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
 	if output, err = exec.Command("quotaon", "-avu").CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
 	return nil
@@ -2854,7 +2955,7 @@ func deleteTestPartition(mountPoint string) (err error) {
 	var output []byte
 
 	if output, err = exec.Command("umount", mountPoint).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s (%s)", err, (string(output)))
+		return aoserrors.New(fmt.Sprintf("%s (%s)", err, string(output)))
 	}
 
 	return nil
@@ -2885,7 +2986,7 @@ while True:
 	time.sleep(5)`
 
 	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -2913,8 +3014,8 @@ server.serve_forever()`
 
 	if err := ioutil.WriteFile(
 		path.Join(imagePath, "rootfs", "home", "service.py"),
-		[]byte(fmt.Sprintf(serviceContent, ftpDir, ftpDir)), 0644); err != nil {
-		return err
+		[]byte(fmt.Sprintf(serviceContent, ftpDir, ftpDir)), 0600); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -2936,7 +3037,7 @@ sock.sendto(str.encode(message), (netifaces.gateways()['default'][netifaces.AF_I
 sock.close()`
 
 	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "home", "service.py"), []byte(serviceContent), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -2946,14 +3047,14 @@ func generateConfig(imagePath string) (err error) {
 	// remove json
 	if err := os.Remove(path.Join(imagePath, "config.json")); err != nil {
 		if !os.IsNotExist(err) {
-			return err
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	// generate config spec
 	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
 	if err != nil {
-		return errors.New(string(out))
+		return aoserrors.New(string(out))
 	}
 
 	return nil
@@ -2962,7 +3063,7 @@ func generateConfig(imagePath string) (err error) {
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
 	fullPath := path.Join(folder, "sha256")
 	if err := os.MkdirAll(fullPath, 0755); err != nil {
-		return retDigest, err
+		return retDigest, aoserrors.Wrap(err)
 	}
 
 	h := sha256.New()
@@ -2971,13 +3072,13 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 
 	file, err := os.Create(path.Join(fullPath, retDigest.Hex()))
 	if err != nil {
-		return retDigest, err
+		return retDigest, aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	_, err = file.Write(data)
 	if err != nil {
-		return retDigest, err
+		return retDigest, aoserrors.Wrap(err)
 	}
 
 	return retDigest, nil
@@ -2986,29 +3087,29 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 func generateFakeImage(folderPath string) (err error) {
 	blobsDir := path.Join(folderPath, "blobs")
 	if err := os.MkdirAll(blobsDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	configString := "This is fake image config"
 	configDigest, err := generateAndSaveDigest(blobsDir, []byte(configString))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	aosConfigString := "AOS Serice config fake file"
 	aosConfigDigest, err := generateAndSaveDigest(blobsDir, []byte(aosConfigString))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	layerString := "Fake Serice rootfs"
 	layerDigest, err := generateAndSaveDigest(blobsDir, []byte(layerString))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err := genarateImageManfest(folderPath, &configDigest, &aosConfigDigest, &layerDigest, nil); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -3019,25 +3120,29 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 	var manifest serviceManifest
 	manifest.SchemaVersion = 2
 
-	manifest.Config = imagespec.Descriptor{MediaType: "application/vnd.oci.image.config.v1+json",
-		Digest: *imgConfig,
+	manifest.Config = imagespec.Descriptor{
+		MediaType: "application/vnd.oci.image.config.v1+json",
+		Digest:    *imgConfig,
 	}
 
 	if aosSrvConfig != nil {
-		manifest.AosService = &imagespec.Descriptor{MediaType: "application/vnd.aos.service.config.v1+json",
-			Digest: *aosSrvConfig,
+		manifest.AosService = &imagespec.Descriptor{
+			MediaType: "application/vnd.aos.service.config.v1+json",
+			Digest:    *aosSrvConfig,
 		}
 	}
 
-	layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
-		Digest: *rootfsLayer,
+	layerDescriptor := imagespec.Descriptor{
+		MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		Digest:    *rootfsLayer,
 	}
 
 	manifest.Layers = append(manifest.Layers, layerDescriptor)
 
 	for _, layerDigest := range srvLayers {
-		layerDescriptor := imagespec.Descriptor{MediaType: "application/vnd.aos.image.layer.v1.tar",
-			Digest: layerDigest,
+		layerDescriptor := imagespec.Descriptor{
+			MediaType: "application/vnd.aos.image.layer.v1.tar",
+			Digest:    layerDigest,
 		}
 
 		manifest.Layers = append(manifest.Layers, layerDescriptor)
@@ -3045,16 +3150,16 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 
 	data, err := json.Marshal(manifest)
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	jsonFile, err := os.Create(path.Join(folderPath, "manifest.json"))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err := jsonFile.Write(data); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -3063,22 +3168,22 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 func (launcher *Launcher) connectToFtp(serviceID string) (ftpConnection *ftp.ServerConn, err error) {
 	service, err := launcher.serviceProvider.GetService(serviceID)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	ip, err := networkProvider.GetServiceIP(service.ID, service.ServiceProvider)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	ftpConnection, err = ftp.DialTimeout(ip+":21", 5*time.Second)
 	if err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = ftpConnection.Login("anonymous", "anonymous"); err != nil {
-		ftpConnection.Quit()
-		return nil, err
+		_ = ftpConnection.Quit()
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return ftpConnection, nil
@@ -3143,7 +3248,7 @@ func generateImageConfig() (config *imagespec.Image, err error) {
 	`
 	var imageConfig imagespec.Image
 	if err = json.Unmarshal([]byte(configStr), &imageConfig); err != nil {
-		return nil, err
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return &imageConfig, nil
@@ -3154,54 +3259,54 @@ func saveImageConfig(folderPath string, config *imagespec.Image) (filePath strin
 
 	if err := os.Remove(filePath); err != nil {
 		if !os.IsNotExist(err) {
-			return "", err
+			return "", aoserrors.Wrap(err)
 		}
 	}
 
 	data, err := json.Marshal(config)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	jsonFile, err := os.Create(filePath)
 	if err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
 	if _, err := jsonFile.Write(data); err != nil {
-		return "", err
+		return "", aoserrors.Wrap(err)
 	}
 
-	return filePath, err
+	return filePath, aoserrors.Wrap(err)
 }
 
 func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error) {
 	blobsDir := path.Join(imgFolder, "blobs")
 	if err := os.MkdirAll(blobsDir, 0755); err != nil {
-		return digest, err
+		return digest, aoserrors.Wrap(err)
 	}
 
 	tarFile := path.Join(blobsDir, "_temp.tar.gz")
 
 	if output, err := exec.Command("tar", "-C", rootfs, "-czf", tarFile, "./").CombinedOutput(); err != nil {
-		return digest, fmt.Errorf("error: %s, code: %s", string(output), err)
+		return digest, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
 	}
 	defer os.Remove(tarFile)
 
 	file, err := os.Open(tarFile)
 	if err != nil {
-		return digest, err
+		return digest, aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	byteValue, err := ioutil.ReadAll(file)
 	if err != nil {
-		return digest, err
+		return digest, aoserrors.Wrap(err)
 	}
 
 	digest, err = generateAndSaveDigest(blobsDir, byteValue)
 	if err != nil {
-		return digest, err
+		return digest, aoserrors.Wrap(err)
 	}
 
 	os.RemoveAll(rootfs)

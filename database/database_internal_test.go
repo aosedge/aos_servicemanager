@@ -20,17 +20,18 @@ package database
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -42,8 +43,10 @@ import (
  * Variables
  ******************************************************************************/
 
-var tmpDir string
-var db *Database
+var (
+	tmpDir string
+	db     *Database
+)
 
 /*******************************************************************************
  * Init
@@ -53,7 +56,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -71,6 +75,7 @@ func TestMain(m *testing.M) {
 	}
 
 	dbPath := path.Join(tmpDir, "test.db")
+
 	db, err = New(dbPath, tmpDir, tmpDir)
 	if err != nil {
 		log.Fatalf("Can't create database: %s", err)
@@ -93,9 +98,11 @@ func TestMain(m *testing.M) {
 
 func TestAddService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
 		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, StartAt: time.Now().UTC(),
-		AlertRules: "", Description: ""}
+		AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -120,18 +127,22 @@ func TestAddService(t *testing.T) {
 
 func TestUpdateService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 = launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	// UpdateService
 	err = db.UpdateService(service1)
@@ -144,6 +155,7 @@ func TestUpdateService(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
+
 	if !reflect.DeepEqual(service, service1) {
 		t.Errorf("service1 doesn't match updated one: %v", service)
 	}
@@ -159,15 +171,17 @@ func TestNotExistService(t *testing.T) {
 	_, err := db.GetService("service3")
 	if err == nil {
 		t.Error("Error in non existed service")
-	} else if err != ErrNotExist {
+	} else if !errors.Is(err, ErrNotExist) {
 		t.Errorf("Can't get service: %s", err)
 	}
 }
 
 func TestSetServiceState(t *testing.T) {
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -179,10 +193,12 @@ func TestSetServiceState(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't set service state: %s", err)
 	}
+
 	service, err := db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
+
 	if service.State != 1 {
 		t.Errorf("Service state mismatch")
 	}
@@ -194,9 +210,11 @@ func TestSetServiceState(t *testing.T) {
 }
 
 func TestSetServiceStartTime(t *testing.T) {
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -209,10 +227,12 @@ func TestSetServiceStartTime(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't set service state: %s", err)
 	}
+
 	service, err := db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
+
 	if service.StartAt != time {
 		t.Errorf("Service start time mismatch")
 	}
@@ -225,9 +245,11 @@ func TestSetServiceStartTime(t *testing.T) {
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -235,21 +257,22 @@ func TestRemoveService(t *testing.T) {
 	}
 
 	// RemoveService
-	err = db.RemoveService("service1")
-	if err != nil {
+	if err = db.RemoveService("service1"); err != nil {
 		t.Errorf("Can't remove service: %s", err)
 	}
-	_, err = db.GetService("service1")
-	if err == nil {
-		t.Errorf("Error deleteing service")
+
+	if _, err = db.GetService("service1"); err == nil {
+		t.Errorf("Error deleting service")
 	}
 }
 
 func TestGetServices(t *testing.T) {
 	// Add service 1
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -257,9 +280,11 @@ func TestGetServices(t *testing.T) {
 	}
 
 	// Add service 2
-	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service2 := launcher.Service{
+		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err = db.AddService(service2)
 	if err != nil {
@@ -271,9 +296,11 @@ func TestGetServices(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't get services: %s", err)
 	}
+
 	if len(services) != 2 {
 		t.Error("Wrong service count")
 	}
+
 	for _, service := range services {
 		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
 			t.Error("Error getting services")
@@ -288,38 +315,42 @@ func TestGetServices(t *testing.T) {
 
 func TestGetServiceProviderServices(t *testing.T) {
 	// Add service 1
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err := db.AddService(service1)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service1); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 2
-	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service2 := launcher.Service{
+		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err = db.AddService(service2)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 3
-	service3 := launcher.Service{ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
+	service3 := launcher.Service{
+		ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
 		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err = db.AddService(service3)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service3); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service 4
-	service4 := launcher.Service{ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
+	service4 := launcher.Service{
+		ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
 		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err = db.AddService(service4)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service4); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
@@ -328,9 +359,11 @@ func TestGetServiceProviderServices(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't get services: %s", err)
 	}
+
 	if len(servicesSp1) != 2 {
 		t.Error("Wrong service count")
 	}
+
 	for _, service := range servicesSp1 {
 		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
 			t.Error("Error getting services")
@@ -342,9 +375,11 @@ func TestGetServiceProviderServices(t *testing.T) {
 	if err != nil {
 		t.Errorf("Can't get services: %s", err)
 	}
+
 	if len(servicesSp2) != 2 {
 		t.Error("Wrong service count")
 	}
+
 	for _, service := range servicesSp2 {
 		if !reflect.DeepEqual(service, service3) && !reflect.DeepEqual(service, service4) {
 			t.Error("Error getting services")
@@ -359,30 +394,30 @@ func TestGetServiceProviderServices(t *testing.T) {
 
 func TestAddUsersService(t *testing.T) {
 	// Add services
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err := db.AddService(service1)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service1); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service2 := launcher.Service{ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service2 := launcher.Service{
+		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
-	err = db.AddService(service2)
-	if err != nil {
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
+	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// Add service to users
-	err = db.AddServiceToUsers([]string{"user1"}, "service1")
-	if err != nil {
+	if err := db.AddServiceToUsers([]string{"user1"}, "service1"); err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
-	err = db.AddServiceToUsers([]string{"user2"}, "service2")
-	if err != nil {
+	if err := db.AddServiceToUsers([]string{"user2"}, "service2"); err != nil {
 		t.Errorf("Can't add users service: %s", err)
 	}
 
@@ -446,7 +481,7 @@ func TestAddSameUsersService(t *testing.T) {
 func TestNotExistUsersServices(t *testing.T) {
 	// GetService
 	_, err := db.GetUsersService([]string{"user2", "user3"}, "service18")
-	if err != nil && err != ErrNotExist {
+	if err != nil && !errors.Is(err, ErrNotExist) {
 		t.Fatalf("Can't check if service in users: %s", err)
 	}
 
@@ -469,7 +504,7 @@ func TestRemoveUsersService(t *testing.T) {
 	}
 
 	_, err = db.GetUsersService([]string{"user0", "user1"}, "service1")
-	if err != nil && err != ErrNotExist {
+	if err != nil && !errors.Is(err, ErrNotExist) {
 		t.Fatalf("Can't check if service in users: %s", err)
 	}
 
@@ -508,6 +543,7 @@ func TestAddUsersList(t *testing.T) {
 		for i := 0; i < numUsers; i++ {
 			if users[0] == fmt.Sprintf("user%d", i) {
 				ok = true
+
 				break
 			}
 		}
@@ -535,6 +571,7 @@ func TestAddUsersList(t *testing.T) {
 			for i := 0; i < numUsers; i++ {
 				if userService.Users[0] == fmt.Sprintf("user%d", i) {
 					ok = true
+
 					break
 				}
 			}
@@ -595,7 +632,8 @@ func TestUsersStorage(t *testing.T) {
 		t.Errorf("Can't get users service: %s", err)
 	}
 
-	if usersService.StorageFolder != "stateFolder1" || !reflect.DeepEqual(usersService.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
+	if usersService.StorageFolder != "stateFolder1" ||
+		!reflect.DeepEqual(usersService.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
 		t.Error("Wrong users service value")
 	}
 
@@ -617,7 +655,7 @@ func TestOverideEnvVars(t *testing.T) {
 	envVars = append(envVars, &pb.EnvVarInfo{VarId: "some", Variable: "log=10", Ttl: timestamppb.New(ttl)})
 
 	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service2", envVars); err != nil {
-		if strings.Contains(err.Error(), ErrNotExist.Error()) == false {
+		if !errors.Is(err, ErrNotExist) {
 			t.Errorf("Should be error: %s", ErrNotExist)
 		}
 	}
@@ -707,9 +745,11 @@ func TestCursor(t *testing.T) {
 
 func TestGetServiceByUnitName(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
+	service1 := launcher.Service{
+		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
 		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: ""}
+		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	}
 
 	err := db.AddService(service1)
 	if err != nil {
@@ -744,7 +784,9 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if err := db.SetOperationVersion(uint64(i)); err != nil {
-				t.Fatalf("Can't set operation version: %s", err)
+				t.Errorf("Can't set operation version: %s", err)
+
+				return
 			}
 		}
 	}()
@@ -754,7 +796,9 @@ func TestMultiThread(t *testing.T) {
 
 		_, err := db.GetOperationVersion()
 		if err != nil {
-			t.Fatalf("Can't get Operation Version : %s", err)
+			t.Errorf("Can't get Operation Version : %s", err)
+
+			return
 		}
 	}()
 
@@ -763,7 +807,9 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if err := db.SetJournalCursor(strconv.Itoa(i)); err != nil {
-				t.Fatalf("Can't set journal cursor: %s", err)
+				t.Errorf("Can't set journal cursor: %s", err)
+
+				return
 			}
 		}
 	}()
@@ -773,7 +819,9 @@ func TestMultiThread(t *testing.T) {
 
 		for i := 0; i < numIterations; i++ {
 			if _, err := db.GetJournalCursor(); err != nil {
-				t.Fatalf("Can't get journal cursor: %s", err)
+				t.Errorf("Can't get journal cursor: %s", err)
+
+				return
 			}
 		}
 	}()
@@ -839,24 +887,25 @@ func TestLayers(t *testing.T) {
 }
 
 func TestMigrationToV1(t *testing.T) {
-	migrationDb := path.Join(tmpDir, "test_migration.db")
+	migrationDB := path.Join(tmpDir, "test_migration.db")
 	mergedMigrationDir := path.Join(tmpDir, "mergedMigration")
 
-	if err := os.MkdirAll(mergedMigrationDir, 0755); err != nil {
+	if err := os.MkdirAll(mergedMigrationDir, 0o755); err != nil {
 		t.Fatalf("Error creating merged migration dir: %s", err)
 	}
+
 	defer func() {
 		if err := os.RemoveAll(mergedMigrationDir); err != nil {
 			t.Fatalf("Error removing merged migration dir: %s", err)
 		}
 	}()
 
-	if err := createDatabaseV0(migrationDb); err != nil {
+	if err := createDatabaseV0(migrationDB); err != nil {
 		t.Fatalf("Can't create initial database %s", err)
 	}
 
 	// Migration upward
-	db, err := newDatabase(migrationDb, "migration", mergedMigrationDir, 1)
+	db, err := newDatabase(migrationDB, "migration", mergedMigrationDir, 1)
 	if err != nil {
 		t.Fatalf("Can't create database: %s", err)
 	}
@@ -868,7 +917,7 @@ func TestMigrationToV1(t *testing.T) {
 	db.Close()
 
 	// Migration downward
-	db, err = newDatabase(migrationDb, "migration", mergedMigrationDir, 0)
+	db, err = newDatabase(migrationDB, "migration", mergedMigrationDir, 0)
 	if err != nil {
 		t.Fatalf("Can't create database: %s", err)
 	}
@@ -887,7 +936,7 @@ func TestMigrationToV1(t *testing.T) {
 func (db *Database) getUsersList() (usersList [][]string, err error) {
 	rows, err := db.sql.Query("SELECT DISTINCT users FROM users")
 	if err != nil {
-		return usersList, err
+		return usersList, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
@@ -895,40 +944,27 @@ func (db *Database) getUsersList() (usersList [][]string, err error) {
 
 	for rows.Next() {
 		var usersJSON []byte
-		err = rows.Scan(&usersJSON)
-		if err != nil {
-			return usersList, err
+		if err := rows.Scan(&usersJSON); err != nil {
+			return usersList, aoserrors.Wrap(err)
 		}
 
 		var users []string
 
 		if err = json.Unmarshal(usersJSON, &users); err != nil {
-			return usersList, err
+			return usersList, aoserrors.Wrap(err)
 		}
 
 		usersList = append(usersList, users)
 	}
 
-	return usersList, rows.Err()
-}
-
-func createDir(t *testing.T, name string, errorMessage string) {
-	if err := os.MkdirAll(name, 0755); err != nil {
-		t.Fatalf("%s: %s", errorMessage, err)
-	}
-}
-
-func removeDir(t *testing.T, name string, errorMessage string) {
-	if err := os.RemoveAll(name); err != nil {
-		t.Fatalf("%s: %s", errorMessage, err)
-	}
+	return usersList, aoserrors.Wrap(rows.Err())
 }
 
 func createDatabaseV0(name string) (err error) {
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
 		name, busyTimeout, journalMode, syncMode))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer sqlite.Close()
 
@@ -936,17 +972,17 @@ func createDatabaseV0(name string) (err error) {
 		`CREATE TABLE config (
 			operationVersion INTEGER,
 			cursor TEXT)`); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = sqlite.Exec(
 		`INSERT INTO config (
 			operationVersion,
 			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
 															   aosVersion INTEGER,
 															   serviceProvider TEXT,
 															   path TEXT,
@@ -970,109 +1006,133 @@ func createDatabaseV0(name string) (err error) {
 															   deviceResources TEXT,
 															   boardResources TEXT,
 															   vendorVersion TEXT,
-															   description TEXT)`)
+															   description TEXT)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
 															serviceid TEXT NOT NULL,
 															storageFolder TEXT,
 															stateCheckSum BLOB,
-															PRIMARY KEY(users, serviceid))`)
+															PRIMARY KEY(users, serviceid))`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
 																	 time TIMESTAMP,
-																	 value INTEGER)`)
+																	 value INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-	_, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
 															 layerId TEXT,
 															 path TEXT,
 															 osVersion TEXT,
 															 vendorVersion TEXT,
 															 description TEXT,
-															 aosVersion INTEGER)`)
+															 aosVersion INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
 	return nil
 }
 
 func isDatabaseVer1(sqlite *sql.DB) (err error) {
-	rows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
+	rows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
+	if rows.Err() != nil {
+		return aoserrors.Wrap(rows.Err())
+	}
+
 	var count int
-	for rows.Next() {
+	if rows.Next() {
 		if err = rows.Scan(&count); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if count == 0 {
 			return ErrNotExist
 		}
-
-		break
 	}
 
-	servicesRows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('services') WHERE name='exposedPorts'")
+	servicesRows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('services') WHERE name='exposedPorts'")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer servicesRows.Close()
 
-	count = 0
-	for servicesRows.Next() {
-		if err = servicesRows.Scan(&count); err != nil {
-			return err
-		}
-
-		if count == 0 {
-			return ErrNotExist
-		}
-
-		return nil
+	if servicesRows.Err() != nil {
+		return aoserrors.Wrap(servicesRows.Err())
 	}
 
-	return ErrNotExist
+	if !servicesRows.Next() {
+		return ErrNotExist
+	}
+
+	count = 0
+	if err = servicesRows.Scan(&count); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count == 0 {
+		return ErrNotExist
+	}
+
+	return nil
 }
 
 func isDatabaseVer0(sqlite *sql.DB) (err error) {
-	rows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
+	rows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='componentsUpdateInfo'")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
+	if rows.Err() != nil {
+		return aoserrors.Wrap(rows.Err())
+	}
+
 	var count int
-	for rows.Next() {
+	if rows.Next() {
 		if err = rows.Scan(&count); err != nil {
-			return err
+			return aoserrors.Wrap(err)
 		}
 
 		if count != 0 {
 			return ErrNotExist
 		}
-
-		break
 	}
 
-	servicesRows, err := sqlite.Query("SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='exposedPorts'")
+	servicesRows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('config') WHERE name='exposedPorts'")
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 	defer servicesRows.Close()
 
-	count = 0
-	for servicesRows.Next() {
-		if err = servicesRows.Scan(&count); err != nil {
-			return err
-		}
-
-		if count != 0 {
-			return ErrNotExist
-		}
-
-		return nil
+	if servicesRows.Err() != nil {
+		return aoserrors.Wrap(servicesRows.Err())
 	}
 
-	return ErrNotExist
+	if !servicesRows.Next() {
+		return ErrNotExist
+	}
+
+	count = 0
+	if err = servicesRows.Scan(&count); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count != 0 {
+		return ErrNotExist
+	}
+
+	return nil
 }

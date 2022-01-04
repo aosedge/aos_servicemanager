@@ -111,13 +111,15 @@ type SMServer struct {
  * Public
  ******************************************************************************/
 
-// New creates new IAM server instance
+// New creates new IAM server instance.
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
 	monitoringProvider MonitoringDataProvider,
 	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider,
 	insecure bool) (server *SMServer, err error) {
-	server = &SMServer{launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
-		logsProvider: logsProvider}
+	server = &SMServer{
+		launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
+		logsProvider: logsProvider,
+	}
 
 	if alertsProvider != nil {
 		server.alertChannel = alertsProvider.GetAlertsChannel()
@@ -157,7 +159,7 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 	return server, nil
 }
 
-// Start starts SM  server
+// Start starts SM  server.
 func (server *SMServer) Start() (err error) {
 	server.listener, err = net.Listen("tcp", server.url)
 	if err != nil {
@@ -167,7 +169,7 @@ func (server *SMServer) Start() (err error) {
 	return server.grpcServer.Serve(server.listener)
 }
 
-// Stop stops SM server
+// Stop stops SM server.
 func (server *SMServer) Stop() {
 	log.Debug("Close grpc server")
 
@@ -180,7 +182,7 @@ func (server *SMServer) Stop() {
 	}
 }
 
-// GetUsersStatus gets current SM status for user
+// GetUsersStatus gets current SM status for user.
 func (server *SMServer) GetUsersStatus(ctx context.Context, users *pb.Users) (status *pb.SMStatus, err error) {
 	status = &pb.SMStatus{}
 
@@ -192,7 +194,7 @@ func (server *SMServer) GetUsersStatus(ctx context.Context, users *pb.Users) (st
 	return status, nil
 }
 
-// GetAllStatus gets current SM status
+// GetAllStatus gets current SM status.
 func (server *SMServer) GetAllStatus(ctx context.Context, req *empty.Empty) (status *pb.SMStatus, err error) {
 	status = &pb.SMStatus{}
 
@@ -209,12 +211,12 @@ func (server *SMServer) GetAllStatus(ctx context.Context, req *empty.Empty) (sta
 	return status, nil
 }
 
-// GetBoardConfigStatus gets current board configuration status
+// GetBoardConfigStatus gets current board configuration status.
 func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (status *pb.BoardConfigStatus, err error) {
 	return &pb.BoardConfigStatus{VendorVersion: server.boardConfigProcessor.GetBoardConfigInfo()}, nil
 }
 
-// CheckBoardConfig checks new board configuration
+// CheckBoardConfig checks new board configuration.
 func (server *SMServer) CheckBoardConfig(ctx context.Context,
 	boardConfig *pb.BoardConfig) (status *pb.BoardConfigStatus, err error) {
 	version, err := server.boardConfigProcessor.CheckBoardConfig(boardConfig.GetBoardConfig())
@@ -222,7 +224,7 @@ func (server *SMServer) CheckBoardConfig(ctx context.Context,
 	return &pb.BoardConfigStatus{VendorVersion: version}, err
 }
 
-// SetBoardConfig sets new board configuration
+// SetBoardConfig sets new board configuration.
 func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.BoardConfig) (ret *empty.Empty, err error) {
 	if err = server.boardConfigProcessor.UpdateBoardConfig(boardConfig.GetBoardConfig()); err != nil {
 		return &emptypb.Empty{}, err
@@ -233,27 +235,27 @@ func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.Boar
 	return &emptypb.Empty{}, nil
 }
 
-// InstallService installs aos service
+// InstallService installs aos service.
 func (server *SMServer) InstallService(ctx context.Context, service *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
 	return server.launcher.InstallService(service)
 }
 
-// InstallService removes aos service
+// InstallService removes aos service.
 func (server *SMServer) RemoveService(ctx context.Context, service *pb.RemoveServiceRequest) (ret *empty.Empty, err error) {
 	return &emptypb.Empty{}, server.launcher.UninstallService(service)
 }
 
-// ServiceStateAcceptance accepts new services state
+// ServiceStateAcceptance accepts new services state.
 func (server *SMServer) ServiceStateAcceptance(ctx context.Context, acceptance *pb.StateAcceptance) (*empty.Empty, error) {
 	return &emptypb.Empty{}, server.launcher.StateAcceptance(acceptance)
 }
 
-// SetServiceState sets state for aos service
+// SetServiceState sets state for aos service.
 func (server *SMServer) SetServiceState(ctx context.Context, state *pb.ServiceState) (ret *empty.Empty, err error) {
 	return &emptypb.Empty{}, server.launcher.SetServiceState(state)
 }
 
-// OverrideEnvVars overrides entrainment variables for the service
+// OverrideEnvVars overrides entrainment variables for the service.
 func (server *SMServer) OverrideEnvVars(ctx context.Context,
 	envVars *pb.OverrideEnvVarsRequest) (status *pb.OverrideEnvVarStatus, err error) {
 	varsStatus, err := server.launcher.ProcessDesiredEnvVarsList(envVars.GetEnvVars())
@@ -261,12 +263,12 @@ func (server *SMServer) OverrideEnvVars(ctx context.Context,
 	return &pb.OverrideEnvVarStatus{EnvVarStatus: varsStatus}, err
 }
 
-// InstallLayer installs the layer
+// InstallLayer installs the layer.
 func (server *SMServer) InstallLayer(ctx context.Context, layer *pb.InstallLayerRequest) (ret *empty.Empty, err error) {
 	return &emptypb.Empty{}, server.layerProvider.InstallLayer(layer)
 }
 
-// SubscribeSMNotifications subscribes for SM notifications
+// SubscribeSMNotifications subscribes for SM notifications.
 func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.SMService_SubscribeSMNotificationsServer) (err error) {
 	server.notificationStream = stream
 
@@ -275,21 +277,21 @@ func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.SMS
 	return nil
 }
 
-//GetSystemLog gets system logs
+// GetSystemLog gets system logs.
 func (server *SMServer) GetSystemLog(ctx context.Context, req *pb.SystemLogRequest) (ret *empty.Empty, err error) {
 	server.logsProvider.GetSystemLog(req)
 
 	return &emptypb.Empty{}, nil
 }
 
-//GetServiceLog gets the service logs
+// GetServiceLog gets the service logs.
 func (server *SMServer) GetServiceLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
 	server.logsProvider.GetServiceLog(req)
 
 	return &emptypb.Empty{}, nil
 }
 
-//GetServiceCrashLog gets the service crash logs
+// GetServiceCrashLog gets the service crash logs.
 func (server *SMServer) GetServiceCrashLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
 	server.logsProvider.GetServiceCrashLog(req)
 
@@ -308,6 +310,7 @@ func (server *SMServer) handleChannels() {
 
 			if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: alertNtf}); err != nil {
 				log.Errorf("Can't send alert: %s ", err)
+
 				return
 			}
 
@@ -315,8 +318,11 @@ func (server *SMServer) handleChannels() {
 			if err := server.notificationStream.Send(
 				&pb.SMNotifications{
 					SMNotification: &pb.SMNotifications_Monitoring{
-						Monitoring: monitoringData}}); err != nil {
+						Monitoring: monitoringData,
+					},
+				}); err != nil {
 				log.Errorf("Can't send monitoring notification: %s ", err)
+
 				return
 			}
 
@@ -329,8 +335,10 @@ func (server *SMServer) handleChannels() {
 		case logs := <-server.logsChannel:
 			if err := server.notificationStream.Send(
 				&pb.SMNotifications{
-					SMNotification: &pb.SMNotifications_Log{Log: logs}}); err != nil {
+					SMNotification: &pb.SMNotifications_Log{Log: logs},
+				}); err != nil {
 				log.Errorf("Can't send logs: %s ", err)
+
 				return
 			}
 

@@ -41,8 +41,10 @@ import (
  * Vars
  ******************************************************************************/
 
-var manager *networkmanager.NetworkManager
-var tmpDir string
+var (
+	manager *networkmanager.NetworkManager
+	tmpDir  string
+)
 
 /*******************************************************************************
  * Init
@@ -52,7 +54,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -78,7 +81,7 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestAddRemoveService(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	numServices := 10
 
@@ -127,7 +130,7 @@ func TestAddRemoveService(t *testing.T) {
 
 func TestDeleteAllNetworks(t *testing.T) {
 	t.Cleanup(func() {
-		manager.DeleteAllNetworks()
+		_ = manager.DeleteAllNetworks()
 	})
 
 	numNetworks := 3
@@ -157,7 +160,7 @@ func TestDeleteAllNetworks(t *testing.T) {
 }
 
 func TestInternet(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	containerPath := path.Join(tmpDir, "servicenm1")
 
@@ -178,8 +181,8 @@ func TestInternet(t *testing.T) {
 
 func TestInterServiceConnection(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("servicenm2")
-		manager.DeleteNetwork("network0")
+		_ = killOCIContainer("servicenm2")
+		_ = manager.DeleteNetwork("network0")
 	})
 
 	container0Path := path.Join(tmpDir, "servicenm2")
@@ -192,7 +195,7 @@ func TestInterServiceConnection(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "servicenm2")
+	go runOCIContainer(container0Path, "servicenm2") // nolint:errcheck
 
 	container1Path := path.Join(tmpDir, "servicenm3")
 
@@ -218,7 +221,7 @@ func TestInterServiceConnection(t *testing.T) {
 }
 
 func TestHostName(t *testing.T) {
-	t.Cleanup(func() { manager.DeleteNetwork("network0") })
+	t.Cleanup(func() { _ = manager.DeleteNetwork("network0") })
 
 	container0Path := path.Join(tmpDir, "servicenm4")
 
@@ -240,16 +243,16 @@ func TestHostName(t *testing.T) {
 
 func TestExposedPortAndAllowedConnection(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("serviceServer")
-		manager.DeleteNetwork("networkSP1")
-		manager.DeleteNetwork("networkSP2")
+		_ = killOCIContainer("serviceServer")
+		_ = manager.DeleteNetwork("networkSP1")
+		_ = manager.DeleteNetwork("networkSP2")
 	})
 
 	serverPort := "9000"
 	containerServerPath := path.Join(tmpDir, "serviceServer")
 	serverServiceID := "serviceServer"
 
-	if err := createOCIContainerWitHttpServer(containerServerPath, serverServiceID, serverPort); err != nil {
+	if err := createOCIContainerWitHTTPServer(containerServerPath, serverServiceID, serverPort); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
@@ -263,19 +266,22 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 		t.Fatalf("Can't get ip address from service: %s", err)
 	}
 
-	go runOCIContainer(containerServerPath, serverServiceID)
+	go runOCIContainer(containerServerPath, serverServiceID) // nolint:errcheck
 
 	time.Sleep(1 * time.Second)
 
 	containerClientPath := path.Join(tmpDir, "serviceClient")
 
-	if err := createOCIContainer(containerClientPath, "serviceClient", []string{"curl", servIP + ":" + serverPort,
-		"--connect-timeout", "2"}); err != nil {
+	if err := createOCIContainer(containerClientPath, "serviceClient", []string{
+		"curl", servIP + ":" + serverPort,
+		"--connect-timeout", "2",
+	}); err != nil {
 		t.Fatalf("Can't create service container: %s", err)
 	}
 
 	if err := manager.AddServiceToNetwork("serviceClient", "networkSP2", networkmanager.NetworkParams{
-		AllowedConnections: []string{serverServiceID + "/" + serverPort}}); err != nil {
+		AllowedConnections: []string{serverServiceID + "/" + serverPort},
+	}); err != nil {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
@@ -286,9 +292,9 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 
 func TestNetworkDNS(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("service0")
-		manager.DeleteNetwork("network0")
-		manager.DeleteNetwork("network1")
+		_ = killOCIContainer("service0")
+		_ = manager.DeleteNetwork("network0")
+		_ = manager.DeleteNetwork("network1")
 	})
 
 	container0Path := path.Join(tmpDir, "service0")
@@ -304,7 +310,7 @@ func TestNetworkDNS(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "service0")
+	go runOCIContainer(container0Path, "service0") // nolint:errcheck
 
 	container1Path := path.Join(tmpDir, "service1")
 
@@ -367,8 +373,8 @@ func TestNetworkDNS(t *testing.T) {
 
 func TestBandwidth(t *testing.T) {
 	t.Cleanup(func() {
-		killOCIContainer("service0")
-		manager.DeleteNetwork("network0")
+		_ = killOCIContainer("service0")
+		_ = manager.DeleteNetwork("network0")
 	})
 
 	container0Path := path.Join(tmpDir, "service0")
@@ -387,7 +393,7 @@ func TestBandwidth(t *testing.T) {
 		t.Fatalf("Can't add service to network: %s", err)
 	}
 
-	go runOCIContainer(container0Path, "service0")
+	go runOCIContainer(container0Path, "service0") // nolint:errcheck
 
 	ip, err := manager.GetServiceIP("service0", "network0")
 	if err != nil {
@@ -444,15 +450,15 @@ func TestBandwidth(t *testing.T) {
 
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if manager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -470,9 +476,9 @@ func cleanup() {
 	}
 }
 
-func createOCIContainerWitHttpServer(imagePath string, containerID string, port string) (err error) {
+func createOCIContainerWitHTTPServer(imagePath string, containerID string, port string) (err error) {
 	if err = createOCIContainer(imagePath, containerID, []string{"/usr/bin/python3.7", "/httpserver.py"}); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	httpServerContent := `#!/usr/bin/python
@@ -493,7 +499,7 @@ if __name__ == '__main__':
 	s.start()`
 
 	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "httpserver.py"), []byte(httpServerContent), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -501,11 +507,11 @@ if __name__ == '__main__':
 
 func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
 	if err = os.RemoveAll(imagePath); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
@@ -514,18 +520,18 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	}
 
 	if err := addHostResolvFiles(imagePath); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	var spec runtimespec.Spec
 
 	if err = json.Unmarshal(specJSON, &spec); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	spec.Process.Terminal = false
@@ -540,13 +546,17 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	}
 
 	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc/nsswitch.conf"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: mount,
-			Type: "bind", Source: mount, Options: []string{"bind", "ro"}})
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
+			Destination: mount,
+			Type:        "bind", Source: mount, Options: []string{"bind", "ro"},
+		})
 	}
 
 	for _, mount := range []string{"hosts", "resolv.conf"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{Destination: path.Join("/etc", mount),
-			Type: "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"}})
+		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
+			Destination: path.Join("/etc", mount),
+			Type:        "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"},
+		})
 	}
 
 	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
@@ -556,11 +566,11 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 	spec.Process.Capabilities.Ambient = append(spec.Process.Capabilities.Ambient, "CAP_NET_RAW")
 
 	if specJSON, err = json.Marshal(&spec); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -587,15 +597,15 @@ func killOCIContainer(containerID string) (err error) {
 func addHostResolvFiles(pathToContainer string) (err error) {
 	etcPath := path.Join(pathToContainer, "etc")
 	if err = os.MkdirAll(etcPath, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = os.Create(path.Join(etcPath, "hosts")); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = os.Create(path.Join(etcPath, "resolv.conf")); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil

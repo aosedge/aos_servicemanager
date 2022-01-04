@@ -86,7 +86,7 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []*pb.OverrideEnvVa
 
 	var resultError error
 
-	for currentIndex, currentVar := range provider.currentEnvVars {
+	for currentIndex, currentVar := range provider.currentEnvVars { // nolint
 		presentInDesired := false
 
 		for desIndex, desValue := range vars {
@@ -152,7 +152,10 @@ func (provider *envVarsProvider) processOverrideEnvVars(vars []*pb.OverrideEnvVa
 			status := pb.EnvVarStatus{SubjectId: notExistVar.SubjectId, ServiceId: notExistVar.ServiceId}
 
 			for _, env := range notExistVar.Vars {
-				status.VarStatus = append(status.VarStatus, &pb.VarStatus{VarId: env.VarId, Error: "Non-existent subject serviceId pair"})
+				status.VarStatus = append(status.VarStatus, &pb.VarStatus{
+					VarId: env.VarId,
+					Error: "Non-existent subject serviceId pair",
+				})
 			}
 
 			statuses = append(statuses, &status)
@@ -190,11 +193,13 @@ func (provider *envVarsProvider) validateEnvVarsTTL() (servicesToRestart []subje
 		for _, value := range provider.currentEnvVars[i].Vars {
 			if value.Ttl == nil {
 				actualEnv = append(actualEnv, value)
+
 				continue
 			}
 
 			if currentTime.Before(value.Ttl.AsTime()) {
 				actualEnv = append(actualEnv, value)
+
 				continue
 			}
 
@@ -210,8 +215,10 @@ func (provider *envVarsProvider) validateEnvVarsTTL() (servicesToRestart []subje
 
 			provider.currentEnvVars[i].Vars = actualEnv
 
-			servicesToRestart = append(servicesToRestart, subjectServicePair{provider.currentEnvVars[i].SubjectId,
-				provider.currentEnvVars[i].ServiceId})
+			servicesToRestart = append(servicesToRestart, subjectServicePair{
+				provider.currentEnvVars[i].SubjectId,
+				provider.currentEnvVars[i].ServiceId,
+			})
 		}
 	}
 
@@ -229,6 +236,7 @@ func (provider *envVarsProvider) isEnvVarsEqual(desiredVars, currentVars []*pb.E
 		for _, currentEl := range currentVars {
 			if proto.Equal(value, currentEl) {
 				elementWasFound = true
+
 				break
 			}
 		}

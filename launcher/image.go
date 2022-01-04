@@ -40,14 +40,12 @@ import (
  ******************************************************************************/
 
 const manifestFileName = "manifest.json"
-const decryptDir = "/tmp/decrypt"
+
+const buffSize = 1024 * 1024
 
 /*******************************************************************************
  * Type
  ******************************************************************************/
-
-type imageHandler struct {
-}
 
 type imageParts struct {
 	imageConfigPath    string
@@ -101,6 +99,7 @@ func getImageManifest(installDir string) (manifest *serviceManifest, err error) 
 	if err = json.Unmarshal(manifestJSON, manifest); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
 	return manifest, nil
 }
 
@@ -115,7 +114,7 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 	}
 	defer file.Close()
 
-	buffer := make([]byte, 1024*1024)
+	buffer := make([]byte, buffSize)
 	verifier := digest.Verifier()
 
 	for {
@@ -133,7 +132,7 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 		}
 	}
 
-	if verifier.Verified() == false {
+	if !verifier.Verified() {
 		return aoserrors.New("hash missmach")
 	}
 
@@ -159,13 +158,13 @@ func packImage(source, name string) (err error) {
 	tarWriter := tar.NewWriter(gzWriter)
 	defer tarWriter.Close()
 
-	return filepath.Walk(source, func(fileName string, fileInfo os.FileInfo, err error) error {
+	if err = filepath.Walk(source, func(fileName string, fileInfo os.FileInfo, inErr error) error {
 		header, err := tar.FileInfoHeader(fileInfo, fileInfo.Name())
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
 
-		header.Name = strings.TrimPrefix(strings.Replace(fileName, source, "", -1), string(filepath.Separator))
+		header.Name = strings.TrimPrefix(strings.ReplaceAll(fileName, source, ""), string(filepath.Separator))
 
 		if header.Name == "" {
 			return nil
@@ -187,7 +186,11 @@ func packImage(source, name string) (err error) {
 
 		_, err = io.Copy(tarWriter, file)
 		return aoserrors.Wrap(err)
-	})
+	}); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 func getImageParts(installDir string) (parts imageParts, err error) {
@@ -196,10 +199,12 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 		return parts, aoserrors.Wrap(err)
 	}
 
-	parts.imageConfigPath = path.Join(installDir, "blobs", string(manifest.Config.Digest.Algorithm()), string(manifest.Config.Digest.Hex()))
+	parts.imageConfigPath = path.Join(installDir, "blobs", string(manifest.Config.Digest.Algorithm()),
+		manifest.Config.Digest.Hex())
 
 	if manifest.AosService != nil {
-		parts.aosSrvConfigPath = path.Join(installDir, "blobs", string(manifest.AosService.Digest.Algorithm()), string(manifest.AosService.Digest.Hex()))
+		parts.aosSrvConfigPath = path.Join(installDir, "blobs", string(manifest.AosService.Digest.Algorithm()),
+			manifest.AosService.Digest.Hex())
 	}
 
 	layersSize := len(manifest.Layers)
@@ -209,7 +214,7 @@ func getImageParts(installDir string) (parts imageParts, err error) {
 
 	rootFSDigest := manifest.Layers[0].Digest
 
-	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), string(rootFSDigest.Hex()))
+	parts.serviceFSLayerPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
 
 	parts.layersDigest = getLayersFromManifest(manifest)
 

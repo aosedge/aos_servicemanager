@@ -16,7 +16,6 @@
 // limitations under the License.
 
 // Package networkmanager provides set of API to configure network
-
 package networkmanager
 
 import (
