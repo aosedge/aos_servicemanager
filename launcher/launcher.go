@@ -136,8 +136,10 @@ const defaultServiceProvider = "default"
 
 const errNotLoaded = "not loaded"
 
-const ttlValidatePeriod = 1 * time.Minute
-const ttlRemoveServices = 24 * time.Hour
+const (
+	ttlValidatePeriod = 1 * time.Minute
+	ttlRemoveServices = 24 * time.Hour
+)
 
 /*******************************************************************************
  * Vars
@@ -280,7 +282,8 @@ type layerProvider interface {
 
 // New creates new launcher object
 func New(config *config.Config, serviceProvider ServiceProvider,
-	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement, serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
+	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement,
+	serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
 	log.WithField("runner", config.Runner).Debug("New launcher")
 
 	launcher = &Launcher{
@@ -402,19 +405,22 @@ func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err erro
 func (launcher *Launcher) InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
 	log.WithFields(log.Fields{
 		"id":         serviceInfo.GetServiceId(),
-		"aosVersion": serviceInfo.GetAosVersion()}).Info("Install service")
+		"aosVersion": serviceInfo.GetAosVersion(),
+	}).Info("Install service")
 
-	status = &pb.ServiceStatus{ServiceId: serviceInfo.GetServiceId(),
+	status = &pb.ServiceStatus{
+		ServiceId:     serviceInfo.GetServiceId(),
 		AosVersion:    serviceInfo.GetAosVersion(),
-		VendorVersion: serviceInfo.GetVendorVersion()}
+		VendorVersion: serviceInfo.GetVendorVersion(),
+	}
 
 	defer func() {
 		if err != nil {
 			log.WithFields(log.Fields{
 				"id":         serviceInfo.GetServiceId(),
-				"aosVersion": serviceInfo.GetAosVersion()}).Errorf("Can't install service: %s", err)
+				"aosVersion": serviceInfo.GetAosVersion(),
+			}).Errorf("Can't install service: %s", err)
 		}
-
 	}()
 
 	launcher.usersMutex.RLock()
@@ -437,7 +443,8 @@ func (launcher *Launcher) InstallService(serviceInfo *pb.InstallServiceRequest) 
 
 	log.WithFields(log.Fields{
 		"id":         serviceInfo.GetServiceId(),
-		"aosVersion": serviceInfo.GetAosVersion()}).Info("Service successfully installed")
+		"aosVersion": serviceInfo.GetAosVersion(),
+	}).Info("Service successfully installed")
 
 	return status, nil
 }
@@ -477,7 +484,7 @@ func (launcher *Launcher) UninstallService(removeReq *pb.RemoveServiceRequest) (
 
 // CheckServicesConsistency checks if service folders exist
 func (launcher *Launcher) CheckServicesConsistency() (err error) {
-	//Check for storage folder
+	// Check for storage folder
 	if _, err = os.Stat(launcher.config.StorageDir); err != nil {
 		log.Error("Can't find storagedir")
 		return aoserrors.Wrap(err)
@@ -492,7 +499,7 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 		if err := launcher.isServiceValid(service); err != nil {
 			log.WithField("id", service.ID).Errorf("Service is invalid: %s", err.Error())
 
-			//try to remove only corrupted service
+			// try to remove only corrupted service
 			if err := launcher.removeService(service); err != nil {
 				return aoserrors.Wrap(err)
 			}
@@ -809,7 +816,8 @@ func (launcher *Launcher) RestartServices() {
 }
 
 // ProcessDesiredEnvVarsList override env vars fore services
-func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
+func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus,
+	err error) {
 	subjectServiceToRestart, status, err := launcher.envVarsProvider.processOverrideEnvVars(envVars)
 	if err != nil {
 		return status, err
@@ -949,7 +957,7 @@ func (launcher *Launcher) restartServicesBySubjectServiceID(subjectServiceToRest
 func (launcher *Launcher) addServicesToSystemd() (err error) {
 	services, err := launcher.serviceProvider.GetServices()
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	for _, service := range services {
@@ -967,7 +975,7 @@ func (launcher *Launcher) addServicesToSystemd() (err error) {
 	}
 
 	if err = launcher.systemd.ReloadContext(context.Background()); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -1081,11 +1089,12 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 	defer os.RemoveAll(unpackDir)
 
 	// download and unpack
-	serviceImage := ""
 	urlVal, err := url.Parse(installInfo.Url)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	var serviceImage string
 
 	if urlVal.Scheme != "file" {
 		if serviceImage, err = image.Download(context.Background(), launcher.downloadDir, installInfo.Url); err != nil {
@@ -1097,8 +1106,10 @@ func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) 
 		serviceImage = urlVal.Path
 	}
 
-	if err = image.CheckFileInfo(context.Background(), serviceImage, image.FileInfo{Sha256: installInfo.Sha256,
-		Sha512: installInfo.Sha512, Size: installInfo.Size}); err != nil {
+	if err = image.CheckFileInfo(context.Background(), serviceImage, image.FileInfo{
+		Sha256: installInfo.Sha256,
+		Sha512: installInfo.Sha512, Size: installInfo.Size,
+	}); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1172,7 +1183,8 @@ func (launcher *Launcher) uninstallService(service Service, users []string) (err
 	if userService.StorageFolder != "" {
 		log.WithFields(log.Fields{
 			"folder":    userService.StorageFolder,
-			"serviceID": service.ID}).Debug("Remove storage folder")
+			"serviceID": service.ID,
+		}).Debug("Remove storage folder")
 
 		if err = os.RemoveAll(userService.StorageFolder); err != nil {
 			return aoserrors.Wrap(err)
@@ -1237,15 +1249,14 @@ func (launcher *Launcher) umountRootfs(service Service) (err error) {
 
 	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service rootfs")
 
-	if err = umountWithRetry(mergedDir, 0); err != nil {
+	if err = umountWithRetry(mergedDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, service Service,
-	aosSrvConf *aosServiceConfig) (err error) {
+func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, aosSrvConf *aosServiceConfig) (err error) {
 	// Update Devices in spec
 	if err = launcher.setDevices(spec, aosSrvConf.Devices); err != nil {
 		return aoserrors.Wrap(err)
@@ -1400,10 +1411,12 @@ func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServ
 }
 
 func (launcher *Launcher) overrideEnvVars(spec *serviceSpec, service Service) (err error) {
-	currentSubject := launcher.users[0] //TODO: currently supported only one user
+	currentSubject := launcher.users[0] // TODO: currently supported only one user
 
-	vars, err := launcher.envVarsProvider.getEnvVars(subjectServicePair{subjectID: currentSubject,
-		serviseID: service.ID})
+	vars, err := launcher.envVarsProvider.getEnvVars(subjectServicePair{
+		subjectID: currentSubject,
+		serviseID: service.ID,
+	})
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -1438,6 +1451,7 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
 	defer func() {
 		if specErr := spec.save(); specErr != nil {
 			if err == nil {
@@ -1452,7 +1466,7 @@ func (launcher *Launcher) prestartService(service Service, aosConfig *aosService
 		return aoserrors.Wrap(err)
 	}
 
-	if err := launcher.applyDevicesAndResources(spec, service, aosConfig); err != nil {
+	if err := launcher.applyDevicesAndResources(spec, aosConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1596,14 +1610,16 @@ func (launcher *Launcher) poststopService(service Service, aosConfig *aosService
 		}
 	}
 
-	if launcher.network != nil {
-		if err := launcher.network.IsServiceInNetwork(service.ID, service.ServiceProvider); err == nil {
-			if err := launcher.network.RemoveServiceFromNetwork(
-				service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
-				if retErr == nil {
-					log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
-					retErr = err
-				}
+	if launcher.network == nil {
+		return aoserrors.Wrap(retErr)
+	}
+
+	if err := launcher.network.IsServiceInNetwork(service.ID, service.ServiceProvider); err == nil {
+		if err := launcher.network.RemoveServiceFromNetwork(
+			service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
+			if retErr == nil {
+				log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
+				retErr = err
 			}
 		}
 	}
@@ -1707,7 +1723,6 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	}
 
 	for _, mount := range spec.ocSpec.Mounts {
-
 		var permissions uint64
 
 		for _, option := range mount.Options {
@@ -1767,11 +1782,10 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	return nil
 }
 
+// get devices from aos service configuration
+// and get all resource information for device from device manager
+// and add groups and host devices for class device
 func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (err error) {
-	// get devices from aos service configuration
-	// and get all resource information for device from device manager
-	// and add groups and host devices for class device
-
 	for _, device := range devices {
 		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
 		if err != nil {
@@ -1790,7 +1804,6 @@ func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (err e
 				return aoserrors.Wrap(err)
 			}
 		}
-
 	}
 
 	return nil
@@ -1810,10 +1823,12 @@ func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []str
 		}
 
 		for _, mount := range boardResource.Mounts {
-			if err = spec.addMount(runtimespec.Mount{Destination: mount.Destination,
-				Source:  mount.Source,
-				Type:    mount.Type,
-				Options: mount.Options}); err != nil {
+			if err = spec.addMount(runtimespec.Mount{
+				Destination: mount.Destination,
+				Source:      mount.Source,
+				Type:        mount.Type,
+				Options:     mount.Options,
+			}); err != nil {
 				return aoserrors.Wrap(err)
 			}
 		}
@@ -1856,7 +1871,8 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 		return service, aoserrors.Wrap(err)
 	}
 
-	if err := imageutils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir, manifestFileName)); err != nil {
+	if err := imageutils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir,
+		manifestFileName)); err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 
@@ -1884,7 +1900,11 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 			return aoserrors.Wrap(err)
 		}
 
-		return os.Chown(name, int(uid), int(gid))
+		if err = os.Chown(name, int(uid), int(gid)); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		return nil
 	}); err != nil {
 		return service, aoserrors.Wrap(err)
 	}
@@ -1921,10 +1941,9 @@ func (launcher *Launcher) prepareService(unpackDir, installDir string,
 	return service, nil
 }
 
+// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
+// handled by parent function
 func (launcher *Launcher) addService(service Service, users []string) (err error) {
-	// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
-	// handled by parent function
-
 	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
 	if err != nil {
 		return aoserrors.Wrap(err)
@@ -1943,7 +1962,9 @@ func (launcher *Launcher) addService(service Service, users []string) (err error
 		if err != nil {
 			log.WithField("id", service.ID).Errorf("Error adding service: %s", err)
 
-			launcher.removeService(service)
+			if err := launcher.removeService(service); err != nil {
+				log.Errorf("Can't remove service: %s", err)
+			}
 		}
 	}()
 
@@ -1964,19 +1985,23 @@ func (launcher *Launcher) addService(service Service, users []string) (err error
 
 func (launcher *Launcher) updateService(oldService, newService Service, users []string) (err error) {
 	defer func() {
-		if err != nil {
-			log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
+		if err == nil {
+			return
+		}
 
-			if err := launcher.stopService(newService); err != nil {
-				log.WithField("id", newService.ID).Errorf("Can't stop service: %s", err)
-			}
+		log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
 
-			if err := os.RemoveAll(newService.Path); err != nil {
-				log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
-			}
+		if err := launcher.stopService(newService); err != nil {
+			log.WithField("id", newService.ID).Errorf("Can't stop service: %s", err)
+		}
 
-			if err := launcher.restoreService(oldService); err != nil {
-				launcher.removeService(oldService)
+		if err := os.RemoveAll(newService.Path); err != nil {
+			log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
+		}
+
+		if err := launcher.restoreService(oldService); err != nil {
+			if err := launcher.removeService(oldService); err != nil {
+				log.Errorf("Can't remove old service: %s", err)
 			}
 		}
 	}()
@@ -2059,7 +2084,8 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 		if userService.StorageFolder != "" {
 			log.WithFields(log.Fields{
 				"folder":    userService.StorageFolder,
-				"serviceID": service.ID}).Debug("Remove storage folder")
+				"serviceID": service.ID,
+			}).Debug("Remove storage folder")
 
 			if err := os.RemoveAll(userService.StorageFolder); err != nil {
 				if retErr == nil {
@@ -2123,7 +2149,7 @@ func (launcher *Launcher) removeService(service Service) (retErr error) {
 func (launcher *Launcher) cleanupLayers() (retErr error) {
 	layersToRemove, retErr := launcher.layerProvider.GetLayersInfo()
 	if retErr != nil {
-		aoserrors.Wrap(retErr)
+		return aoserrors.Wrap(retErr)
 	}
 
 	if len(layersToRemove) == 0 {
@@ -2146,6 +2172,7 @@ func (launcher *Launcher) cleanupLayers() (retErr error) {
 				log.WithField("name", serviceToCheck.ID).Errorf("Can't get layers from installed service: %s", err)
 				retErr = err
 			}
+
 			continue
 		}
 
@@ -2153,6 +2180,7 @@ func (launcher *Launcher) cleanupLayers() (retErr error) {
 			for i, layerToRemove := range layersToRemove {
 				if layerToRemove.Digest == digest {
 					layersToRemove = append(layersToRemove[:i], layersToRemove[i+1:]...)
+
 					break
 				}
 			}
@@ -2173,6 +2201,7 @@ func (launcher *Launcher) cleanupLayers() (retErr error) {
 
 func getSystemdServiceTemplate(workingDir string) (template string, err error) {
 	fileName := path.Join(workingDir, serviceTemplateFile)
+
 	fileContent, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -2211,9 +2240,9 @@ func (launcher *Launcher) createSystemdService(installDir, serviceName, id strin
 		}
 
 		// replaces variables with values
-		line = strings.Replace(line, "${RUNNER}", launcher.runnerPath, -1)
-		line = strings.Replace(line, "${ID}", id, -1)
-		line = strings.Replace(line, "${SERVICEPATH}", absServicePath, -1)
+		line = strings.ReplaceAll(line, "${RUNNER}", launcher.runnerPath)
+		line = strings.ReplaceAll(line, "${ID}", id)
+		line = strings.ReplaceAll(line, "${SERVICEPATH}", absServicePath)
 
 		fmt.Fprint(f, line)
 	}
@@ -2234,7 +2263,7 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 
 		if launcher.network != nil {
 			if ipAddress, err = launcher.network.GetServiceIP(service.ID, service.ServiceProvider); err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 		}
 
@@ -2243,7 +2272,8 @@ func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, 
 			IPAddress:    ipAddress,
 			UID:          service.UID,
 			GID:          service.GID,
-			ServiceRules: &rules}
+			ServiceRules: &rules,
+		}
 
 		if err = launcher.monitor.StartMonitorService(service.ID, monitoringConfig); err != nil {
 			return aoserrors.Wrap(err)
@@ -2304,6 +2334,7 @@ func (launcher *Launcher) cleanCache() (err error) {
 		for _, startedService := range startedServices {
 			if service.ID == startedService.ID {
 				justStarted = true
+
 				break
 			}
 		}
@@ -2347,22 +2378,22 @@ func (launcher *Launcher) cleanCache() (err error) {
 }
 
 func (launcher *Launcher) isServiceValid(service Service) (err error) {
-	//check service folder
+	// check service folder
 	if fi, err := os.Stat(service.Path); os.IsNotExist(err) || !fi.Mode().IsDir() {
 		return aoserrors.Errorf("service folder %s doesn't exist", service.Path)
 	}
 
-	//check image manifest
+	// check image manifest
 	if _, err = os.Stat(path.Join(service.Path, manifestFileName)); os.IsNotExist(err) {
 		return aoserrors.Errorf("image manifest file %s doesn't exist", path.Join(service.Path, manifestFileName))
 	}
 
-	//check image specification
+	// check image specification
 	if _, err = os.Stat(path.Join(service.Path, ociImageConfigFile)); os.IsNotExist(err) {
 		return aoserrors.Errorf("image specification file %s doesn't exist", path.Join(service.Path, ociImageConfigFile))
 	}
 
-	//check service file
+	// check service file
 	if _, err = os.Stat(path.Join(service.Path, service.UnitName)); os.IsNotExist(err) {
 		return aoserrors.Errorf("service file %s doesn't exist", path.Join(service.Path, service.UnitName))
 	}

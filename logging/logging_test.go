@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/coreos/go-systemd/v22/dbus"
 	log "github.com/sirupsen/logrus"
@@ -51,7 +52,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -93,7 +95,9 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	logging, err := logging.New(&config.Config{Logging: config.Logging{
+		MaxPartSize: 1024, MaxPartCount: 10,
+	}}, &serviceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
@@ -121,14 +125,16 @@ func TestGetServiceLog(t *testing.T) {
 		ServiceId: "logservice0",
 		LogId:     "log0",
 		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till)})
+		Till:      timestamppb.New(till),
+	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
 	logging.GetServiceLog(&pb.ServiceLogRequest{
 		ServiceId: "logservice0",
 		LogId:     "log0",
-		From:      timestamppb.New(from)})
+		From:      timestamppb.New(from),
+	})
 
 	currentTime := time.Now()
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &currentTime)
@@ -148,7 +154,8 @@ func TestGetWrongServiceLog(t *testing.T) {
 		ServiceId: "nonExisting",
 		LogId:     "log1",
 		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till)})
+		Till:      timestamppb.New(till),
+	})
 
 	select {
 	case result := <-logging.GetLogsDataChannel():
@@ -184,7 +191,8 @@ func TestGetSystemLog(t *testing.T) {
 	logging.GetSystemLog(&pb.SystemLogRequest{
 		LogId: "log10",
 		From:  timestamppb.New(from),
-		Till:  timestamppb.New(till)})
+		Till:  timestamppb.New(till),
+	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
 }
@@ -210,7 +218,8 @@ func TestGetEmptyLog(t *testing.T) {
 		ServiceId: "logservice2",
 		LogId:     "log0",
 		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till)})
+		Till:      timestamppb.New(till),
+	})
 
 	checkEmptyLog(t, logging.GetLogsDataChannel())
 }
@@ -242,7 +251,8 @@ func TestGetServiceCrashLog(t *testing.T) {
 
 	logging.GetServiceCrashLog(&pb.ServiceLogRequest{
 		ServiceId: "logservice3",
-		LogId:     "log2"})
+		LogId:     "log2",
+	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
@@ -313,7 +323,8 @@ func TestMaxPartCountLog(t *testing.T) {
 		ServiceId: "logservice4",
 		LogId:     "log0",
 		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till)})
+		Till:      timestamppb.New(till),
+	})
 
 	for {
 		select {
@@ -373,11 +384,11 @@ func (serviceProvider *testServiceProvider) GetService(serviceID string) (servic
 
 func setup() (err error) {
 	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
-	if systemd, err = dbus.NewSystemConnection(); err != nil {
-		return err
+	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -427,19 +438,19 @@ func createService(serviceID string) (err error) {
 
 	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
 	if err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = systemd.ReloadContext(context.Background()); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -450,7 +461,7 @@ func startService(serviceID string) (err error) {
 
 	if _, err = systemd.RestartUnitContext(context.Background(),
 		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	<-channel
@@ -463,7 +474,7 @@ func stopService(serviceID string) (err error) {
 
 	if _, err = systemd.StopUnitContext(context.Background(),
 		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	<-channel

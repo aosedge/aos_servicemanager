@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aoserrors"
+
 	"github.com/aoscloud/aos_servicemanager/config"
 )
 
@@ -86,19 +88,19 @@ func createConfigFile() (err error) {
 }`
 
 	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
 func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return err
+	if err := os.MkdirAll("tmp", 0o755); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	if err = createConfigFile(); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -106,7 +108,7 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	if err := os.RemoveAll("tmp"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -328,7 +330,6 @@ func TestHosts(t *testing.T) {
 
 func TestDatabaseMigration(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
-
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
@@ -359,7 +360,7 @@ func TestServiceHealthCheckTimeout(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.ServiceHealthCheckTimeout.Duration != time.Duration(10*time.Second) {
+	if config.ServiceHealthCheckTimeout.Duration != 10*time.Second {
 		t.Errorf("Wrong ServiceHealthCheckTimeout value: %s", config.ServiceHealthCheckTimeout.String())
 	}
 }

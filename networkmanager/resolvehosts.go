@@ -16,7 +16,6 @@
 // limitations under the License.
 
 // Package networkmanager provides set of API to configure network
-
 package networkmanager
 
 import (
@@ -60,7 +59,7 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		return aoserrors.Wrap(err)
 	}
 
-	if ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
+	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -78,7 +77,7 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 		return aoserrors.Wrap(err)
 	}
 
-	if ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
+	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

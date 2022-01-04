@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/aoscloud/aos_common/aoserrors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,22 +34,25 @@ import (
  * Consts
  ******************************************************************************/
 
-const DRI_DEV_PATH = "/dev/dri/by-path/"
-const STDIN_DEV_PATH = "/dev/stdin"
+const (
+	driDevPath   = "/dev/dri/by-path/"
+	stdinDevPath = "/dev/stdin"
+)
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-type alertSender struct {
-}
+type alertSender struct{}
 
 /*******************************************************************************
  * Vars
  ******************************************************************************/
 
-var tmpDir string
-var testAlertSender = &alertSender{}
+var (
+	tmpDir          string
+	testAlertSender = &alertSender{}
+)
 
 /*******************************************************************************
  * Init
@@ -58,7 +62,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetLevel(log.DebugLevel)
 	log.SetOutput(os.Stdout)
 }
@@ -100,14 +105,14 @@ func TestProcessHostDevice(t *testing.T) {
 	}
 
 	var hs []string
-	if _, exist := os.Stat(DRI_DEV_PATH); exist == nil || os.IsExist(exist) {
-		//Test directory with symlinks
-		hs, err = rm.processHostDevice(DRI_DEV_PATH)
+	if _, exist := os.Stat(driDevPath); exist == nil || os.IsExist(exist) {
+		// Test directory with symlinks
+		hs, err = rm.processHostDevice(driDevPath)
 		if err != nil {
 			t.Errorf("Can't process device directory. Error: %s", err)
 		}
 
-		originalHs, err := getDevicePathContents(DRI_DEV_PATH)
+		originalHs, err := getDevicePathContents(driDevPath)
 		if err != nil {
 			t.Errorf("Can't process device directory. Error: %s", err)
 		}
@@ -117,13 +122,13 @@ func TestProcessHostDevice(t *testing.T) {
 		}
 	}
 
-	//Test symlink
-	hs, err = rm.processHostDevice(STDIN_DEV_PATH)
+	// Test symlink
+	hs, err = rm.processHostDevice(stdinDevPath)
 	if err != nil {
 		t.Errorf("Can't process device directory. Error: %s", err)
 	}
 
-	linkName, err := filepath.EvalSymlinks(STDIN_DEV_PATH)
+	linkName, err := filepath.EvalSymlinks(stdinDevPath)
 	if err != nil {
 		t.Errorf("Can't read symlink. Error: %s", err)
 	}
@@ -244,8 +249,10 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		t.Fatalf("Can't request resource: %s", err)
 	}
 
-	randomResource := DeviceResource{Name: "random", SharedCount: 0, Groups: []string{"root"},
-		HostDevices: []string{"/dev/random"}}
+	randomResource := DeviceResource{
+		Name: "random", SharedCount: 0, Groups: []string{"root"},
+		HostDevices: []string{"/dev/random"},
+	}
 	if !reflect.DeepEqual(deviceResource, randomResource) {
 		t.Fatalf("deviceResource is not equal to randomResource")
 	}
@@ -256,8 +263,10 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		t.Fatalf("Can't request resource: %s", err)
 	}
 
-	inputResource := DeviceResource{Name: "input", SharedCount: 2, Groups: nil,
-		HostDevices: []string{}}
+	inputResource := DeviceResource{
+		Name: "input", SharedCount: 2, Groups: nil,
+		HostDevices: []string{},
+	}
 
 	inputResource.HostDevices, err = getDevicePathContents("/dev/input/by-path")
 	if err != nil {
@@ -278,16 +287,17 @@ func TestRequestDeviceResourceByName(t *testing.T) {
 		t.Fatalf("Can't read symlink with error: %s", err)
 	}
 
-	stdoutResource := DeviceResource{Name: "stdin", SharedCount: 2, Groups: nil,
-		HostDevices: []string{linkName}}
+	stdoutResource := DeviceResource{
+		Name: "stdin", SharedCount: 2, Groups: nil,
+		HostDevices: []string{linkName},
+	}
 
 	if !reflect.DeepEqual(deviceResource, stdoutResource) {
 		t.Fatalf("deviceResource is not equal to stdoutResource")
 	}
 
 	// request not existed device class
-	deviceResource, err = rm.RequestDeviceResourceByName("some_unavailable_device")
-	if err == nil {
+	if _, err = rm.RequestDeviceResourceByName("some_unavailable_device"); err == nil {
 		t.Fatalf("Can request resource: some_unavailable_device")
 	}
 }
@@ -308,11 +318,14 @@ func TestRequestBoardResourceByName(t *testing.T) {
 		t.Errorf("Should be error: resource is not present in board configuration")
 	}
 
-	originalConfig := BoardResource{Name: "system-dbus",
-		Mounts: []FileSystemMount{FileSystemMount{Destination: "/var/run/dbus/system_bus_socket",
-			Options: []string{"rw", "bind"},
-			Source:  "/var/run/dbus/system_bus_socket",
-			Type:    "bind"}},
+	originalConfig := BoardResource{
+		Name: "system-dbus",
+		Mounts: []FileSystemMount{{
+			Destination: "/var/run/dbus/system_bus_socket",
+			Options:     []string{"rw", "bind"},
+			Source:      "/var/run/dbus/system_bus_socket",
+			Type:        "bind",
+		}},
 		Env: []string{"DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"},
 	}
 
@@ -519,13 +532,13 @@ func getDevicePathContents(device string) (hostDevices []string, err error) {
 	err = filepath.Walk(device,
 		func(path string, info os.FileInfo, err error) error {
 			if info.IsDir() || err != nil {
-				return err
+				return aoserrors.Wrap(err)
 			}
 
 			if info.Mode()&os.ModeSymlink == os.ModeSymlink {
 				linkName, err := filepath.EvalSymlinks(path)
 				if err != nil {
-					return err
+					return aoserrors.Wrap(err)
 				}
 
 				hostDevices = append(hostDevices, linkName)
@@ -540,11 +553,11 @@ func getDevicePathContents(device string) (hostDevices []string, err error) {
 
 func setup() (err error) {
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil
@@ -673,7 +686,7 @@ func createEmptyBoardConfigJSON() (configJSON string) {
 
 func writeTestBoardConfigFile(content string) (err error) {
 	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(content), 0644); err != nil {
-		return err
+		return aoserrors.Wrap(err)
 	}
 
 	return nil

@@ -16,7 +16,6 @@
 // limitations under the License.
 
 // Package networkmanager provides set of API to configure network
-
 package networkmanager
 
 import (
@@ -34,7 +33,6 @@ import (
 
 func getNetworkRoutes() (routeIPList []netlink.Route, err error) {
 	initNl, err := netlink.NewHandle(syscall.NETLINK_ROUTE, syscall.NETLINK_NETFILTER)
-
 	if err != nil {
 		return nil, aoserrors.Errorf("could not create netlink handle on initial namespace: %v", err)
 	}
@@ -57,10 +55,6 @@ func checkRouteOverlaps(toCheck *net.IPNet, networks []netlink.Route) (overlapsI
 	}
 
 	return false
-}
-
-func networkOverlaps(netX *net.IPNet, netY *net.IPNet) (sameIPNet bool) {
-	return netX.Contains(netY.IP) || netY.Contains(netX.IP)
 }
 
 func removeBridgeInterface(spID string) (err error) {
@@ -90,7 +84,13 @@ func createNetNS(name string) (err error) {
 			return aoserrors.Wrap(err)
 		}
 		defer origin.Close()
-		defer netns.Set(origin)
+		defer func() {
+			if setErr := netns.Set(origin); setErr != nil {
+				if err == nil {
+					err = aoserrors.Wrap(setErr)
+				}
+			}
+		}()
 
 		newns, err := netns.NewNamed(name)
 		if err != nil {

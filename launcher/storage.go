@@ -84,7 +84,8 @@ func newStorageHandler(storageDir string, serviceProvider ServiceProvider,
 	handler = &storageHandler{
 		serviceProvider: serviceProvider,
 		storageDir:      storageDir,
-		stateChannel:    stateChannel}
+		stateChannel:    stateChannel,
+	}
 
 	if _, err = os.Stat(handler.storageDir); err != nil {
 		if !os.IsNotExist(err) {
@@ -119,7 +120,8 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 	log.WithFields(log.Fields{
 		"serviceID":    service.ID,
 		"storageLimit": storageLimit,
-		"stateLimit":   stateLimit}).Debug("Mount storage folder")
+		"stateLimit":   stateLimit,
+	}).Debug("Mount storage folder")
 
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
@@ -146,7 +148,8 @@ func (handler *storageHandler) PrepareStorageFolder(users []string, service Serv
 
 			log.WithFields(log.Fields{
 				"folder":    usersService.StorageFolder,
-				"serviceID": service.ID}).Warning("Storage folder doesn't exist")
+				"serviceID": service.ID,
+			}).Warning("Storage folder doesn't exist")
 
 			usersService.StorageFolder = ""
 		}
@@ -206,7 +209,8 @@ func (handler *storageHandler) StopStateWatching(users []string, service Service
 		return aoserrors.Wrap(err)
 	}
 
-	return aoserrors.Wrap(handler.stopStateWatching(path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder))
+	return aoserrors.Wrap(handler.stopStateWatching(
+		path.Join(usersService.StorageFolder, stateFile), usersService.StorageFolder))
 }
 
 func (handler *storageHandler) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
@@ -220,7 +224,8 @@ func (handler *storageHandler) StateAcceptance(acceptance *pb.StateAcceptance) (
 			} else {
 				log.WithFields(log.Fields{
 					"serviceID":     state.serviceID,
-					"correlationID": state.correlationID}).Errorf("State is rejected due to: %s", acceptance.Reason)
+					"correlationID": state.correlationID,
+				}).Errorf("State is rejected due to: %s", acceptance.Reason)
 			}
 
 			if state.acceptanceTimer.Stop() {
@@ -243,7 +248,8 @@ func (handler *storageHandler) UpdateState(users []string, service Service, stat
 		"serviceID":  service.ID,
 		"checksum":   checksum,
 		"stateLimit": stateLimit,
-		"stateSize":  len(state)}).Debug("Update state")
+		"stateSize":  len(state),
+	}).Debug("Update state")
 
 	if err = checkChecksum(state, checksum); err != nil {
 		return aoserrors.Wrap(err)
@@ -274,9 +280,8 @@ func (handler *storageHandler) UpdateState(users []string, service Service, stat
 	return nil
 }
 
+// no mutex as it is called from locked context
 func (handler *storageHandler) startStateWatching(users []string, service Service) (err error) {
-	// no mutex as it is called from locked context
-
 	usersService, err := handler.serviceProvider.GetUsersService(users, service.ID)
 	if err != nil {
 		return aoserrors.Wrap(err)
@@ -307,13 +312,15 @@ func (handler *storageHandler) startStateWatching(users []string, service Servic
 	if !reflect.DeepEqual(usersService.StateChecksum, checksum) {
 		log.WithFields(log.Fields{
 			"serviceID": service.ID,
-			"checksum":  hex.EncodeToString(checksum)}).Warn("State file checksum mistmatch. Send state request")
+			"checksum":  hex.EncodeToString(checksum),
+		}).Warn("State file checksum mistmatch. Send state request")
 
 		// Send state request
 		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
 			ServiceStateRequest: &pb.ServiceStateRequest{
 				ServiceId: state.serviceID, Default: false, Users: &pb.Users{Users: users},
-			}}}); err != nil {
+			},
+		}}); err != nil {
 			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}
@@ -358,7 +365,8 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 	if state.stateAccepted {
 		log.WithFields(log.Fields{
 			"serviceID":     state.serviceID,
-			"correlationID": state.correlationID}).Debug("State is accepted")
+			"correlationID": state.correlationID,
+		}).Debug("State is accepted")
 
 		if err := handler.serviceProvider.SetUsersStateChecksum(state.users, state.serviceID, checksum); err != nil {
 			log.WithField("serviceID", state.serviceID).Errorf("Can't set state checksum: %s", err)
@@ -368,7 +376,8 @@ func (handler *storageHandler) handleStateAcception(state *stateParams, checksum
 		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_ServiceStateRequest{
 			ServiceStateRequest: &pb.ServiceStateRequest{
 				ServiceId: state.serviceID, Default: false, Users: &pb.Users{Users: state.users},
-			}}}); err != nil {
+			},
+		}}); err != nil {
 			log.Warn("Can't send service state request: ", err.Error())
 		}
 	}
@@ -406,15 +415,19 @@ func (handler *storageHandler) stateChanged(fileName string, state *stateParams)
 		log.WithFields(log.Fields{
 			"serviceID":     state.serviceID,
 			"correlationID": state.correlationID,
-			"checksum":      hex.EncodeToString(checksum)}).Debug("Send new state")
+			"checksum":      hex.EncodeToString(checksum),
+		}).Debug("Send new state")
 
 		if err := handler.pushServiceStateMessage(&pb.SMNotifications{SMNotification: &pb.SMNotifications_NewServiceState{
-			NewServiceState: &pb.NewServiceState{CorrelationId: state.correlationID,
+			NewServiceState: &pb.NewServiceState{
+				CorrelationId: state.correlationID,
 				ServiceState: &pb.ServiceState{
 					ServiceId:     state.serviceID,
 					StateChecksum: hex.EncodeToString(checksum),
 					State:         stateData,
-				}}}}); err != nil {
+				},
+			},
+		}}); err != nil {
 			log.Warn(err.Error())
 
 			handler.Lock()

@@ -43,19 +43,19 @@ const (
  * Types
  ******************************************************************************/
 
-// Duration represents duration in format "00:00:00"
+// Duration represents duration in format "00:00:00".
 type Duration struct {
 	time.Duration
 }
 
-// AlertRule describes alert rule
+// AlertRule describes alert rule.
 type AlertRule struct {
 	MinTimeout   Duration `json:"minTimeout"`
 	MinThreshold uint64   `json:"minThreshold"`
 	MaxThreshold uint64   `json:"maxThreshold"`
 }
 
-// Monitoring configuration for system monitoring
+// Monitoring configuration for system monitoring.
 type Monitoring struct {
 	Disabled   bool       `json:"disabled"`
 	SendPeriod Duration   `json:"sendPeriod"`
@@ -67,13 +67,13 @@ type Monitoring struct {
 	OutTraffic *AlertRule `json:"outTraffic"`
 }
 
-// Logging configuration for system and service logging
+// Logging configuration for system and service logging.
 type Logging struct {
 	MaxPartSize  uint64 `json:"maxPartSize"`
 	MaxPartCount uint64 `json:"maxPartCount"`
 }
 
-// Alerts configuration for alerts
+// Alerts configuration for alerts.
 type Alerts struct {
 	Disabled             bool     `json:"disabled"`
 	Filter               []string `json:"filter"`
@@ -81,21 +81,21 @@ type Alerts struct {
 	SystemAlertPriority  int      `json:"systemAlertPriority"`
 }
 
-// Host strunct represent entry in /etc/hosts
+// Host strunct represent entry in /etc/hosts.
 type Host struct {
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname"`
 }
 
-// Migration struct represents path for db migration
+// Migration struct represents path for db migration.
 type Migration struct {
 	MigrationPath       string `json:"migrationPath"`
 	MergedMigrationPath string `json:"mergedMigrationPath"`
 }
 
-// Config instance
+// Config instance.
 type Config struct {
-	CACert                    string     `json:"CACert"`
+	CACert                    string     `json:"caCert"`
 	SMServerURL               string     `json:"smServerUrl"`
 	CertStorage               string     `json:"certStorage"`
 	IAMServerURL              string     `json:"iamServer"`
@@ -103,7 +103,7 @@ type Config struct {
 	StorageDir                string     `json:"storageDir"`
 	LayersDir                 string     `json:"layersDir"`
 	BoardConfigFile           string     `json:"boardConfigFile"`
-	DefaultServiceTTLDays     uint64     `json:"defaultServiceTTLDays"`
+	DefaultServiceTTLDays     uint64     `json:"defaultServiceTtlDays"`
 	ServiceHealthCheckTimeout Duration   `json:"serviceHealthCheckTimeout"`
 	Monitoring                Monitoring `json:"monitoring"`
 	Logging                   Logging    `json:"logging"`
@@ -118,15 +118,15 @@ type Config struct {
  * Public
  ******************************************************************************/
 
-// New creates new config object
+// New creates new config object.
 func New(fileName string) (config *Config, err error) {
 	raw, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		return config, err
+		return config, aoserrors.Wrap(err)
 	}
 
 	config = &Config{
-		DefaultServiceTTLDays:     30,
+		DefaultServiceTTLDays:     30, // nolint:gomnd
 		ServiceHealthCheckTimeout: Duration{35 * time.Second},
 		Runner:                    "runc",
 		Monitoring: Monitoring{
@@ -134,11 +134,14 @@ func New(fileName string) (config *Config, err error) {
 			PollPeriod: Duration{10 * time.Second},
 		},
 		Logging: Logging{
-			MaxPartSize:  524288,
-			MaxPartCount: 20},
+			MaxPartSize:  524288, // nolint:gomnd
+			MaxPartCount: 20,     // nolint:gomnd
+		},
 		Alerts: Alerts{
 			SystemAlertPriority:  defaultSystemAlertPriority,
-			ServiceAlertPriority: defaultServiceAlertPriority}}
+			ServiceAlertPriority: defaultServiceAlertPriority,
+		},
+	}
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, aoserrors.Wrap(err)
@@ -168,12 +171,14 @@ func New(fileName string) (config *Config, err error) {
 		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
 	}
 
-	if config.Alerts.ServiceAlertPriority > maxAlertPriorityLevel || config.Alerts.ServiceAlertPriority < minAlertPriorityLevel {
+	if config.Alerts.ServiceAlertPriority > maxAlertPriorityLevel ||
+		config.Alerts.ServiceAlertPriority < minAlertPriorityLevel {
 		log.Warnf("Default value %d for service alert priority is assigned", defaultServiceAlertPriority)
 		config.Alerts.ServiceAlertPriority = defaultServiceAlertPriority
 	}
 
-	if config.Alerts.SystemAlertPriority > maxAlertPriorityLevel || config.Alerts.SystemAlertPriority < minAlertPriorityLevel {
+	if config.Alerts.SystemAlertPriority > maxAlertPriorityLevel ||
+		config.Alerts.SystemAlertPriority < minAlertPriorityLevel {
 		log.Warnf("Default value %d for system alert priority is assigned", defaultSystemAlertPriority)
 		config.Alerts.SystemAlertPriority = defaultSystemAlertPriority
 	}
@@ -181,18 +186,24 @@ func New(fileName string) (config *Config, err error) {
 	return config, nil
 }
 
-// MarshalJSON marshals JSON Duration type
+// MarshalJSON marshals JSON Duration type.
 func (d Duration) MarshalJSON() (b []byte, err error) {
 	t, err := time.Parse("15:04:05", "00:00:00")
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
 	t.Add(d.Duration)
 
-	return json.Marshal(t.Add(d.Duration).Format("15:04:05"))
+	b, err = json.Marshal(t.Add(d.Duration).Format("15:04:05"))
+	if err != nil {
+		return b, aoserrors.Wrap(err)
+	}
+
+	return b, nil
 }
 
-// UnmarshalJSON unmarshals JSON Duration type
+// UnmarshalJSON unmarshals JSON Duration type.
 func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 	var v interface{}
 
@@ -203,6 +214,7 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 	switch value := v.(type) {
 	case float64:
 		d.Duration = time.Duration(value) * time.Second
+
 		return nil
 
 	case string:
@@ -212,6 +224,7 @@ func (d *Duration) UnmarshalJSON(b []byte) (err error) {
 			if err != nil {
 				return aoserrors.Wrap(err)
 			}
+
 			t2, err := time.Parse("15:04:05", "00:00:00")
 			if err != nil {
 				return aoserrors.Wrap(err)
