@@ -38,9 +38,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"aos_servicemanager/alerts"
-	"aos_servicemanager/config"
-	"aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/alerts"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
 /*******************************************************************************

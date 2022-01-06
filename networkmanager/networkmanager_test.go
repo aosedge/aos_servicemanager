@@ -33,8 +33,8 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/networkmanager"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
 )
 
 /*******************************************************************************

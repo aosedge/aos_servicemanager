@@ -30,7 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************

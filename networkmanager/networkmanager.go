@@ -40,7 +40,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netns"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************

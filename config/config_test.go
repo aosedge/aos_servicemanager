@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************

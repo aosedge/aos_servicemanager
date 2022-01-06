@@ -32,7 +32,7 @@ import (
 	"github.com/jinzhu/copier"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************

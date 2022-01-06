@@ -1,4 +1,4 @@
-module aos_servicemanager
+module github.com/aoscloud/aos_servicemanager
 
 go 1.14
 

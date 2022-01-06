@@ -45,13 +45,13 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/monitoring"
-	"aos_servicemanager/networkmanager"
-	"aos_servicemanager/platform"
-	"aos_servicemanager/resourcemanager"
-	"aos_servicemanager/utils/action"
-	"aos_servicemanager/utils/imageutils"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/monitoring"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
+	"github.com/aoscloud/aos_servicemanager/platform"
+	"github.com/aoscloud/aos_servicemanager/resourcemanager"
+	"github.com/aoscloud/aos_servicemanager/utils/action"
+	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 )
 
 /*******************************************************************************

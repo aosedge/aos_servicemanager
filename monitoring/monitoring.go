@@ -40,8 +40,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/platform"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/platform"
 )
 
 /*******************************************************************************
