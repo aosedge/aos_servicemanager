@@ -27,7 +27,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************

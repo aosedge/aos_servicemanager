@@ -28,8 +28,8 @@ import (
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
 /*******************************************************************************

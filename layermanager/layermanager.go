@@ -33,9 +33,9 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/config"
-	"aos_servicemanager/utils/action"
-	"aos_servicemanager/utils/imageutils"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/utils/action"
+	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 )
 
 /*******************************************************************************

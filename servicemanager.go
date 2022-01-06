@@ -33,17 +33,17 @@ import (
 	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/alerts"
-	"aos_servicemanager/config"
-	"aos_servicemanager/database"
-	"aos_servicemanager/iamclient"
-	"aos_servicemanager/launcher"
-	"aos_servicemanager/layermanager"
-	"aos_servicemanager/logging"
-	"aos_servicemanager/monitoring"
-	"aos_servicemanager/networkmanager"
-	resource "aos_servicemanager/resourcemanager"
-	"aos_servicemanager/smserver"
+	"github.com/aoscloud/aos_servicemanager/alerts"
+	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/database"
+	"github.com/aoscloud/aos_servicemanager/iamclient"
+	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/logging"
+	"github.com/aoscloud/aos_servicemanager/monitoring"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
+	resource "github.com/aoscloud/aos_servicemanager/resourcemanager"
+	"github.com/aoscloud/aos_servicemanager/smserver"
 )
 
 /*******************************************************************************
