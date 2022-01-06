@@ -32,7 +32,7 @@ import (
 	_ "github.com/mattn/go-sqlite3" //ignore lint
 	log "github.com/sirupsen/logrus"
 
-	"aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
 /*******************************************************************************

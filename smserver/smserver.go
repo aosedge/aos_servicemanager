@@ -30,7 +30,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /*******************************************************************************
