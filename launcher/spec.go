@@ -380,8 +380,8 @@ func (spec *serviceSpec) setUserUIDGID(uid, gid uint32) {
 }
 
 func (spec *serviceSpec) bindHostDirs(workingDir string) (err error) {
-	// TODO: all services should have their own certificates
-	// this mound for demo only and should be removed
+	// All services should have their own certificates
+	// this mount for demo only and should be removed
 	// mount /etc/ssl
 	etcItems := []string{"nsswitch.conf", "ssl"}
 
