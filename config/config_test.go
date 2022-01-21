@@ -188,7 +188,7 @@ func TestGetBoardConfigFile(t *testing.T) {
 	}
 
 	if config.BoardConfigFile != "/var/aos/aos_board.cfg" {
-		t.Errorf("Wrong storageDir value: %s", config.BoardConfigFile)
+		t.Errorf("Wrong board config value: %s", config.BoardConfigFile)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestGetLayersDir(t *testing.T) {
 	}
 
 	if config.LayersDir != "/var/aos/srvlib" {
-		t.Errorf("Wrong storageDir value: %s", config.LayersDir)
+		t.Errorf("Wrong layers dir value: %s", config.LayersDir)
 	}
 }
 
@@ -245,7 +245,7 @@ func TestDurationMarshal(t *testing.T) {
 	}
 
 	if string(result) != `"00:00:32"` {
-		t.Errorf("Wrong value: %s", result)
+		t.Errorf("Wrong duration value: %s", result)
 	}
 }
 
@@ -268,7 +268,7 @@ func TestGetMonitoringConfig(t *testing.T) {
 	}
 
 	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
+		t.Errorf("Wrong value: %s", config.Monitoring.OutTraffic.MinTimeout.Duration)
 	}
 }
 
