@@ -192,7 +192,41 @@ func (launcher *Launcher) SubjectsChanged(subjects []string) error {
 		return nil
 	}
 
+	log.WithField("subjects", subjects).Info("Subjects changed")
+
 	launcher.currentSubjects = subjects
+
+	runInstances, err := launcher.storage.GetRunningInstances()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	// Remove unit subjects instances
+	i := 0
+
+	for _, instance := range runInstances {
+		if !instance.UnitSubject {
+			runInstances[i] = instance
+			i++
+		}
+	}
+
+	runInstances = runInstances[:i]
+
+	for _, subject := range subjects {
+		subjectInstances, err := launcher.storage.GetSubjectInstances(subject)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		runInstances = append(runInstances, subjectInstances...)
+	}
+
+	if err := launcher.updateRunningFlags(runInstances); err != nil {
+		return err
+	}
+
+	launcher.runInstances(runInstances)
 
 	return nil
 }
