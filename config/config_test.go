@@ -43,6 +43,7 @@ func createConfigFile() (err error) {
 	"workingDir" : "workingDir",
 	"certStorage": "/var/aos/crypt/sm/",	
 	"storageDir" : "/var/aos/storage",
+	"servicesDir": "/var/aos/servicemanager/services",
 	"layersDir": "/var/aos/srvlib",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8090",
@@ -199,6 +200,17 @@ func TestGetLayersDir(t *testing.T) {
 
 	if config.LayersDir != "/var/aos/srvlib" {
 		t.Errorf("Wrong storageDir value: %s", config.LayersDir)
+	}
+}
+
+func TestGetServicesDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.ServicesDir != "/var/aos/servicemanager/services" {
+		t.Errorf("Wrong services dir value: %s", config.ServicesDir)
 	}
 }
 
