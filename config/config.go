@@ -102,6 +102,7 @@ type Config struct {
 	IAMPublicServerURL        string     `json:"iamPublicServer"`
 	WorkingDir                string     `json:"workingDir"`
 	StorageDir                string     `json:"storageDir"`
+	ServicesDir               string     `json:"servicesDir"`
 	LayersDir                 string     `json:"layersDir"`
 	BoardConfigFile           string     `json:"boardConfigFile"`
 	DefaultServiceTTLDays     uint64     `json:"defaultServiceTtlDays"`
@@ -158,6 +159,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.LayersDir == "" {
 		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
+	}
+
+	if config.ServicesDir == "" {
+		config.ServicesDir = path.Join(config.WorkingDir, "servicemanager", "services")
 	}
 
 	if config.BoardConfigFile == "" {
