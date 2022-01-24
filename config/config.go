@@ -103,6 +103,8 @@ type Config struct {
 	StorageDir                string     `json:"storageDir"`
 	ServicesDir               string     `json:"servicesDir"`
 	LayersDir                 string     `json:"layersDir"`
+	DownloadDir               string     `json:"downloadDir"`
+	
 	BoardConfigFile           string     `json:"boardConfigFile"`
 	DefaultServiceTTLDays     uint64     `json:"defaultServiceTtlDays"`
 	ServiceHealthCheckTimeout Duration   `json:"serviceHealthCheckTimeout"`
@@ -162,6 +164,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.ServicesDir == "" {
 		config.ServicesDir = path.Join(config.WorkingDir, "servicemanager", "services")
+	}
+
+	if config.DownloadDir == "" {
+		config.DownloadDir = path.Join(config.WorkingDir, "download")
 	}
 
 	if config.BoardConfigFile == "" {
