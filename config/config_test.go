@@ -45,6 +45,7 @@ func createConfigFile() (err error) {
 	"storageDir" : "/var/aos/storage",
 	"servicesDir": "/var/aos/servicemanager/services",
 	"layersDir": "/var/aos/srvlib",
+	"downloadDir": "/var/aos/servicemanager/download",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
@@ -211,6 +212,17 @@ func TestGetServicesDir(t *testing.T) {
 
 	if config.ServicesDir != "/var/aos/servicemanager/services" {
 		t.Errorf("Wrong services dir value: %s", config.ServicesDir)
+	}
+}
+
+func TestGetDownloadDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.DownloadDir != "/var/aos/servicemanager/download" {
+		t.Errorf("Wrong download dir value: %s", config.DownloadDir)
 	}
 }
 
