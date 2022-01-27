@@ -53,6 +53,9 @@ type ServiceStorage interface {
 	GetService(serviceID string) (ServiceInfo, error)
 	GetAllServices() ([]ServiceInfo, error)
 	AddService(ServiceInfo) error
+	GetAllServiceVersions(serviceID string) ([]ServiceInfo, error)
+	RemoveService(ServiceInfo) error
+	ActivateService(ServiceInfo) error
 }
 
 // ServiceManager instance.
@@ -129,13 +132,24 @@ func (sm *ServiceManager) InstallService(
 	)
 }
 
+// GetServiceInfo gets service information by id.
 func (sm *ServiceManager) GetServiceInfo(serviceID string) (serviceInfo ServiceInfo, err error) {
 	serviceInfo, err = sm.serviceInfoProvider.GetService(serviceID)
 	return serviceInfo, aoserrors.Wrap(err)
 }
 
+// GetImageParts gets image parts for the service.
 func (sm *ServiceManager) GetImageParts(service ServiceInfo) (parts ImageParts, err error) {
 	return getImageParts(service.ImagePath)
+}
+
+// ApplyService applies already installed service.
+func (sm *ServiceManager) ApplyService(service ServiceInfo) (err error) {
+	return <-sm.actionHandler.Execute(service.ServiceID,
+		func(id string) error {
+			return sm.doApplyService(service)
+		},
+	)
 }
 
 /***********************************************************************************************************************
@@ -220,6 +234,33 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 	}
 
 	if err = sm.serviceInfoProvider.AddService(newService); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (sm *ServiceManager) doApplyService(service ServiceInfo) (err error) {
+	oldServices, err := sm.serviceInfoProvider.GetAllServiceVersions(service.ServiceID)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, oldService := range oldServices {
+		if oldService.AosVersion == service.AosVersion {
+			continue
+		}
+
+		if err := os.RemoveAll(oldService.ImagePath); err != nil {
+			log.Errorf("Can't remove old service: %s", err)
+		}
+
+		if err := sm.serviceInfoProvider.RemoveService(oldService); err != nil {
+			log.Errorf("Can't remove old service from storage: %s", err)
+		}
+	}
+
+	if err = sm.serviceInfoProvider.ActivateService(service); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
