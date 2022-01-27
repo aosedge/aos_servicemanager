@@ -333,6 +333,64 @@ func TestImageParts(t *testing.T) {
 	}
 }
 
+func TestApplyService(t *testing.T) {
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		WorkingDir:  tmpDir,
+		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir: path.Join(tmpDir, "downloads"),
+	}
+
+	sm, err := servicemanager.New(config, serviceStorage)
+	if err != nil {
+		t.Fatalf("Can't create SM: %s", err)
+	}
+
+	// install services
+	serviceID := "testServiceApplyID"
+
+	serviceURL, fileInfo, err := prepareService("Service content")
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %s", err)
+	}
+
+	if err = sm.InstallService(servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1},
+		serviceURL, fileInfo); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
+
+	if err = sm.InstallService(servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 2},
+		serviceURL, fileInfo); err != nil {
+		t.Errorf("Can't update service: %s", err)
+	}
+
+	serviceInfo, err := sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Errorf("Can't get service info: %s", err)
+	}
+
+	if err := sm.ApplyServise(serviceInfo); err != nil {
+		t.Errorf("Can't apply service : %s", err)
+	}
+
+	if err = sm.InstallService(servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 4},
+		serviceURL, fileInfo); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
+
+	serviceInfo, err = sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Errorf("Can't get service info: %s", err)
+	}
+
+	serviceStorage.Services = []servicemanager.ServiceInfo{}
+
+	if err := sm.ApplyServise(serviceInfo); err == nil {
+		t.Error("Should be  error: service not exist")
+	}
+}
+
 /**********************************************************************************************************************
 * Interfaces
 **********************************************************************************************************************/
@@ -363,6 +421,40 @@ func (storage *testServiceStorage) AddService(service servicemanager.ServiceInfo
 	storage.Services = append(storage.Services, service)
 
 	return err
+}
+
+func (storage *testServiceStorage) GetAllServiceVersions(id string) (result []servicemanager.ServiceInfo, err error) {
+	for _, outService := range storage.Services {
+		if outService.ServiceID == id {
+			result = append(result, outService)
+		}
+	}
+
+	return result, nil
+}
+
+func (storage *testServiceStorage) RemoveService(service servicemanager.ServiceInfo) error {
+	for i, outService := range storage.Services {
+		if outService.ServiceID == service.ServiceID && outService.AosVersion == service.AosVersion {
+			storage.Services = append(storage.Services[:i], storage.Services[i+1:]...)
+
+			return nil
+		}
+	}
+
+	return servicemanager.ErrNotExist
+}
+
+func (storage *testServiceStorage) ActivateService(service servicemanager.ServiceInfo) error {
+	for i, outService := range storage.Services {
+		if outService.ServiceID == service.ServiceID && outService.AosVersion == service.AosVersion {
+			storage.Services[i].IsActive = true
+
+			return nil
+		}
+	}
+
+	return servicemanager.ErrNotExist
 }
 
 /**********************************************************************************************************************
