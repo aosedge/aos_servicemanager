@@ -384,6 +384,46 @@ func TestApplyService(t *testing.T) {
 	}
 }
 
+func TestRevertService(t *testing.T) {
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		WorkingDir:  tmpDir,
+		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir: path.Join(tmpDir, "downloads"),
+	}
+
+	sm, err := servicemanager.New(config, serviceStorage)
+	if err != nil {
+		t.Fatalf("Can't create SM: %s", err)
+	}
+
+	serviceID := "testRevertID"
+
+	serviceURL, fileInfo, err := prepareService("Service content")
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %s", err)
+	}
+
+	if err = sm.InstallService(servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1},
+		serviceURL, fileInfo); err != nil {
+		t.Errorf("Can't install service: %s", err)
+	}
+
+	serviceInfo, err := sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Errorf("Can't get service info: %s", err)
+	}
+
+	if err = sm.RevertService(serviceInfo); err != nil {
+		t.Errorf("Can't revert service: %s", err)
+	}
+
+	if err = sm.RevertService(serviceInfo); err == nil {
+		t.Error("Should be error: service does not exist")
+	}
+}
+
 /***********************************************************************************************************************
 * Interfaces
 ***********************************************************************************************************************/
