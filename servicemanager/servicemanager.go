@@ -149,6 +149,15 @@ func (sm *ServiceManager) ApplyServise(service ServiceInfo) (err error) {
 	)
 }
 
+// RevertServise reverts already installed service.
+func (sm *ServiceManager) RevertServise(service ServiceInfo) (retErr error) {
+	return <-sm.actionHandler.Execute(service.ServiceID,
+		func(id string) error {
+			return sm.doRevertServise(service)
+		},
+	)
+}
+
 /**********************************************************************************************************************
  * Private
  *********************************************************************************************************************/
@@ -263,6 +272,20 @@ func (sm *ServiceManager) doApplyServise(service ServiceInfo) (err error) {
 	}
 
 	return nil
+}
+
+func (sm *ServiceManager) doRevertServise(service ServiceInfo) (retErr error) {
+	if err := os.RemoveAll(service.ImagePath); err != nil {
+		retErr = err
+	}
+
+	if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
+		if retErr == nil {
+			retErr = err
+		}
+	}
+
+	return retErr
 }
 
 func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (err error) {
