@@ -29,10 +29,11 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/migration"
-	_ "github.com/mattn/go-sqlite3" //ignore lint
+	_ "github.com/mattn/go-sqlite3" // ignore lint
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
 /*******************************************************************************
@@ -119,77 +120,48 @@ func (db *Database) SetOperationVersion(version uint64) (err error) {
 }
 
 // AddService adds new service.
-func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
+	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(service.ID, service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.StartAt,
-		service.AlertRules, service.VendorVersion, service.Description, service.ManifestDigest)
-
-	return aoserrors.Wrap(err)
-}
-
-// UpdateService updates service.
-func (db *Database) UpdateService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET aosVersion = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?,
-								 state = ?, startat = ?, alertRules = ?, vendorVersion = ?,
-								 description = ?, manifestDigest = ? WHERE id = ?`)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.StartAt, service.AlertRules,
-		service.VendorVersion, service.Description, service.ManifestDigest, service.ID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
+	_, err = stmt.Exec(
+		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
+		service.GID, service.ManifestDigest, service.IsActive)
 
 	return aoserrors.Wrap(err)
 }
 
 // RemoveService removes existing service.
-func (db *Database) RemoveService(serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM services WHERE id = ?")
+func (db *Database) RemoveService(service servicemanager.ServiceInfo) error {
+	stmt, err := db.sql.Prepare("DELETE FROM services WHERE id = ? AND aosVersion = ?")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(serviceID)
+	_, err = stmt.Exec(service.ServiceID, service.AosVersion)
 
 	return aoserrors.Wrap(err)
 }
 
 // GetService returns service by service ID.
-func (db *Database) GetService(serviceID string) (service launcher.Service, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE id = ?")
+func (db *Database) GetService(serviceID string) (service servicemanager.ServiceInfo, err error) {
+	stmt, err := db.sql.Prepare(
+		"SELECT * FROM services WHERE aosVersion = (SELECT MAX(aosVersion) FROM services WHERE id = ?)")
 	if err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State,
-		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
+	err = stmt.QueryRow(serviceID).Scan(
+		&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return service, ErrNotExist
+		return service, servicemanager.ErrNotExist
 	}
 
 	if err != nil {
@@ -199,8 +171,8 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	return service, aoserrors.Wrap(err)
 }
 
-// GetServices returns all services.
-func (db *Database) GetServices() (services []launcher.Service, err error) {
+// GetAllServices returns all services.
+func (db *Database) GetAllServices() (services []servicemanager.ServiceInfo, err error) {
 	rows, err := db.sql.Query("SELECT * FROM services")
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -208,12 +180,11 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var service launcher.Service
+		var service servicemanager.ServiceInfo
 
-		if err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description,
-			&service.ManifestDigest); err != nil {
+		if err = rows.Scan(
+			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
 			return services, aoserrors.Wrap(err)
 		}
 
@@ -223,21 +194,20 @@ func (db *Database) GetServices() (services []launcher.Service, err error) {
 	return services, aoserrors.Wrap(rows.Err())
 }
 
-// GetServiceProviderServices returns all services belong to specified service provider.
-func (db *Database) GetServiceProviderServices(serviceProvider string) (services []launcher.Service, err error) {
-	rows, err := db.sql.Query("SELECT * FROM services WHERE serviceProvider = ?", serviceProvider)
+// GetAllServiceVersions returns all service versions.
+func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
+	rows, err := db.sql.Query("SELECT * FROM services WHERE id = ?", id)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var service launcher.Service
+		var service servicemanager.ServiceInfo
 
-		if err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description,
-			&service.ManifestDigest); err != nil {
+		if err = rows.Scan(
+			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
 			return services, aoserrors.Wrap(err)
 		}
 
@@ -247,62 +217,15 @@ func (db *Database) GetServiceProviderServices(serviceProvider string) (services
 	return services, aoserrors.Wrap(rows.Err())
 }
 
-// GetServiceByUnitName returns service by systemd unit name.
-func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State,
-		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
-	if err != nil && errors.Is(err, sql.ErrNoRows) {
-		return service, ErrNotExist
-	}
-
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	return service, aoserrors.Wrap(err)
-}
-
-// SetServiceState sets service state.
-func (db *Database) SetServiceState(serviceID string, state launcher.ServiceState) (err error) {
-	stmt, err := db.sql.Prepare("UPDATE services SET state = ? WHERE id = ?")
+// ActivateService sets isActive to true for the service.
+func (db *Database) ActivateService(service servicemanager.ServiceInfo) error {
+	stmt, err := db.sql.Prepare("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	result, err := stmt.Exec(state, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
-}
-
-// SetServiceStartTime sets service start time.
-func (db *Database) SetServiceStartTime(serviceID string, time time.Time) (err error) {
-	stmt, err := db.sql.Prepare("UPDATE services SET startat = ? WHERE id = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(time, serviceID)
+	result, err := stmt.Exec(service.ServiceID, service.AosVersion)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -458,36 +381,6 @@ func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices
 		}
 
 		usersServices = append(usersServices, usersService)
-	}
-
-	return usersServices, aoserrors.Wrap(rows.Err())
-}
-
-// GetUsersServices returns list of users services.
-func (db *Database) GetUsersServices(users []string) (usersServices []launcher.Service, err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	rows, err := db.sql.Query("SELECT * FROM services WHERE id IN (SELECT serviceid FROM users WHERE users = ?)",
-		usersJSON)
-	if err != nil {
-		return usersServices, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service launcher.Service
-
-		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
-		if err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		usersServices = append(usersServices, service)
 	}
 
 	return usersServices, aoserrors.Wrap(rows.Err())
@@ -792,7 +685,7 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 			return db, aoserrors.Wrap(err)
 		}
 
-		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
+		if err = os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 			return db, aoserrors.Wrap(err)
 		}
 	}
@@ -902,19 +795,15 @@ func (db *Database) createConfigTable() (err error) {
 func (db *Database) createServiceTable() (err error) {
 	log.Info("Create service table")
 
-	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
-															   aosVersion INTEGER,															   
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL ,
+															   aosVersion INTEGER,
 															   serviceProvider TEXT,
-															   path TEXT,
-															   unit TEXT,
-															   uid INTEGER,
-															   gid INTEGER,															   
-															   state INTEGER,															   
-															   startat TIMESTAMP,															   
-															   alertRules TEXT,															   														   
-															   vendorVersion TEXT,
 															   description TEXT,
-															   manifestDigest BLOB)`)
+															   imagePath TEXT,
+															   gid INTEGER,
+															   manifestDigest BLOB,
+															   isActive INTEGER,
+															   PRIMARY KEY(id, aosVersion))`)
 
 	return aoserrors.Wrap(err)
 }
