@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
 /*******************************************************************************
@@ -96,68 +97,60 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestAddService(t *testing.T) {
+func TestAddGetService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
-		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, StartAt: time.Now().UTC(),
-		AlertRules: "", Description: "",
+	service := servicemanager.ServiceInfo{
+		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	service.AosVersion = 2
+	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// GetService
-	service, err := db.GetService("service1")
+	serviceFromDB, err := db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
 
-	if !reflect.DeepEqual(service, service1) {
+	if !reflect.DeepEqual(serviceFromDB, service) {
 		t.Error("service1 doesn't match stored one")
 	}
 
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestUpdateService(t *testing.T) {
-	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	service2 := servicemanager.ServiceInfo{
+		ServiceID: "service2", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	if err := db.AddService(service2); err == nil {
+		t.Error("Should be error can't add service")
 	}
 
-	// UpdateService
-	err = db.UpdateService(service1)
+	services, err := db.GetAllServiceVersions("service1")
 	if err != nil {
-		t.Errorf("Can't update service: %s", err)
+		t.Errorf("Can't get all service versions: %s", err)
 	}
 
-	// GetService
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
+	if len(services) != 2 {
+		t.Errorf("incorrect count of services %d", len(services))
 	}
 
-	if !reflect.DeepEqual(service, service1) {
-		t.Errorf("service1 doesn't match updated one: %v", service)
+	if services, err = db.GetAllServices(); err != nil {
+		t.Errorf("Can't get all services: %s", err)
+	}
+
+	if len(services) != 3 {
+		t.Errorf("Incorrect count of all services %d", len(services))
 	}
 
 	// Clear DB
@@ -171,140 +164,38 @@ func TestNotExistService(t *testing.T) {
 	_, err := db.GetService("service3")
 	if err == nil {
 		t.Error("Error in non existed service")
-	} else if !errors.Is(err, ErrNotExist) {
+	} else if !errors.Is(err, servicemanager.ErrNotExist) {
 		t.Errorf("Can't get service: %s", err)
-	}
-}
-
-func TestSetServiceState(t *testing.T) {
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// SetServiceState
-	err = db.SetServiceState("service1", 1)
-	if err != nil {
-		t.Errorf("Can't set service state: %s", err)
-	}
-
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if service.State != 1 {
-		t.Errorf("Service state mismatch")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestSetServiceStartTime(t *testing.T) {
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	time := time.Date(2018, 1, 1, 15, 35, 49, 0, time.UTC)
-	// SetServiceState
-	err = db.SetServiceStartTime("service1", time)
-	if err != nil {
-		t.Errorf("Can't set service state: %s", err)
-	}
-
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if service.StartAt != time {
-		t.Errorf("Service start time mismatch")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
 	}
 }
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	service := servicemanager.ServiceInfo{
+		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	// RemoveService
-	if err = db.RemoveService("service1"); err != nil {
-		t.Errorf("Can't remove service: %s", err)
-	}
-
-	if _, err = db.GetService("service1"); err == nil {
-		t.Errorf("Error deleting service")
-	}
-}
-
-func TestGetServices(t *testing.T) {
-	// Add service 1
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
+	// GetService
+	serviceFromDB, err := db.GetService("service1")
 	if err != nil {
-		t.Errorf("Can't add service: %s", err)
+		t.Errorf("Can't get service: %s", err)
 	}
 
-	// Add service 2
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	if !reflect.DeepEqual(serviceFromDB, service) {
+		t.Error("service1 doesn't match stored one")
 	}
 
-	err = db.AddService(service2)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
+	if err := db.RemoveService(service); err != nil {
+		t.Errorf("Can't delete service: %s", err)
 	}
 
-	// GetServices
-	services, err := db.GetServices()
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if len(services) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range services {
-		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
-			t.Error("Error getting services")
-		}
+	if _, err := db.GetService("service1"); err == nil {
+		t.Errorf("Should be error: service does not exist ")
 	}
 
 	// Clear DB
@@ -313,149 +204,29 @@ func TestGetServices(t *testing.T) {
 	}
 }
 
-func TestGetServiceProviderServices(t *testing.T) {
-	// Add service 1
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+func TestActivateService(t *testing.T) {
+	// AddService
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceActivate", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
 	}
-	if err := db.AddService(service1); err != nil {
+
+	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	// Add service 2
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %s", err)
+	if err := db.ActivateService(service); err != nil {
+		t.Errorf("Can't activate service: %s", err)
 	}
 
-	// Add service 3
-	service3 := launcher.Service{
-		ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service3); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service 4
-	service4 := launcher.Service{
-		ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service4); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Get sp1 services
-	servicesSp1, err := db.GetServiceProviderServices("sp1")
+	// GetService
+	serviceFromDB, err := db.GetService("serviceActivate")
 	if err != nil {
-		t.Errorf("Can't get services: %s", err)
+		t.Errorf("Can't get service: %s", err)
 	}
 
-	if len(servicesSp1) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range servicesSp1 {
-		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
-			t.Error("Error getting services")
-		}
-	}
-
-	// Get sp2 services
-	servicesSp2, err := db.GetServiceProviderServices("sp2")
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if len(servicesSp2) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range servicesSp2 {
-		if !reflect.DeepEqual(service, service3) && !reflect.DeepEqual(service, service4) {
-			t.Error("Error getting services")
-		}
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestAddUsersService(t *testing.T) {
-	// Add services
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service1); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service to users
-	if err := db.AddServiceToUsers([]string{"user1"}, "service1"); err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	if err := db.AddServiceToUsers([]string{"user2"}, "service2"); err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Check user1
-	services, err := db.GetUsersServices([]string{"user1"})
-	if err != nil {
-		t.Errorf("Can't get users services: %s", err)
-	}
-
-	if len(services) != 1 {
-		t.Error("Wrong service count")
-	}
-
-	if services[0].ID != "service1" {
-		t.Errorf("Wrong service id: %s", services[0].ID)
-	}
-
-	// Check user2
-	services, err = db.GetUsersServices([]string{"user2"})
-	if err != nil {
-		t.Errorf("Can't get users services: %s", err)
-	}
-
-	if len(services) != 1 {
-		t.Error("Wrong service count")
-	}
-
-	if services[0].ID != "service2" {
-		t.Errorf("Wrong service id: %s", services[0].ID)
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
+	if serviceFromDB.IsActive != true {
+		t.Error("Wrong active value")
 	}
 }
 
@@ -740,35 +511,6 @@ func TestCursor(t *testing.T) {
 
 	if getCursor != setCursor {
 		t.Fatalf("Wrong cursor value: %s", getCursor)
-	}
-}
-
-func TestGetServiceByUnitName(t *testing.T) {
-	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// GetService
-	service, err := db.GetServiceByUnitName("service1.service")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if !reflect.DeepEqual(service, service1) {
-		t.Error("service1 doesn't match stored one")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
 	}
 }
 
