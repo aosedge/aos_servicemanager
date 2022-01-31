@@ -6,7 +6,7 @@ replace github.com/ThalesIgnite/crypto11 => github.com/xen-troops/crypto11 v1.2.
 
 require (
 	github.com/anexia-it/fsquota v0.1.3
-	github.com/aoscloud/aos_common v0.0.0-20211223083914-b6c05c484760
+	github.com/aoscloud/aos_common v0.0.0-20220131091851-03b512e6deff
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/containernetworking/cni v1.0.1
 	github.com/containernetworking/plugins v1.0.1
