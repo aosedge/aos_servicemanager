@@ -206,6 +206,7 @@ func TestLayerConsistencyCheck(t *testing.T) {
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
+
 func newTesInfoProvider() (infoProvider *testInfoProvider) {
 	return &testInfoProvider{layers: make(map[string]layerDesc)}
 }
@@ -291,19 +292,19 @@ func cleanup() {
 }
 
 func createLayer(dir string) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(dir)
 
 	tmpLayerFolder := path.Join(tmpDir, "tmpLayerDir")
-	if err := os.MkdirAll(tmpLayerFolder, 0755); err != nil {
+	if err := os.MkdirAll(tmpLayerFolder, 0o755); err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
 	data := []byte("this is layer data in layer " + dir)
 
-	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0o600); err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(tmpLayerFolder)
@@ -334,7 +335,6 @@ func createLayer(dir string) (layerFile string, digest string, fileInfo image.Fi
 	layerDescriptor := imagespec.Descriptor{
 		MediaType: "application/vnd.aos.image.layer.v1.tar+gzip",
 		Digest:    layerDigest,
-		// TODO fulfill
 	}
 
 	dataJSON, err := json.Marshal(layerDescriptor)
