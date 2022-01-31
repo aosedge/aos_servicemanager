@@ -41,6 +41,7 @@ import (
 /*******************************************************************************
  * Consts
  ******************************************************************************/
+
 const (
 	layerDirName       = "layers"
 	extractDirName     = "extract"
@@ -87,7 +88,7 @@ func New(config *config.Config,
 		layermanager.layersDir = path.Join(config.WorkingDir, layerDirName)
 	}
 
-	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
+	if err := os.MkdirAll(layermanager.extractDir, 0o755); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -289,14 +290,18 @@ func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (laye
 
 // GetLayerInfoByDigest get layers information by layer digest.
 func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	return layermanager.layerInfoProvider.GetLayerInfoByDigest(digest) //nolint
+	if layer, err = layermanager.layerInfoProvider.GetLayerInfoByDigest(digest); err != nil {
+		return layer, aoserrors.Wrap(err)
+	}
+
+	return layer, nil
 }
 
 /*******************************************************************************
  * Private
  ******************************************************************************/
 
-func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) { //nolint
-	// TODO implement descriptor validation
+func getValidLayerPath(
+	layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) { // nolint:unparam
 	return path.Join(unTarPath, layerDescriptor.Digest.Hex()), nil
 }
