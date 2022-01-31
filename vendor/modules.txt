@@ -1,7 +1,7 @@
 # github.com/anexia-it/fsquota v0.1.3
 ## explicit
 github.com/anexia-it/fsquota
-# github.com/aoscloud/aos_common v0.0.0-20211223083914-b6c05c484760
+# github.com/aoscloud/aos_common v0.0.0-20220131091851-03b512e6deff
 ## explicit
 github.com/aoscloud/aos_common/aoserrors
 github.com/aoscloud/aos_common/api/iamanager/v1
@@ -9,6 +9,7 @@ github.com/aoscloud/aos_common/api/servicemanager/v1
 github.com/aoscloud/aos_common/fs
 github.com/aoscloud/aos_common/image
 github.com/aoscloud/aos_common/migration
+github.com/aoscloud/aos_common/utils/action
 github.com/aoscloud/aos_common/utils/contextreader
 github.com/aoscloud/aos_common/utils/cryptutils
 # github.com/apparentlymart/go-cidr v1.1.0
