@@ -20,6 +20,7 @@ package layermanager
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -46,6 +47,12 @@ const (
 )
 
 const maxConcurrentActions = 10
+
+/*******************************************************************************
+ * Vars
+ ******************************************************************************/
+
+var ErrNotExist = errors.New("layer does not exist")
 
 /*******************************************************************************
  * Types

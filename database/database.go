@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
@@ -577,15 +578,15 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 }
 
 // AddLayer add layer to layers table.
-func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, description string,
-	aosVersion uint64) (err error) {
+func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(digest, layerID, path, osVersion, vendorVersion, description, aosVersion)
+	_, err = stmt.Exec(layer.Digest, layer.LayerID, layer.Path, layer.OSVersion, layer.VendorVersion,
+		layer.Description, layer.AosVersion)
 
 	return aoserrors.Wrap(err)
 }
@@ -624,46 +625,48 @@ func (db *Database) GetLayerPathByDigest(digest string) (path string, err error)
 }
 
 // GetLayersInfo get all installed layers.
-func (db *Database) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
-	rows, err := db.sql.Query("SELECT digest, layerId, aosVersion FROM layers ")
+func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
+	rows, err := db.sql.Query("SELECT * FROM layers ")
 	if err != nil {
 		return layersList, aoserrors.Wrap(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		layer := pb.LayerStatus{}
+		layer := layermanager.LayerInfo{}
 
-		if err = rows.Scan(&layer.Digest, &layer.LayerId, &layer.AosVersion); err != nil {
+		if err = rows.Scan(&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+			&layer.VendorVersion, &layer.Description, &layer.AosVersion); err != nil {
 			return layersList, aoserrors.Wrap(err)
 		}
 
-		layersList = append(layersList, &layer)
+		layersList = append(layersList, layer)
 	}
 
 	return layersList, aoserrors.Wrap(rows.Err())
 }
 
 // GetLayerInfoByDigest returns layers information by layer digest.
-func (db *Database) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	stmt, err := db.sql.Prepare("SELECT layerId, aosVersion FROM layers WHERE digest = ?")
+func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.LayerInfo, err error) {
+	stmt, err := db.sql.Prepare("SELECT * FROM layers WHERE digest = ?")
 	if err != nil {
-		return layer, aoserrors.Wrap(err) // nolint
+		return layer, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(digest).Scan(&layer.LayerId, &layer.AosVersion)
+	err = stmt.QueryRow(digest).Scan(&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+		&layer.VendorVersion, &layer.Description, &layer.AosVersion)
 	if errors.Is(err, sql.ErrNoRows) {
-		return layer, ErrNotExist // nolint
+		return layer, layermanager.ErrNotExist
 	}
 
 	if err != nil {
-		return layer, aoserrors.Wrap(err) // nolint
+		return layer, aoserrors.Wrap(err)
 	}
 
 	layer.Digest = digest
 
-	return layer, nil // nolint
+	return layer, nil
 }
 
 // Close closes database.
