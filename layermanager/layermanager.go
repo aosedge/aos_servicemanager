@@ -19,13 +19,10 @@
 package layermanager
 
 import (
-	"context"
 	"encoding/json"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
@@ -144,38 +141,21 @@ func (layermanager *LayerManager) InstallLayer(
 		return nil
 	}
 
-	urlVal, err := url.Parse(layerURL)
-	if err != nil {
+	extractLayerDir := path.Join(layermanager.extractDir, installInfo.Digest)
+
+	if err := os.MkdirAll(extractLayerDir, 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	var destinationFile string
+	defer os.RemoveAll(extractLayerDir)
 
-	if urlVal.Scheme != "file" {
-		if destinationFile, err = image.Download(context.Background(),
-			layermanager.downloadDir, layerURL); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		defer os.RemoveAll(destinationFile)
-	} else {
-		destinationFile = urlVal.Path
-	}
-
-	if err = image.CheckFileInfo(context.Background(), destinationFile, fileInfo); err != nil {
+	if err := imageutils.ExtractPackageByURL(extractLayerDir, layermanager.downloadDir, layerURL, fileInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
-
-	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
-
-	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer os.RemoveAll(unpackDir)
 
 	var byteValue []byte
 
-	if byteValue, err = ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor)); err != nil {
+	if byteValue, err = ioutil.ReadFile(path.Join(extractLayerDir, layerOCIDescriptor)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -187,7 +167,7 @@ func (layermanager *LayerManager) InstallLayer(
 
 	var layerPath string
 
-	if layerPath, err = getValidLayerPath(layerDescriptor, unpackDir); err != nil {
+	if layerPath, err = getValidLayerPath(layerDescriptor, extractLayerDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -203,6 +183,7 @@ func (layermanager *LayerManager) InstallLayer(
 	}
 
 	installInfo.Path = layerStorageDir
+
 	if err = layermanager.layerInfoProvider.AddLayer(installInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}

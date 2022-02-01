@@ -18,10 +18,8 @@
 package servicemanager
 
 import (
-	"context"
 	"errors"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -181,32 +179,14 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		}
 	}
 
-	// download and unpack
-	urlVal, err := url.Parse(imageURL)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	var serviceImage string
-
-	if urlVal.Scheme != "file" {
-		if serviceImage, err = image.Download(context.Background(), sm.downloadDir, imageURL); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		defer os.RemoveAll(serviceImage)
-	} else {
-		serviceImage = urlVal.Path
-	}
-
-	if err = image.CheckFileInfo(context.Background(), serviceImage, fileInfo); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
 	log.WithFields(log.Fields{"serviceID": newService.ServiceID}).Debug("Install service")
 
 	newService.ImagePath, err = ioutil.TempDir(sm.servicesDir, "")
 	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = imageutils.ExtractPackageByURL(newService.ImagePath, sm.downloadDir, imageURL, fileInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -215,10 +195,6 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 			_ = os.RemoveAll(newService.ImagePath)
 		}
 	}()
-
-	if err = imageutils.UnpackTarImage(serviceImage, newService.ImagePath); err != nil {
-		return aoserrors.Wrap(err)
-	}
 
 	if err = validateUnpackedImage(newService.ImagePath); err != nil {
 		return aoserrors.Wrap(err)
