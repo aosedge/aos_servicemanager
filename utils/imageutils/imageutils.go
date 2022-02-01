@@ -18,11 +18,14 @@
 package imageutils
 
 import (
+	"context"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/image"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -54,6 +57,37 @@ func CopyFile(source, destination string) (err error) {
 	_, err = io.Copy(desFile, sourceFile)
 
 	return aoserrors.Wrap(err)
+}
+
+// ExtractPackageByUrl extracts package by url and validate checksum.
+func ExtractPackageByURL(
+	extractDir, downloadDir, packageURL string, fileInfo image.FileInfo) (err error) {
+	urlVal, err := url.Parse(packageURL)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	var sourceFile string
+
+	if urlVal.Scheme != "file" {
+		if sourceFile, err = image.Download(context.Background(), downloadDir, packageURL); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		defer os.RemoveAll(sourceFile)
+	} else {
+		sourceFile = urlVal.Path
+	}
+
+	if err = image.CheckFileInfo(context.Background(), sourceFile, fileInfo); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = UnpackTarImage(sourceFile, extractDir); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 /*******************************************************************************
