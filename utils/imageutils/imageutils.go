@@ -30,14 +30,14 @@ import (
  * Types
  ******************************************************************************/
 
-// UnpackTarImage extract tar image
+// UnpackTarImage extract tar image.
 func UnpackTarImage(source, destination string) (err error) {
 	log.WithFields(log.Fields{"name": source, "destination": destination}).Debug("Unpack tar image")
 
 	return aoserrors.Wrap(unTarFromFile(source, destination))
 }
 
-// CopyFile copies file content
+// CopyFile copies file content.
 func CopyFile(source, destination string) (err error) {
 	sourceFile, err := os.Open(source)
 	if err != nil {
@@ -65,7 +65,7 @@ func unTarFromFile(tarArchive string, destination string) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(destination, 0755); err != nil {
+	if err = os.MkdirAll(destination, 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
