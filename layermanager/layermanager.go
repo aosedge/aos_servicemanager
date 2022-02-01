@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/image"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
@@ -64,11 +63,22 @@ type LayerManager struct {
 
 // LayerInfoProvider provides API to add, remove or access layer information.
 type LayerInfoProvider interface {
-	AddLayer(digest, layerID, path, osVersion, vendorVersion, description string, aosVersion uint64) (err error)
+	AddLayer(layerInfo LayerInfo) (err error)
 	DeleteLayerByDigest(digest string) (err error)
 	GetLayerPathByDigest(digest string) (path string, err error)
-	GetLayersInfo() (layersList []*pb.LayerStatus, err error)
-	GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error)
+	GetLayersInfo() (layersList []LayerInfo, err error)
+	GetLayerInfoByDigest(digest string) (layer LayerInfo, err error)
+}
+
+// LayerInfo layer information.
+type LayerInfo struct {
+	Digest        string
+	LayerID       string
+	Path          string
+	OSVersion     string
+	AosVersion    uint64
+	VendorVersion string
+	Description   string
 }
 
 /*******************************************************************************
@@ -102,7 +112,7 @@ func New(config *config.Config,
 }
 
 // GetLayersInfo provides list of already installed fs layers.
-func (layermanager *LayerManager) GetLayersInfo() (info []*pb.LayerStatus, err error) {
+func (layermanager *LayerManager) GetLayersInfo() (info []LayerInfo, err error) {
 	if info, err = layermanager.layerInfoProvider.GetLayersInfo(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -111,29 +121,30 @@ func (layermanager *LayerManager) GetLayersInfo() (info []*pb.LayerStatus, err e
 }
 
 // InstallLayer installs layer.
-func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
+func (layermanager *LayerManager) InstallLayer(
+	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo) (err error) {
 	log.WithFields(log.Fields{
-		"id":         installInfo.GetLayerId(),
-		"aosVersion": installInfo.GetAosVersion(),
-		"digest":     installInfo.GetDigest(),
+		"id":         installInfo.LayerID,
+		"aosVersion": installInfo.AosVersion,
+		"digest":     installInfo.Digest,
 	}).Debug("Install layer")
 
 	defer func() {
 		if err != nil {
 			log.WithFields(log.Fields{
-				"id":         installInfo.LayerId,
+				"id":         installInfo.LayerID,
 				"aosVersion": installInfo.AosVersion,
 				"digest":     installInfo.Digest,
 			}).Errorf("Can't install layer: %s", err)
 		}
 	}()
 
-	if _, errNoLayer := layermanager.layerInfoProvider.GetLayerInfoByDigest(installInfo.GetDigest()); errNoLayer == nil {
+	if _, errNoLayer := layermanager.layerInfoProvider.GetLayerInfoByDigest(installInfo.Digest); errNoLayer == nil {
 		// layer already installed
 		return nil
 	}
 
-	urlVal, err := url.Parse(installInfo.Url)
+	urlVal, err := url.Parse(layerURL)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -142,7 +153,7 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 
 	if urlVal.Scheme != "file" {
 		if destinationFile, err = image.Download(context.Background(),
-			layermanager.downloadDir, installInfo.Url); err != nil {
+			layermanager.downloadDir, layerURL); err != nil {
 			return aoserrors.Wrap(err)
 		}
 
@@ -151,10 +162,7 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 		destinationFile = urlVal.Path
 	}
 
-	if err = image.CheckFileInfo(context.Background(), destinationFile, image.FileInfo{
-		Sha256: installInfo.Sha256,
-		Sha512: installInfo.Sha512, Size: installInfo.Size,
-	}); err != nil {
+	if err = image.CheckFileInfo(context.Background(), destinationFile, fileInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -190,20 +198,17 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 		return aoserrors.Wrap(err)
 	}
 
-	osVersion := ""
-
 	if layerDescriptor.Platform != nil {
-		osVersion = layerDescriptor.Platform.OSVersion
+		installInfo.OSVersion = layerDescriptor.Platform.OSVersion
 	}
 
-	if err = layermanager.layerInfoProvider.AddLayer(installInfo.Digest, installInfo.LayerId,
-		layerStorageDir, osVersion, installInfo.VendorVersion, installInfo.Description,
-		installInfo.AosVersion); err != nil {
+	installInfo.Path = layerStorageDir
+	if err = layermanager.layerInfoProvider.AddLayer(installInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
-		"id":         installInfo.LayerId,
+		"id":         installInfo.LayerID,
 		"aosVersion": installInfo.AosVersion,
 		"digest":     installInfo.Digest,
 	}).Info("Layer successfully installed")
@@ -289,7 +294,7 @@ func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (laye
 }
 
 // GetLayerInfoByDigest get layers information by layer digest.
-func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer LayerInfo, err error) {
 	if layer, err = layermanager.layerInfoProvider.GetLayerInfoByDigest(digest); err != nil {
 		return layer, aoserrors.Wrap(err)
 	}
