@@ -30,7 +30,6 @@ import (
 	"testing"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -46,13 +45,7 @@ import (
 
 type testInfoProvider struct {
 	sync.Mutex
-	layers map[string]layerDesc
-}
-
-type layerDesc struct {
-	id         string
-	aosVersion uint64
-	path       string
+	layers []layermanager.LayerInfo
 }
 
 /*******************************************************************************
@@ -106,10 +99,9 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
-		Url: layerFile, LayerId: "LayerId1", Digest: digest, AosVersion: 1,
-		Sha256: fileInfo.Sha256, Sha512: fileInfo.Sha512, Size: fileInfo.Size,
-	}); err != nil {
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+		layerFile, fileInfo); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -122,7 +114,7 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Fatal("Count of layers should be 1")
 	}
 
-	if list[0].LayerId != "LayerId1" {
+	if list[0].LayerID != "LayerId1" {
 		t.Error("Layer ID should be LayerId1")
 	}
 
@@ -162,17 +154,15 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Fatalf("Can't create layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
-		Url: layerFile1, LayerId: "LayerId1", Digest: digest1, AosVersion: 1,
-		Sha256: fileInfo1.Sha256, Sha512: fileInfo1.Sha512, Size: fileInfo1.Size,
-	}); err != nil {
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest1, AosVersion: 1},
+		layerFile1, fileInfo1); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
-	if err = layerManager.InstallLayer(&pb.InstallLayerRequest{
-		Url: layerFile2, LayerId: "LayerId2", Digest: digest2, AosVersion: 1,
-		Sha256: fileInfo2.Sha256, Sha512: fileInfo2.Sha512, Size: fileInfo2.Size,
-	}); err != nil {
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest2, AosVersion: 1},
+		layerFile2, fileInfo2); err != nil {
 		t.Fatalf("Can't install layer: %s", err)
 	}
 
@@ -208,19 +198,20 @@ func TestLayerConsistencyCheck(t *testing.T) {
  ******************************************************************************/
 
 func newTesInfoProvider() (infoProvider *testInfoProvider) {
-	return &testInfoProvider{layers: make(map[string]layerDesc)}
+	return &testInfoProvider{}
 }
 
-func (infoProvider *testInfoProvider) AddLayer(digest, layerID, path, osVersion,
-	vendorVersion, description string, aosVersion uint64) (err error) {
+func (infoProvider *testInfoProvider) AddLayer(layerInfo layermanager.LayerInfo) (err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
-	infoProvider.layers[digest] = layerDesc{
-		id:         layerID,
-		aosVersion: aosVersion,
-		path:       path,
+	for _, layer := range infoProvider.layers {
+		if layer.Digest == layerInfo.Digest {
+			return aoserrors.New("Layer exist")
+		}
 	}
+
+	infoProvider.layers = append(infoProvider.layers, layerInfo)
 
 	return nil
 }
@@ -229,50 +220,51 @@ func (infoProvider *testInfoProvider) DeleteLayerByDigest(digest string) (err er
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
-	if _, ok := infoProvider.layers[digest]; !ok {
-		return aoserrors.New("layer not found")
+	for i, layer := range infoProvider.layers {
+		if layer.Digest == digest {
+			infoProvider.layers = append(infoProvider.layers[:i], infoProvider.layers[i+1:]...)
+
+			return nil
+		}
 	}
 
-	delete(infoProvider.layers, digest)
-
-	return nil
+	return aoserrors.New("layer not found")
 }
 
 func (infoProvider *testInfoProvider) GetLayerPathByDigest(digest string) (path string, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
-	layer, ok := infoProvider.layers[digest]
-	if !ok {
-		return "", aoserrors.New("layer not found")
+	for _, layer := range infoProvider.layers {
+		if layer.Digest == digest {
+			return layer.Path, nil
+		}
 	}
 
-	return layer.path, nil
+	return "", aoserrors.New("layer not found")
 }
 
-func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
+func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
-	for digest, layer := range infoProvider.layers {
-		layersList = append(layersList, &pb.LayerStatus{
-			LayerId: layer.id, AosVersion: layer.aosVersion, Digest: digest,
-		})
-	}
+	layersList = infoProvider.layers
 
 	return layersList, nil
 }
 
-func (infoProvider *testInfoProvider) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
+func (infoProvider *testInfoProvider) GetLayerInfoByDigest(
+	digest string) (layerInfo layermanager.LayerInfo, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
-	layerInfo, ok := infoProvider.layers[digest]
-	if !ok {
-		return layer, aoserrors.New("layer does't exist") // nolint
+	for _, layer := range infoProvider.layers {
+		if layer.Digest == digest {
+			return layer, nil
+		}
 	}
 
-	return pb.LayerStatus{LayerId: layerInfo.id, Digest: digest, AosVersion: layerInfo.aosVersion}, nil
+	return layerInfo, aoserrors.New("layer not found")
 }
 
 /*******************************************************************************
