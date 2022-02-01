@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
@@ -572,15 +573,27 @@ func TestMultiThread(t *testing.T) {
 }
 
 func TestLayers(t *testing.T) {
-	if err := db.AddLayer("sha256:1", "id1", "path1", "1", "1.0", "some layer 1", 1); err != nil {
+	layer1 := layermanager.LayerInfo{
+		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1", VendorVersion: "1.0",
+		Description: "some layer 1", AosVersion: 1,
+	}
+	if err := db.AddLayer(layer1); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:2", "id2", "path2", "1", "2.0", "some layer 2", 2); err != nil {
+	layer2 := layermanager.LayerInfo{
+		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1", VendorVersion: "2.0",
+		Description: "some layer 2", AosVersion: 2,
+	}
+	if err := db.AddLayer(layer2); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:3", "id3", "path3", "1", "1.0", "some layer 3", 3); err != nil {
+	layer3 := layermanager.LayerInfo{
+		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1", VendorVersion: "1.0",
+		Description: "some layer 3", AosVersion: 3,
+	}
+	if err := db.AddLayer(layer3); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
@@ -589,7 +602,7 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Can't get layer path %s", err)
 	}
 
-	if path != "path2" {
+	if path != layer2.Path {
 		t.Errorf("Path form db %s != path2", path)
 	}
 
@@ -598,8 +611,8 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Can't get layer ino by digest path %s", err)
 	}
 
-	if layerInfo.LayerId != "id3" {
-		t.Error("Incorrect layerID ", layerInfo.LayerId)
+	if layerInfo.LayerID != layer3.LayerID {
+		t.Error("Incorrect layerID ", layerInfo.LayerID)
 	}
 
 	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
@@ -610,7 +623,7 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Should be error: entry does not exist")
 	}
 
-	if err := db.DeleteLayerByDigest("sha256:2"); err != nil {
+	if err := db.DeleteLayerByDigest(layer2.Digest); err != nil {
 		t.Errorf("Can't delete layer %s", err)
 	}
 
