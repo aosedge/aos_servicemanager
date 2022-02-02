@@ -97,6 +97,12 @@ type NetworkManager interface {
 	RemoveInstanceFromNetwork(instanceID, networkID string) error
 }
 
+// InstanceRegistrar provides API to register/unregister instance.
+type InstanceRegistrar interface {
+	RegisterInstance(instanceID string, permissions map[string]map[string]string) (secret string, err error)
+	UnregisterInstance(instanceID string) error
+}
+
 // InstanceInfo instance information.
 type InstanceInfo struct {
 	cloudprotocol.InstanceIdent
@@ -129,11 +135,12 @@ type UpdateInstancesStatus struct {
 type Launcher struct {
 	sync.Mutex
 
-	storage         Storage
-	serviceProvider ServiceProvider
-	instanceRunner  InstanceRunner
-	resourceManager ResourceManager
-	networkManager  NetworkManager
+	storage           Storage
+	serviceProvider   ServiceProvider
+	instanceRunner    InstanceRunner
+	resourceManager   ResourceManager
+	networkManager    NetworkManager
+	instanceRegistrar InstanceRegistrar
 
 	config                 *config.Config
 	currentSubjects        []string
@@ -171,12 +178,13 @@ var RuntimeDir = "/run/aos/runtime"
 // New creates new launcher object.
 func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, instanceRunner InstanceRunner,
 	resourceManager ResourceManager, networkManager NetworkManager,
+	instanceRegistrar InstanceRegistrar,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
-		resourceManager: resourceManager, networkManager: networkManager,
+		resourceManager: resourceManager, networkManager: networkManager, instanceRegistrar: instanceRegistrar,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
@@ -559,6 +567,17 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 	})
 }
 
+func (launcher *Launcher) releaseRuntime(instance *instanceInfo, service *serviceInfo) (err error) {
+	if service == nil || service.serviceConfig.Permissions != nil {
+		if registerErr := launcher.instanceRegistrar.UnregisterInstance(
+			instance.InstanceID); registerErr != nil && err == nil {
+			err = aoserrors.Wrap(registerErr)
+		}
+	}
+
+	return err
+}
+
 func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Stop instance")
 
@@ -570,6 +589,15 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 
 	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil && err == nil {
 		err = aoserrors.Wrap(runnerErr)
+	}
+
+	service, serviceErr := launcher.getCurrentServiceInfo(instance.ServiceID)
+	if serviceErr != nil && err == nil {
+		err = serviceErr
+	}
+
+	if releaseErr := launcher.releaseRuntime(instance, service); releaseErr != nil && err == nil {
+		err = releaseErr
 	}
 
 	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
@@ -645,7 +673,21 @@ func (launcher *Launcher) doStartAction(instance *instanceInfo) {
 	})
 }
 
-func (launcher *Launcher) startInstance(instance *instanceInfo) (err error) {
+func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
+	if instance.service.serviceConfig.Permissions != nil {
+		secret, err := launcher.instanceRegistrar.RegisterInstance(
+			instance.InstanceID, instance.service.serviceConfig.Permissions)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		instance.secret = secret
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Start instance")
 
 	if instance.isStarted {
@@ -661,6 +703,10 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) (err error) {
 
 	if err := os.MkdirAll(instance.runtimeDir, 0o755); err != nil {
 		return aoserrors.Wrap(err)
+	}
+
+	if err := launcher.setupRuntime(instance); err != nil {
+		return err
 	}
 
 	if _, err := launcher.createRuntimeSpec(instance); err != nil {
