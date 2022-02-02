@@ -34,6 +34,7 @@ type instanceInfo struct {
 	service       *serviceInfo
 	runStatus     runner.InstanceStatus
 	isStarted     bool
+	runtimeDir    string
 	stateChecksum []byte
 }
 

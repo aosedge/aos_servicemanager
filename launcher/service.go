@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"github.com/aoscloud/aos_common/aoserrors"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
@@ -29,7 +30,9 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	err error
+	serviceConfig *serviceConfig
+	imageConfig   *imagespec.Image
+	err           error
 }
 
 /***********************************************************************************************************************
@@ -47,6 +50,14 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 		var service serviceInfo
 
 		service.ServiceInfo, service.err = launcher.serviceProvider.GetServiceInfo(instance.ServiceID)
+
+		if service.err == nil {
+			service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo)
+		}
+
+		if service.err == nil {
+			service.imageConfig, service.err = launcher.getImageConfig(service.ServiceInfo)
+		}
 
 		launcher.currentServices[instance.ServiceID] = &service
 	}
