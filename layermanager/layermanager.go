@@ -26,11 +26,11 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
+	"github.com/aoscloud/aos_common/utils/action"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/utils/action"
 	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 )
 
@@ -44,6 +44,8 @@ const (
 	downloadDirName    = "download"
 	layerOCIDescriptor = "layer.json"
 )
+
+const maxConcurrentActions = 10
 
 /*******************************************************************************
  * Types
@@ -89,6 +91,7 @@ func New(config *config.Config,
 		layerInfoProvider: infoProvider,
 		extractDir:        path.Join(config.WorkingDir, extractDirName),
 		downloadDir:       path.Join(config.WorkingDir, downloadDirName),
+		actionHandler:     action.New(maxConcurrentActions),
 	}
 
 	if layermanager.layersDir == "" {
@@ -96,10 +99,6 @@ func New(config *config.Config,
 	}
 
 	if err := os.MkdirAll(layermanager.extractDir, 0o755); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	if layermanager.actionHandler, err = action.New(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -119,6 +118,90 @@ func (layermanager *LayerManager) GetLayersInfo() (info []LayerInfo, err error) 
 
 // InstallLayer installs layer.
 func (layermanager *LayerManager) InstallLayer(
+	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo) (err error) {
+	return <-layermanager.actionHandler.Execute(installInfo.Digest,
+		func(id string) error {
+			return layermanager.doInstallLayer(installInfo, layerURL, fileInfo)
+		})
+}
+
+// UninstallLayer uninstalls layer.
+func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
+	return <-layermanager.actionHandler.Execute(digest,
+		func(id string) error {
+			return layermanager.doUninstallLayer(digest)
+		})
+}
+
+// CheckLayersConsistency checks layers data to be consistent.
+func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
+	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, layer := range layers {
+		// Checking if Layer path exists
+		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		fi, err := os.Stat(layerPath)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		if !fi.Mode().IsDir() {
+			return aoserrors.New("layer is not a dir")
+		}
+	}
+
+	return nil
+}
+
+// Cleanup clears all Layers.
+func (layermanager *LayerManager) Cleanup() (err error) {
+	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, layerInfo := range layersInfo {
+		if curErr := layermanager.UninstallLayer(layerInfo.Digest); curErr != nil {
+			if err == nil {
+				err = aoserrors.Wrap(curErr)
+			}
+		}
+	}
+
+	return aoserrors.Wrap(err)
+}
+
+// GetLayerPathByDigest provies installed layer path by digest.
+func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
+	layerPath, err = layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	return layerPath, nil
+}
+
+// GetLayerInfoByDigest gets layers information by layer digest.
+func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer LayerInfo, err error) {
+	if layer, err = layermanager.layerInfoProvider.GetLayerInfoByDigest(digest); err != nil {
+		return layer, aoserrors.Wrap(err)
+	}
+
+	return layer, nil
+}
+
+/*******************************************************************************
+ * Private
+ ******************************************************************************/
+
+func (layermanager *LayerManager) doInstallLayer(
 	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo) (err error) {
 	log.WithFields(log.Fields{
 		"id":         installInfo.LayerID,
@@ -197,8 +280,7 @@ func (layermanager *LayerManager) InstallLayer(
 	return nil
 }
 
-// UninstallLayer uninstalls layer.
-func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
+func (layermanager *LayerManager) doUninstallLayer(digest string) (err error) {
 	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
 
 	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
@@ -218,74 +300,6 @@ func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
 
 	return nil
 }
-
-// CheckLayersConsistency checks layers data to be consistent.
-func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
-	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	for _, layer := range layers {
-		// Checking if Layer path exists
-		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		fi, err := os.Stat(layerPath)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		if !fi.Mode().IsDir() {
-			return aoserrors.New("layer is not a dir")
-		}
-	}
-
-	return nil
-}
-
-// Cleanup clears all Layers.
-func (layermanager *LayerManager) Cleanup() (err error) {
-	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	for _, layerInfo := range layersInfo {
-		if curErr := layermanager.UninstallLayer(layerInfo.Digest); curErr != nil {
-			if err == nil {
-				err = aoserrors.Wrap(curErr)
-			}
-		}
-	}
-
-	return aoserrors.Wrap(err)
-}
-
-// GetLayerPathByDigest provied installed layer path by digest.
-func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
-	layerPath, err = layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	return layerPath, nil
-}
-
-// GetLayerInfoByDigest get layers information by layer digest.
-func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer LayerInfo, err error) {
-	if layer, err = layermanager.layerInfoProvider.GetLayerInfoByDigest(digest); err != nil {
-		return layer, aoserrors.Wrap(err)
-	}
-
-	return layer, nil
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
 
 func getValidLayerPath(
 	layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) { // nolint:unparam
