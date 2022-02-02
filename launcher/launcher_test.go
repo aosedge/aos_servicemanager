@@ -18,10 +18,17 @@
 package launcher_test
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,27 +37,28 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/google/uuid"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
+	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
 /***********************************************************************************************************************
- * Init
+ * Const
  **********************************************************************************************************************/
 
-func init() {
-	log.SetFormatter(&log.TextFormatter{
-		DisableTimestamp: false,
-		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true,
-	})
-	log.SetLevel(log.DebugLevel)
-	log.SetOutput(os.Stdout)
-}
+const (
+	imageConfigFile   = "image.json"
+	serviceConfigFile = "service.json"
+	runtimeConfigFile = "config.json"
+	servicesDir       = "services"
+)
 
 /***********************************************************************************************************************
  * Types
@@ -72,13 +80,67 @@ type testRunner struct {
 	stopFunc      func(instanceID string) error
 }
 
+type testResourceManager struct {
+	devices   map[string]resourcemanager.DeviceInfo
+	resources map[string]resourcemanager.ResourceInfo
+}
+
+type testNetworkManager struct{}
+
 type testInstance struct {
 	serviceID      string
 	serviceVersion uint64
 	subjectID      string
+	serviceGID     int
 	numInstances   uint64
 	unitSubject    bool
+	imageConfig    *imagespec.Image
+	serviceConfig  *serviceConfig
 	err            []error
+}
+
+type serviceDevice struct {
+	Name        string `json:"name"`
+	Permissions string `json:"permissions"`
+}
+
+type serviceQuotas struct {
+	CPULimit      *uint64 `json:"cpuLimit,omitempty"`
+	RAMLimit      *uint64 `json:"ramLimit,omitempty"`
+	PIDsLimit     *uint64 `json:"pidsLimit,omitempty"`
+	NoFileLimit   *uint64 `json:"noFileLimit,omitempty"`
+	TmpLimit      *uint64 `json:"tmpLimit,omitempty"`
+	StateLimit    *uint64 `json:"stateLimit,omitempty"`
+	StorageLimit  *uint64 `json:"storageLimit,omitempty"`
+	UploadSpeed   *uint64 `json:"uploadSpeed,omitempty"`
+	DownloadSpeed *uint64 `json:"downloadSpeed,omitempty"`
+	UploadLimit   *uint64 `json:"uploadLimit,omitempty"`
+	DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
+}
+
+type serviceConfig struct {
+	Created            time.Time                    `json:"created"`
+	Author             string                       `json:"author"`
+	Hostname           *string                      `json:"hostname,omitempty"`
+	Sysctl             map[string]string            `json:"sysctl,omitempty"`
+	ServiceTTL         *uint64                      `json:"serviceTtl,omitempty"`
+	Quotas             serviceQuotas                `json:"quotas"`
+	AllowedConnections map[string]struct{}          `json:"allowedConnections,omitempty"`
+	Devices            []serviceDevice              `json:"devices,omitempty"`
+	Resources          []string                     `json:"resources,omitempty"`
+	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
+}
+
+type testDevice struct {
+	hostPath      string
+	containerPath string
+	deviceType    string
+	major         int64
+	minor         int64
+	uid           uint32
+	gid           uint32
+	mode          os.FileMode
+	permissions   string
 }
 
 /***********************************************************************************************************************
@@ -86,6 +148,20 @@ type testInstance struct {
  **********************************************************************************************************************/
 
 var tmpDir string
+
+/***********************************************************************************************************************
+ * Init
+ **********************************************************************************************************************/
+
+func init() {
+	log.SetFormatter(&log.TextFormatter{
+		DisableTimestamp: false,
+		TimestampFormat:  "2006-01-02 15:04:05.000",
+		FullTimestamp:    true,
+	})
+	log.SetLevel(log.DebugLevel)
+	log.SetOutput(os.Stdout)
+}
 
 /***********************************************************************************************************************
  * Main
@@ -186,7 +262,8 @@ func TestRunInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner)
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
+		newTestResourceManager(), newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -224,7 +301,8 @@ func TestUpdateInstances(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	instanceRunner := newTestRunner(nil, nil)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner)
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
+		newTestResourceManager(), newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -279,7 +357,7 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestRunner(nil, nil))
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -351,7 +429,7 @@ func TestRestartInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		instanceRunner)
+		instanceRunner, newTestResourceManager(), newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -473,7 +551,7 @@ func TestSubjectsChanged(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil))
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -516,7 +594,8 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil))
+		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -564,6 +643,357 @@ func TestHostFSDir(t *testing.T) {
 		if !bind && !whiteout {
 			t.Errorf("Not bind item %s should be whiteouted", rootItem.Name())
 		}
+	}
+}
+
+func TestRuntimeSpec(t *testing.T) {
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+	resourceManager := newTestResourceManager()
+	networkManager := newTestNetworkManager()
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestRunner(nil, nil), resourceManager, networkManager)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	testInstaces := []testInstance{
+		{
+			serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1, serviceGID: 9999,
+			imageConfig: &imagespec.Image{
+				OS: "linux",
+				Config: imagespec.ImageConfig{
+					Entrypoint: []string{"entry1", "entry2", "entry3"},
+					Cmd:        []string{"cmd1", "cmd2", "cmd3"},
+					WorkingDir: "/working/dir",
+					Env:        []string{"env1=val1", "env2=val2", "env3=val3"},
+				},
+			},
+			serviceConfig: &serviceConfig{
+				Hostname: newString("testHostName"),
+				Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
+				Quotas: serviceQuotas{
+					CPULimit:    newUint64(42),
+					RAMLimit:    newUint64(1024),
+					PIDsLimit:   newUint64(10),
+					NoFileLimit: newUint64(3),
+					TmpLimit:    newUint64(512),
+				},
+				Devices: []serviceDevice{
+					{Name: "input", Permissions: "r"},
+					{Name: "video", Permissions: "rw"},
+					{Name: "sound", Permissions: "rwm"},
+				},
+				Resources: []string{"resource1", "resource2", "resource3"},
+			},
+		},
+	}
+
+	hostGroups, err := getSystemGroups(9)
+	if err != nil {
+		t.Fatalf("Can't get system groups: %v", err)
+	}
+
+	// Create devices
+
+	hostDeviceDir := filepath.Join(tmpDir, "dev")
+
+	if err = os.RemoveAll(hostDeviceDir); err != nil {
+		t.Fatalf("Can't remove host device dir: %v", err)
+	}
+
+	resourceManager.addDevice(resourcemanager.DeviceInfo{
+		Name: "input", HostDevices: []string{fmt.Sprintf("%s/input:/dev/input", hostDeviceDir)},
+		Groups: hostGroups[:2],
+	})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{
+		Name: "video", HostDevices: []string{fmt.Sprintf("%s/video:/dev/video", hostDeviceDir)},
+		Groups: hostGroups[2:4],
+	})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{
+		Name: "sound", HostDevices: []string{fmt.Sprintf("%s/sound:/dev/sound", hostDeviceDir)},
+		Groups: hostGroups[4:6],
+	})
+
+	testDevices := []testDevice{
+		{
+			hostPath: filepath.Join(hostDeviceDir, "input"), containerPath: "/dev/input",
+			deviceType: "c", major: 1, minor: 1, uid: 0, gid: 1, mode: 0o644, permissions: "r",
+		},
+		{
+			hostPath: filepath.Join(hostDeviceDir, "video", "video1"), containerPath: "/dev/video/video1",
+			deviceType: "b", major: 2, minor: 1, uid: 1, gid: 1, mode: 0o640, permissions: "rw",
+		},
+		{
+			hostPath: filepath.Join(hostDeviceDir, "video", "video2"), containerPath: "/dev/video/video2",
+			deviceType: "b", major: 2, minor: 2, uid: 1, gid: 2, mode: 0o640, permissions: "rw",
+		},
+		{
+			hostPath: filepath.Join(hostDeviceDir, "video", "video3"), containerPath: "/dev/video/video3",
+			deviceType: "b", major: 2, minor: 3, uid: 1, gid: 3, mode: 0o640, permissions: "rw",
+		},
+		{
+			hostPath: filepath.Join(hostDeviceDir, "real_sound", "sound1"), containerPath: "/dev/sound/sound1",
+			deviceType: "b", major: 3, minor: 1, uid: 2, gid: 1, mode: 0o600, permissions: "rwm",
+		},
+		{
+			hostPath: filepath.Join(hostDeviceDir, "real_sound", "sound2"), containerPath: "/dev/sound/sound2",
+			deviceType: "b", major: 3, minor: 2, uid: 2, gid: 2, mode: 0o600, permissions: "rwm",
+		},
+	}
+
+	if err = createTestDevices(testDevices); err != nil {
+		t.Fatalf("Can't create test devices: %v", err)
+	}
+
+	// create symlink to test if it is resolved
+	if err := os.Symlink(filepath.Join(hostDeviceDir, "real_sound"),
+		filepath.Join(hostDeviceDir, "sound")); err != nil {
+		t.Fatalf("Can't create symlink: %v", err)
+	}
+
+	// Create resource
+
+	hostDirs := filepath.Join(tmpDir, "mount")
+
+	hostMounts := []resourcemanager.FileSystemMount{
+		{Source: filepath.Join(hostDirs, "dir0"), Destination: "/dir0", Type: "bind", Options: []string{"opt0, opt1"}},
+		{Source: filepath.Join(hostDirs, "dir1"), Destination: "/dir1", Type: "bind", Options: []string{"opt2, opt3"}},
+		{Source: filepath.Join(hostDirs, "dir2"), Destination: "/dir2", Type: "bind", Options: []string{"opt4, opt5"}},
+		{Source: filepath.Join(hostDirs, "dir3"), Destination: "/dir3", Type: "bind", Options: []string{"opt6, opt7"}},
+		{Source: filepath.Join(hostDirs, "dir4"), Destination: "/dir4", Type: "bind", Options: []string{"opt8, opt9"}},
+	}
+
+	envVars := []string{"var0=0", "var1=1", "var2=2", "var3=3", "var4=4", "var5=5", "var6=6", "var7=7"}
+
+	resourceManager.addResource(resourcemanager.ResourceInfo{
+		Name: "resource1", Mounts: hostMounts[:2], Env: envVars[:2], Groups: hostGroups[6:7],
+	})
+	resourceManager.addResource(resourcemanager.ResourceInfo{
+		Name: "resource2", Mounts: hostMounts[2:4], Env: envVars[2:5], Groups: hostGroups[7:8],
+	})
+	resourceManager.addResource(resourcemanager.ResourceInfo{
+		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
+	})
+
+	if err = serviceProvider.fromTestInstances(testInstaces); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstaces)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstaces)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
+	})
+	if err != nil {
+		t.Fatalf("Can't get instance info: %v", err)
+	}
+
+	runtimeSpec, err := getInstanceRuntimeSpec(instance.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance runtime spec: %v", err)
+	}
+
+	// Check terminal is false
+
+	if runtimeSpec.Process.Terminal {
+		t.Error("Terminal setting should be disabled")
+	}
+
+	// Check args
+
+	expectedArgs := make([]string, 0,
+		len(testInstaces[0].imageConfig.Config.Entrypoint)+len(testInstaces[0].imageConfig.Config.Cmd))
+
+	expectedArgs = append(expectedArgs, testInstaces[0].imageConfig.Config.Entrypoint...)
+	expectedArgs = append(expectedArgs, testInstaces[0].imageConfig.Config.Cmd...)
+
+	if !compareArrays(len(expectedArgs), len(runtimeSpec.Process.Args), func(index1, index2 int) bool {
+		return expectedArgs[index1] == runtimeSpec.Process.Args[index2]
+	}) {
+		t.Errorf("Wrong args value: %v", runtimeSpec.Process.Args)
+	}
+
+	// Check working dir
+
+	if runtimeSpec.Process.Cwd != testInstaces[0].imageConfig.Config.WorkingDir {
+		t.Errorf("Wrong working dir value: %s", runtimeSpec.Process.Cwd)
+	}
+
+	// Check host name
+
+	if runtimeSpec.Hostname != *testInstaces[0].serviceConfig.Hostname {
+		t.Errorf("Wrong host name value: %s", runtimeSpec.Hostname)
+	}
+
+	// Check sysctl
+
+	if !reflect.DeepEqual(runtimeSpec.Linux.Sysctl, testInstaces[0].serviceConfig.Sysctl) {
+		t.Errorf("Wrong sysctl value: %s", runtimeSpec.Linux.Sysctl)
+	}
+
+	// Check CPU limit
+
+	if *runtimeSpec.Linux.Resources.CPU.Period != 100000 {
+		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
+	}
+
+	if *runtimeSpec.Linux.Resources.CPU.Quota !=
+		int64(*testInstaces[0].serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
+		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
+	}
+
+	// Check RAM limit
+
+	if *runtimeSpec.Linux.Resources.Memory.Limit != int64(*testInstaces[0].serviceConfig.Quotas.RAMLimit) {
+		t.Errorf("Wrong RAM limit value: %d", *runtimeSpec.Linux.Resources.Memory.Limit)
+	}
+
+	// Check PIDs limit
+
+	if runtimeSpec.Linux.Resources.Pids.Limit != int64(*testInstaces[0].serviceConfig.Quotas.PIDsLimit) {
+		t.Errorf("Wrong PIDs limit value: %d", runtimeSpec.Linux.Resources.Pids.Limit)
+	}
+
+	// Check RLimits
+	expectedRLimits := []runtimespec.POSIXRlimit{
+		{
+			Type: "RLIMIT_NPROC",
+			Hard: *testInstaces[0].serviceConfig.Quotas.PIDsLimit,
+			Soft: *testInstaces[0].serviceConfig.Quotas.PIDsLimit,
+		},
+		{
+			Type: "RLIMIT_NOFILE",
+			Hard: *testInstaces[0].serviceConfig.Quotas.NoFileLimit,
+			Soft: *testInstaces[0].serviceConfig.Quotas.NoFileLimit,
+		},
+	}
+
+	if !compareArrays(len(expectedRLimits), len(runtimeSpec.Process.Rlimits), func(index1, index2 int) bool {
+		return expectedRLimits[index1] == runtimeSpec.Process.Rlimits[index2]
+	}) {
+		t.Errorf("Wrong resource limits value: %v", runtimeSpec.Process.Rlimits)
+	}
+
+	// Check network namespace
+
+	namespaceFound := false
+
+	for _, namespace := range runtimeSpec.Linux.Namespaces {
+		if namespace.Type == runtimespec.NetworkNamespace {
+			if namespace.Path != networkManager.GetNetnsPath(instance.InstanceID) {
+				t.Errorf("Wrong network namespace path: %s", namespace.Path)
+			}
+
+			namespaceFound = true
+		}
+	}
+
+	if !namespaceFound {
+		t.Error("Network namespace not found")
+	}
+
+	// Check devices
+
+	expectedDevices := createSpecDevices(testDevices)
+
+	if !compareArrays(len(expectedDevices), len(runtimeSpec.Linux.Devices), func(index1, index2 int) bool {
+		val1, val2 := expectedDevices[index1], runtimeSpec.Linux.Devices[index2]
+
+		return val1.Path == val2.Path && val1.Type == val2.Type &&
+			val1.Major == val2.Major && val1.Minor == val2.Minor &&
+			*val1.FileMode == *val2.FileMode && *val1.UID == *val2.UID && *val1.GID == *val2.GID
+	}) {
+		t.Errorf("Wrong linux devices value: %v", runtimeSpec.Linux.Devices)
+	}
+
+	expectedCgroupDevices := createCgroupDevices(testDevices)
+
+	if !compareArrays(len(expectedCgroupDevices), len(runtimeSpec.Linux.Resources.Devices),
+		func(index1, index2 int) bool {
+			val1, val2 := expectedCgroupDevices[index1], runtimeSpec.Linux.Resources.Devices[index2]
+
+			if val1.Allow != val2.Allow || val1.Type != val2.Type || val1.Access != val2.Access {
+				return false
+			}
+
+			if val1.Major != nil && val2.Major != nil {
+				if *val1.Major != *val2.Major {
+					return false
+				}
+			}
+
+			if val1.Minor != nil && val2.Minor != nil {
+				if *val1.Minor != *val2.Minor {
+					return false
+				}
+			}
+
+			return true
+		}) {
+		t.Errorf("Wrong cgroup devices value: %v", runtimeSpec.Linux.Resources.Devices)
+	}
+
+	// Check mounts
+
+	expectedMounts := createSpecMounts(hostMounts)
+	expectedMounts = append(expectedMounts, runtimespec.Mount{
+		Source:      "tmpfs",
+		Destination: "/tmp",
+		Type:        "tmpfs",
+		Options: []string{
+			"nosuid", "strictatime", "mode=1777",
+			"size=" + strconv.FormatUint(*testInstaces[0].serviceConfig.Quotas.TmpLimit, 10),
+		},
+	})
+
+	if !compareArrays(len(expectedMounts), len(runtimeSpec.Mounts), func(index1, index2 int) bool {
+		return reflect.DeepEqual(expectedMounts[index1], runtimeSpec.Mounts[index2])
+	}) {
+		t.Errorf("Wrong mounts value: %v", runtimeSpec.Mounts)
+	}
+
+	// Check env vars
+
+	envVars = append(envVars, testInstaces[0].imageConfig.Config.Env...)
+
+	if !compareArrays(len(envVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
+		return envVars[index1] == runtimeSpec.Process.Env[index2]
+	}) {
+		t.Errorf("Wrong env variables value: %v", runtimeSpec.Process.Env)
+	}
+
+	// Check UID/GID
+
+	if runtimeSpec.Process.User.UID != uint32(instance.UID) {
+		t.Errorf("Wrong UID: %d", runtimeSpec.Process.User.UID)
+	}
+
+	if runtimeSpec.Process.User.GID != uint32(testInstaces[0].serviceGID) {
+		t.Errorf("Wrong GID: %d", runtimeSpec.Process.User.GID)
+	}
+
+	// Check additional groups
+
+	expectedGroups, err := createAdditionalGroups(hostGroups)
+	if err != nil {
+		t.Fatalf("Can't create additional groups: %v", err)
+	}
+
+	if !compareArrays(len(expectedGroups), len(runtimeSpec.Process.User.AdditionalGids), func(index1, index2 int) bool {
+		return expectedGroups[index1] == runtimeSpec.Process.User.AdditionalGids[index2]
+	}) {
+		t.Errorf("Wrong additional GIDs value: %v", runtimeSpec.Process.User.AdditionalGids)
 	}
 }
 
@@ -669,11 +1099,24 @@ func (storage *testStorage) GetSubjectInstances(subjectID string) (instances []l
 	return instances, nil
 }
 
+func (storage *testStorage) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
+	storage.RLock()
+	defer storage.RUnlock()
+
+	for _, instance := range storage.instances {
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
 func (storage *testStorage) fromTestInstances(testInstances []testInstance, running bool) {
 	storage.Lock()
 	defer storage.Unlock()
 
 	storage.instances = make(map[string]launcher.InstanceInfo)
+
+	uid := 5000
 
 	for _, testInstance := range testInstances {
 		for i := uint64(0); i < testInstance.numInstances; i++ {
@@ -695,7 +1138,10 @@ func (storage *testStorage) fromTestInstances(testInstances []testInstance, runn
 				InstanceID:  newInstanceID,
 				UnitSubject: testInstance.unitSubject,
 				Running:     running,
+				UID:         uid,
 			}
+
+			uid++
 		}
 	}
 }
@@ -719,13 +1165,50 @@ func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicema
 	return service, nil
 }
 
+func (provider *testServiceProvider) GetImageParts(
+	service servicemanager.ServiceInfo,
+) (servicemanager.ImageParts, error) {
+	return servicemanager.ImageParts{
+		ImageConfigPath:   filepath.Join(service.ImagePath, imageConfigFile),
+		ServiceConfigPath: filepath.Join(service.ImagePath, serviceConfigFile),
+	}, nil
+}
+
 func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance) error {
 	provider.services = make(map[string]servicemanager.ServiceInfo)
+
+	if err := os.RemoveAll(filepath.Join(tmpDir, servicesDir)); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
 	for _, testInstance := range testInstances {
 		provider.services[testInstance.serviceID] = servicemanager.ServiceInfo{
 			ServiceID:  testInstance.serviceID,
 			AosVersion: testInstance.serviceVersion,
+			ImagePath:  filepath.Join(tmpDir, servicesDir, testInstance.serviceID),
+			GID:        testInstance.serviceGID,
+		}
+
+		if err := os.MkdirAll(filepath.Join(tmpDir, servicesDir, testInstance.serviceID), 0o755); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		imageConfig := &imagespec.Image{OS: "linux"}
+
+		if testInstance.imageConfig != nil {
+			imageConfig = testInstance.imageConfig
+		}
+
+		if err := writeConfig(filepath.Join(tmpDir, servicesDir, testInstance.serviceID, imageConfigFile),
+			imageConfig); err != nil {
+			return err
+		}
+
+		if testInstance.serviceConfig != nil {
+			if err := writeConfig(filepath.Join(tmpDir, servicesDir, testInstance.serviceID, serviceConfigFile),
+				testInstance.serviceConfig); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -778,6 +1261,65 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 }
 
 /***********************************************************************************************************************
+ * testResourceManager
+ **********************************************************************************************************************/
+
+func newTestResourceManager() *testResourceManager {
+	return &testResourceManager{
+		devices:   make(map[string]resourcemanager.DeviceInfo),
+		resources: make(map[string]resourcemanager.ResourceInfo),
+	}
+}
+
+func (manager *testResourceManager) GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error) {
+	deviceInfo, ok := manager.devices[device]
+	if !ok {
+		return resourcemanager.DeviceInfo{}, aoserrors.New("device info not found")
+	}
+
+	return deviceInfo, nil
+}
+
+func (manager *testResourceManager) GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error) {
+	resourceInfo, ok := manager.resources[resource]
+	if !ok {
+		return resourcemanager.ResourceInfo{}, aoserrors.New("resource info not found")
+	}
+
+	return resourceInfo, nil
+}
+
+func (manager *testResourceManager) addDevice(device resourcemanager.DeviceInfo) {
+	manager.devices[device.Name] = device
+}
+
+func (manager *testResourceManager) addResource(resource resourcemanager.ResourceInfo) {
+	manager.resources[resource.Name] = resource
+}
+
+/***********************************************************************************************************************
+ * testNetworkManager
+ **********************************************************************************************************************/
+
+func newTestNetworkManager() *testNetworkManager {
+	return &testNetworkManager{}
+}
+
+func (manager *testNetworkManager) GetNetnsPath(instanceID string) string {
+	return filepath.Join("/run/netns", instanceID)
+}
+
+func (manager *testNetworkManager) AddInstanceToNetwork(
+	instanceID, networkID string, params networkmanager.NetworkParams,
+) error {
+	return nil
+}
+
+func (manager *testNetworkManager) RemoveInstanceFromNetwork(instanceID, networkID string) error {
+	return nil
+}
+
+/***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
@@ -786,6 +1328,8 @@ func setup() (err error) {
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	launcher.RuntimeDir = filepath.Join(tmpDir, "runtime")
 
 	return nil
 }
@@ -1031,4 +1575,248 @@ func createRunStatus(
 	}
 
 	return runStatus, nil
+}
+
+func writeConfig(fileName string, config interface{}) error {
+	data, err := json.Marshal(config)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = ioutil.WriteFile(fileName, data, 0o600); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func createDevice(path, deviceType string, major, minor int64, mode os.FileMode, uid, gid uint32) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	output, err := exec.Command("mknod", path, deviceType,
+		strconv.FormatInt(major, 10), strconv.FormatInt(minor, 10)).CombinedOutput()
+	if err != nil {
+		return aoserrors.Errorf("%v: %s", err, output)
+	}
+
+	if output, err = exec.Command("chown", fmt.Sprintf("%d:%d", uid, gid), path).CombinedOutput(); err != nil {
+		return aoserrors.Errorf("%v: %s", err, output)
+	}
+
+	if output, err = exec.Command("chmod", fmt.Sprintf("%o", mode), path).CombinedOutput(); err != nil {
+		return aoserrors.Errorf("%v: %s", err, output)
+	}
+
+	return nil
+}
+
+func createTestDevices(testDevices []testDevice) error {
+	for _, device := range testDevices {
+		if err := createDevice(device.hostPath, device.deviceType, device.major, device.minor,
+			device.mode, device.uid, device.gid); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func createSpecDevices(testDevices []testDevice) (specDevices []runtimespec.LinuxDevice) {
+	for _, device := range testDevices {
+		specDevices = append(specDevices, runtimespec.LinuxDevice{
+			Path:     device.containerPath,
+			Type:     device.deviceType,
+			Major:    device.major,
+			Minor:    device.minor,
+			FileMode: newFileMode(device.mode),
+			UID:      newUIDGID(device.uid),
+			GID:      newUIDGID(device.gid),
+		})
+	}
+
+	return specDevices
+}
+
+func createCgroupDevices(testDevices []testDevice) (cgroupDevices []runtimespec.LinuxDeviceCgroup) {
+	cgroupDevices = append(cgroupDevices, runtimespec.LinuxDeviceCgroup{
+		Allow:  false,
+		Access: "rwm",
+	})
+
+	for _, device := range testDevices {
+		cgroupDevices = append(cgroupDevices, runtimespec.LinuxDeviceCgroup{
+			Allow:  true,
+			Type:   device.deviceType,
+			Major:  newMajorMinor(device.major),
+			Minor:  newMajorMinor(device.minor),
+			Access: device.permissions,
+		})
+	}
+
+	return cgroupDevices
+}
+
+func newFileMode(mode os.FileMode) *os.FileMode {
+	return &mode
+}
+
+func newUIDGID(id uint32) *uint32 {
+	return &id
+}
+
+func newMajorMinor(value int64) *int64 {
+	return &value
+}
+
+func newString(value string) *string {
+	return &value
+}
+
+func newUint64(value uint64) *uint64 {
+	return &value
+}
+
+func createSpecMounts(mounts []resourcemanager.FileSystemMount) (specMounts []runtimespec.Mount) {
+	// Manadatory mounts
+	specMounts = append(specMounts, runtimespec.Mount{Source: "proc", Destination: "/proc", Type: "proc"})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "tmpfs", Destination: "/dev", Type: "tmpfs",
+		Options: []string{"nosuid", "strictatime", "mode=755", "size=65536k"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "devpts", Destination: "/dev/pts", Type: "devpts",
+		Options: []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620", "gid=5"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "shm", Destination: "/dev/shm", Type: "tmpfs",
+		Options: []string{"nosuid", "noexec", "nodev", "mode=1777", "size=65536k"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "mqueue", Destination: "/dev/mqueue", Type: "mqueue",
+		Options: []string{"nosuid", "noexec", "nodev"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "sysfs", Destination: "/sys", Type: "sysfs",
+		Options: []string{"nosuid", "noexec", "nodev", "ro"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "cgroup", Destination: "/sys/fs/cgroup", Type: "cgroup",
+		Options: []string{"nosuid", "noexec", "nodev", "relatime", "ro"},
+	})
+
+	// Aos mounts
+
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "/etc/nsswitch.conf", Destination: "/etc/nsswitch.conf", Type: "bind",
+		Options: []string{"bind", "ro"},
+	})
+	specMounts = append(specMounts, runtimespec.Mount{
+		Source: "/etc/ssl", Destination: "/etc/ssl", Type: "bind",
+		Options: []string{"bind", "ro"},
+	})
+
+	// Resource mounts
+
+	for _, mount := range mounts {
+		specMounts = append(specMounts, runtimespec.Mount{
+			Source:      mount.Source,
+			Destination: mount.Destination,
+			Type:        mount.Type,
+			Options:     mount.Options,
+		})
+	}
+
+	return specMounts
+}
+
+func getGroupsMap() (groupsMap map[string]uint32, err error) {
+	groupsMap = make(map[string]uint32)
+
+	output, err := exec.Command("getent", "group").CombinedOutput()
+	if err != nil {
+		return nil, aoserrors.Errorf("%v: %s", err, output)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), ":")
+
+		if len(fields) < 3 {
+			return nil, aoserrors.Errorf("invalid group line: %s", scanner.Text())
+		}
+
+		gid, err := strconv.ParseUint(fields[2], 10, 32)
+		if err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		groupsMap[fields[0]] = uint32(gid)
+	}
+
+	return groupsMap, nil
+}
+
+func getSystemGroups(n int) (groups []string, err error) {
+	groupsMap, err := getGroupsMap()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(groupsMap) == 0 {
+		return nil, aoserrors.New("no system groups found")
+	}
+
+	systemGroups := make([]string, 0, len(groupsMap))
+
+	for group := range groupsMap {
+		systemGroups = append(systemGroups, group)
+	}
+
+	for i := 0; i < n; i++ {
+		groups = append(groups, systemGroups[i%len(systemGroups)])
+	}
+
+	return groups, nil
+}
+
+func createAdditionalGroups(groups []string) (gids []uint32, err error) {
+	groupsMap, err := getGroupsMap()
+	if err != nil {
+		return nil, err
+	}
+
+groupLoop:
+	for _, group := range groups {
+		gid, ok := groupsMap[group]
+		if !ok {
+			return nil, aoserrors.Errorf("group %s not found", group)
+		}
+
+		for _, existingGID := range gids {
+			if gid == existingGID {
+				continue groupLoop
+			}
+		}
+
+		gids = append(gids, gid)
+	}
+
+	return gids, nil
+}
+
+func getInstanceRuntimeSpec(instanceID string) (runtimespec.Spec, error) {
+	runtimeData, err := ioutil.ReadFile(filepath.Join(launcher.RuntimeDir, instanceID, runtimeConfigFile))
+	if err != nil {
+		return runtimespec.Spec{}, aoserrors.Wrap(err)
+	}
+
+	var runtimeSpec runtimespec.Spec
+
+	if err = json.Unmarshal(runtimeData, &runtimeSpec); err != nil {
+		return runtimespec.Spec{}, aoserrors.Wrap(err)
+	}
+
+	return runtimeSpec, nil
 }

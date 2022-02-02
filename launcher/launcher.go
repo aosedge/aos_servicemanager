@@ -36,8 +36,11 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
+	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/utils/uidgidpool"
 )
 
 /***********************************************************************************************************************
@@ -46,9 +49,11 @@ import (
 
 const maxParallelInstanceActions = 32
 
-const runtimeDir = "/run/aos/runtime"
-
-const hostFSWiteoutsDir = "hostfs/whiteouts"
+const (
+	hostFSWiteoutsDir = "hostfs/whiteouts"
+	runtimeConfigFile = "config.json"
+	instanceRootFS    = "rootfs"
+)
 
 /***********************************************************************************************************************
  * Types
@@ -61,6 +66,7 @@ type Storage interface {
 	RemoveInstance(instanceID string) error
 	GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error)
 	GetInstanceByID(instanceID string) (InstanceInfo, error)
+	GetAllInstances() ([]InstanceInfo, error)
 	GetRunningInstances() ([]InstanceInfo, error)
 	GetSubjectInstances(subjectID string) ([]InstanceInfo, error)
 }
@@ -68,6 +74,7 @@ type Storage interface {
 // ServiceProvider service provider.
 type ServiceProvider interface {
 	GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error)
+	GetImageParts(service servicemanager.ServiceInfo) (servicemanager.ImageParts, error)
 }
 
 // InstanceRunner interface to start/stop service instances.
@@ -77,6 +84,19 @@ type InstanceRunner interface {
 	InstanceStatusChannel() <-chan []runner.InstanceStatus
 }
 
+// ResourceManager provides API to validate, request and release resources.
+type ResourceManager interface {
+	GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error)
+	GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error)
+}
+
+// NetworkManager provides network access.
+type NetworkManager interface {
+	GetNetnsPath(instanceID string) string
+	AddInstanceToNetwork(instanceID, networkID string, params networkmanager.NetworkParams) error
+	RemoveInstanceFromNetwork(instanceID, networkID string) error
+}
+
 // InstanceInfo instance information.
 type InstanceInfo struct {
 	cloudprotocol.InstanceIdent
@@ -84,6 +104,7 @@ type InstanceInfo struct {
 	InstanceID  string
 	UnitSubject bool
 	Running     bool
+	UID         int
 }
 
 // RuntimeStatus runtime status info.
@@ -111,6 +132,8 @@ type Launcher struct {
 	storage         Storage
 	serviceProvider ServiceProvider
 	instanceRunner  InstanceRunner
+	resourceManager ResourceManager
+	networkManager  NetworkManager
 
 	config                 *config.Config
 	currentSubjects        []string
@@ -121,6 +144,7 @@ type Launcher struct {
 	runInstancesInProgress bool
 	currentInstances       map[string]*instanceInfo
 	currentServices        map[string]*serviceInfo
+	uidPool                *uidgidpool.IdentifierPool
 }
 
 /***********************************************************************************************************************
@@ -136,23 +160,31 @@ var (
 
 var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
 
+// RuntimeDir specifies directory where instance runtime spec is stored.
+// nolint:gochecknoglobals // used to be overridden in unit tests
+var RuntimeDir = "/run/aos/runtime"
+
 /***********************************************************************************************************************
  * Public
  **********************************************************************************************************************/
 
 // New creates new launcher object.
-func New(config *config.Config, storage Storage, serviceProvider ServiceProvider,
-	instanceRunner InstanceRunner,
+func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, instanceRunner InstanceRunner,
+	resourceManager ResourceManager, networkManager NetworkManager,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
+		resourceManager: resourceManager, networkManager: networkManager,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
 		runtimeStatusChannel: make(chan RuntimeStatus, 1),
+		uidPool:              uidgidpool.NewUserIDPool(),
 	}
+
+	launcher.fillUIDPool()
 
 	ctx, cancelFunction := context.WithCancel(context.Background())
 
@@ -162,6 +194,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 
 	if err = launcher.prepareHostFSDir(); err != nil {
 		return nil, err
+	}
+
+	if err = os.MkdirAll(RuntimeDir, 0o755); err != nil {
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return launcher, nil
@@ -176,6 +212,10 @@ func (launcher *Launcher) Close() (err error) {
 
 	launcher.cancelFunction()
 	launcher.stopCurrentInstances()
+
+	if removeErr := os.RemoveAll(RuntimeDir); removeErr != nil && err == nil {
+		err = aoserrors.Wrap(removeErr)
+	}
 
 	return err
 }
@@ -330,6 +370,19 @@ func (launcher *Launcher) RuntimeStatusChannel() <-chan RuntimeStatus {
  * Private
  **********************************************************************************************************************/
 
+func (launcher *Launcher) fillUIDPool() {
+	instances, err := launcher.storage.GetAllInstances()
+	if err != nil {
+		log.Errorf("Can't fill UID pool: %v", err)
+	}
+
+	for _, instance := range instances {
+		if err = launcher.uidPool.AddID(instance.UID); err != nil {
+			log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Errorf("Can't add UID to pool: %v", err)
+		}
+	}
+}
+
 func (launcher *Launcher) handleChannels(ctx context.Context) {
 	for {
 		select {
@@ -376,6 +429,13 @@ func (launcher *Launcher) createNewInstance(instanceIdent cloudprotocol.Instance
 		InstanceID:    uuid.New().String(),
 		UnitSubject:   launcher.isCurrentSubject(instanceIdent.SubjectID),
 	}
+
+	uid, err := launcher.uidPool.GetFreeID()
+	if err != nil {
+		return instance, aoserrors.Wrap(err)
+	}
+
+	instance.UID = uid
 
 	if err := launcher.storage.AddInstance(instance); err != nil {
 		return instance, aoserrors.Wrap(err)
@@ -512,6 +572,10 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		err = aoserrors.Wrap(runnerErr)
 	}
 
+	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
+		err = aoserrors.Wrap(removeErr)
+	}
+
 	return err
 }
 
@@ -525,7 +589,11 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 		}
 
 		if !ok {
-			startInstance = &instanceInfo{InstanceInfo: instance}
+			startInstance = &instanceInfo{
+				InstanceInfo: instance,
+				runtimeDir:   filepath.Join(RuntimeDir, instance.InstanceID),
+			}
+
 			launcher.currentInstances[instance.InstanceID] = startInstance
 		}
 
@@ -591,8 +659,16 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) (err error) {
 
 	instance.isStarted = true
 
+	if err := os.MkdirAll(instance.runtimeDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err := launcher.createRuntimeSpec(instance); err != nil {
+		return err
+	}
+
 	runStatus := launcher.instanceRunner.StartInstance(
-		instance.InstanceID, filepath.Join(runtimeDir, instance.InstanceID), runner.StartInstanceParams{})
+		instance.InstanceID, instance.runtimeDir, runner.StartInstanceParams{})
 
 	// Update current status if it is not updated by runner status channel. Instance runner status goes asynchronously
 	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this
