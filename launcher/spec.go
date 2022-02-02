@@ -21,6 +21,7 @@ package launcher
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/user"
@@ -45,6 +46,14 @@ import (
  **********************************************************************************************************************/
 
 const defaultCPUPeriod uint64 = 100000
+
+const (
+	envAosServiceID     = "AOS_SERVICE_ID"
+	envAosSubjectID     = "AOS_SUBJECT_ID"
+	envAosInstanceIndex = "AOS_INSTANCE_INDEX"
+	envAosInstanceID    = "AOS_INSTANCE_ID"
+	envAosSecret        = "AOS_SECRET"
+)
 
 /***********************************************************************************************************************
  * Types
@@ -560,6 +569,7 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	spec.setRootfs(filepath.Join(instance.runtimeDir, instanceRootFS))
 	spec.bindHostDirs(launcher.config.WorkingDir)
 	spec.setNamespacePath(runtimespec.NetworkNamespace, launcher.networkManager.GetNetnsPath(instance.InstanceID))
+	spec.mergeEnv(createAosEnvVars(instance))
 
 	if err := spec.setUserUIDGID(uint32(instance.UID), uint32(instance.service.GID)); err != nil {
 		return nil, err
@@ -584,4 +594,17 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	}
 
 	return spec, nil
+}
+
+func createAosEnvVars(instance *instanceInfo) (aosEnvVars []string) {
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosServiceID, instance.ServiceID))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosSubjectID, instance.SubjectID))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%d", envAosInstanceIndex, instance.Instance))
+	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosInstanceID, instance.InstanceID))
+
+	if instance.secret != "" {
+		aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosSecret, instance.secret))
+	}
+
+	return aosEnvVars
 }

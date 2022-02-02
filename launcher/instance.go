@@ -35,6 +35,7 @@ type instanceInfo struct {
 	runStatus     runner.InstanceStatus
 	isStarted     bool
 	runtimeDir    string
+	secret        string
 	stateChecksum []byte
 }
 
