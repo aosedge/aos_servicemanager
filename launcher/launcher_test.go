@@ -292,6 +292,90 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 	}
 }
 
+func TestRestartInstances(t *testing.T) {
+	type startStopCount struct {
+		startCount int
+		stopCount  int
+	}
+
+	restartMap := make(map[string]startStopCount)
+
+	serviceProvider := newTestServiceProvider()
+	instanceRunner := newTestRunner(
+		func(instanceID string) runner.InstanceStatus {
+			status := runner.InstanceStatus{InstanceID: instanceID, State: cloudprotocol.InstanceStateActive}
+
+			currentValue := restartMap[instanceID]
+
+			currentValue.startCount++
+			restartMap[instanceID] = currentValue
+
+			return status
+		},
+		func(instanceID string) error {
+			currentValue := restartMap[instanceID]
+
+			currentValue.stopCount++
+			restartMap[instanceID] = currentValue
+
+			return nil
+		},
+	)
+
+	testLauncher, err := launcher.New(&config.Config{}, newTestStorage(), serviceProvider, instanceRunner)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	testInstances := []testInstance{
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
+	}
+
+	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	if err = testLauncher.RestartInstances(); err != nil {
+		t.Errorf("Can't stop instances: %v", err)
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	if len(restartMap) != 13 {
+		t.Errorf("Wrong running instances count: %d", len(restartMap))
+	}
+
+	for instanceID, counters := range restartMap {
+		if counters.stopCount != 1 {
+			t.Errorf("Wrong stop count for instance %s: %d", instanceID, counters.stopCount)
+		}
+
+		if counters.startCount != 2 {
+			t.Errorf("Wrong start count for instance %s: %d", instanceID, counters.startCount)
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
