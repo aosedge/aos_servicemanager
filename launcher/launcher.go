@@ -160,8 +160,9 @@ func (launcher *Launcher) Close() (err error) {
 	log.Debug("Close launcher")
 
 	launcher.cancelFunction()
+	launcher.stopCurrentInstances()
 
-	return nil
+	return err
 }
 
 // SendCurrentRuntimeStatus forces launcher to send current runtime status.
@@ -247,6 +248,16 @@ func (launcher *Launcher) RunInstances(instances []cloudprotocol.InstanceInfo) e
 func (launcher *Launcher) RestartInstances() error {
 	launcher.Lock()
 	defer launcher.Unlock()
+
+	launcher.stopCurrentInstances()
+
+	runInstances := make([]InstanceInfo, 0, len(launcher.currentInstances))
+
+	for _, instance := range launcher.currentInstances {
+		runInstances = append(runInstances, instance.InstanceInfo)
+	}
+
+	launcher.runInstances(runInstances)
 
 	return nil
 }
@@ -595,4 +606,14 @@ func isSubjectsEqual(subjects1, subjects2 []string) bool {
 	}
 
 	return true
+}
+
+func (launcher *Launcher) stopCurrentInstances() {
+	stopInstances := make([]*instanceInfo, 0, len(launcher.currentInstances))
+
+	for _, instance := range launcher.currentInstances {
+		stopInstances = append(stopInstances, instance)
+	}
+
+	launcher.stopInstances(stopInstances)
 }
