@@ -71,7 +71,6 @@ type LayerManager struct {
 type LayerInfoProvider interface {
 	AddLayer(layerInfo LayerInfo) (err error)
 	DeleteLayerByDigest(digest string) (err error)
-	GetLayerPathByDigest(digest string) (path string, err error)
 	GetLayersInfo() (layersList []LayerInfo, err error)
 	GetLayerInfoByDigest(digest string) (layer LayerInfo, err error)
 }
@@ -149,12 +148,7 @@ func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
 
 	for _, layer := range layers {
 		// Checking if Layer path exists
-		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		fi, err := os.Stat(layerPath)
+		fi, err := os.Stat(layer.Path)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -183,16 +177,6 @@ func (layermanager *LayerManager) Cleanup() (err error) {
 	}
 
 	return aoserrors.Wrap(err)
-}
-
-// GetLayerPathByDigest provies installed layer path by digest.
-func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
-	layerPath, err = layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	return layerPath, nil
 }
 
 // GetLayerInfoByDigest gets layers information by layer digest.
@@ -290,12 +274,12 @@ func (layermanager *LayerManager) doInstallLayer(
 func (layermanager *LayerManager) doUninstallLayer(digest string) (err error) {
 	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
 
-	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
+	layer, err := layermanager.layerInfoProvider.GetLayerInfoByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = os.RemoveAll(layerPath); err != nil {
+	if err = os.RemoveAll(layer.Path); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

@@ -604,26 +604,6 @@ func (db *Database) DeleteLayerByDigest(digest string) (err error) {
 	return aoserrors.Wrap(err)
 }
 
-// GetLayerPathByDigest return layer installation path by digest.
-func (db *Database) GetLayerPathByDigest(digest string) (path string, err error) {
-	stmt, err := db.sql.Prepare("SELECT path FROM layers WHERE digest = ?")
-	if err != nil {
-		return path, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(digest).Scan(&path)
-	if errors.Is(err, sql.ErrNoRows) {
-		return path, ErrNotExist
-	}
-
-	if err != nil {
-		return path, aoserrors.Wrap(err)
-	}
-
-	return path, nil
-}
-
 // GetLayersInfo get all installed layers.
 func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
 	rows, err := db.sql.Query("SELECT * FROM layers ")
