@@ -179,12 +179,12 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Errorf("Error checking layer consistency: %s", err)
 	}
 
-	layer2path, err := infoProvider.GetLayerPathByDigest(digest2)
+	layer2, err := infoProvider.GetLayerInfoByDigest(digest2)
 	if err != nil {
 		t.Errorf("Can't get layer path: %s", err)
 	}
 
-	if err = os.RemoveAll(layer2path); err != nil {
+	if err = os.RemoveAll(layer2.Path); err != nil {
 		t.Errorf("Can't remove dir: %s", err)
 	}
 
@@ -229,19 +229,6 @@ func (infoProvider *testInfoProvider) DeleteLayerByDigest(digest string) (err er
 	}
 
 	return aoserrors.New("layer not found")
-}
-
-func (infoProvider *testInfoProvider) GetLayerPathByDigest(digest string) (path string, err error) {
-	infoProvider.Lock()
-	defer infoProvider.Unlock()
-
-	for _, layer := range infoProvider.layers {
-		if layer.Digest == digest {
-			return layer.Path, nil
-		}
-	}
-
-	return "", aoserrors.New("layer not found")
 }
 
 func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
