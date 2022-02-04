@@ -597,13 +597,13 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	path, err := db.GetLayerPathByDigest("sha256:2")
+	savedLayer, err := db.GetLayerInfoByDigest("sha256:2")
 	if err != nil {
 		t.Errorf("Can't get layer path %s", err)
 	}
 
-	if path != layer2.Path {
-		t.Errorf("Path form db %s != path2", path)
+	if savedLayer.Path != layer2.Path {
+		t.Errorf("Path form db %s != path2", savedLayer.Path)
 	}
 
 	layerInfo, err := db.GetLayerInfoByDigest("sha256:3")
@@ -615,11 +615,7 @@ func TestLayers(t *testing.T) {
 		t.Error("Incorrect layerID ", layerInfo.LayerID)
 	}
 
-	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
-		t.Errorf("Should be error: entry does not exist")
-	}
-
-	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
+	if _, err := db.GetLayerInfoByDigest("sha256:12345"); err == nil {
 		t.Errorf("Should be error: entry does not exist")
 	}
 
