@@ -35,9 +35,9 @@ import (
 	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	layerDirName       = "layers"
@@ -48,15 +48,15 @@ const (
 
 const maxConcurrentActions = 10
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 var ErrNotExist = errors.New("layer does not exist")
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // LayerManager instance.
 type LayerManager struct {
@@ -69,10 +69,10 @@ type LayerManager struct {
 
 // LayerInfoProvider provides API to add, remove or access layer information.
 type LayerInfoProvider interface {
-	AddLayer(layerInfo LayerInfo) (err error)
-	DeleteLayerByDigest(digest string) (err error)
-	GetLayersInfo() (layersList []LayerInfo, err error)
-	GetLayerInfoByDigest(digest string) (layer LayerInfo, err error)
+	AddLayer(LayerInfo) error
+	DeleteLayerByDigest(digest string) error
+	GetLayersInfo() ([]LayerInfo, error)
+	GetLayerInfoByDigest(digest string) (LayerInfo, error)
 }
 
 // LayerInfo layer information.
@@ -86,9 +86,9 @@ type LayerInfo struct {
 	Description   string
 }
 
-/*******************************************************************************
+/**********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 // New creates new launcher object.
 func New(config *config.Config,
 	infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
@@ -188,9 +188,9 @@ func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer Lay
 	return layer, nil
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func (layermanager *LayerManager) doInstallLayer(
 	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo) (err error) {
