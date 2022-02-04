@@ -27,7 +27,9 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/utils/action"
+	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/mod/sumdb/dirhash"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
@@ -40,7 +42,7 @@ import (
 
 const maxConcurrentActions = 10
 
-const tmpTarFile = "tmpfs.tar.gz"
+const tmpRootFSDir = "tmprootfs"
 
 /***********************************************************************************************************************
  * Types
@@ -84,7 +86,7 @@ type ServiceInfo struct {
 var (
 	// ErrNotExist not exist service error.
 	ErrNotExist = errors.New("service not exist")
-	// ErrVersionMismatch new service version <= existing one
+	// ErrVersionMismatch new service version <= existing one.
 	ErrVersionMismatch = errors.New("version mismatch")
 )
 
@@ -209,7 +211,12 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		}
 	}
 
-	if err = sm.prepareServiceFS(newService.ImagePath, newService.GID); err != nil {
+	rootFSDigest, err := sm.prepareServiceFS(newService.ImagePath, newService.GID)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = updateRootFSDigestInManifest(newService.ImagePath, rootFSDigest); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -266,28 +273,26 @@ func (sm *ServiceManager) doRevertService(service ServiceInfo) (retErr error) {
 	return retErr
 }
 
-func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (err error) {
+func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (rootFSDigest digest.Digest, err error) {
 	imageParts, err := getImageParts(imagePath)
 	if err != nil {
-		return aoserrors.Wrap(err)
+		return "", aoserrors.Wrap(err)
 	}
 
-	tmpTar := path.Join(imagePath, tmpTarFile)
+	originRootFSPath := imageParts.ServiceFSPath
 
-	if err = os.Rename(imageParts.ServiceFSPath, tmpTar); err != nil {
-		return aoserrors.Wrap(err)
-	}
+	tmpRootFS := path.Join(imagePath, tmpRootFSDir)
 
 	// unpack rootfs layer
-	if err = imageutils.UnpackTarImage(tmpTar, imageParts.ServiceFSPath); err != nil {
-		return aoserrors.Wrap(err)
+	if err = imageutils.UnpackTarImage(imageParts.ServiceFSPath, tmpRootFS); err != nil {
+		return "", aoserrors.Wrap(err)
 	}
 
-	if err = os.RemoveAll(tmpTar); err != nil {
+	if err = os.RemoveAll(imageParts.ServiceFSPath); err != nil {
 		log.Errorf("Can't remove temp file: %s", err)
 	}
 
-	if err = filepath.Walk(imageParts.ServiceFSPath, func(name string, info os.FileInfo, err error) error {
+	if err = filepath.Walk(tmpRootFS, func(name string, info os.FileInfo, err error) error {
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -298,8 +303,21 @@ func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (err error
 
 		return nil
 	}); err != nil {
-		return aoserrors.Wrap(err)
+		return "", aoserrors.Wrap(err)
 	}
 
-	return nil
+	rootFSHash, err := dirhash.HashDir(tmpRootFS, tmpRootFS, dirDigest)
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	if rootFSDigest, err = digest.Parse(rootFSHash); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	if err = os.Rename(tmpRootFS, path.Join(path.Dir(originRootFSPath), rootFSDigest.Hex())); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	return rootFSDigest, nil
 }
