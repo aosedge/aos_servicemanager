@@ -31,6 +31,7 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 /***********************************************************************************************************************
@@ -87,8 +88,25 @@ func validateUnpackedImage(installDir string) (err error) {
 	}
 
 	// validate service rootfs layer
-	if err = validateDigest(installDir, manifest.Layers[0].Digest); err != nil {
+	rootfsPath := path.Join(
+		installDir, "blobs", string(manifest.Layers[0].Digest.Algorithm()), manifest.Layers[0].Digest.Hex())
+
+	fi, err := os.Stat(rootfsPath)
+	if err != nil {
 		return aoserrors.Wrap(err)
+	}
+
+	if !fi.Mode().IsDir() {
+		return aoserrors.Wrap(validateDigest(installDir, manifest.Layers[0].Digest))
+	}
+
+	rootfsHash, err := dirhash.HashDir(rootfsPath, rootfsPath, dirDigest)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if manifest.Layers[0].Digest.String() != rootfsHash {
+		return aoserrors.New("incorrect rootfs checksum")
 	}
 
 	return nil

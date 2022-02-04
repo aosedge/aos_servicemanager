@@ -18,6 +18,7 @@
 package servicemanager
 
 import (
+	"bytes"
 	"errors"
 	"io/ioutil"
 	"os"
@@ -159,6 +160,19 @@ func (sm *ServiceManager) RevertService(service ServiceInfo) (retErr error) {
 			return sm.doRevertService(service)
 		},
 	)
+}
+
+func (sm *ServiceManager) ValidateService(service ServiceInfo) error {
+	manifestCheckSum, err := getManifestChecksum(service.ImagePath)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if !bytes.Equal(service.ManifestDigest, manifestCheckSum) {
+		return aoserrors.New("manifest checksum mismatch")
+	}
+
+	return validateUnpackedImage(service.ImagePath)
 }
 
 /***********************************************************************************************************************
