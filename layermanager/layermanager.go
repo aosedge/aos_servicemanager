@@ -60,15 +60,15 @@ var ErrNotExist = errors.New("layer does not exist")
 
 // LayerManager instance.
 type LayerManager struct {
-	layersDir         string
-	layerInfoProvider LayerInfoProvider
-	extractDir        string
-	downloadDir       string
-	actionHandler     *action.Handler
+	layersDir     string
+	layerStorage  LayerStorage
+	extractDir    string
+	downloadDir   string
+	actionHandler *action.Handler
 }
 
-// LayerInfoProvider provides API to add, remove or access layer information.
-type LayerInfoProvider interface {
+// LayerStorage provides API to add, remove or access layer information.
+type LayerStorage interface {
 	AddLayer(LayerInfo) error
 	DeleteLayerByDigest(digest string) error
 	GetLayersInfo() ([]LayerInfo, error)
@@ -90,14 +90,13 @@ type LayerInfo struct {
  * Public
  **********************************************************************************************************************/
 // New creates new launcher object.
-func New(config *config.Config,
-	infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
+func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{
-		layersDir:         config.LayersDir,
-		layerInfoProvider: infoProvider,
-		extractDir:        path.Join(config.WorkingDir, extractDirName),
-		downloadDir:       path.Join(config.WorkingDir, downloadDirName),
-		actionHandler:     action.New(maxConcurrentActions),
+		layersDir:     config.LayersDir,
+		layerStorage:  layerStorage,
+		extractDir:    path.Join(config.WorkingDir, extractDirName),
+		downloadDir:   path.Join(config.WorkingDir, downloadDirName),
+		actionHandler: action.New(maxConcurrentActions),
 	}
 
 	if layermanager.layersDir == "" {
@@ -115,7 +114,7 @@ func New(config *config.Config,
 
 // GetLayersInfo provides list of already installed fs layers.
 func (layermanager *LayerManager) GetLayersInfo() (info []LayerInfo, err error) {
-	if info, err = layermanager.layerInfoProvider.GetLayersInfo(); err != nil {
+	if info, err = layermanager.layerStorage.GetLayersInfo(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -141,7 +140,7 @@ func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
 
 // CheckLayersConsistency checks layers data to be consistent.
 func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
-	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
+	layers, err := layermanager.layerStorage.GetLayersInfo()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -163,7 +162,7 @@ func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
 
 // Cleanup clears all Layers.
 func (layermanager *LayerManager) Cleanup() (err error) {
-	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
+	layersInfo, err := layermanager.layerStorage.GetLayersInfo()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -181,7 +180,7 @@ func (layermanager *LayerManager) Cleanup() (err error) {
 
 // GetLayerInfoByDigest gets layers information by layer digest.
 func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer LayerInfo, err error) {
-	if layer, err = layermanager.layerInfoProvider.GetLayerInfoByDigest(digest); err != nil {
+	if layer, err = layermanager.layerStorage.GetLayerInfoByDigest(digest); err != nil {
 		return layer, aoserrors.Wrap(err)
 	}
 
@@ -210,7 +209,7 @@ func (layermanager *LayerManager) doInstallLayer(
 		}
 	}()
 
-	if _, errNoLayer := layermanager.layerInfoProvider.GetLayerInfoByDigest(installInfo.Digest); errNoLayer == nil {
+	if _, errNoLayer := layermanager.layerStorage.GetLayerInfoByDigest(installInfo.Digest); errNoLayer == nil {
 		// layer already installed
 		return nil
 	}
@@ -258,7 +257,7 @@ func (layermanager *LayerManager) doInstallLayer(
 
 	installInfo.Path = layerStorageDir
 
-	if err = layermanager.layerInfoProvider.AddLayer(installInfo); err != nil {
+	if err = layermanager.layerStorage.AddLayer(installInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -274,7 +273,7 @@ func (layermanager *LayerManager) doInstallLayer(
 func (layermanager *LayerManager) doUninstallLayer(digest string) (err error) {
 	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
 
-	layer, err := layermanager.layerInfoProvider.GetLayerInfoByDigest(digest)
+	layer, err := layermanager.layerStorage.GetLayerInfoByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -283,7 +282,7 @@ func (layermanager *LayerManager) doUninstallLayer(digest string) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = layermanager.layerInfoProvider.DeleteLayerByDigest(digest); err != nil {
+	if err = layermanager.layerStorage.DeleteLayerByDigest(digest); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
