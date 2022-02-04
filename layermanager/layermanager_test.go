@@ -43,7 +43,7 @@ import (
  * Types
  **********************************************************************************************************************/
 
-type testInfoProvider struct {
+type testLayerStorage struct {
 	sync.Mutex
 	layers []layermanager.LayerInfo
 }
@@ -89,7 +89,7 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestInstallRemoveLayer(t *testing.T) {
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, newTesInfoProvider())
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, newTestLayerStorage())
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
@@ -137,9 +137,9 @@ func TestInstallRemoveLayer(t *testing.T) {
 }
 
 func TestLayerConsistencyCheck(t *testing.T) {
-	infoProvider := newTesInfoProvider()
+	layerStorage := newTestLayerStorage()
 
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, infoProvider)
+	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, layerStorage)
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
@@ -179,7 +179,7 @@ func TestLayerConsistencyCheck(t *testing.T) {
 		t.Errorf("Error checking layer consistency: %s", err)
 	}
 
-	layer2, err := infoProvider.GetLayerInfoByDigest(digest2)
+	layer2, err := layerStorage.GetLayerInfoByDigest(digest2)
 	if err != nil {
 		t.Errorf("Can't get layer path: %s", err)
 	}
@@ -197,11 +197,11 @@ func TestLayerConsistencyCheck(t *testing.T) {
  * Interfaces
  **********************************************************************************************************************/
 
-func newTesInfoProvider() (infoProvider *testInfoProvider) {
-	return &testInfoProvider{}
+func newTestLayerStorage() (infoProvider *testLayerStorage) {
+	return &testLayerStorage{}
 }
 
-func (infoProvider *testInfoProvider) AddLayer(layerInfo layermanager.LayerInfo) (err error) {
+func (infoProvider *testLayerStorage) AddLayer(layerInfo layermanager.LayerInfo) (err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
@@ -216,7 +216,7 @@ func (infoProvider *testInfoProvider) AddLayer(layerInfo layermanager.LayerInfo)
 	return nil
 }
 
-func (infoProvider *testInfoProvider) DeleteLayerByDigest(digest string) (err error) {
+func (infoProvider *testLayerStorage) DeleteLayerByDigest(digest string) (err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
@@ -231,7 +231,7 @@ func (infoProvider *testInfoProvider) DeleteLayerByDigest(digest string) (err er
 	return aoserrors.New("layer not found")
 }
 
-func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
+func (infoProvider *testLayerStorage) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
@@ -240,7 +240,7 @@ func (infoProvider *testInfoProvider) GetLayersInfo() (layersList []layermanager
 	return layersList, nil
 }
 
-func (infoProvider *testInfoProvider) GetLayerInfoByDigest(
+func (infoProvider *testLayerStorage) GetLayerInfoByDigest(
 	digest string) (layerInfo layermanager.LayerInfo, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
