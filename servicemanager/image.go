@@ -20,10 +20,13 @@ package servicemanager
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path"
+	"sort"
+	"strings"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/opencontainers/go-digest"
@@ -37,6 +40,8 @@ import (
 const manifestFileName = "manifest.json"
 
 const buffSize = 1024 * 1024
+
+const blobsFolder = "blobs"
 
 /***********************************************************************************************************************
  * Types
@@ -104,12 +109,25 @@ func getImageManifest(installDir string) (manifest *serviceManifest, err error) 
 	return manifest, nil
 }
 
+func saveImageManifest(manifest *serviceManifest, installDir string) (err error) {
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = ioutil.WriteFile(path.Join(installDir, manifestFileName), manifestData, 0o600); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
 func validateDigest(installDir string, digest digest.Digest) (err error) {
 	if err = digest.Validate(); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	file, err := os.Open(path.Join(installDir, "blobs", string(digest.Algorithm()), digest.Hex()))
+	file, err := os.Open(path.Join(installDir, blobsFolder, string(digest.Algorithm()), digest.Hex()))
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -146,11 +164,11 @@ func getImageParts(installDir string) (parts ImageParts, err error) {
 		return parts, aoserrors.Wrap(err)
 	}
 
-	parts.ImageConfigPath = path.Join(installDir, "blobs", string(manifest.Config.Digest.Algorithm()),
+	parts.ImageConfigPath = path.Join(installDir, blobsFolder, string(manifest.Config.Digest.Algorithm()),
 		manifest.Config.Digest.Hex())
 
 	if manifest.AosService != nil {
-		parts.ServiceConfigPath = path.Join(installDir, "blobs", string(manifest.AosService.Digest.Algorithm()),
+		parts.ServiceConfigPath = path.Join(installDir, blobsFolder, string(manifest.AosService.Digest.Algorithm()),
 			manifest.AosService.Digest.Hex())
 	}
 
@@ -161,7 +179,7 @@ func getImageParts(installDir string) (parts ImageParts, err error) {
 
 	rootFSDigest := manifest.Layers[0].Digest
 
-	parts.ServiceFSPath = path.Join(installDir, "blobs", string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
+	parts.ServiceFSPath = path.Join(installDir, blobsFolder, string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
 	parts.LayersDigest = getLayersFromManifest(manifest)
 
 	return parts, nil
@@ -177,6 +195,17 @@ func getLayersFromManifest(manifest *serviceManifest) (layers []string) {
 	return layers
 }
 
+func updateRootFSDigestInManifest(installDir string, digest digest.Digest) (err error) {
+	manifest, err := getImageManifest(installDir)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	manifest.Layers[0].Digest = digest
+
+	return aoserrors.Wrap(saveImageManifest(manifest, installDir))
+}
+
 func getManifestChecksum(installDir string) (digest []byte, err error) {
 	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
 	if err != nil {
@@ -187,4 +216,37 @@ func getManifestChecksum(installDir string) (digest []byte, err error) {
 	h.Write(manifestJSON)
 
 	return h.Sum(nil), nil
+}
+
+func dirDigest(files []string, open func(string) (io.ReadCloser, error)) (string, error) {
+	h := sha256.New()
+
+	files = append([]string(nil), files...)
+
+	sort.Strings(files)
+
+	for _, file := range files {
+		if strings.Contains(file, "\n") {
+			return "", aoserrors.New("file names with new lines are not supported")
+		}
+
+		r, err := open(file)
+		if err != nil {
+			return "", err
+		}
+
+		hf := sha256.New()
+
+		_, err = io.Copy(hf, r)
+
+		r.Close()
+
+		if err != nil {
+			return "", aoserrors.Wrap(err)
+		}
+
+		fmt.Fprintf(h, "%x\n", hf.Sum(nil))
+	}
+
+	return digest.NewDigest("sha256", h).String(), nil
 }

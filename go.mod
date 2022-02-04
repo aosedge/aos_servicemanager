@@ -34,6 +34,7 @@ require (
 	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/mod v0.4.2
 	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
 	google.golang.org/grpc v1.41.0
 	google.golang.org/protobuf v1.27.1
