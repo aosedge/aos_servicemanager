@@ -36,6 +36,8 @@ type instanceInfo struct {
 	isStarted     bool
 	runtimeDir    string
 	secret        string
+	storagePath   string
+	statePath     string
 	stateChecksum []byte
 }
 

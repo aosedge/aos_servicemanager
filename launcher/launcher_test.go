@@ -20,6 +20,7 @@ package launcher_test
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/google/uuid"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -43,10 +45,12 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/monitoring"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /***********************************************************************************************************************
@@ -58,6 +62,8 @@ const (
 	serviceConfigFile = "service.json"
 	runtimeConfigFile = "config.json"
 	servicesDir       = "services"
+	storagesDir       = "storages"
+	statesDir         = "states"
 )
 
 /***********************************************************************************************************************
@@ -81,27 +87,50 @@ type testRunner struct {
 }
 
 type testResourceManager struct {
-	devices   map[string]resourcemanager.DeviceInfo
-	resources map[string]resourcemanager.ResourceInfo
+	allocatedDevices map[string][]string
+	devices          map[string]resourcemanager.DeviceInfo
+	resources        map[string]resourcemanager.ResourceInfo
 }
 
-type testNetworkManager struct{}
+type testNetworkManager struct {
+	sync.Mutex
+	instances map[string]networkmanager.NetworkParams
+}
 
 type testRegistrar struct {
 	sync.Mutex
 	secrets map[string]string
 }
 
+type testStorageStateProvider struct {
+	sync.Mutex
+	testInstances []testInstance
+	infos         map[string]storageStateInfo
+	stateChannel  chan storagestate.StateChangedInfo
+}
+
+type testInstanceMonitor struct {
+	sync.Mutex
+	instances map[string]monitoring.MonitorParams
+}
+
+type storageStateInfo struct {
+	storagestate.SetupParams
+	storagePath, statePath string
+}
+
 type testInstance struct {
-	serviceID      string
-	serviceVersion uint64
-	subjectID      string
-	serviceGID     int
-	numInstances   uint64
-	unitSubject    bool
-	imageConfig    *imagespec.Image
-	serviceConfig  *serviceConfig
-	err            []error
+	serviceID       string
+	serviceVersion  uint64
+	serviceProvider string
+	subjectID       string
+	serviceGID      int
+	numInstances    uint64
+	unitSubject     bool
+	imageConfig     *imagespec.Image
+	serviceConfig   *serviceConfig
+	stateChecksum   [][]byte
+	err             []error
 }
 
 type serviceDevice struct {
@@ -134,6 +163,7 @@ type serviceConfig struct {
 	Devices            []serviceDevice              `json:"devices,omitempty"`
 	Resources          []string                     `json:"resources,omitempty"`
 	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
+	AlertRules         *aostypes.ServiceAlertRules  `json:"alertRules,omitempty"`
 }
 
 type testDevice struct {
@@ -268,7 +298,8 @@ func TestRunInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil),
+		newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -305,9 +336,11 @@ func TestUpdateInstances(t *testing.T) {
 	storage := newTestStorage()
 	serviceProvider := newTestServiceProvider()
 	instanceRunner := newTestRunner(nil, nil)
+	storageStateProvider := newTestStorageStateProvider(nil)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), storageStateProvider,
+		newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -335,6 +368,8 @@ func TestUpdateInstances(t *testing.T) {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
+	// Check update status on runtime state changed
+
 	changedInstances := []testInstance{
 		{
 			serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 2,
@@ -356,13 +391,53 @@ func TestUpdateInstances(t *testing.T) {
 	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
+
+	// Check checksum on runtime state changed
+
+	newChecksum := []byte("new checksum")
+
+	changedInstances = []testInstance{
+		{
+			serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1,
+			stateChecksum: [][]byte{newChecksum}, err: []error{errors.New("some error")}, // nolint:goerr113
+		},
+	}
+
+	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+		ServiceID: changedInstances[0].serviceID, SubjectID: changedInstances[0].subjectID, Instance: 0,
+	})
+	if err != nil {
+		t.Fatalf("Can't get instance info: %v", err)
+	}
+
+	storageStateProvider.stateChannel <- storagestate.StateChangedInfo{
+		InstanceID: instance.InstanceID, Checksum: newChecksum,
+	}
+
+	// Wait for state event processed by launcher
+	time.Sleep(1 * time.Second)
+
+	if runStatus, err = createRunStatus(storage, changedInstances); err != nil {
+		t.Fatalf("Can't create run status: %v", err)
+	}
+
+	instanceRunner.statusChannel <- runStatus
+
+	runtimeStatus = launcher.RuntimeStatus{
+		UpdateStatus: &launcher.UpdateInstancesStatus{Instances: createInstancesStatuses(changedInstances)},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Fatalf("Check runtime status error: %v", err)
+	}
 }
 
 func TestSendCurrentRuntimeStatus(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -434,7 +509,8 @@ func TestRestartInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
+		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -556,7 +632,8 @@ func TestSubjectsChanged(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar())
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -600,7 +677,7 @@ func TestHostFSDir(t *testing.T) {
 		HostBinds:  hostFSBinds,
 	},
 		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil), newTestResourceManager(),
-		newTestNetworkManager(), newTestRegistrar())
+		newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -657,9 +734,11 @@ func TestRuntimeSpec(t *testing.T) {
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
 	testRegistrar := newTestRegistrar()
+	storageStateProvider := newTestStorageStateProvider(nil)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar)
+		newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar, storageStateProvider,
+		newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -963,6 +1042,12 @@ func TestRuntimeSpec(t *testing.T) {
 			"size=" + strconv.FormatUint(*testInstaces[0].serviceConfig.Quotas.TmpLimit, 10),
 		},
 	})
+	expectedMounts = append(expectedMounts, runtimespec.Mount{
+		Source:      storageStateProvider.infos[instance.InstanceID].statePath,
+		Destination: "/state.dat",
+		Type:        "bind",
+		Options:     []string{"bind", "rw"},
+	})
 
 	if !compareArrays(len(expectedMounts), len(runtimeSpec.Mounts), func(index1, index2 int) bool {
 		return reflect.DeepEqual(expectedMounts[index1], runtimeSpec.Mounts[index2])
@@ -1003,6 +1088,231 @@ func TestRuntimeSpec(t *testing.T) {
 		return expectedGroups[index1] == runtimeSpec.Process.User.AdditionalGids[index2]
 	}) {
 		t.Errorf("Wrong additional GIDs value: %v", runtimeSpec.Process.User.AdditionalGids)
+	}
+}
+
+func TestRuntimeEnvironment(t *testing.T) {
+	testInstaces := []testInstance{
+		{
+			serviceID: "service0", serviceVersion: 0, serviceProvider: "sp0", serviceGID: 1234,
+			subjectID: "subject0", numInstances: 1,
+			imageConfig: &imagespec.Image{
+				OS: "linux",
+				Config: imagespec.ImageConfig{
+					ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
+				},
+			},
+			serviceConfig: &serviceConfig{
+				Hostname:           newString("host1"),
+				Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
+				AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
+				Quotas: serviceQuotas{
+					DownloadSpeed: newUint64(4096),
+					UploadSpeed:   newUint64(8192),
+					DownloadLimit: newUint64(16384),
+					UploadLimit:   newUint64(32768),
+					StorageLimit:  newUint64(2048),
+					StateLimit:    newUint64(1024),
+				},
+				Resources: []string{"resource0", "resource1", "resource2"},
+				Devices:   []serviceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
+				AlertRules: &aostypes.ServiceAlertRules{
+					RAM: &aostypes.AlertRule{
+						MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
+						MinThreshold: 10, MaxThreshold: 100,
+					},
+					CPU: &aostypes.AlertRule{
+						MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
+						MinThreshold: 20, MaxThreshold: 200,
+					},
+					UsedDisk: &aostypes.AlertRule{
+						MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
+						MinThreshold: 30, MaxThreshold: 300,
+					},
+					InTraffic: &aostypes.AlertRule{
+						MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
+						MinThreshold: 40, MaxThreshold: 400,
+					},
+					OutTraffic: &aostypes.AlertRule{
+						MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
+						MinThreshold: 50, MaxThreshold: 500,
+					},
+				},
+			},
+		},
+	}
+
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+	resourceManager := newTestResourceManager()
+	networkManager := newTestNetworkManager()
+	registrar := newTestRegistrar()
+	storageStateProvider := newTestStorageStateProvider(testInstaces)
+	instanceMonitor := newTestInstanceMonitor()
+
+	resourceHosts := []config.Host{
+		{IP: "10.0.0.1", Hostname: "host1"},
+		{IP: "10.0.0.2", Hostname: "host2"},
+		{IP: "10.0.0.3", Hostname: "host3"},
+	}
+
+	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource0", Hosts: resourceHosts[:1]})
+	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource1", Hosts: resourceHosts[1:2]})
+	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource2", Hosts: resourceHosts[2:]})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device0"})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1"})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2"})
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider, instanceMonitor)
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = serviceProvider.fromTestInstances(testInstaces); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstaces)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstaces)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
+	})
+	if err != nil {
+		t.Fatalf("Can't get instance info: %v", err)
+	}
+
+	// Check registrar
+
+	if _, ok := registrar.secrets[instance.InstanceID]; !ok {
+		t.Error("Instance should be registered")
+	}
+
+	// Check storage state
+
+	storageStateInfo, ok := storageStateProvider.infos[instance.InstanceID]
+	if !ok {
+		t.Error("Storage & state should be setup")
+	}
+
+	if storageStateInfo.InstanceIdent != instance.InstanceIdent {
+		t.Errorf("Wrong storage & state instance ident: %v", storageStateInfo.InstanceIdent)
+	}
+
+	if storageStateInfo.StorageQuota != *testInstaces[0].serviceConfig.Quotas.StorageLimit {
+		t.Errorf("Wrong storage quota value: %d", storageStateInfo.StorageQuota)
+	}
+
+	if storageStateInfo.StateQuota != *testInstaces[0].serviceConfig.Quotas.StateLimit {
+		t.Errorf("Wrong state quota value: %d", storageStateInfo.StateQuota)
+	}
+
+	if storageStateInfo.UID != instance.UID {
+		t.Errorf("Wrong storage & state UID: %d", storageStateInfo.UID)
+	}
+
+	if storageStateInfo.GID != testInstaces[0].serviceGID {
+		t.Errorf("Wrong storage & state GID: %d", storageStateInfo.GID)
+	}
+
+	// Check network
+
+	netParams, ok := networkManager.instances[instance.InstanceID]
+	if !ok {
+		t.Error("Instance should be registered to network")
+	}
+
+	if !compateNetParams(netParams, networkmanager.NetworkParams{
+		InstanceIdent:      instance.InstanceIdent,
+		Hostname:           *testInstaces[0].serviceConfig.Hostname,
+		Hosts:              resourceHosts,
+		ExposedPorts:       convertMapToStringList(testInstaces[0].imageConfig.Config.ExposedPorts),
+		AllowedConnections: convertMapToStringList(testInstaces[0].serviceConfig.AllowedConnections),
+		HostsFilePath:      filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "hosts"),
+		ResolvConfFilePath: filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "resolv.conf"),
+		IngressKbit:        *testInstaces[0].serviceConfig.Quotas.DownloadSpeed,
+		EgressKbit:         *testInstaces[0].serviceConfig.Quotas.UploadSpeed,
+		DownloadLimit:      *testInstaces[0].serviceConfig.Quotas.DownloadLimit,
+		UploadLimit:        *testInstaces[0].serviceConfig.Quotas.UploadLimit,
+	}) {
+		t.Errorf("Wrong network params: %v", netParams)
+	}
+
+	// Check allocated devices
+
+	for name, allocatedDevice := range resourceManager.allocatedDevices {
+		if allocatedDevice[0] != instance.InstanceID {
+			t.Errorf("Device %s should be allocated", name)
+		}
+	}
+
+	// Check monitor
+
+	monitorPrams, ok := instanceMonitor.instances[instance.InstanceID]
+	if !ok {
+		t.Error("Instance monitor should be stated")
+	}
+
+	if !reflect.DeepEqual(monitorPrams, monitoring.MonitorParams{
+		InstanceIdent: instance.InstanceIdent,
+		UID:           instance.UID,
+		GID:           testInstaces[0].serviceGID,
+		AlertRules:    testInstaces[0].serviceConfig.AlertRules,
+	}) {
+		t.Errorf("Wrong monitor params: %v", monitorPrams)
+	}
+
+	// Stop instances and check runtime release
+
+	if err = testLauncher.RunInstances(nil); err != nil {
+		t.Fatalf("Can't stop instances: %v", err)
+	}
+
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Check registrar
+
+	if _, ok := registrar.secrets[instance.InstanceID]; ok {
+		t.Error("Instance should be unregistered")
+	}
+
+	// Check storage state
+
+	if _, ok := storageStateProvider.infos[instance.InstanceID]; ok {
+		t.Error("Storage state should be cleanup")
+	}
+
+	// Check network
+
+	if _, ok := networkManager.instances[instance.InstanceID]; ok {
+		t.Error("Instance should be removed from network")
+	}
+
+	// Check allocated devices
+
+	for name, allocatedDevice := range resourceManager.allocatedDevices {
+		if len(allocatedDevice) != 0 {
+			t.Errorf("Device %s should be released", name)
+		}
+	}
+
+	// Check monitor
+
+	if _, ok := instanceMonitor.instances[instance.InstanceID]; ok {
+		t.Error("Instance monitor should be stopped")
 	}
 }
 
@@ -1192,10 +1502,11 @@ func (provider *testServiceProvider) fromTestInstances(testInstances []testInsta
 
 	for _, testInstance := range testInstances {
 		provider.services[testInstance.serviceID] = servicemanager.ServiceInfo{
-			ServiceID:  testInstance.serviceID,
-			AosVersion: testInstance.serviceVersion,
-			ImagePath:  filepath.Join(tmpDir, servicesDir, testInstance.serviceID),
-			GID:        testInstance.serviceGID,
+			ServiceID:       testInstance.serviceID,
+			AosVersion:      testInstance.serviceVersion,
+			ServiceProvider: testInstance.serviceProvider,
+			ImagePath:       filepath.Join(tmpDir, servicesDir, testInstance.serviceID),
+			GID:             testInstance.serviceGID,
 		}
 
 		if err := os.MkdirAll(filepath.Join(tmpDir, servicesDir, testInstance.serviceID), 0o755); err != nil {
@@ -1275,8 +1586,9 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 
 func newTestResourceManager() *testResourceManager {
 	return &testResourceManager{
-		devices:   make(map[string]resourcemanager.DeviceInfo),
-		resources: make(map[string]resourcemanager.ResourceInfo),
+		allocatedDevices: map[string][]string{},
+		devices:          make(map[string]resourcemanager.DeviceInfo),
+		resources:        make(map[string]resourcemanager.ResourceInfo),
 	}
 }
 
@@ -1298,6 +1610,44 @@ func (manager *testResourceManager) GetResourceInfo(resource string) (resourcema
 	return resourceInfo, nil
 }
 
+func (manager *testResourceManager) AllocateDevice(device, instanceID string) error {
+	deviceInfo, ok := manager.devices[device]
+	if !ok {
+		return aoserrors.New("device info not found")
+	}
+
+	for _, allocatedInstanceID := range manager.allocatedDevices[device] {
+		if allocatedInstanceID == instanceID {
+			return aoserrors.Errorf("device %s already allocated by %s", device, instanceID)
+		}
+	}
+
+	if deviceInfo.SharedCount != 0 && len(manager.allocatedDevices[device]) >= deviceInfo.SharedCount {
+		return aoserrors.Errorf("device %s shared count exceeds", device)
+	}
+
+	manager.allocatedDevices[device] = append(manager.allocatedDevices[device], instanceID)
+
+	return nil
+}
+
+func (manager *testResourceManager) ReleaseDevices(instanceID string) error {
+	for device, instanceIDs := range manager.allocatedDevices {
+		for i, allocatedInstanceID := range instanceIDs {
+			if allocatedInstanceID == instanceID {
+				manager.allocatedDevices[device] = append(instanceIDs[:i], instanceIDs[i+1:]...)
+				break
+			}
+		}
+
+		if len(manager.allocatedDevices[device]) == 0 {
+			delete(manager.allocatedDevices, device)
+		}
+	}
+
+	return nil
+}
+
 func (manager *testResourceManager) addDevice(device resourcemanager.DeviceInfo) {
 	manager.devices[device.Name] = device
 }
@@ -1311,7 +1661,7 @@ func (manager *testResourceManager) addResource(resource resourcemanager.Resourc
  **********************************************************************************************************************/
 
 func newTestNetworkManager() *testNetworkManager {
-	return &testNetworkManager{}
+	return &testNetworkManager{instances: make(map[string]networkmanager.NetworkParams)}
 }
 
 func (manager *testNetworkManager) GetNetnsPath(instanceID string) string {
@@ -1321,10 +1671,24 @@ func (manager *testNetworkManager) GetNetnsPath(instanceID string) string {
 func (manager *testNetworkManager) AddInstanceToNetwork(
 	instanceID, networkID string, params networkmanager.NetworkParams,
 ) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+	if _, ok := manager.instances[instanceID]; ok {
+		return aoserrors.Errorf("instance %s already added to network", instanceID)
+	}
+
+	manager.instances[instanceID] = params
+
 	return nil
 }
 
 func (manager *testNetworkManager) RemoveInstanceFromNetwork(instanceID, networkID string) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+	delete(manager.instances, instanceID)
+
 	return nil
 }
 
@@ -1362,6 +1726,92 @@ func (registrar *testRegistrar) UnregisterInstance(instanceID string) error {
 	}
 
 	delete(registrar.secrets, instanceID)
+
+	return nil
+}
+
+/***********************************************************************************************************************
+ * testStateStorageProvider
+ **********************************************************************************************************************/
+
+func newTestStorageStateProvider(testInstances []testInstance) *testStorageStateProvider {
+	return &testStorageStateProvider{
+		testInstances: testInstances,
+		infos:         make(map[string]storageStateInfo),
+		stateChannel:  make(chan storagestate.StateChangedInfo, 1),
+	}
+}
+
+func (provider *testStorageStateProvider) Setup(
+	instanceID string, params storagestate.SetupParams,
+) (storagePath, statePath string, stateChecksum []byte, err error) {
+	provider.Lock()
+	defer provider.Unlock()
+
+	storagePath = filepath.Join(tmpDir, storagesDir, instanceID)
+	statePath = filepath.Join(tmpDir, statesDir, instanceID)
+
+	provider.infos[instanceID] = storageStateInfo{
+		SetupParams: params,
+		storagePath: storagePath,
+		statePath:   statePath,
+	}
+
+	if len(provider.testInstances) > 0 {
+		for _, testInstance := range provider.testInstances {
+			if testInstance.serviceID == params.ServiceID && testInstance.subjectID == params.SubjectID &&
+				params.Instance < uint64(len(testInstance.stateChecksum)) {
+				stateChecksum = testInstance.stateChecksum[params.Instance]
+			}
+		}
+	}
+
+	return storagePath, statePath, stateChecksum, nil
+}
+
+func (provider *testStorageStateProvider) Cleanup(instanceID string) error {
+	provider.Lock()
+	defer provider.Unlock()
+
+	delete(provider.infos, instanceID)
+
+	return nil
+}
+
+func (provider *testStorageStateProvider) Remove(instanceID string) error {
+	return nil
+}
+
+func (provider *testStorageStateProvider) StateChangedChannel() <-chan storagestate.StateChangedInfo {
+	return provider.stateChannel
+}
+
+/***********************************************************************************************************************
+ * testInstanceMonitor
+ **********************************************************************************************************************/
+
+func newTestInstanceMonitor() *testInstanceMonitor {
+	return &testInstanceMonitor{instances: make(map[string]monitoring.MonitorParams)}
+}
+
+func (monitor *testInstanceMonitor) StartInstanceMonitor(instanceID string, params monitoring.MonitorParams) error {
+	monitor.Lock()
+	defer monitor.Unlock()
+
+	if _, ok := monitor.instances[instanceID]; ok {
+		return aoserrors.Errorf("monitor for instance %s already started", instanceID)
+	}
+
+	monitor.instances[instanceID] = params
+
+	return nil
+}
+
+func (monitor *testInstanceMonitor) StopInstanceMonitor(instanceID string) error {
+	monitor.Lock()
+	defer monitor.Unlock()
+
+	delete(monitor.instances, instanceID)
 
 	return nil
 }
@@ -1552,6 +2002,10 @@ func createInstancesStatuses(testInstances []testInstance) (instances []cloudpro
 				instanceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{
 					Message: testInstance.err[index].Error(),
 				}
+			}
+
+			if index < uint64(len(testInstance.stateChecksum)) {
+				instanceStatus.StateChecksum = hex.EncodeToString(testInstance.stateChecksum[index])
 			}
 
 			instances = append(instances, instanceStatus)
@@ -1875,4 +2329,72 @@ func getAosEnvVars(instance launcher.InstanceInfo) (aosEnvVars []string) {
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_ID=%s", instance.InstanceID))
 
 	return aosEnvVars
+}
+
+func convertMapToStringList(m map[string]struct{}) (result []string) {
+	result = make([]string, 0, len(m))
+
+	for key := range m {
+		result = append(result, key)
+	}
+
+	return result
+}
+
+func compateNetParams(p1, p2 networkmanager.NetworkParams) bool {
+	if p1.InstanceIdent != p2.InstanceIdent {
+		return false
+	}
+
+	if p1.Hostname != p2.Hostname {
+		return false
+	}
+
+	if !compareArrays(len(p1.Aliases), len(p2.Aliases), func(index1, index2 int) bool {
+		return p1.Aliases[index1] == p2.Aliases[index2]
+	}) {
+		return false
+	}
+
+	if !compareArrays(len(p1.Hosts), len(p2.Hosts), func(index1, index2 int) bool {
+		return p1.Hosts[index1] == p2.Hosts[index2]
+	}) {
+		return false
+	}
+
+	if !compareArrays(len(p1.DNSSevers), len(p2.DNSSevers), func(index1, index2 int) bool {
+		return p1.DNSSevers[index1] == p2.DNSSevers[index2]
+	}) {
+		return false
+	}
+
+	if !compareArrays(len(p1.ExposedPorts), len(p2.ExposedPorts), func(index1, index2 int) bool {
+		return p1.ExposedPorts[index1] == p2.ExposedPorts[index2]
+	}) {
+		return false
+	}
+
+	if !compareArrays(len(p1.AllowedConnections), len(p2.AllowedConnections), func(index1, index2 int) bool {
+		return p1.AllowedConnections[index1] == p2.AllowedConnections[index2]
+	}) {
+		return false
+	}
+
+	if p1.HostsFilePath != p2.HostsFilePath {
+		return false
+	}
+
+	if p1.ResolvConfFilePath != p2.ResolvConfFilePath {
+		return false
+	}
+
+	if p1.IngressKbit != p2.IngressKbit || p1.EgressKbit != p2.EgressKbit {
+		return false
+	}
+
+	if p1.DownloadLimit != p2.DownloadLimit || p1.UploadLimit != p2.UploadLimit {
+		return false
+	}
+
+	return true
 }
