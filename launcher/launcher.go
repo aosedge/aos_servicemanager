@@ -18,7 +18,9 @@
 package launcher
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"io/ioutil"
 	"os"
@@ -36,10 +38,12 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/monitoring"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 	"github.com/aoscloud/aos_servicemanager/utils/uidgidpool"
 )
 
@@ -50,9 +54,11 @@ import (
 const maxParallelInstanceActions = 32
 
 const (
-	hostFSWiteoutsDir = "hostfs/whiteouts"
-	runtimeConfigFile = "config.json"
-	instanceRootFS    = "rootfs"
+	hostFSWiteoutsDir      = "hostfs/whiteouts"
+	runtimeConfigFile      = "config.json"
+	instanceRootFS         = "rootfs"
+	instanceMountPointsDir = "mounts"
+	instanceStateFile      = "/state.dat"
 )
 
 /***********************************************************************************************************************
@@ -88,6 +94,8 @@ type InstanceRunner interface {
 type ResourceManager interface {
 	GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error)
 	GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error)
+	AllocateDevice(device, instanceID string) error
+	ReleaseDevices(instanceID string) error
 }
 
 // NetworkManager provides network access.
@@ -101,6 +109,22 @@ type NetworkManager interface {
 type InstanceRegistrar interface {
 	RegisterInstance(instanceID string, permissions map[string]map[string]string) (secret string, err error)
 	UnregisterInstance(instanceID string) error
+}
+
+// StorageStateProvider provides API for instance storage/state.
+type StorageStateProvider interface {
+	Setup(
+		instanceID string, params storagestate.SetupParams,
+	) (storagePath, statePath string, stateChecksum []byte, err error)
+	Cleanup(instanceID string) error
+	Remove(instanceID string) error
+	StateChangedChannel() <-chan storagestate.StateChangedInfo
+}
+
+// InstanceMonitor provides API to monitor instance parameters.
+type InstanceMonitor interface {
+	StartInstanceMonitor(instanceID string, params monitoring.MonitorParams) error
+	StopInstanceMonitor(instanceID string) error
 }
 
 // InstanceInfo instance information.
@@ -135,12 +159,14 @@ type UpdateInstancesStatus struct {
 type Launcher struct {
 	sync.Mutex
 
-	storage           Storage
-	serviceProvider   ServiceProvider
-	instanceRunner    InstanceRunner
-	resourceManager   ResourceManager
-	networkManager    NetworkManager
-	instanceRegistrar InstanceRegistrar
+	storage              Storage
+	serviceProvider      ServiceProvider
+	instanceRunner       InstanceRunner
+	resourceManager      ResourceManager
+	networkManager       NetworkManager
+	instanceRegistrar    InstanceRegistrar
+	storageStateProvider StorageStateProvider
+	instanceMonitor      InstanceMonitor
 
 	config                 *config.Config
 	currentSubjects        []string
@@ -177,14 +203,15 @@ var RuntimeDir = "/run/aos/runtime"
 
 // New creates new launcher object.
 func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, instanceRunner InstanceRunner,
-	resourceManager ResourceManager, networkManager NetworkManager,
-	instanceRegistrar InstanceRegistrar,
+	resourceManager ResourceManager, networkManager NetworkManager, instanceRegistrar InstanceRegistrar,
+	storageStateProvider StorageStateProvider, instanceMonitor InstanceMonitor,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, instanceRunner: instanceRunner,
 		resourceManager: resourceManager, networkManager: networkManager, instanceRegistrar: instanceRegistrar,
+		storageStateProvider: storageStateProvider, instanceMonitor: instanceMonitor,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
@@ -397,6 +424,9 @@ func (launcher *Launcher) handleChannels(ctx context.Context) {
 		case instances := <-launcher.instanceRunner.InstanceStatusChannel():
 			launcher.updateInstancesStatuses(instances)
 
+		case stateChangedInfo := <-launcher.storageStateProvider.StateChangedChannel():
+			launcher.updateInstanceState(stateChangedInfo)
+
 		case <-ctx.Done():
 			return
 		}
@@ -428,6 +458,27 @@ func (launcher *Launcher) updateInstancesStatuses(instances []runner.InstanceSta
 
 	if len(updateInstancesStatus.Instances) > 0 {
 		launcher.runtimeStatusChannel <- RuntimeStatus{UpdateStatus: updateInstancesStatus}
+	}
+}
+
+func (launcher *Launcher) updateInstanceState(stateChangedIngo storagestate.StateChangedInfo) {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	instance, ok := launcher.currentInstances[stateChangedIngo.InstanceID]
+	if !ok {
+		log.WithField("instanceID", stateChangedIngo.InstanceID).Errorf("Unknown instance state changed")
+
+		return
+	}
+
+	if !bytes.Equal(stateChangedIngo.Checksum, instance.stateChecksum) {
+		log.WithFields(log.Fields{
+			"instanceID": stateChangedIngo.InstanceID,
+			"checksum":   hex.EncodeToString(stateChangedIngo.Checksum),
+		}).Debugf("Instance state changed")
+
+		instance.stateChecksum = stateChangedIngo.Checksum
 	}
 }
 
@@ -567,12 +618,26 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 	})
 }
 
-func (launcher *Launcher) releaseRuntime(instance *instanceInfo, service *serviceInfo) (err error) {
-	if service == nil || service.serviceConfig.Permissions != nil {
+func (launcher *Launcher) releaseRuntime(instance *instanceInfo) (err error) {
+	if instance.service.serviceConfig.Permissions != nil {
 		if registerErr := launcher.instanceRegistrar.UnregisterInstance(
 			instance.InstanceID); registerErr != nil && err == nil {
 			err = aoserrors.Wrap(registerErr)
 		}
+	}
+
+	if networkErr := launcher.networkManager.RemoveInstanceFromNetwork(
+		instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
+		err = aoserrors.Wrap(networkErr)
+	}
+
+	if deviceErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); deviceErr != nil && err == nil {
+		err = aoserrors.Wrap(deviceErr)
+	}
+
+	if storageStateErr := launcher.storageStateProvider.Cleanup(
+		instance.InstanceID); storageStateErr != nil && err == nil {
+		err = aoserrors.Wrap(storageStateErr)
 	}
 
 	return err
@@ -587,21 +652,25 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 
 	instance.isStarted = false
 
+	if instance.service == nil {
+		return err
+	}
+
 	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil && err == nil {
 		err = aoserrors.Wrap(runnerErr)
 	}
 
-	service, serviceErr := launcher.getCurrentServiceInfo(instance.ServiceID)
-	if serviceErr != nil && err == nil {
-		err = serviceErr
-	}
-
-	if releaseErr := launcher.releaseRuntime(instance, service); releaseErr != nil && err == nil {
+	if releaseErr := launcher.releaseRuntime(instance); releaseErr != nil && err == nil {
 		err = releaseErr
 	}
 
 	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
 		err = aoserrors.Wrap(removeErr)
+	}
+
+	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
+		instance.InstanceID); monitorErr != nil && err == nil {
+		err = aoserrors.Wrap(monitorErr)
 	}
 
 	return err
@@ -650,6 +719,23 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 }
 
 func (launcher *Launcher) startInstances(instances []*instanceInfo) {
+	// Allocate devices
+	i := 0
+
+	for _, instance := range instances {
+		if err := launcher.allocateDevices(instance); err != nil {
+			launcher.instanceFailed(instance, err)
+
+			continue
+		}
+
+		instances[i] = instance
+		i++
+	}
+
+	instances = instances[:i]
+
+	// Start instances
 	for _, instance := range instances {
 		launcher.doStartAction(instance)
 	}
@@ -673,6 +759,96 @@ func (launcher *Launcher) doStartAction(instance *instanceInfo) {
 	})
 }
 
+func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []config.Host, err error) {
+	for _, resource := range resources {
+		boardResource, err := launcher.resourceManager.GetResourceInfo(resource)
+		if err != nil {
+			return hosts, aoserrors.Wrap(err)
+		}
+
+		hosts = append(hosts, boardResource.Hosts...)
+	}
+
+	return hosts, nil
+}
+
+func (launcher *Launcher) setupNetwork(instance *instanceInfo) (err error) {
+	networkFilesDir := filepath.Join(instance.runtimeDir, instanceMountPointsDir)
+
+	if err = os.MkdirAll(networkFilesDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	params := networkmanager.NetworkParams{
+		InstanceIdent:      instance.InstanceIdent,
+		HostsFilePath:      filepath.Join(networkFilesDir, "etc", "hosts"),
+		ResolvConfFilePath: filepath.Join(networkFilesDir, "etc", "resolv.conf"),
+	}
+
+	if params.Hosts, err = launcher.getHostsFromResources(instance.service.serviceConfig.Resources); err != nil {
+		return err
+	}
+
+	if instance.service.serviceConfig.Quotas.DownloadSpeed != nil {
+		params.IngressKbit = *instance.service.serviceConfig.Quotas.DownloadSpeed
+	}
+
+	if instance.service.serviceConfig.Quotas.UploadSpeed != nil {
+		params.EgressKbit = *instance.service.serviceConfig.Quotas.UploadSpeed
+	}
+
+	if instance.service.serviceConfig.Quotas.DownloadLimit != nil {
+		params.DownloadLimit = *instance.service.serviceConfig.Quotas.DownloadLimit
+	}
+
+	if instance.service.serviceConfig.Quotas.UploadLimit != nil {
+		params.UploadLimit = *instance.service.serviceConfig.Quotas.UploadLimit
+	}
+
+	if instance.service.serviceConfig.Hostname != nil {
+		params.Hostname = *instance.service.serviceConfig.Hostname
+	}
+
+	params.ExposedPorts = make([]string, 0, len(instance.service.imageConfig.Config.ExposedPorts))
+
+	for key := range instance.service.imageConfig.Config.ExposedPorts {
+		params.ExposedPorts = append(params.ExposedPorts, key)
+	}
+
+	params.AllowedConnections = make([]string, 0, len(instance.service.serviceConfig.AllowedConnections))
+
+	for key := range instance.service.serviceConfig.AllowedConnections {
+		params.AllowedConnections = append(params.AllowedConnections, key)
+	}
+
+	if err := launcher.networkManager.AddInstanceToNetwork(
+		instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) allocateDevices(instance *instanceInfo) (err error) {
+	defer func() {
+		if err != nil {
+			if releaseErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); releaseErr != nil {
+				log.WithFields(
+					instanceIdentLogFields(instance.InstanceIdent, nil),
+				).Errorf("Can't release instance devices: %v", releaseErr)
+			}
+		}
+	}()
+
+	for _, device := range instance.service.serviceConfig.Devices {
+		if err := launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
 	if instance.service.serviceConfig.Permissions != nil {
 		secret, err := launcher.instanceRegistrar.RegisterInstance(
@@ -682,6 +858,41 @@ func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
 		}
 
 		instance.secret = secret
+	}
+
+	var (
+		storageLimit uint64
+		stateLimit   uint64
+	)
+
+	if instance.service.serviceConfig.Quotas.StorageLimit != nil {
+		storageLimit = *instance.service.serviceConfig.Quotas.StorageLimit
+	}
+
+	if instance.service.serviceConfig.Quotas.StateLimit != nil {
+		stateLimit = *instance.service.serviceConfig.Quotas.StateLimit
+	}
+
+	storagePath, statePath, stateChecksum, err := launcher.storageStateProvider.Setup(instance.InstanceID,
+		storagestate.SetupParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID, GID: instance.service.GID,
+			StorageQuota: storageLimit, StateQuota: stateLimit,
+		})
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	instance.storagePath = storagePath
+	instance.statePath = statePath
+
+	// State checksum can be changed in state changed handler
+	launcher.runMutex.Lock()
+	instance.stateChecksum = stateChecksum
+	launcher.runMutex.Unlock()
+
+	if err = launcher.setupNetwork(instance); err != nil {
+		return err
 	}
 
 	return nil
@@ -711,6 +922,18 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 
 	if _, err := launcher.createRuntimeSpec(instance); err != nil {
 		return err
+	}
+
+	if err := launcher.instanceMonitor.StartInstanceMonitor(
+		instance.InstanceID, monitoring.MonitorParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID,
+			GID:           instance.service.GID,
+			AlertRules:    instance.service.serviceConfig.AlertRules,
+		}); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't start instance monitoring: %v", err)
 	}
 
 	runStatus := launcher.instanceRunner.StartInstance(
