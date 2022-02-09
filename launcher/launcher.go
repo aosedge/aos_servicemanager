@@ -119,8 +119,12 @@ type Launcher struct {
  * Vars
  **********************************************************************************************************************/
 
-// ErrNotExist not exist instance error.
-var ErrNotExist = errors.New("instance not exist")
+var (
+	// ErrNotExist not exist instance error.
+	ErrNotExist = errors.New("instance not exist")
+	// ErrNoRuntimeStatus no current runtime status error.
+	ErrNoRuntimeStatus = errors.New("no runtime status")
+)
 
 /***********************************************************************************************************************
  * Public
@@ -164,6 +168,16 @@ func (launcher *Launcher) Close() (err error) {
 func (launcher *Launcher) SendCurrentRuntimeStatus() error {
 	launcher.Lock()
 	defer launcher.Unlock()
+
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	// Send current run status only if it is available
+	if launcher.currentInstances == nil {
+		return ErrNoRuntimeStatus
+	}
+
+	launcher.sendRunInstancesStatuses()
 
 	return nil
 }
