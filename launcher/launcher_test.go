@@ -247,6 +247,51 @@ func TestUpdateInstances(t *testing.T) {
 	}
 }
 
+func TestSendCurrentRuntimeStatus(t *testing.T) {
+	serviceProvider := newTestServiceProvider()
+
+	testLauncher, err := launcher.New(&config.Config{}, newTestStorage(), serviceProvider,
+		newTestRunner(nil, nil))
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	testInstances := []testInstance{
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 3},
+	}
+
+	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.SendCurrentRuntimeStatus(); !errors.Is(launcher.ErrNoRuntimeStatus, err) {
+		t.Error("No runtime status error expected")
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	if err = testLauncher.SendCurrentRuntimeStatus(); err != nil {
+		t.Errorf("Can't send current runtime status: %v", err)
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
