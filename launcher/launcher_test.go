@@ -45,6 +45,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/monitoring"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
@@ -60,8 +61,10 @@ import (
 const (
 	imageConfigFile   = "image.json"
 	serviceConfigFile = "service.json"
+	instanceRootFS    = "rootfs"
 	runtimeConfigFile = "config.json"
 	servicesDir       = "services"
+	layersDir         = "layers"
 	storagesDir       = "storages"
 	statesDir         = "states"
 )
@@ -76,7 +79,11 @@ type testStorage struct {
 }
 
 type testServiceProvider struct {
-	services map[string]servicemanager.ServiceInfo
+	services map[string]serviceInfo
+}
+
+type testLayerProvider struct {
+	layers map[string]layermanager.LayerInfo
 }
 
 type testRunner struct {
@@ -114,6 +121,22 @@ type testInstanceMonitor struct {
 	instances map[string]monitoring.MonitorParams
 }
 
+type testMounter struct {
+	sync.Mutex
+	mounts map[string]mountInfo
+}
+
+type serviceInfo struct {
+	servicemanager.ServiceInfo
+	layerDigests []string
+}
+
+type mountInfo struct {
+	lowerDirs []string
+	upperDir  string
+	workDir   string
+}
+
 type storageStateInfo struct {
 	storagestate.SetupParams
 	storagePath, statePath string
@@ -125,6 +148,7 @@ type testInstance struct {
 	serviceProvider string
 	subjectID       string
 	serviceGID      int
+	layerDigests    []string
 	numInstances    uint64
 	unitSubject     bool
 	imageConfig     *imagespec.Image
@@ -182,7 +206,10 @@ type testDevice struct {
  * Vars
  **********************************************************************************************************************/
 
-var tmpDir string
+var (
+	tmpDir  string
+	mounter = newTestMounter()
+)
 
 /***********************************************************************************************************************
  * Init
@@ -297,9 +324,9 @@ func TestRunInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil),
-		newTestInstanceMonitor())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -338,9 +365,9 @@ func TestUpdateInstances(t *testing.T) {
 	instanceRunner := newTestRunner(nil, nil)
 	storageStateProvider := newTestStorageStateProvider(nil)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, instanceRunner,
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), storageStateProvider,
-		newTestInstanceMonitor())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		storageStateProvider, newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -436,8 +463,8 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -509,7 +536,7 @@ func TestRestartInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
 		newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
@@ -632,8 +659,8 @@ func TestSubjectsChanged(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -676,8 +703,9 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(), newTestRunner(nil, nil), newTestResourceManager(),
-		newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil),
+		newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -737,8 +765,8 @@ func TestRuntimeSpec(t *testing.T) {
 	storageStateProvider := newTestStorageStateProvider(nil)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar, storageStateProvider,
-		newTestInstanceMonitor())
+		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
+		storageStateProvider, newTestInstanceMonitor())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1096,6 +1124,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 		{
 			serviceID: "service0", serviceVersion: 0, serviceProvider: "sp0", serviceGID: 1234,
 			subjectID: "subject0", numInstances: 1,
+			layerDigests: []string{uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()},
 			imageConfig: &imagespec.Image{
 				OS: "linux",
 				Config: imagespec.ImageConfig{
@@ -1143,6 +1172,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 
 	serviceProvider := newTestServiceProvider()
+	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
@@ -1163,7 +1193,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1"})
 	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2"})
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
 		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider, instanceMonitor)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
@@ -1172,6 +1202,10 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	if err = serviceProvider.fromTestInstances(testInstaces); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = layerProvider.fromTestInstances(testInstaces); err != nil {
+		t.Fatalf("Can't create test layers: %v", err)
 	}
 
 	if err = testLauncher.RunInstances(createInstancesInfos(testInstaces)); err != nil {
@@ -1271,6 +1305,50 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Errorf("Wrong monitor params: %v", monitorPrams)
 	}
 
+	// Check mount
+
+	mountInfo, ok := mounter.mounts[filepath.Join(launcher.RuntimeDir, instance.InstanceID, instanceRootFS)]
+	if !ok {
+		t.Error("Instance root FS should be mounted")
+	}
+
+	if mountInfo.upperDir != filepath.Join(tmpDir, storagesDir, instance.InstanceID, "upperdir") {
+		t.Errorf("Wrong upper dir value: %v", mountInfo.upperDir)
+	}
+
+	if mountInfo.workDir != filepath.Join(tmpDir, storagesDir, instance.InstanceID, "workdir") {
+		t.Errorf("Wrong work dir value: %v", mountInfo.workDir)
+	}
+
+	service, err := serviceProvider.GetServiceInfo(instance.ServiceID)
+	if err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	imageParts, err := serviceProvider.GetImageParts(service)
+	if err != nil {
+		t.Fatalf("Can't get image parts: %v", err)
+	}
+
+	expectedLowerDirs := []string{
+		filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts"), imageParts.ServiceFSPath,
+	}
+
+	for _, digest := range imageParts.LayersDigest {
+		layer, err := layerProvider.GetLayerInfoByDigest(digest)
+		if err != nil {
+			t.Fatalf("Can't get layer info: %v", err)
+		}
+
+		expectedLowerDirs = append(expectedLowerDirs, layer.Path)
+	}
+
+	expectedLowerDirs = append(expectedLowerDirs, filepath.Join(tmpDir, "hostfs", "whiteouts"), "/")
+
+	if !reflect.DeepEqual(mountInfo.lowerDirs, expectedLowerDirs) {
+		t.Errorf("Wrong lower dirs value: %v", mountInfo.lowerDirs)
+	}
+
 	// Stop instances and check runtime release
 
 	if err = testLauncher.RunInstances(nil); err != nil {
@@ -1313,6 +1391,12 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	if _, ok := instanceMonitor.instances[instance.InstanceID]; ok {
 		t.Error("Instance monitor should be stopped")
+	}
+
+	// Check mount
+
+	if _, ok := mounter.mounts[filepath.Join(launcher.RuntimeDir, instance.InstanceID, instanceRootFS)]; ok {
+		t.Error("Instance root FS should be unmounted")
 	}
 }
 
@@ -1471,7 +1555,7 @@ func (storage *testStorage) fromTestInstances(testInstances []testInstance, runn
 
 func newTestServiceProvider() *testServiceProvider {
 	return &testServiceProvider{
-		services: make(map[string]servicemanager.ServiceInfo),
+		services: make(map[string]serviceInfo),
 	}
 }
 
@@ -1481,35 +1565,51 @@ func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicema
 		return servicemanager.ServiceInfo{}, servicemanager.ErrNotExist
 	}
 
-	return service, nil
+	return service.ServiceInfo, nil
 }
 
 func (provider *testServiceProvider) GetImageParts(
 	service servicemanager.ServiceInfo,
 ) (servicemanager.ImageParts, error) {
+	info, ok := provider.services[service.ServiceID]
+	if !ok {
+		return servicemanager.ImageParts{}, servicemanager.ErrNotExist
+	}
+
 	return servicemanager.ImageParts{
 		ImageConfigPath:   filepath.Join(service.ImagePath, imageConfigFile),
 		ServiceConfigPath: filepath.Join(service.ImagePath, serviceConfigFile),
+		ServiceFSPath:     filepath.Join(service.ImagePath, instanceRootFS),
+		LayersDigest:      info.layerDigests,
 	}, nil
 }
 
 func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance) error {
-	provider.services = make(map[string]servicemanager.ServiceInfo)
+	provider.services = make(map[string]serviceInfo)
 
 	if err := os.RemoveAll(filepath.Join(tmpDir, servicesDir)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	for _, testInstance := range testInstances {
-		provider.services[testInstance.serviceID] = servicemanager.ServiceInfo{
-			ServiceID:       testInstance.serviceID,
-			AosVersion:      testInstance.serviceVersion,
-			ServiceProvider: testInstance.serviceProvider,
-			ImagePath:       filepath.Join(tmpDir, servicesDir, testInstance.serviceID),
-			GID:             testInstance.serviceGID,
+		if _, ok := provider.services[testInstance.serviceID]; ok {
+			continue
 		}
 
-		if err := os.MkdirAll(filepath.Join(tmpDir, servicesDir, testInstance.serviceID), 0o755); err != nil {
+		servicePath := filepath.Join(tmpDir, servicesDir, testInstance.serviceID)
+
+		provider.services[testInstance.serviceID] = serviceInfo{
+			ServiceInfo: servicemanager.ServiceInfo{
+				ServiceID:       testInstance.serviceID,
+				AosVersion:      testInstance.serviceVersion,
+				ServiceProvider: testInstance.serviceProvider,
+				ImagePath:       servicePath,
+				GID:             testInstance.serviceGID,
+			},
+			layerDigests: testInstance.layerDigests,
+		}
+
+		if err := os.MkdirAll(filepath.Join(servicePath, instanceRootFS), 0o755); err != nil {
 			return aoserrors.Wrap(err)
 		}
 
@@ -1528,6 +1628,50 @@ func (provider *testServiceProvider) fromTestInstances(testInstances []testInsta
 			if err := writeConfig(filepath.Join(tmpDir, servicesDir, testInstance.serviceID, serviceConfigFile),
 				testInstance.serviceConfig); err != nil {
 				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+/***********************************************************************************************************************
+ * testLayerProvider
+ **********************************************************************************************************************/
+
+func newTestLayerProvider() *testLayerProvider {
+	return &testLayerProvider{
+		layers: make(map[string]layermanager.LayerInfo),
+	}
+}
+
+func (provider *testLayerProvider) GetLayerInfoByDigest(digest string) (layermanager.LayerInfo, error) {
+	layer, ok := provider.layers[digest]
+	if !ok {
+		return layermanager.LayerInfo{}, layermanager.ErrNotExist
+	}
+
+	return layer, nil
+}
+
+func (provider *testLayerProvider) fromTestInstances(testInstances []testInstance) error {
+	provider.layers = make(map[string]layermanager.LayerInfo)
+
+	if err := os.RemoveAll(filepath.Join(tmpDir, layersDir)); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, testInstance := range testInstances {
+		for _, digest := range testInstance.layerDigests {
+			layerPath := filepath.Join(tmpDir, layersDir, digest)
+
+			provider.layers[digest] = layermanager.LayerInfo{
+				Digest: digest,
+				Path:   layerPath,
+			}
+
+			if err := os.MkdirAll(layerPath, 0o755); err != nil {
+				return aoserrors.Wrap(err)
 			}
 		}
 	}
@@ -1653,6 +1797,14 @@ func (manager *testResourceManager) addDevice(device resourcemanager.DeviceInfo)
 }
 
 func (manager *testResourceManager) addResource(resource resourcemanager.ResourceInfo) {
+	for _, mount := range resource.Mounts {
+		if err := os.MkdirAll(mount.Source, 0o755); err != nil {
+			log.Errorf("Can't create mount dir: %v", err)
+
+			return
+		}
+	}
+
 	manager.resources[resource.Name] = resource
 }
 
@@ -1751,6 +1903,16 @@ func (provider *testStorageStateProvider) Setup(
 	storagePath = filepath.Join(tmpDir, storagesDir, instanceID)
 	statePath = filepath.Join(tmpDir, statesDir, instanceID)
 
+	if err = os.MkdirAll(filepath.Join(tmpDir, statesDir), 0o755); err != nil {
+		return "", "", nil, aoserrors.Wrap(err)
+	}
+
+	file, err := os.OpenFile(statePath, os.O_CREATE, 0o644)
+	if err != nil {
+		return "", "", nil, aoserrors.Wrap(err)
+	}
+	defer file.Close()
+
 	provider.infos[instanceID] = storageStateInfo{
 		SetupParams: params,
 		storagePath: storagePath,
@@ -1772,6 +1934,14 @@ func (provider *testStorageStateProvider) Setup(
 func (provider *testStorageStateProvider) Cleanup(instanceID string) error {
 	provider.Lock()
 	defer provider.Unlock()
+
+	if _, ok := provider.infos[instanceID]; !ok {
+		return nil
+	}
+
+	if err := os.RemoveAll(provider.infos[instanceID].statePath); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
 	delete(provider.infos, instanceID)
 
@@ -1817,6 +1987,62 @@ func (monitor *testInstanceMonitor) StopInstanceMonitor(instanceID string) error
 }
 
 /***********************************************************************************************************************
+ * testMounter
+ **********************************************************************************************************************/
+
+func newTestMounter() *testMounter {
+	return &testMounter{mounts: make(map[string]mountInfo)}
+}
+
+func (mounter *testMounter) Mount(mountPoint string, lowerDirs []string, workDir, upperDir string) error {
+	mounter.Lock()
+	defer mounter.Unlock()
+
+	if _, ok := mounter.mounts[mountPoint]; ok {
+		return aoserrors.Errorf("folder %s already mounted", mountPoint)
+	}
+
+	if _, err := os.Stat(mountPoint); err != nil {
+		return aoserrors.Errorf("mount point err: %v", err)
+	}
+
+	for _, lowerDir := range lowerDirs {
+		if _, err := os.Stat(lowerDir); err != nil {
+			return aoserrors.Errorf("lower dir err: %v", err)
+		}
+	}
+
+	if workDir != "" {
+		if _, err := os.Stat(workDir); err != nil {
+			return aoserrors.Errorf("work dir err: %v", err)
+		}
+	}
+
+	if upperDir != "" {
+		if _, err := os.Stat(upperDir); err != nil {
+			return aoserrors.Errorf("upper dir err: %v", err)
+		}
+	}
+
+	mounter.mounts[mountPoint] = mountInfo{
+		lowerDirs: lowerDirs,
+		workDir:   workDir,
+		upperDir:  upperDir,
+	}
+
+	return nil
+}
+
+func (mounter *testMounter) Unmount(mountPoint string) error {
+	mounter.Lock()
+	defer mounter.Unlock()
+
+	delete(mounter.mounts, mountPoint)
+
+	return nil
+}
+
+/***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
@@ -1827,6 +2053,8 @@ func setup() (err error) {
 	}
 
 	launcher.RuntimeDir = filepath.Join(tmpDir, "runtime")
+	launcher.MountFunc = mounter.Mount
+	launcher.UnmountFunc = mounter.Unmount
 
 	return nil
 }
