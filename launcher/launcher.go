@@ -88,6 +88,9 @@ type Storage interface {
 type ServiceProvider interface {
 	GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error)
 	GetImageParts(service servicemanager.ServiceInfo) (servicemanager.ImageParts, error)
+	ValidateService(service servicemanager.ServiceInfo) error
+	ApplyService(service servicemanager.ServiceInfo) error
+	RevertService(service servicemanager.ServiceInfo) error
 }
 
 // LayerProvider layer provider.
@@ -190,6 +193,7 @@ type Launcher struct {
 	runInstancesInProgress bool
 	currentInstances       map[string]*instanceInfo
 	currentServices        map[string]*serviceInfo
+	errorServices          []cloudprotocol.ServiceStatus
 	uidPool                *uidgidpool.IdentifierPool
 }
 
@@ -586,6 +590,49 @@ func (launcher *Launcher) runInstances(runInstances []InstanceInfo) {
 
 	launcher.stopInstances(stopInstances)
 	launcher.startInstances(startInstances)
+
+	launcher.checkNewServices()
+}
+
+func (launcher *Launcher) checkNewServices() {
+	launcher.errorServices = nil
+
+serviceLoop:
+	for _, service := range launcher.currentServices {
+		if service.IsActive {
+			continue
+		}
+
+		for _, instance := range launcher.currentInstances {
+			if instance.ServiceID == service.ServiceID &&
+				instance.runStatus.State == cloudprotocol.InstanceStateActive {
+				log.WithFields(log.Fields{"serviceID": service.ServiceID}).Debug("Apply new service")
+
+				if err := launcher.serviceProvider.ApplyService(service.ServiceInfo); err != nil {
+					log.WithField("serviceID", service.ServiceID).Errorf("Can't apply service: %v", err)
+
+					launcher.errorServices = append(launcher.errorServices,
+						service.cloudStatus(cloudprotocol.ErrorStatus, err))
+				}
+
+				continue serviceLoop
+			}
+		}
+
+		log.WithFields(log.Fields{"serviceID": service.ServiceID}).Warn("Revert new service")
+
+		if err := launcher.serviceProvider.RevertService(service.ServiceInfo); err != nil {
+			log.WithField("serviceID", service.ServiceID).Errorf("Can't revert service: %v", err)
+
+			launcher.errorServices = append(launcher.errorServices,
+				service.cloudStatus(cloudprotocol.ErrorStatus, err))
+
+			continue
+		}
+
+		launcher.errorServices = append(launcher.errorServices,
+			service.cloudStatus(cloudprotocol.ErrorStatus, aoserrors.New("can't start any instances")))
+	}
 }
 
 func (launcher *Launcher) getStopInstances(runInstances []InstanceInfo) []*instanceInfo {
@@ -991,8 +1038,9 @@ func (launcher *Launcher) sendRunInstancesStatuses() {
 
 	launcher.runtimeStatusChannel <- RuntimeStatus{
 		RunStatus: &RunInstancesStatus{
-			UnitSubjects: launcher.currentSubjects,
-			Instances:    runInstancesStatuses,
+			UnitSubjects:  launcher.currentSubjects,
+			Instances:     runInstancesStatuses,
+			ErrorServices: launcher.errorServices,
 		},
 	}
 }
