@@ -42,7 +42,7 @@ const (
 	iamReconnectTimeout = 10 * time.Second
 )
 
-const usersChangedChannelSize = 1
+const subjectsChangedChannelSize = 1
 
 /*******************************************************************************
  * Types
@@ -52,15 +52,15 @@ const usersChangedChannelSize = 1
 type Client struct {
 	sync.Mutex
 
-	users []string
+	subjects []string
 
 	publicConnection    *grpc.ClientConn
 	protectedConnection *grpc.ClientConn
 	pbclientPublic      pb.IAMPublicServiceClient
 	pbclientProtected   pb.IAMProtectedServiceClient
 
-	closeChannel        chan struct{}
-	usersChangedChannel chan []string
+	closeChannel           chan struct{}
+	subjectsChangedChannel chan []string
 }
 
 /*******************************************************************************
@@ -72,8 +72,8 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 	log.Debug("Connecting to IAM...")
 
 	client = &Client{
-		closeChannel:        make(chan struct{}, 1),
-		usersChangedChannel: make(chan []string, usersChangedChannelSize),
+		closeChannel:           make(chan struct{}, 1),
+		subjectsChangedChannel: make(chan []string, subjectsChangedChannelSize),
 	}
 
 	defer func() {
@@ -125,26 +125,26 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 
 	log.Debug("Connected to IAM")
 
-	if client.users, err = client.getUsers(); err != nil {
+	if client.subjects, err = client.getSubjects(); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
-	go client.handleUsersChanged()
+	go client.handleSubjectsChanged()
 
 	return client, nil
 }
 
-// GetUsers returns current users.
-func (client *Client) GetUsers() (users []string) {
+// GetSubjects returns current subjects.
+func (client *Client) GetSubjects() (subjects []string) {
 	client.Lock()
 	defer client.Unlock()
 
-	return client.users
+	return client.subjects
 }
 
-// GetUsersChangedChannel returns users changed channel.
-func (client *Client) GetUsersChangedChannel() (channel <-chan []string) {
-	return client.usersChangedChannel
+// GetSubjectsChangedChannel returns subjects changed channel.
+func (client *Client) GetSubjectsChangedChannel() (channel <-chan []string) {
+	return client.subjectsChangedChannel
 }
 
 // RegisterService registers new service with permissions and create secret.
@@ -235,28 +235,28 @@ func (client *Client) Close() (err error) {
  * Private
  ******************************************************************************/
 
-func (client *Client) getUsers() (users []string, err error) {
+func (client *Client) getSubjects() (subjects []string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
 	request := &empty.Empty{}
 
-	response, err := client.pbclientPublic.GetUsers(ctx, request)
+	response, err := client.pbclientPublic.GetSubjects(ctx, request)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	log.WithFields(log.Fields{"users": response.Users}).Debug("Get users")
+	log.WithFields(log.Fields{"subjects": response.Subjects}).Debug("Get subjects")
 
-	return response.Users, nil
+	return response.Subjects, nil
 }
 
-func (client *Client) handleUsersChanged() {
-	err := client.subscribeUsersChanged()
+func (client *Client) handleSubjectsChanged() {
+	err := client.subscribeSubjectsChanged()
 
 	for {
 		if err != nil && len(client.closeChannel) == 0 {
-			log.Errorf("Error subscribe users changed: %s", err)
+			log.Errorf("Error subscribe subjects changed: %s", err)
 			log.Debugf("Reconnect to IAM in %v...", iamReconnectTimeout)
 		}
 
@@ -265,32 +265,32 @@ func (client *Client) handleUsersChanged() {
 			return
 
 		case <-time.After(iamReconnectTimeout):
-			err = client.subscribeUsersChanged()
+			err = client.subscribeSubjectsChanged()
 		}
 	}
 }
 
-func (client *Client) subscribeUsersChanged() (err error) {
-	log.Debug("Subscribe to users changed notification")
+func (client *Client) subscribeSubjectsChanged() (err error) {
+	log.Debug("Subscribe to subjects changed notification")
 
 	request := &empty.Empty{}
 
-	stream, err := client.pbclientPublic.SubscribeUsersChanged(context.Background(), request)
+	stream, err := client.pbclientPublic.SubscribeSubjectsChanged(context.Background(), request)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	users, err := client.getUsers()
+	subjects, err := client.getSubjects()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if !isUsersEqual(users, client.users) {
+	if !isSubjectsEqual(subjects, client.subjects) {
 		client.Lock()
-		client.users = users
+		client.subjects = subjects
 		client.Unlock()
 
-		client.usersChangedChannel <- client.users
+		client.subjectsChangedChannel <- client.subjects
 	}
 
 	for {
@@ -299,25 +299,25 @@ func (client *Client) subscribeUsersChanged() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		log.WithFields(log.Fields{"users": notification.Users}).Debug("Users changed notification")
+		log.WithFields(log.Fields{"subjects": notification.Subjects}).Debug("Subjects changed notification")
 
-		if !isUsersEqual(notification.Users, client.users) {
+		if !isSubjectsEqual(notification.Subjects, client.subjects) {
 			client.Lock()
-			client.users = notification.Users
+			client.subjects = notification.Subjects
 			client.Unlock()
 
-			client.usersChangedChannel <- client.users
+			client.subjectsChangedChannel <- client.subjects
 		}
 	}
 }
 
-func isUsersEqual(users1, users2 []string) (result bool) {
-	if len(users1) != len(users2) {
+func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
+	if len(subjects1) != len(subjects2) {
 		return false
 	}
 
-	for i, user := range users1 {
-		if user != users2[i] {
+	for i, subject := range subjects1 {
+		if subject != subjects2[i] {
 			return false
 		}
 	}
