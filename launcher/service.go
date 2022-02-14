@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
@@ -59,6 +60,10 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 			service.imageConfig, service.err = launcher.getImageConfig(service.ServiceInfo)
 		}
 
+		if service.err == nil {
+			service.err = launcher.serviceProvider.ValidateService(service.ServiceInfo)
+		}
+
 		launcher.currentServices[instance.ServiceID] = &service
 	}
 }
@@ -70,4 +75,18 @@ func (launcher *Launcher) getCurrentServiceInfo(serviceID string) (*serviceInfo,
 	}
 
 	return service, service.err
+}
+
+func (service *serviceInfo) cloudStatus(status string, err error) cloudprotocol.ServiceStatus {
+	serviceStatus := cloudprotocol.ServiceStatus{
+		ID:         service.ServiceID,
+		AosVersion: service.AosVersion,
+		Status:     status,
+	}
+
+	if err != nil {
+		serviceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{Message: err.Error()}
+	}
+
+	return serviceStatus
 }
