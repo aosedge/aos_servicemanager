@@ -79,6 +79,7 @@ type testStorage struct {
 }
 
 type testServiceProvider struct {
+	sync.RWMutex
 	services map[string]serviceInfo
 }
 
@@ -337,7 +338,7 @@ func TestRunInstances(t *testing.T) {
 
 		currentTestInstances = item.instances
 
-		if err = serviceProvider.fromTestInstances(currentTestInstances); err != nil {
+		if err = serviceProvider.fromTestInstances(currentTestInstances, true); err != nil {
 			t.Fatalf("Can't create test services: %v", err)
 		}
 
@@ -379,7 +380,7 @@ func TestUpdateInstances(t *testing.T) {
 		{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 3},
 	}
 
-	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
@@ -476,7 +477,7 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 		{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 3},
 	}
 
-	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
@@ -552,7 +553,7 @@ func TestRestartInstances(t *testing.T) {
 		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
 	}
 
-	if err = serviceProvider.fromTestInstances(testInstances); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
@@ -669,7 +670,7 @@ func TestSubjectsChanged(t *testing.T) {
 	for i, item := range data {
 		t.Logf("Subjects changed: %d", i)
 
-		if err = serviceProvider.fromTestInstances(item.initialInstances); err != nil {
+		if err = serviceProvider.fromTestInstances(item.initialInstances, true); err != nil {
 			t.Fatalf("Can't create test services: %v", err)
 		}
 
@@ -892,7 +893,7 @@ func TestRuntimeSpec(t *testing.T) {
 		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
 	})
 
-	if err = serviceProvider.fromTestInstances(testInstaces); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstaces, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
@@ -1200,7 +1201,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = serviceProvider.fromTestInstances(testInstaces); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstaces, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
@@ -1400,6 +1401,98 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 }
 
+func TestRevertApplyService(t *testing.T) {
+	// nolint:goerr113
+	testInstances := []testInstance{
+		// All instances of service0 fails, service should be reverted
+		{
+			serviceID: "service0", subjectID: "subject0", numInstances: 3,
+			err: []error{errors.New("error"), errors.New("error"), errors.New("error")},
+		},
+		{
+			serviceID: "service0", subjectID: "subject1", numInstances: 2,
+			err: []error{errors.New("error"), errors.New("error")},
+		},
+		// Some instances of service1 fails, some are ok, service should be applied
+		{
+			serviceID: "service1", subjectID: "subject0", numInstances: 1,
+		},
+		{
+			serviceID: "service1", subjectID: "subject1", numInstances: 2,
+			err: []error{errors.New("error"), errors.New("error")},
+		},
+		// All instances of service2 are ok, service should be applied
+		{serviceID: "service2", subjectID: "subject1", numInstances: 1},
+		{serviceID: "service2", subjectID: "subject2", numInstances: 2},
+	}
+
+	storage := newTestStorage()
+	serviceProvider := newTestServiceProvider()
+	instanceRunner := newTestRunner(
+		func(instanceID string) runner.InstanceStatus {
+			return getRunnerStatus(instanceID, testInstances, storage)
+		}, nil,
+	)
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = serviceProvider.fromTestInstances(testInstances, false); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{
+			Instances: createInstancesStatuses(testInstances),
+			ErrorServices: []cloudprotocol.ServiceStatus{{
+				ID: "service0", Status: cloudprotocol.ErrorStatus,
+				ErrorInfo: &cloudprotocol.ErrorInfo{Message: "can't start any instances"},
+			}},
+		},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	var service servicemanager.ServiceInfo
+
+	// Check service0 is reverted
+
+	if _, err = serviceProvider.GetServiceInfo("service0"); !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Error("service2 should be reverted")
+	}
+
+	// Check service1 is active
+
+	if service, err = serviceProvider.GetServiceInfo("service1"); err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if !service.IsActive {
+		t.Error("service1 should be active")
+	}
+
+	// Check service1 is active
+
+	if service, err = serviceProvider.GetServiceInfo("service2"); err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if !service.IsActive {
+		t.Error("service2 should be active")
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
@@ -1560,6 +1653,9 @@ func newTestServiceProvider() *testServiceProvider {
 }
 
 func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error) {
+	provider.RLock()
+	defer provider.RUnlock()
+
 	service, ok := provider.services[serviceID]
 	if !ok {
 		return servicemanager.ServiceInfo{}, servicemanager.ErrNotExist
@@ -1571,6 +1667,9 @@ func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicema
 func (provider *testServiceProvider) GetImageParts(
 	service servicemanager.ServiceInfo,
 ) (servicemanager.ImageParts, error) {
+	provider.RLock()
+	defer provider.RUnlock()
+
 	info, ok := provider.services[service.ServiceID]
 	if !ok {
 		return servicemanager.ImageParts{}, servicemanager.ErrNotExist
@@ -1584,7 +1683,39 @@ func (provider *testServiceProvider) GetImageParts(
 	}, nil
 }
 
-func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance) error {
+func (provider *testServiceProvider) ValidateService(service servicemanager.ServiceInfo) error {
+	return nil
+}
+
+func (provider *testServiceProvider) ApplyService(service servicemanager.ServiceInfo) error {
+	provider.Lock()
+	defer provider.Unlock()
+
+	serviceInfo, ok := provider.services[service.ServiceID]
+	if !ok {
+		return servicemanager.ErrNotExist
+	}
+
+	serviceInfo.IsActive = true
+	provider.services[service.ServiceID] = serviceInfo
+
+	return nil
+}
+
+func (provider *testServiceProvider) RevertService(service servicemanager.ServiceInfo) error {
+	provider.Lock()
+	defer provider.Unlock()
+
+	if _, ok := provider.services[service.ServiceID]; !ok {
+		return servicemanager.ErrNotExist
+	}
+
+	delete(provider.services, service.ServiceID)
+
+	return nil
+}
+
+func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance, active bool) error {
 	provider.services = make(map[string]serviceInfo)
 
 	if err := os.RemoveAll(filepath.Join(tmpDir, servicesDir)); err != nil {
@@ -1605,6 +1736,7 @@ func (provider *testServiceProvider) fromTestInstances(testInstances []testInsta
 				ServiceProvider: testInstance.serviceProvider,
 				ImagePath:       servicePath,
 				GID:             testInstance.serviceGID,
+				IsActive:        active,
 			},
 			layerDigests: testInstance.layerDigests,
 		}
