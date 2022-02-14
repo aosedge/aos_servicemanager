@@ -55,10 +55,10 @@ const (
 type testServer struct {
 	pb.UnimplementedIAMProtectedServiceServer
 	pb.UnimplementedIAMPublicServiceServer
-	grpcServer          *grpc.Server
-	users               []string
-	usersChangedChannel chan []string
-	permissionsCache    map[string]servicePermissions
+	grpcServer             *grpc.Server
+	subjects               []string
+	subjectsChangedChannel chan []string
+	permissionsCache       map[string]servicePermissions
 }
 
 type servicePermissions struct {
@@ -111,7 +111,7 @@ func TestMain(m *testing.M) {
  * Tests
  ******************************************************************************/
 
-func TestGetUsers(t *testing.T) {
+func TestGetSubjects(t *testing.T) {
 	server, err := newTestServer(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
@@ -119,7 +119,7 @@ func TestGetUsers(t *testing.T) {
 
 	defer server.close()
 
-	server.users = []string{"user1", "user2", "user3"}
+	server.subjects = []string{"subject1", "subject2", "subject3"}
 
 	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
 	if err != nil {
@@ -127,22 +127,22 @@ func TestGetUsers(t *testing.T) {
 	}
 	defer client.Close()
 
-	if !reflect.DeepEqual(server.users, client.GetUsers()) {
-		t.Errorf("Invalid users: %s", client.GetUsers())
+	if !reflect.DeepEqual(server.subjects, client.GetSubjects()) {
+		t.Errorf("Invalid subjects: %s", client.GetSubjects())
 	}
 
-	newUsers := []string{"newUser1", "newUser2", "newUser3"}
+	newSubjects := []string{"newSubjects1", "newSubjects2", "newSubjects3"}
 
-	server.usersChangedChannel <- newUsers
+	server.subjectsChangedChannel <- newSubjects
 
 	select {
-	case users := <-client.GetUsersChangedChannel():
-		if !reflect.DeepEqual(users, newUsers) {
-			t.Errorf("Invalid users: %s", users)
+	case subjects := <-client.GetSubjectsChangedChannel():
+		if !reflect.DeepEqual(subjects, newSubjects) {
+			t.Errorf("Invalid subjects: %s", subjects)
 		}
 
 	case <-time.After(5 * time.Second):
-		t.Error("Wait users changed timeout")
+		t.Error("Wait subjects changed timeout")
 	}
 }
 
@@ -237,7 +237,7 @@ func TestGetPermissions(t *testing.T) {
  ******************************************************************************/
 
 func newTestServer(url string) (server *testServer, err error) {
-	server = &testServer{usersChangedChannel: make(chan []string, 1)}
+	server = &testServer{subjectsChangedChannel: make(chan []string, 1)}
 
 	listener, err := net.Listen("tcp", url)
 	if err != nil {
@@ -321,21 +321,21 @@ func (server *testServer) GetPermissions(ctx context.Context, req *pb.Permission
 	return rsp, nil
 }
 
-func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.Users, err error) {
-	rsp = &pb.Users{Users: server.users}
+func (server *testServer) GetSubjects(context context.Context, req *empty.Empty) (rsp *pb.Subjects, err error) {
+	rsp = &pb.Subjects{Subjects: server.subjects}
 
 	return rsp, nil
 }
 
-func (server *testServer) SubscribeUsersChanged(req *empty.Empty,
-	stream pb.IAMPublicService_SubscribeUsersChangedServer) (err error) {
+func (server *testServer) SubscribeSubjectsChanged(req *empty.Empty,
+	stream pb.IAMPublicService_SubscribeSubjectsChangedServer) (err error) {
 	for {
 		select {
 		case <-stream.Context().Done():
 			return nil
 
-		case users := <-server.usersChangedChannel:
-			if err := stream.Send(&pb.Users{Users: users}); err != nil {
+		case subjects := <-server.subjectsChangedChannel:
+			if err := stream.Send(&pb.Subjects{Subjects: subjects}); err != nil {
 				return aoserrors.Wrap(err)
 			}
 
@@ -360,7 +360,7 @@ func randomString() string {
 	rand.Seed(time.Now().UnixNano())
 
 	for i := range secret {
-		secret[i] = secretSymbols[rand.Intn(len(secretSymbols))] //nolint
+		secret[i] = secretSymbols[rand.Intn(len(secretSymbols))] // nolint:gosec
 	}
 
 	return string(secret)
