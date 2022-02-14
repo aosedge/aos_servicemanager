@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
@@ -82,6 +83,8 @@ type Storage interface {
 	GetAllInstances() ([]InstanceInfo, error)
 	GetRunningInstances() ([]InstanceInfo, error)
 	GetSubjectInstances(subjectID string) ([]InstanceInfo, error)
+	GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error)
+	SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error
 }
 
 // ServiceProvider service provider.
@@ -195,6 +198,7 @@ type Launcher struct {
 	currentServices        map[string]*serviceInfo
 	errorServices          []cloudprotocol.ServiceStatus
 	uidPool                *uidgidpool.IdentifierPool
+	currentEnvVars         []cloudprotocol.EnvVarsInstanceInfo
 }
 
 /***********************************************************************************************************************
@@ -217,9 +221,13 @@ var (
 
 var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
 
-// RuntimeDir specifies directory where instance runtime spec is stored.
 // nolint:gochecknoglobals // used to be overridden in unit tests
-var RuntimeDir = "/run/aos/runtime"
+var (
+	// RuntimeDir specifies directory where instance runtime spec is stored.
+	RuntimeDir = "/run/aos/runtime"
+	// CheckTLLsPeriod specified period different TTL timers are checked with.
+	CheckTLLsPeriod = 1 * time.Hour
+)
 
 /***********************************************************************************************************************
  * Public
@@ -258,6 +266,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 
 	if err = os.MkdirAll(RuntimeDir, 0o755); err != nil {
 		return nil, aoserrors.Wrap(err)
+	}
+
+	if launcher.currentEnvVars, err = launcher.storage.GetOverrideEnvVars(); err != nil {
+		log.Errorf("Can't get current env vars: %v", err)
 	}
 
 	return launcher, nil
@@ -418,7 +430,11 @@ func (launcher *Launcher) OverrideEnvVars(
 	launcher.Lock()
 	defer launcher.Unlock()
 
-	return nil, nil
+	envVarsStatus := launcher.setEnvVars(envVarsInfo)
+
+	launcher.updateInstancesEnvVars()
+
+	return envVarsStatus, nil
 }
 
 // RuntimeStatusChannel returns runtime status channel.
@@ -451,6 +467,11 @@ func (launcher *Launcher) handleChannels(ctx context.Context) {
 
 		case stateChangedInfo := <-launcher.storageStateProvider.StateChangedChannel():
 			launcher.updateInstanceState(stateChangedInfo)
+
+		case <-time.After(CheckTLLsPeriod):
+			launcher.Lock()
+			launcher.updateInstancesEnvVars()
+			launcher.Unlock()
 
 		case <-ctx.Done():
 			return

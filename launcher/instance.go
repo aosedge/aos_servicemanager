@@ -31,14 +31,15 @@ import (
 
 type instanceInfo struct {
 	InstanceInfo
-	service       *serviceInfo
-	runStatus     runner.InstanceStatus
-	isStarted     bool
-	runtimeDir    string
-	secret        string
-	storagePath   string
-	statePath     string
-	stateChecksum []byte
+	service         *serviceInfo
+	runStatus       runner.InstanceStatus
+	isStarted       bool
+	runtimeDir      string
+	secret          string
+	storagePath     string
+	statePath       string
+	stateChecksum   []byte
+	overrideEnvVars []string
 }
 
 /***********************************************************************************************************************
@@ -101,6 +102,28 @@ func instanceIdentLogFields(instance cloudprotocol.InstanceIdent, extraFields lo
 		"serviceID": instance.ServiceID,
 		"subjectID": instance.SubjectID,
 		"instance":  instance.Instance,
+	}
+
+	for k, v := range extraFields {
+		logFields[k] = v
+	}
+
+	return logFields
+}
+
+func instanceFilterLogFields(filter cloudprotocol.InstanceFilter, extraFields log.Fields) log.Fields {
+	logFields := log.Fields{"serviceID": filter.ServiceID}
+
+	if filter.SubjectID != nil {
+		logFields["subjectID"] = *filter.SubjectID
+	} else {
+		logFields["subjectID"] = "*"
+	}
+
+	if filter.Instance != nil {
+		logFields["Instance"] = *filter.Instance
+	} else {
+		logFields["Instance"] = "*"
 	}
 
 	for k, v := range extraFields {
