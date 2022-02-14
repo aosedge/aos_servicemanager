@@ -76,6 +76,7 @@ const (
 type testStorage struct {
 	sync.RWMutex
 	instances map[string]launcher.InstanceInfo
+	envVars   []cloudprotocol.EnvVarsInstanceInfo
 }
 
 type testServiceProvider struct {
@@ -1493,6 +1494,379 @@ func TestRevertApplyService(t *testing.T) {
 	}
 }
 
+func TestOverrideEnvVars(t *testing.T) {
+	defaultTTLPeriod := launcher.CheckTLLsPeriod
+
+	launcher.CheckTLLsPeriod = 1 * time.Second
+
+	t.Cleanup(func() { launcher.CheckTLLsPeriod = defaultTTLPeriod })
+
+	type instanceEnvVars struct {
+		cloudprotocol.InstanceIdent
+		envVars []string
+	}
+
+	type testData struct {
+		envVars      []cloudprotocol.EnvVarsInstanceInfo
+		status       []cloudprotocol.EnvVarsInstanceStatus
+		instances    []instanceEnvVars
+		waitDuration time.Duration
+	}
+
+	data := []testData{
+		// Override env var for all instances of service0
+		{
+			envVars: []cloudprotocol.EnvVarsInstanceInfo{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: "service0"},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id0", Variable: "VAR0=VAL0"},
+						{ID: "id1", Variable: "VAR1=VAL1"},
+						{ID: "id2", Variable: "VAR2=VAL2"},
+					},
+				},
+			},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: "service0"},
+					Statuses: []cloudprotocol.EnvVarStatus{
+						{ID: "id0"}, {ID: "id1"}, {ID: "id2"},
+					},
+				},
+			},
+			instances: []instanceEnvVars{
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+					},
+					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+					},
+					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+					},
+					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+					},
+					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+					},
+					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
+				},
+			},
+		},
+		// Override env var for all instances of service0 subject0
+		{
+			envVars: []cloudprotocol.EnvVarsInstanceInfo{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id3", Variable: "VAR3=VAL3"},
+						{ID: "id4", Variable: "VAR4=VAL4"},
+					},
+				},
+			},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{
+						{ID: "id3"}, {ID: "id4"},
+					},
+				},
+			},
+			instances: []instanceEnvVars{
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+					},
+					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+					},
+					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+					},
+					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+					},
+				},
+			},
+		},
+		// Override env var for instance of service0 subject0 instance 1
+		{
+			envVars: []cloudprotocol.EnvVarsInstanceInfo{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"), Instance: newUint64(1),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{{ID: "id5", Variable: "VAR5=VAL5"}},
+				},
+			},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"), Instance: newUint64(1),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id5"}},
+				},
+			},
+			instances: []instanceEnvVars{
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+					},
+					envVars: []string{"VAR5=VAL5"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+					},
+				},
+			},
+		},
+		// Set expired env vars for service0 subject0
+		{
+			envVars: []cloudprotocol.EnvVarsInstanceInfo{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id6", Variable: "VAR6=VAL6", TTL: newTime(time.Now().Add(-10 * time.Second))},
+					},
+				},
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject1"),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id7", Variable: "VAR7=VAL7", TTL: newTime(time.Now().Add(10 * time.Second))},
+					},
+				},
+			},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id6", Error: "environment variable expired"}},
+				},
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject1"),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id7"}},
+				},
+			},
+			instances: []instanceEnvVars{
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+					},
+					envVars: []string{"VAR7=VAL7"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+					},
+					envVars: []string{"VAR7=VAL7"},
+				},
+			},
+		},
+		// Check runtime env var expiration
+		{
+			envVars: []cloudprotocol.EnvVarsInstanceInfo{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id8", Variable: "VAR8=VAL8", TTL: newTime(time.Now().Add(2 * time.Second))},
+					},
+				},
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject1"),
+					},
+					EnvVars: []cloudprotocol.EnvVarInfo{
+						{ID: "id9", Variable: "VAR9=VAL9"},
+					},
+				},
+			},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject0"),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id8"}},
+				},
+				{
+					InstanceFilter: cloudprotocol.InstanceFilter{
+						ServiceID: "service0", SubjectID: newString("subject1"),
+					},
+					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id9"}},
+				},
+			},
+			instances: []instanceEnvVars{
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+					},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+					},
+					envVars: []string{"VAR9=VAL9"},
+				},
+				{
+					InstanceIdent: cloudprotocol.InstanceIdent{
+						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+					},
+					envVars: []string{"VAR9=VAL9"},
+				},
+			},
+			waitDuration: 4 * time.Second,
+		},
+	}
+
+	testInstances := []testInstance{
+		{serviceID: "service0", subjectID: "subject0", numInstances: 3},
+		{serviceID: "service0", subjectID: "subject1", numInstances: 2},
+	}
+
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+	}
+
+	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Fatalf("Check runtime status error: %v", err)
+	}
+
+	for i, item := range data {
+		t.Logf("Override env vars: %d", i)
+
+		status, err := testLauncher.OverrideEnvVars(item.envVars)
+		if err != nil {
+			t.Fatalf("Error override env vars: %v", err)
+		}
+
+		if err = compareOverrideEnvVarsStatus(item.status, status); err != nil {
+			t.Errorf("Check override env vars status error: %v", err)
+		}
+
+		time.Sleep(item.waitDuration)
+
+		for _, checkInstance := range item.instances {
+			instanceInfo, err := storage.GetInstanceByIdent(checkInstance.InstanceIdent)
+			if err != nil {
+				t.Fatalf("Can't get instance: %v", err)
+			}
+
+			runtimeSpec, err := getInstanceRuntimeSpec(instanceInfo.InstanceID)
+			if err != nil {
+				t.Fatalf("Can't get instance runtime spec: %v", err)
+			}
+
+			expectedEnvVars := append(getAosEnvVars(instanceInfo), checkInstance.envVars...)
+
+			if !compareArrays(len(expectedEnvVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
+				return expectedEnvVars[index1] == runtimeSpec.Process.Env[index2]
+			}) {
+				t.Errorf("Wrong env variables value: %v", runtimeSpec.Process.Env)
+			}
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
@@ -1604,6 +1978,22 @@ func (storage *testStorage) GetAllInstances() (instances []launcher.InstanceInfo
 	}
 
 	return instances, nil
+}
+
+func (storage *testStorage) GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error) {
+	storage.RLock()
+	defer storage.RUnlock()
+
+	return storage.envVars, nil
+}
+
+func (storage *testStorage) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error {
+	storage.Lock()
+	defer storage.Unlock()
+
+	storage.envVars = envVarsInfo
+
+	return nil
 }
 
 func (storage *testStorage) fromTestInstances(testInstances []testInstance, running bool) {
@@ -2539,6 +2929,10 @@ func newUint64(value uint64) *uint64 {
 	return &value
 }
 
+func newTime(value time.Time) *time.Time {
+	return &value
+}
+
 func createSpecMounts(mounts []resourcemanager.FileSystemMount) (specMounts []runtimespec.Mount) {
 	// Manadatory mounts
 	specMounts = append(specMounts, runtimespec.Mount{Source: "proc", Destination: "/proc", Type: "proc"})
@@ -2757,4 +3151,48 @@ func compateNetParams(p1, p2 networkmanager.NetworkParams) bool {
 	}
 
 	return true
+}
+
+func isInstanceFilterEqual(filter1, filter2 cloudprotocol.InstanceFilter) bool {
+	switch {
+	case filter1.ServiceID != filter2.ServiceID:
+		return false
+
+	case (filter1.SubjectID == nil && filter2.SubjectID != nil) ||
+		(filter1.SubjectID != nil && filter2.SubjectID == nil):
+		return false
+
+	case filter1.SubjectID != nil && filter2.SubjectID != nil && *filter1.SubjectID != *filter2.SubjectID:
+		return false
+
+	case (filter1.Instance == nil && filter2.Instance != nil) ||
+		(filter1.Instance != nil && filter2.Instance == nil):
+		return false
+
+	case filter1.Instance != nil && filter2.Instance != nil && *filter1.Instance != *filter2.Instance:
+		return false
+	}
+
+	return true
+}
+
+func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstanceStatus) error {
+	if !compareArrays(len(status1), len(status2),
+		func(index1, index2 int) bool {
+			status1, status2 := status1[index1], status2[index2]
+
+			if !isInstanceFilterEqual(status1.InstanceFilter, status2.InstanceFilter) {
+				return false
+			}
+
+			return compareArrays(len(status1.Statuses), len(status2.Statuses), func(index1, index2 int) bool {
+				return status1.Statuses[index1].ID == status2.Statuses[index2].ID &&
+					(strings.HasPrefix(status1.Statuses[index1].Error, status2.Statuses[index2].Error) ||
+						(strings.HasPrefix(status2.Statuses[index2].Error, status1.Statuses[index1].Error)))
+			})
+		}) {
+		return aoserrors.New("override env vars status mismatch")
+	}
+
+	return nil
 }

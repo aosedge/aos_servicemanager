@@ -572,6 +572,8 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	spec.bindHostDirs(launcher.config.WorkingDir)
 	spec.setNamespacePath(runtimespec.NetworkNamespace, launcher.networkManager.GetNetnsPath(instance.InstanceID))
 	spec.mergeEnv(createAosEnvVars(instance))
+	instance.overrideEnvVars = launcher.getInstanceEnvVars(instance.InstanceInfo)
+	spec.mergeEnv(instance.overrideEnvVars)
 
 	if instance.statePath != "" {
 		if err := spec.addBindMount(instance.statePath, instanceStateFile, "rw"); err != nil {
