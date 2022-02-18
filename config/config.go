@@ -115,7 +115,6 @@ type Config struct {
 	HostBinds                 []string   `json:"hostBinds"`
 	Hosts                     []Host     `json:"hosts,omitempty"`
 	Migration                 Migration  `json:"migration"`
-	Runner                    string     `json:"runner"`
 }
 
 /*******************************************************************************
@@ -132,7 +131,6 @@ func New(fileName string) (config *Config, err error) {
 	config = &Config{
 		DefaultServiceTTLDays:     30, // nolint:gomnd
 		ServiceHealthCheckTimeout: Duration{35 * time.Second},
-		Runner:                    "runc",
 		Monitoring: Monitoring{
 			SendPeriod: Duration{1 * time.Minute},
 			PollPeriod: Duration{10 * time.Second},
