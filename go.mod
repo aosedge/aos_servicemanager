@@ -2,11 +2,11 @@ module github.com/aoscloud/aos_servicemanager
 
 go 1.14
 
-replace github.com/ThalesIgnite/crypto11 => github.com/xen-troops/crypto11 v1.2.5-0.20210607075540-0b6da74b5450
+replace github.com/ThalesIgnite/crypto11 => github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f
 
 require (
 	github.com/anexia-it/fsquota v0.1.3
-	github.com/aoscloud/aos_common v0.0.0-20211223083914-b6c05c484760
+	github.com/aoscloud/aos_common v0.0.0-20220218172038-8cf168776e9c
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/containernetworking/cni v1.0.1
 	github.com/containernetworking/plugins v1.0.1

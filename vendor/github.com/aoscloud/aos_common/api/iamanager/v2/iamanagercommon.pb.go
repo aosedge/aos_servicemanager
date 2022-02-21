@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.27.1
 // 	protoc        v3.6.1
-// source: iamanager/v1/iamanagercommon.proto
+// source: iamanager/v2/iamanagercommon.proto
 
 package iamanager
 
@@ -31,7 +31,7 @@ type Permissions struct {
 func (x *Permissions) Reset() {
 	*x = Permissions{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_iamanager_v1_iamanagercommon_proto_msgTypes[0]
+		mi := &file_iamanager_v2_iamanagercommon_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -44,7 +44,7 @@ func (x *Permissions) String() string {
 func (*Permissions) ProtoMessage() {}
 
 func (x *Permissions) ProtoReflect() protoreflect.Message {
-	mi := &file_iamanager_v1_iamanagercommon_proto_msgTypes[0]
+	mi := &file_iamanager_v2_iamanagercommon_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +57,7 @@ func (x *Permissions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Permissions.ProtoReflect.Descriptor instead.
 func (*Permissions) Descriptor() ([]byte, []int) {
-	return file_iamanager_v1_iamanagercommon_proto_rawDescGZIP(), []int{0}
+	return file_iamanager_v2_iamanagercommon_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Permissions) GetPermissions() map[string]string {
@@ -78,7 +78,7 @@ type Users struct {
 func (x *Users) Reset() {
 	*x = Users{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_iamanager_v1_iamanagercommon_proto_msgTypes[1]
+		mi := &file_iamanager_v2_iamanagercommon_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -91,7 +91,7 @@ func (x *Users) String() string {
 func (*Users) ProtoMessage() {}
 
 func (x *Users) ProtoReflect() protoreflect.Message {
-	mi := &file_iamanager_v1_iamanagercommon_proto_msgTypes[1]
+	mi := &file_iamanager_v2_iamanagercommon_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -104,7 +104,7 @@ func (x *Users) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Users.ProtoReflect.Descriptor instead.
 func (*Users) Descriptor() ([]byte, []int) {
-	return file_iamanager_v1_iamanagercommon_proto_rawDescGZIP(), []int{1}
+	return file_iamanager_v2_iamanagercommon_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Users) GetUsers() []string {
@@ -114,16 +114,16 @@ func (x *Users) GetUsers() []string {
 	return nil
 }
 
-var File_iamanager_v1_iamanagercommon_proto protoreflect.FileDescriptor
+var File_iamanager_v2_iamanagercommon_proto protoreflect.FileDescriptor
 
-var file_iamanager_v1_iamanagercommon_proto_rawDesc = []byte{
-	0x0a, 0x22, 0x69, 0x61, 0x6d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x2f, 0x76, 0x31, 0x2f, 0x69,
+var file_iamanager_v2_iamanagercommon_proto_rawDesc = []byte{
+	0x0a, 0x22, 0x69, 0x61, 0x6d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x2f, 0x76, 0x32, 0x2f, 0x69,
 	0x61, 0x6d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x70,
 	0x72, 0x6f, 0x74, 0x6f, 0x12, 0x0c, 0x69, 0x61, 0x6d, 0x61, 0x6e, 0x61, 0x67, 0x65, 0x72, 0x2e,
-	0x76, 0x31, 0x22, 0x9b, 0x01, 0x0a, 0x0b, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f,
+	0x76, 0x32, 0x22, 0x9b, 0x01, 0x0a, 0x0b, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f,
 	0x6e, 0x73, 0x12, 0x4c, 0x0a, 0x0b, 0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e,
 	0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x2a, 0x2e, 0x69, 0x61, 0x6d, 0x61, 0x6e, 0x61,
-	0x67, 0x65, 0x72, 0x2e, 0x76, 0x31, 0x2e, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f,
+	0x67, 0x65, 0x72, 0x2e, 0x76, 0x32, 0x2e, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f,
 	0x6e, 0x73, 0x2e, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x45, 0x6e,
 	0x74, 0x72, 0x79, 0x52, 0x0b, 0x70, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73,
 	0x1a, 0x3e, 0x0a, 0x10, 0x50, 0x65, 0x72, 0x6d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x45,
@@ -136,25 +136,25 @@ var file_iamanager_v1_iamanagercommon_proto_rawDesc = []byte{
 }
 
 var (
-	file_iamanager_v1_iamanagercommon_proto_rawDescOnce sync.Once
-	file_iamanager_v1_iamanagercommon_proto_rawDescData = file_iamanager_v1_iamanagercommon_proto_rawDesc
+	file_iamanager_v2_iamanagercommon_proto_rawDescOnce sync.Once
+	file_iamanager_v2_iamanagercommon_proto_rawDescData = file_iamanager_v2_iamanagercommon_proto_rawDesc
 )
 
-func file_iamanager_v1_iamanagercommon_proto_rawDescGZIP() []byte {
-	file_iamanager_v1_iamanagercommon_proto_rawDescOnce.Do(func() {
-		file_iamanager_v1_iamanagercommon_proto_rawDescData = protoimpl.X.CompressGZIP(file_iamanager_v1_iamanagercommon_proto_rawDescData)
+func file_iamanager_v2_iamanagercommon_proto_rawDescGZIP() []byte {
+	file_iamanager_v2_iamanagercommon_proto_rawDescOnce.Do(func() {
+		file_iamanager_v2_iamanagercommon_proto_rawDescData = protoimpl.X.CompressGZIP(file_iamanager_v2_iamanagercommon_proto_rawDescData)
 	})
-	return file_iamanager_v1_iamanagercommon_proto_rawDescData
+	return file_iamanager_v2_iamanagercommon_proto_rawDescData
 }
 
-var file_iamanager_v1_iamanagercommon_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_iamanager_v1_iamanagercommon_proto_goTypes = []interface{}{
-	(*Permissions)(nil), // 0: iamanager.v1.Permissions
-	(*Users)(nil),       // 1: iamanager.v1.Users
-	nil,                 // 2: iamanager.v1.Permissions.PermissionsEntry
+var file_iamanager_v2_iamanagercommon_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_iamanager_v2_iamanagercommon_proto_goTypes = []interface{}{
+	(*Permissions)(nil), // 0: iamanager.v2.Permissions
+	(*Users)(nil),       // 1: iamanager.v2.Users
+	nil,                 // 2: iamanager.v2.Permissions.PermissionsEntry
 }
-var file_iamanager_v1_iamanagercommon_proto_depIdxs = []int32{
-	2, // 0: iamanager.v1.Permissions.permissions:type_name -> iamanager.v1.Permissions.PermissionsEntry
+var file_iamanager_v2_iamanagercommon_proto_depIdxs = []int32{
+	2, // 0: iamanager.v2.Permissions.permissions:type_name -> iamanager.v2.Permissions.PermissionsEntry
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -162,13 +162,13 @@ var file_iamanager_v1_iamanagercommon_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_iamanager_v1_iamanagercommon_proto_init() }
-func file_iamanager_v1_iamanagercommon_proto_init() {
-	if File_iamanager_v1_iamanagercommon_proto != nil {
+func init() { file_iamanager_v2_iamanagercommon_proto_init() }
+func file_iamanager_v2_iamanagercommon_proto_init() {
+	if File_iamanager_v2_iamanagercommon_proto != nil {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
-		file_iamanager_v1_iamanagercommon_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
+		file_iamanager_v2_iamanagercommon_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*Permissions); i {
 			case 0:
 				return &v.state
@@ -180,7 +180,7 @@ func file_iamanager_v1_iamanagercommon_proto_init() {
 				return nil
 			}
 		}
-		file_iamanager_v1_iamanagercommon_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
+		file_iamanager_v2_iamanagercommon_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*Users); i {
 			case 0:
 				return &v.state
@@ -197,18 +197,18 @@ func file_iamanager_v1_iamanagercommon_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_iamanager_v1_iamanagercommon_proto_rawDesc,
+			RawDescriptor: file_iamanager_v2_iamanagercommon_proto_rawDesc,
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_iamanager_v1_iamanagercommon_proto_goTypes,
-		DependencyIndexes: file_iamanager_v1_iamanagercommon_proto_depIdxs,
-		MessageInfos:      file_iamanager_v1_iamanagercommon_proto_msgTypes,
+		GoTypes:           file_iamanager_v2_iamanagercommon_proto_goTypes,
+		DependencyIndexes: file_iamanager_v2_iamanagercommon_proto_depIdxs,
+		MessageInfos:      file_iamanager_v2_iamanagercommon_proto_msgTypes,
 	}.Build()
-	File_iamanager_v1_iamanagercommon_proto = out.File
-	file_iamanager_v1_iamanagercommon_proto_rawDesc = nil
-	file_iamanager_v1_iamanagercommon_proto_goTypes = nil
-	file_iamanager_v1_iamanagercommon_proto_depIdxs = nil
+	File_iamanager_v2_iamanagercommon_proto = out.File
+	file_iamanager_v2_iamanagercommon_proto_rawDesc = nil
+	file_iamanager_v2_iamanagercommon_proto_goTypes = nil
+	file_iamanager_v2_iamanagercommon_proto_depIdxs = nil
 }
