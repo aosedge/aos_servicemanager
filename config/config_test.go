@@ -45,7 +45,8 @@ func createConfigFile() (err error) {
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
-	"iamServer" : "localhost:8090",
+	"iamServer" : "localhost:8089",
+	"iamPublicServer" : "localhost:8090",
 	"defaultServiceTTLDays" : 30,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
@@ -208,8 +209,19 @@ func TestGetIAMServerURL(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.IAMServerURL != "localhost:8090" {
+	if config.IAMServerURL != "localhost:8089" {
 		t.Errorf("Wrong IAM server value: %s", config.IAMServerURL)
+	}
+}
+
+func TestGetIAMPublicServerURL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.IAMPublicServerURL != "localhost:8090" {
+		t.Errorf("Wrong IAM public server value: %s", config.IAMPublicServerURL)
 	}
 }
 
