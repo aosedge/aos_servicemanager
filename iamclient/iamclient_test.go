@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v1"
+	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -43,22 +43,28 @@ import (
  ******************************************************************************/
 
 const (
-	serverURL     = "localhost:8089"
-	secretLength  = 8
-	secretSymbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	protectedServerURL = "localhost:8089"
+	publicServerURL    = "localhost:8090"
+	secretLength       = 8
+	secretSymbols      = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
 
 /*******************************************************************************
  * Types
  ******************************************************************************/
 
-type testServer struct {
-	pb.UnimplementedIAMProtectedServiceServer
+type testPublicServer struct {
 	pb.UnimplementedIAMPublicServiceServer
 	grpcServer          *grpc.Server
 	users               []string
 	usersChangedChannel chan []string
 	permissionsCache    map[string]servicePermissions
+}
+
+type testProtectedServer struct {
+	pb.UnimplementedIAMProtectedServiceServer
+	grpcServer       *grpc.Server
+	permissionsCache map[string]servicePermissions
 }
 
 type servicePermissions struct {
@@ -112,28 +118,34 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetUsers(t *testing.T) {
-	server, err := newTestServer(serverURL)
+	permissionsCache := make(map[string]servicePermissions)
+
+	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
 
-	defer server.close()
+	defer publicServer.close()
+	defer protectedServer.close()
 
-	server.users = []string{"user1", "user2", "user3"}
+	publicServer.users = []string{"user1", "user2", "user3"}
 
-	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
+	client, err := iamclient.New(&config.Config{
+		IAMServerURL:       protectedServerURL,
+		IAMPublicServerURL: publicServerURL,
+	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %s", err)
 	}
 	defer client.Close()
 
-	if !reflect.DeepEqual(server.users, client.GetUsers()) {
+	if !reflect.DeepEqual(publicServer.users, client.GetUsers()) {
 		t.Errorf("Invalid users: %s", client.GetUsers())
 	}
 
 	newUsers := []string{"newUser1", "newUser2", "newUser3"}
 
-	server.usersChangedChannel <- newUsers
+	publicServer.usersChangedChannel <- newUsers
 
 	select {
 	case users := <-client.GetUsersChangedChannel():
@@ -147,14 +159,20 @@ func TestGetUsers(t *testing.T) {
 }
 
 func TestRegisterService(t *testing.T) {
-	server, err := newTestServer(serverURL)
+	permissionsCache := make(map[string]servicePermissions)
+
+	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
 
-	defer server.close()
+	defer publicServer.close()
+	defer protectedServer.close()
 
-	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
+	client, err := iamclient.New(&config.Config{
+		IAMServerURL:       protectedServerURL,
+		IAMPublicServerURL: publicServerURL,
+	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %s", err)
 	}
@@ -185,14 +203,20 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestGetPermissions(t *testing.T) {
-	server, err := newTestServer(serverURL)
+	permissionsCache := make(map[string]servicePermissions)
+
+	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
 		t.Fatalf("Can't create test server: %s", err)
 	}
 
-	defer server.close()
+	defer publicServer.close()
+	defer protectedServer.close()
 
-	client, err := iamclient.New(&config.Config{IAMServerURL: serverURL}, true)
+	client, err := iamclient.New(&config.Config{
+		IAMServerURL:       protectedServerURL,
+		IAMPublicServerURL: publicServerURL,
+	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %s", err)
 	}
@@ -236,37 +260,59 @@ func TestGetPermissions(t *testing.T) {
  * Private
  ******************************************************************************/
 
-func newTestServer(url string) (server *testServer, err error) {
-	server = &testServer{usersChangedChannel: make(chan []string, 1)}
-
-	listener, err := net.Listen("tcp", url)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
+func newTestServers(publicServerURL, protectedServerURL string, permissionsCache map[string]servicePermissions) (
+	publicServer *testPublicServer, protectedServer *testProtectedServer, err error) {
+	publicServer = &testPublicServer{
+		usersChangedChannel: make(chan []string, 1),
+		permissionsCache:    permissionsCache,
 	}
 
-	server.grpcServer = grpc.NewServer()
+	publicListener, err := net.Listen("tcp", publicServerURL)
+	if err != nil {
+		return nil, nil, aoserrors.Wrap(err)
+	}
 
-	pb.RegisterIAMProtectedServiceServer(server.grpcServer, server)
-	pb.RegisterIAMPublicServiceServer(server.grpcServer, server)
+	publicServer.grpcServer = grpc.NewServer()
 
-	server.permissionsCache = make(map[string]servicePermissions)
-
+	pb.RegisterIAMPublicServiceServer(publicServer.grpcServer, publicServer)
 	go func() {
-		if err := server.grpcServer.Serve(listener); err != nil {
+		if err := publicServer.grpcServer.Serve(publicListener); err != nil {
 			log.Errorf("Can't serve grpc server: %s", err)
 		}
 	}()
 
-	return server, nil
+	protectedServer = &testProtectedServer{permissionsCache: permissionsCache}
+
+	protectedListener, err := net.Listen("tcp", protectedServerURL)
+	if err != nil {
+		return nil, nil, aoserrors.Wrap(err)
+	}
+
+	protectedServer.grpcServer = grpc.NewServer()
+
+	pb.RegisterIAMProtectedServiceServer(protectedServer.grpcServer, protectedServer)
+	go func() {
+		if err := protectedServer.grpcServer.Serve(protectedListener); err != nil {
+			log.Errorf("Can't serve grpc server: %s", err)
+		}
+	}()
+
+	return publicServer, protectedServer, nil
 }
 
-func (server *testServer) close() {
+func (server *testPublicServer) close() {
 	if server.grpcServer != nil {
 		server.grpcServer.Stop()
 	}
 }
 
-func (server *testServer) RegisterService(context context.Context,
+func (server *testProtectedServer) close() {
+	if server.grpcServer != nil {
+		server.grpcServer.Stop()
+	}
+}
+
+func (server *testProtectedServer) RegisterService(context context.Context,
 	req *pb.RegisterServiceRequest) (rsp *pb.RegisterServiceResponse, err error) {
 	rsp = &pb.RegisterServiceResponse{}
 
@@ -287,7 +333,7 @@ func (server *testServer) RegisterService(context context.Context,
 	return rsp, nil
 }
 
-func (server *testServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty,
+func (server *testProtectedServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty,
 	err error) {
 	rsp = &empty.Empty{}
 
@@ -301,7 +347,7 @@ func (server *testServer) UnregisterService(ctx context.Context, req *pb.Unregis
 	return rsp, nil
 }
 
-func (server *testServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse,
+func (server *testPublicServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse,
 	err error) {
 	rsp = &pb.PermissionsResponse{}
 
@@ -321,13 +367,13 @@ func (server *testServer) GetPermissions(ctx context.Context, req *pb.Permission
 	return rsp, nil
 }
 
-func (server *testServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.Users, err error) {
+func (server *testPublicServer) GetUsers(context context.Context, req *empty.Empty) (rsp *pb.Users, err error) {
 	rsp = &pb.Users{Users: server.users}
 
 	return rsp, nil
 }
 
-func (server *testServer) SubscribeUsersChanged(req *empty.Empty,
+func (server *testPublicServer) SubscribeUsersChanged(req *empty.Empty,
 	stream pb.IAMPublicService_SubscribeUsersChangedServer) (err error) {
 	for {
 		select {
@@ -344,7 +390,7 @@ func (server *testServer) SubscribeUsersChanged(req *empty.Empty,
 	}
 }
 
-func (server *testServer) findServiceID(serviceID string) (secret string) {
+func (server *testProtectedServer) findServiceID(serviceID string) (secret string) {
 	for key, value := range server.permissionsCache {
 		if value.serviceID == serviceID {
 			return key

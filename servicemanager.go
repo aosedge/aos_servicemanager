@@ -28,6 +28,7 @@ import (
 	"syscall"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
@@ -56,6 +57,7 @@ const dbFileName = "servicemanager.db"
  ******************************************************************************/
 
 type serviceManager struct {
+	cryptoContext   *cryptutils.CryptoContext
 	alerts          *alerts.Alerts
 	smServer        *smserver.SMServer
 	cfg             *config.Config
@@ -170,8 +172,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
+	if sm.cryptoContext, err = cryptutils.NewCryptoContext(cfg.CACert); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
 	// Create IAM client
-	if sm.iam, err = iamclient.New(cfg, false); err != nil {
+	if sm.iam, err = iamclient.New(cfg, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -287,6 +293,11 @@ func (sm *serviceManager) close() {
 	// Close DB
 	if sm.db != nil {
 		sm.db.Close()
+	}
+
+	// Close cryptcoxontext
+	if sm.cryptoContext != nil {
+		sm.cryptoContext.Close()
 	}
 }
 
