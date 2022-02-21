@@ -110,7 +110,7 @@ func TestConnection(t *testing.T) {
 		SMServerURL: serverURL,
 	}
 
-	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, nil, resourseManager, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, layerMgr, nil, nil, resourseManager, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -179,7 +179,7 @@ func TestAlertNotifications(t *testing.T) {
 	testAlerts := &testAlertProvider{alertsChannel: make(chan *pb.Alert, 10)}
 
 	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, nil,
-		nil, true)
+		nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -301,7 +301,7 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan *pb.Monitoring, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -356,7 +356,7 @@ func TestServiceStateProcessing(t *testing.T) {
 
 	launcher := &testLauncher{stateChannel: make(chan *pb.SMNotifications, 10)}
 
-	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
