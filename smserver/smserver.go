@@ -90,6 +90,11 @@ type LogsProvider interface {
 	GetLogsDataChannel() (channel <-chan *pb.LogData)
 }
 
+// CertificateProvider certificate and key provider interface
+type CertificateProvider interface {
+	GetCertKeyURL(keyType string) (certURL, keyURL string, err error)
+}
+
 // SMServer SM server instance
 type SMServer struct {
 	url                  string
@@ -114,8 +119,8 @@ type SMServer struct {
 // New creates new IAM server instance.
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
 	monitoringProvider MonitoringDataProvider,
-	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider,
-	insecure bool) (server *SMServer, err error) {
+	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext,
+	certProvider CertificateProvider, insecure bool) (server *SMServer, err error) {
 	server = &SMServer{
 		launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
 		logsProvider: logsProvider,
@@ -140,7 +145,12 @@ func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvid
 	var opts []grpc.ServerOption
 
 	if !insecure {
-		tlsConfig, err := cryptutils.GetServerMutualTLSConfig(cfg.CACert, cfg.CertStorage)
+		certURL, keyURL, err := certProvider.GetCertKeyURL(cfg.CertStorage)
+		if err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		tlsConfig, err := cryptcoxontext.GetClientMutualTLSConfig(certURL, keyURL)
 		if err != nil {
 			return nil, aoserrors.Wrap(err)
 		}
