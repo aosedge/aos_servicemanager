@@ -99,6 +99,7 @@ type Config struct {
 	SMServerURL               string     `json:"smServerUrl"`
 	CertStorage               string     `json:"certStorage"`
 	IAMServerURL              string     `json:"iamServer"`
+	IAMPublicServerURL        string     `json:"iamPublicServer"`
 	WorkingDir                string     `json:"workingDir"`
 	StorageDir                string     `json:"storageDir"`
 	LayersDir                 string     `json:"layersDir"`
