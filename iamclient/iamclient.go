@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v1"
+	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -54,9 +54,10 @@ type Client struct {
 
 	users []string
 
-	connection     *grpc.ClientConn
-	pbclient       pb.IAMProtectedServiceClient
-	pbclientPublic pb.IAMPublicServiceClient
+	publicConnection    *grpc.ClientConn
+	protectedConnection *grpc.ClientConn
+	pbclientPublic      pb.IAMPublicServiceClient
+	pbclientProtected   pb.IAMProtectedServiceClient
 
 	closeChannel        chan struct{}
 	usersChangedChannel chan []string
@@ -67,7 +68,7 @@ type Client struct {
  ******************************************************************************/
 
 // New creates new IAM client.
-func New(config *config.Config, insecure bool) (client *Client, err error) {
+func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecure bool) (client *Client, err error) {
 	log.Debug("Connecting to IAM...")
 
 	client = &Client{
@@ -84,25 +85,43 @@ func New(config *config.Config, insecure bool) (client *Client, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	var secureOpt grpc.DialOption
+	securePublicOpt := grpc.WithInsecure()
+	secureProtectedOpt := grpc.WithInsecure()
 
-	if insecure {
-		secureOpt = grpc.WithInsecure()
-	} else {
-		tlsConfig, err := cryptutils.GetClientMutualTLSConfig(config.CACert, config.CertStorage)
+	if !insecure {
+		tlsConfig, err := cryptcoxontext.GetClientTLSConfig()
 		if err != nil {
 			return client, aoserrors.Wrap(err)
 		}
 
-		secureOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
+		securePublicOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
-	if client.connection, err = grpc.DialContext(ctx, config.IAMServerURL, secureOpt, grpc.WithBlock()); err != nil {
+	if client.publicConnection, err = grpc.DialContext(ctx, config.IAMPublicServerURL, securePublicOpt, grpc.WithBlock()); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclient = pb.NewIAMProtectedServiceClient(client.connection)
-	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.connection)
+	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.publicConnection)
+
+	if !insecure {
+		certURL, keyURL, err := client.GetCertKeyURL(config.CertStorage)
+		if err != nil {
+			return client, err
+		}
+
+		tlsConfig, err := cryptcoxontext.GetClientMutualTLSConfig(certURL, keyURL)
+		if err != nil {
+			return client, aoserrors.Wrap(err)
+		}
+
+		secureProtectedOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
+	}
+
+	if client.protectedConnection, err = grpc.DialContext(ctx, config.IAMServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
+		return client, aoserrors.Wrap(err)
+	}
+
+	client.pbclientProtected = pb.NewIAMProtectedServiceClient(client.protectedConnection)
 
 	log.Debug("Connected to IAM")
 
@@ -143,7 +162,7 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 
 	req := &pb.RegisterServiceRequest{ServiceId: serviceID, Permissions: reqPermissions}
 
-	response, err := client.pbclient.RegisterService(ctx, req)
+	response, err := client.pbclientProtected.RegisterService(ctx, req)
 	if err != nil {
 		return "", aoserrors.Wrap(err)
 	}
@@ -160,7 +179,7 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 
 	req := &pb.UnregisterServiceRequest{ServiceId: serviceID}
 
-	_, err = client.pbclient.UnregisterService(ctx, req)
+	_, err = client.pbclientProtected.UnregisterService(ctx, req)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -186,11 +205,25 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 	return response.ServiceId, response.Permissions.Permissions, nil
 }
 
+// GetCertKeyURL gets cerificate and key url from IAM
+func (client *Client) GetCertKeyURL(keyType string) (certURL, keyURL string, err error) {
+	response, err := client.pbclientPublic.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
+	if err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	return response.CertUrl, response.KeyUrl, nil
+}
+
 // Close closes IAM client.
 func (client *Client) Close() (err error) {
-	if client.connection != nil {
+	if client.publicConnection != nil {
 		client.closeChannel <- struct{}{}
-		client.connection.Close()
+		client.publicConnection.Close()
+	}
+
+	if client.protectedConnection != nil {
+		client.protectedConnection.Close()
 	}
 
 	log.Debug("Disconnected from IAM")
