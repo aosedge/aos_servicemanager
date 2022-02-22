@@ -41,7 +41,7 @@ func createConfigFile() (err error) {
 	"CACert" : "CACert",	
 	"smServerUrl": "smserver",
 	"workingDir" : "workingDir",
-	"certStorage": "/var/aos/crypt/sm/",	
+	"certStorage": "sm",
 	"storageDir" : "/var/aos/storage",
 	"layersDir": "/var/aos/srvlib",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
@@ -361,7 +361,7 @@ func TestCertStorage(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.CertStorage != "/var/aos/crypt/sm/" {
+	if config.CertStorage != "sm" {
 		t.Errorf("Wrong CertStorage value: %s", config.CertStorage)
 	}
 }
