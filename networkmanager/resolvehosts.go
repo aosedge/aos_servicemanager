@@ -29,18 +29,19 @@ import (
 	"github.com/aoscloud/aos_servicemanager/config"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
+// nolint:gochecknoglobals
 var defaultContent = []config.Host{
 	{IP: "127.0.0.1", Hostname: "localhost"},
 	{IP: "::1", Hostname: "localhost ip6-localhost ip6-loopback"},
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []config.Host) (err error) {
 	content := bytes.NewBuffer(nil)
@@ -59,7 +60,7 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
+	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -77,7 +78,7 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
+	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
