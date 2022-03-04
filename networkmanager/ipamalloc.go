@@ -25,26 +25,28 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 type ipSubnetwork struct {
 	predefinedPrivateNetworks []*net.IPNet
 	usedIPSubnetNetworks      map[string]*net.IPNet
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func newIPam() (ipam *ipSubnetwork, err error) {
 	log.Debug("Create ipam allocator")
 
 	ipam = &ipSubnetwork{}
+
 	if ipam.predefinedPrivateNetworks, err = makeNetPools(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
 	ipam.usedIPSubnetNetworks = make(map[string]*net.IPNet)
 
 	return ipam, nil
@@ -55,6 +57,7 @@ func (ipam *ipSubnetwork) tryToGetExistIPNetFromPool(spID string) (allocIPNet *n
 	if usedIPNet {
 		return allocIPNet, usedIPNet
 	}
+
 	return nil, false
 }
 
@@ -72,6 +75,7 @@ func (ipam *ipSubnetwork) requestIPNetPool(spID string) (allocIPNet *net.IPNet, 
 	if err != nil {
 		return nil, usedIPNet, aoserrors.Wrap(err)
 	}
+
 	ipam.usedIPSubnetNetworks[spID] = allocIPNet
 
 	return allocIPNet, usedIPNet, nil
@@ -93,10 +97,10 @@ func (ipam *ipSubnetwork) findUnusedIPSubnetwork() (unusedIPNet *net.IPNet, err 
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
 	for i, nw := range ipam.predefinedPrivateNetworks {
 		if !checkRouteOverlaps(nw, networks) {
-			ipam.predefinedPrivateNetworks =
-				append(ipam.predefinedPrivateNetworks[:i], ipam.predefinedPrivateNetworks[i+1:]...)
+			ipam.predefinedPrivateNetworks = append(ipam.predefinedPrivateNetworks[:i], ipam.predefinedPrivateNetworks[i+1:]...)
 			return nw, nil
 		}
 	}
