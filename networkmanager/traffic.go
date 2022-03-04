@@ -18,6 +18,7 @@
 package networkmanager
 
 import (
+	"errors"
 	"hash/fnv"
 	"strconv"
 	"strings"
@@ -68,15 +69,46 @@ type trafficData struct {
 }
 
 type trafficMonitoring struct {
-	iptables         *iptables.IPTables
-	trafficPeriod    int
-	skipAddresses    string
-	inChain          string
-	outChain         string
-	trafficMap       map[string]*trafficData
-	serviceChainsMap map[string]*trafficChains
-	trafficStorage   TrafficStorage
+	iptables          IPTablesInterface
+	trafficPeriod     int
+	skipAddresses     string
+	inChain           string
+	outChain          string
+	trafficMap        map[string]*trafficData
+	instanceChainsMap map[string]*trafficChains
+	trafficStorage    TrafficStorage
 }
+
+type IPTablesInterface interface {
+	ListWithCounters(table, chain string) ([]string, error)
+	Append(table, chain string, rulespec ...string) error
+	Delete(table, chain string, rulespec ...string) error
+	NewChain(table, chain string) error
+	Insert(table, chain string, pos int, rulespec ...string) error
+	ClearChain(table, chain string) error
+	DeleteChain(table, chain string) error
+	ListChains(table string) ([]string, error)
+}
+
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var (
+	ErrEntryNotExist = errors.New("entry does not exist")
+	ErrRuleNotExist  = errors.New("chain rule not exist")
+)
+
+// These global variables are used to be able to mocking the functionality in tests.
+// nolint:gochecknoglobals
+var (
+	IsSamePeriod = isSamePeriod
+	IPTables     IPTablesInterface
+)
+
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
 
 func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitoring, err error) {
 	monitor = &trafficMonitoring{
@@ -87,9 +119,10 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 	monitor.trafficMap = make(map[string]*trafficData)
 	monitor.serviceChainsMap = make(map[string]*trafficChains)
 
-	monitor.iptables, err = iptables.New()
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
+	if monitor.iptables = IPTables; monitor.iptables == nil {
+		if monitor.iptables, err = iptables.New(); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
 	}
 
 	monitor.inChain = "AOS_SYSTEM_IN"
@@ -148,7 +181,7 @@ func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint
 	return 0, aoserrors.New("statistic for chain not found")
 }
 
-func (monitor *trafficMonitoring) isSamePeriod(t1, t2 time.Time) (result bool) {
+func isSamePeriod(trafficPeriod int, t1, t2 time.Time) (result bool) {
 	y1, m1, d1 := t1.Date()
 	h1 := t1.Hour()
 	min1 := t1.Minute()
@@ -157,7 +190,7 @@ func (monitor *trafficMonitoring) isSamePeriod(t1, t2 time.Time) (result bool) {
 	h2 := t2.Hour()
 	min2 := t2.Minute()
 
-	switch monitor.trafficPeriod {
+	switch trafficPeriod {
 	case MinutePeriod:
 		return y1 == y2 && m1 == m2 && d1 == d2 && h1 == h2 && min1 == min2
 
@@ -220,6 +253,10 @@ func (monitor *trafficMonitoring) deleteAllRules(chain string, rulespec ...strin
 				return nil
 			}
 
+			if errors.Is(err, ErrRuleNotExist) {
+				return nil
+			}
+
 			return aoserrors.Wrap(err)
 		}
 	}
@@ -261,8 +298,8 @@ func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses
 
 	traffic := trafficData{addresses: addresses}
 
-	if traffic.lastUpdate, traffic.initialValue, err =
-		monitor.trafficStorage.GetTrafficMonitorData(chain); err != nil && !strings.Contains(err.Error(), "not exist") {
+	traffic.lastUpdate, traffic.initialValue, err = monitor.trafficStorage.GetTrafficMonitorData(chain)
+	if err != nil && !errors.Is(err, ErrEntryNotExist) {
 		return aoserrors.Wrap(err)
 	}
 
@@ -299,22 +336,23 @@ func (monitor *trafficMonitoring) deleteTrafficChain(chain, rootChain string) (e
 	return nil
 }
 
-func (monitor *trafficMonitoring) processTrafficMonitor() error {
+func (monitor *trafficMonitoring) processTrafficMonitor() (err error) {
 	timestamp := time.Now().UTC()
 
 	for chain, traffic := range monitor.trafficMap {
-		var value uint64
-		var err error
+		var (
+			value    uint64
+			chainErr error
+		)
 
 		if !traffic.disabled {
-			value, err = monitor.getTrafficChainBytes(chain)
-			if err != nil {
-				log.WithField("chain", chain).Errorf("Can't get chain byte count: %s", err)
+			if value, chainErr = monitor.getTrafficChainBytes(chain); chainErr != nil && err == nil {
+				err = aoserrors.Errorf("Can't get chain byte count: %s", chainErr)
 				continue
 			}
 		}
 
-		if !monitor.isSamePeriod(timestamp, traffic.lastUpdate) {
+		if !IsSamePeriod(monitor.trafficPeriod, timestamp, traffic.lastUpdate) {
 			log.WithField("chain", chain).Debug("Reset stats")
 			// we count statistics per day, if date is different then reset stats
 			traffic.initialValue = 0
@@ -327,34 +365,14 @@ func (monitor *trafficMonitoring) processTrafficMonitor() error {
 		traffic.currentValue = traffic.initialValue + value - traffic.subValue
 		traffic.lastUpdate = timestamp
 
-		if traffic.limit != 0 {
-			if traffic.currentValue > traffic.limit && !traffic.disabled {
-				// disable chain
-				if err := monitor.setChainState(chain, traffic.addresses, false); err != nil {
-					log.WithField("chain", chain).Errorf("Can't disable chain: %s", err)
-				} else {
-					traffic.disabled = true
-					traffic.initialValue = traffic.currentValue
-					traffic.subValue = 0
-				}
-			}
-
-			if traffic.currentValue < traffic.limit && traffic.disabled {
-				// enable chain
-				if err = monitor.setChainState(chain, traffic.addresses, true); err != nil {
-					log.WithField("chain", chain).Errorf("Can't enable chain: %s", err)
-				} else {
-					traffic.disabled = false
-					traffic.initialValue = traffic.currentValue
-					traffic.subValue = 0
-				}
-			}
+		if chainErr = monitor.checkTrafficLimit(traffic, chain); chainErr != nil && err == nil {
+			err = chainErr
 		}
 	}
 
 	monitor.saveTraffic()
 
-	return nil
+	return err
 }
 
 func (monitor *trafficMonitoring) saveTraffic() {
@@ -449,4 +467,34 @@ func (monitor *trafficMonitoring) stopMonitorServiceTraffic(serviceID string) (e
 	delete(monitor.serviceChainsMap, serviceID)
 
 	return nil
+}
+
+func (monitor *trafficMonitoring) checkTrafficLimit(traffic *trafficData, chain string) (err error) {
+	if traffic.limit != 0 {
+		if traffic.currentValue > traffic.limit && !traffic.disabled {
+			// disable chain
+			if chainErr := monitor.setChainState(chain, traffic.addresses, false); chainErr != nil && err == nil {
+				err = aoserrors.Errorf("can't disable chain: %s", err)
+			} else {
+				resetTrafficData(traffic, true)
+			}
+		}
+
+		if traffic.currentValue < traffic.limit && traffic.disabled {
+			// enable chain
+			if chainErr := monitor.setChainState(chain, traffic.addresses, true); chainErr != nil && err == nil {
+				err = aoserrors.Errorf("can't enable chain: %s", err)
+			} else {
+				resetTrafficData(traffic, false)
+			}
+		}
+	}
+
+	return err
+}
+
+func resetTrafficData(traffic *trafficData, disable bool) {
+	traffic.disabled = disable
+	traffic.initialValue = traffic.currentValue
+	traffic.subValue = 0
 }
