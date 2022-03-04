@@ -29,11 +29,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// Describes reset traffic period
+// Describes reset traffic period.
 const (
 	MinutePeriod = iota
 	HourPeriod
@@ -42,11 +42,11 @@ const (
 	YearPeriod
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// TrafficStorage provides API to create, remove or access monitoring data
+// TrafficStorage provides API to create, remove or access monitoring data.
 type TrafficStorage interface {
 	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
 	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
@@ -117,7 +117,7 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 	}
 
 	monitor.trafficMap = make(map[string]*trafficData)
-	monitor.serviceChainsMap = make(map[string]*trafficChains)
+	monitor.instanceChainsMap = make(map[string]*trafficChains)
 
 	if monitor.iptables = IPTables; monitor.iptables == nil {
 		if monitor.iptables, err = iptables.New(); err != nil {
@@ -159,21 +159,21 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 	return monitor, nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
 func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint64, err error) {
 	stats, err := monitor.iptables.ListWithCounters("filter", chain)
 	if err != nil {
-		return 0, err
+		return 0, aoserrors.Wrap(err)
 	}
 
 	if len(stats) > 0 {
 		items := strings.Fields(stats[len(stats)-1])
 		for i, item := range items {
 			if item == "-c" && len(items) >= i+3 {
-				return strconv.ParseUint(items[i+2], 10, 64)
+				if value, err = strconv.ParseUint(items[i+2], 10, 64); err != nil {
+					return 0, aoserrors.Wrap(err)
+				}
+
+				return value, nil
 			}
 		}
 	}
@@ -248,9 +248,12 @@ func (monitor *trafficMonitoring) setChainState(chain, addresses string, enable 
 func (monitor *trafficMonitoring) deleteAllRules(chain string, rulespec ...string) (err error) {
 	for {
 		if err = monitor.iptables.Delete("filter", chain, rulespec...); err != nil {
-			errIPTables, ok := err.(*iptables.Error)
-			if ok && errIPTables.IsNotExist() {
-				return nil
+			var errIPTables *iptables.Error
+
+			if errors.As(err, &errIPTables) {
+				if errIPTables.IsNotExist() {
+					return nil
+				}
 			}
 
 			if errors.Is(err, ErrRuleNotExist) {
@@ -416,28 +419,30 @@ func (monitor *trafficMonitoring) deleteAllTrafficChains() (err error) {
 	return nil
 }
 
-func (monitor *trafficMonitoring) startTrafficMonitor(serviceID, IPAddress string, downloadLimit, uploadLimit uint64) (err error) {
-	if IPAddress == "" {
+func (monitor *trafficMonitoring) startInstanceTrafficMonitor(
+	instanceID, ipAddress string, downloadLimit, uploadLimit uint64,
+) (err error) {
+	if ipAddress == "" {
 		return nil
 	}
 
 	hash := fnv.New64a()
-	hash.Write([]byte(serviceID))
+	hash.Write([]byte(instanceID))
 	chainBase := strconv.FormatUint(hash.Sum64(), 16)
 	serviceChains := trafficChains{inChain: "AOS_" + chainBase + "_IN", outChain: "AOS_" + chainBase + "_OUT"}
 
-	if err = monitor.createTrafficChain(serviceChains.inChain, "FORWARD", IPAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceChains.inChain, "FORWARD", ipAddress); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	monitor.trafficMap[serviceChains.inChain].limit = downloadLimit
 
-	if err = monitor.createTrafficChain(serviceChains.outChain, "FORWARD", IPAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceChains.outChain, "FORWARD", ipAddress); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	monitor.trafficMap[serviceChains.outChain].limit = uploadLimit
-	monitor.serviceChainsMap[serviceID] = &serviceChains
+	monitor.instanceChainsMap[instanceID] = &serviceChains
 
 	if err = monitor.processTrafficMonitor(); err != nil {
 		return aoserrors.Wrap(err)
@@ -446,25 +451,25 @@ func (monitor *trafficMonitoring) startTrafficMonitor(serviceID, IPAddress strin
 	return nil
 }
 
-func (monitor *trafficMonitoring) stopMonitorServiceTraffic(serviceID string) (err error) {
-	serviceChains, ok := monitor.serviceChainsMap[serviceID]
+func (monitor *trafficMonitoring) stopInstanceTrafficMonitor(instanceID string) (err error) {
+	serviceChains, ok := monitor.instanceChainsMap[instanceID]
 	if !ok {
 		return nil
 	}
 
 	if serviceChains.inChain != "" {
 		if err = monitor.deleteTrafficChain(serviceChains.inChain, "FORWARD"); err != nil {
-			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+			log.WithField("id", instanceID).Errorf("Can't delete chain: %s", err)
 		}
 	}
 
 	if serviceChains.outChain != "" {
 		if err = monitor.deleteTrafficChain(serviceChains.outChain, "FORWARD"); err != nil {
-			log.WithField("id", serviceID).Errorf("Can't delete chain: %s", err)
+			log.WithField("id", instanceID).Errorf("Can't delete chain: %s", err)
 		}
 	}
 
-	delete(monitor.serviceChainsMap, serviceID)
+	delete(monitor.instanceChainsMap, instanceID)
 
 	return nil
 }

@@ -24,10 +24,11 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Var
- ******************************************************************************/
+ **********************************************************************************************************************/
 
+// nolint:gochecknoglobals
 var predefinedPrivateNetworks = []*networkToSplit{
 	{"172.17.0.0/16", 16},
 	{"172.18.0.0/16", 16},
@@ -37,18 +38,18 @@ var predefinedPrivateNetworks = []*networkToSplit{
 	{"172.28.0.0/14", 16},
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 type networkToSplit struct {
 	ipSubNet string
 	size     int
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func makeNetPools() (listIPNetPool []*net.IPNet, err error) {
 	listIPNetPool = make([]*net.IPNet, 0, len(predefinedPrivateNetworks))
@@ -58,10 +59,13 @@ func makeNetPools() (listIPNetPool []*net.IPNet, err error) {
 		if err != nil {
 			return nil, aoserrors.Errorf("invalid base pool %q: %v", poolNet.ipSubNet, err)
 		}
+
 		ones, _ := b.Mask.Size()
+
 		if poolNet.size <= 0 || poolNet.size < ones {
 			return nil, aoserrors.Errorf("invalid pools size: %d", poolNet.size)
 		}
+
 		listIPNetPool = append(listIPNetPool, makeNetPool(poolNet.size, b)...)
 	}
 
@@ -79,6 +83,7 @@ func makeNetPool(size int, base *net.IPNet) (listIPNet []*net.IPNet) {
 		ip := make([]byte, len(base.IP))
 		copy(ip, base.IP)
 		addIntToIP(ip, uint(i<<s))
+
 		listIPNet = append(listIPNet, &net.IPNet{IP: ip, Mask: mask})
 	}
 

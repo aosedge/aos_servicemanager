@@ -34,6 +34,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
@@ -515,7 +516,7 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
 	if errors.Is(err, sql.ErrNoRows) {
-		return timestamp, value, ErrNotExist
+		return timestamp, value, networkmanager.ErrNotExist
 	}
 
 	if err != nil {
