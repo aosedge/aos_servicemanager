@@ -25,6 +25,9 @@ type IAMPublicServiceClient interface {
 	GetPermissions(ctx context.Context, in *PermissionsRequest, opts ...grpc.CallOption) (*PermissionsResponse, error)
 	GetUsers(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*Users, error)
 	SubscribeUsersChanged(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (IAMPublicService_SubscribeUsersChangedClient, error)
+	GetAPIVersion(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*APIVersion, error)
+	GetSubjects(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*Subjects, error)
+	SubscribeSubjectsChanged(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (IAMPublicService_SubscribeSubjectsChangedClient, error)
 }
 
 type iAMPublicServiceClient struct {
@@ -112,6 +115,56 @@ func (x *iAMPublicServiceSubscribeUsersChangedClient) Recv() (*Users, error) {
 	return m, nil
 }
 
+func (c *iAMPublicServiceClient) GetAPIVersion(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*APIVersion, error) {
+	out := new(APIVersion)
+	err := c.cc.Invoke(ctx, "/iamanager.v2.IAMPublicService/GetAPIVersion", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iAMPublicServiceClient) GetSubjects(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*Subjects, error) {
+	out := new(Subjects)
+	err := c.cc.Invoke(ctx, "/iamanager.v2.IAMPublicService/GetSubjects", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iAMPublicServiceClient) SubscribeSubjectsChanged(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (IAMPublicService_SubscribeSubjectsChangedClient, error) {
+	stream, err := c.cc.NewStream(ctx, &IAMPublicService_ServiceDesc.Streams[1], "/iamanager.v2.IAMPublicService/SubscribeSubjectsChanged", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &iAMPublicServiceSubscribeSubjectsChangedClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type IAMPublicService_SubscribeSubjectsChangedClient interface {
+	Recv() (*Subjects, error)
+	grpc.ClientStream
+}
+
+type iAMPublicServiceSubscribeSubjectsChangedClient struct {
+	grpc.ClientStream
+}
+
+func (x *iAMPublicServiceSubscribeSubjectsChangedClient) Recv() (*Subjects, error) {
+	m := new(Subjects)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // IAMPublicServiceServer is the server API for IAMPublicService service.
 // All implementations must embed UnimplementedIAMPublicServiceServer
 // for forward compatibility
@@ -122,6 +175,9 @@ type IAMPublicServiceServer interface {
 	GetPermissions(context.Context, *PermissionsRequest) (*PermissionsResponse, error)
 	GetUsers(context.Context, *empty.Empty) (*Users, error)
 	SubscribeUsersChanged(*empty.Empty, IAMPublicService_SubscribeUsersChangedServer) error
+	GetAPIVersion(context.Context, *empty.Empty) (*APIVersion, error)
+	GetSubjects(context.Context, *empty.Empty) (*Subjects, error)
+	SubscribeSubjectsChanged(*empty.Empty, IAMPublicService_SubscribeSubjectsChangedServer) error
 	mustEmbedUnimplementedIAMPublicServiceServer()
 }
 
@@ -146,6 +202,15 @@ func (UnimplementedIAMPublicServiceServer) GetUsers(context.Context, *empty.Empt
 }
 func (UnimplementedIAMPublicServiceServer) SubscribeUsersChanged(*empty.Empty, IAMPublicService_SubscribeUsersChangedServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeUsersChanged not implemented")
+}
+func (UnimplementedIAMPublicServiceServer) GetAPIVersion(context.Context, *empty.Empty) (*APIVersion, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAPIVersion not implemented")
+}
+func (UnimplementedIAMPublicServiceServer) GetSubjects(context.Context, *empty.Empty) (*Subjects, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSubjects not implemented")
+}
+func (UnimplementedIAMPublicServiceServer) SubscribeSubjectsChanged(*empty.Empty, IAMPublicService_SubscribeSubjectsChangedServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeSubjectsChanged not implemented")
 }
 func (UnimplementedIAMPublicServiceServer) mustEmbedUnimplementedIAMPublicServiceServer() {}
 
@@ -271,6 +336,63 @@ func (x *iAMPublicServiceSubscribeUsersChangedServer) Send(m *Users) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _IAMPublicService_GetAPIVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(empty.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IAMPublicServiceServer).GetAPIVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/iamanager.v2.IAMPublicService/GetAPIVersion",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IAMPublicServiceServer).GetAPIVersion(ctx, req.(*empty.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IAMPublicService_GetSubjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(empty.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IAMPublicServiceServer).GetSubjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/iamanager.v2.IAMPublicService/GetSubjects",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IAMPublicServiceServer).GetSubjects(ctx, req.(*empty.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IAMPublicService_SubscribeSubjectsChanged_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(empty.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(IAMPublicServiceServer).SubscribeSubjectsChanged(m, &iAMPublicServiceSubscribeSubjectsChangedServer{stream})
+}
+
+type IAMPublicService_SubscribeSubjectsChangedServer interface {
+	Send(*Subjects) error
+	grpc.ServerStream
+}
+
+type iAMPublicServiceSubscribeSubjectsChangedServer struct {
+	grpc.ServerStream
+}
+
+func (x *iAMPublicServiceSubscribeSubjectsChangedServer) Send(m *Subjects) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // IAMPublicService_ServiceDesc is the grpc.ServiceDesc for IAMPublicService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -298,11 +420,24 @@ var IAMPublicService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetUsers",
 			Handler:    _IAMPublicService_GetUsers_Handler,
 		},
+		{
+			MethodName: "GetAPIVersion",
+			Handler:    _IAMPublicService_GetAPIVersion_Handler,
+		},
+		{
+			MethodName: "GetSubjects",
+			Handler:    _IAMPublicService_GetSubjects_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "SubscribeUsersChanged",
 			Handler:       _IAMPublicService_SubscribeUsersChanged_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeSubjectsChanged",
+			Handler:       _IAMPublicService_SubscribeSubjectsChanged_Handler,
 			ServerStreams: true,
 		},
 	},

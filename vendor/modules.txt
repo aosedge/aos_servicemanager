@@ -3,7 +3,7 @@ github.com/ThalesIgnite/crypto11
 # github.com/anexia-it/fsquota v0.1.3
 ## explicit
 github.com/anexia-it/fsquota
-# github.com/aoscloud/aos_common v0.0.0-20220218172038-8cf168776e9c
+# github.com/aoscloud/aos_common v0.0.0-20220307124524-2e9564bf1019
 ## explicit
 github.com/aoscloud/aos_common/aoserrors
 github.com/aoscloud/aos_common/api/iamanager/v2
@@ -11,6 +11,7 @@ github.com/aoscloud/aos_common/api/servicemanager/v1
 github.com/aoscloud/aos_common/fs
 github.com/aoscloud/aos_common/image
 github.com/aoscloud/aos_common/migration
+github.com/aoscloud/aos_common/utils/action
 github.com/aoscloud/aos_common/utils/contextreader
 github.com/aoscloud/aos_common/utils/cryptutils
 github.com/aoscloud/aos_common/utils/tpmkey
