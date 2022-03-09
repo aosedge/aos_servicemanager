@@ -21,7 +21,6 @@ package monitoring
 import (
 	"container/list"
 	"errors"
-	"hash/fnv"
 	"io/ioutil"
 	"math"
 	"path"
@@ -247,10 +246,6 @@ func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig S
 		"id": serviceID,
 		"ip": monitoringConfig.IPAddress,
 	}).Debug("Start service monitoring")
-
-	// convert id to hashed u64 value
-	hash := fnv.New64a()
-	hash.Write([]byte(serviceID))
 
 	serviceMonitoring := serviceMonitoring{
 		serviceDir: monitoringConfig.ServiceDir,
