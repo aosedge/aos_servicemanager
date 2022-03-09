@@ -21,11 +21,8 @@ package monitoring
 import (
 	"container/list"
 	"errors"
-	"io/ioutil"
 	"math"
-	"path"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 
@@ -347,21 +344,6 @@ func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
 	delete(monitor.serviceMap, serviceID)
 
 	return nil
-}
-
-// GetServicePid returns service PID
-func GetServicePid(servicePath string) (pid int32, err error) {
-	pidStr, err := ioutil.ReadFile(path.Join(servicePath, ".pid"))
-	if err != nil {
-		return pid, aoserrors.Wrap(err)
-	}
-
-	pid64, err := strconv.ParseInt(string(pidStr), 10, 0)
-	if err != nil {
-		return pid, aoserrors.Wrap(err)
-	}
-
-	return int32(pid64), nil
 }
 
 /*******************************************************************************
