@@ -30,7 +30,6 @@ import (
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
-	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
@@ -231,8 +230,6 @@ func (monitor *Monitor) GetMonitoringDataChannel() (monitoringChannel <-chan *pb
 func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig ServiceMonitoringConfig) (err error) {
 	monitor.Lock()
 	defer monitor.Unlock()
-
-	_, _ = load.Misc()
 
 	if _, ok := monitor.serviceMap[serviceID]; ok {
 		log.WithField("id", serviceID).Warning("Service already under monitoring")
