@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -57,14 +58,10 @@ type AlertRule struct {
 
 // Monitoring configuration for system monitoring.
 type Monitoring struct {
-	Disabled   bool       `json:"disabled"`
-	SendPeriod Duration   `json:"sendPeriod"`
-	PollPeriod Duration   `json:"pollPeriod"`
-	RAM        *AlertRule `json:"ram"`
-	CPU        *AlertRule `json:"cpu"`
-	UsedDisk   *AlertRule `json:"usedDisk"`
-	InTraffic  *AlertRule `json:"inTraffic"`
-	OutTraffic *AlertRule `json:"outTraffic"`
+	Disabled   bool     `json:"disabled"`
+	SendPeriod Duration `json:"sendPeriod"`
+	PollPeriod Duration `json:"pollPeriod"`
+	aostypes.ServiceAlertRules
 }
 
 // Logging configuration for system and service logging.
