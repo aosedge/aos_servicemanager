@@ -18,26 +18,27 @@
 package monitoring
 
 import (
-	"encoding/json"
-	"errors"
-	"io/ioutil"
+	"fmt"
+	"math"
 	"os"
-	"os/exec"
-	"path"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/shirou/gopsutil/disk"
+	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/networkmanager"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Init
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -49,60 +50,64 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 type testSender struct {
-	callback func(serviceID, resource string, time time.Time, value uint64)
+	alertCallback func(alert cloudprotocol.AlertItem)
 }
 
-type chainData struct {
-	timestamp time.Time
-	value     uint64
+type testTrafficMonitoring struct {
+	inputTraffic, outputTraffic uint64
 }
 
-type testTrafficStorage struct {
-	chainData map[string]chainData
+type testQuotaData struct {
+	cpu  float64
+	ram  uint64
+	disk uint64
 }
 
-/*******************************************************************************
- * Vars
- ******************************************************************************/
-
-var trafficStorage = testTrafficStorage{
-	chainData: make(map[string]chainData),
+type testAlertData struct {
+	alerts            []cloudprotocol.AlertItem
+	monitoringData    cloudprotocol.MonitoringData
+	trafficMonitoring testTrafficMonitoring
+	quotaData         testQuotaData
+	monitoringConfig  MonitorParams
 }
+
+type testProcessData struct {
+	uid       int32
+	quotaData testQuotaData
+}
+
+/***********************************************************************************************************************
+ * Variable
+ **********************************************************************************************************************/
 
 var (
-	networkManager *networkmanager.NetworkManager
-	tmpDir         string
+	systemQuotaData               testQuotaData
+	instanceTrafficMonitoringData map[string]testTrafficMonitoring
+	processesData                 []*testProcessData
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Main
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
-	}
-
 	ret := m.Run()
-
-	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
-	}
 
 	os.Exit(ret)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Tests
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestAlertProcessor(t *testing.T) {
 	var sourceValue uint64
+
 	destination := make([]uint64, 0, 2)
 
 	alert := createAlertProcessor(
@@ -112,8 +117,8 @@ func TestAlertProcessor(t *testing.T) {
 			log.Debugf("T: %s, %d", time, value)
 			destination = append(destination, value)
 		},
-		config.AlertRule{
-			MinTimeout:   config.Duration{Duration: 3 * time.Second},
+		aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
 			MinThreshold: 80,
 			MaxThreshold: 90,
 		})
@@ -127,32 +132,35 @@ func TestAlertProcessor(t *testing.T) {
 		sourceValue = value
 
 		alert.checkAlertDetection(currentTime)
+
 		if alertsCount[i] != len(destination) {
 			t.Errorf("Wrong alert count %d at %d", len(destination), i)
 		}
+
 		currentTime = currentTime.Add(time.Second)
 	}
 }
 
 func TestPeriodicReport(t *testing.T) {
-	sendDuration := 2 * time.Second
+	duration := 100 * time.Millisecond
 
 	sender := &testSender{}
+	trafficMonitoring := &testTrafficMonitoring{}
 
 	monitor, err := New(&config.Config{
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
-			SendPeriod: config.Duration{Duration: sendDuration},
-			PollPeriod: config.Duration{Duration: 1 * time.Second},
+			SendPeriod: config.Duration{Duration: duration},
+			PollPeriod: config.Duration{Duration: duration},
 		},
 	},
-		sender, networkManager)
+		sender, trafficMonitoring)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
 	defer monitor.Close()
 
-	timer := time.NewTimer(sendDuration * 2)
+	timer := time.NewTimer(duration * 2)
 	numSends := 3
 	sendTime := time.Now()
 
@@ -163,12 +171,14 @@ func TestPeriodicReport(t *testing.T) {
 
 			period := currentTime.Sub(sendTime)
 			// check is period in +-10% range
-			if period > sendDuration*110/100 || period < sendDuration*90/100 {
+			if period > duration*110/100 || period < duration*90/100 {
 				t.Errorf("Period mismatch: %s", period)
 			}
 
 			sendTime = currentTime
-			timer.Reset(sendDuration * 2)
+
+			timer.Reset(duration * 2)
+
 			numSends--
 			if numSends == 0 {
 				return
@@ -181,528 +191,529 @@ func TestPeriodicReport(t *testing.T) {
 }
 
 func TestSystemAlerts(t *testing.T) {
-	sendDuration := 1 * time.Second
+	duration := 100 * time.Millisecond
 
-	alertMap := make(map[string]int)
+	var alerts []cloudprotocol.AlertItem
 
-	sender := &testSender{callback: func(serviceID, resource string, time time.Time, value uint64) {
-		alertMap[resource] = alertMap[resource] + 1
-	}}
+	sender := &testSender{
+		alertCallback: func(alert cloudprotocol.AlertItem) {
+			alerts = append(alerts, alert)
+		},
+	}
 
-	monitor, err := New(
-		&config.Config{
-			WorkingDir: ".",
-			Monitoring: config.Monitoring{
-				SendPeriod: config.Duration{Duration: sendDuration},
-				PollPeriod: config.Duration{Duration: 1 * time.Second},
-				CPU: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				RAM: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				UsedDisk: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				InTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				OutTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
+	var trafficMonitoring testTrafficMonitoring
+
+	systemCPUPersent = getSystemCPUPersent
+	systemVirtualMemory = getSystemRAM
+	systemDiskUsage = getSystemDisk
+
+	monitoring := config.Monitoring{
+		ServiceAlertRules: aostypes.ServiceAlertRules{
+			CPU: &aostypes.AlertRule{
+				MinTimeout:   aostypes.Duration{},
+				MinThreshold: 30,
+				MaxThreshold: 40,
+			},
+			RAM: &aostypes.AlertRule{
+				MinTimeout:   aostypes.Duration{},
+				MinThreshold: 1000,
+				MaxThreshold: 2000,
+			},
+			UsedDisk: &aostypes.AlertRule{
+				MinTimeout:   aostypes.Duration{},
+				MinThreshold: 2000,
+				MaxThreshold: 4000,
+			},
+			InTraffic: &aostypes.AlertRule{
+				MinTimeout:   aostypes.Duration{},
+				MinThreshold: 100,
+				MaxThreshold: 200,
+			},
+			OutTraffic: &aostypes.AlertRule{
+				MinTimeout:   aostypes.Duration{},
+				MinThreshold: 100,
+				MaxThreshold: 200,
 			},
 		},
-		sender,
-		networkManager)
-	if err != nil {
-		t.Fatalf("Can't create monitoring instance: %s", err)
+		SendPeriod: config.Duration{Duration: duration},
+		PollPeriod: config.Duration{Duration: duration},
 	}
-	defer monitor.Close()
 
-	for {
+	testData := []testAlertData{
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 150, outputTraffic: 150},
+			monitoringData: cloudprotocol.MonitoringData{
+				Global: cloudprotocol.GlobalMonitoringData{
+					RAM:        1100,
+					CPU:        35,
+					UsedDisk:   2300,
+					InTraffic:  150,
+					OutTraffic: 150,
+				},
+			},
+			quotaData: testQuotaData{
+				cpu:  35,
+				ram:  1100,
+				disk: 2300,
+			},
+		},
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 150, outputTraffic: 250},
+			monitoringData: cloudprotocol.MonitoringData{
+				Global: cloudprotocol.GlobalMonitoringData{
+					RAM:        1100,
+					CPU:        45,
+					UsedDisk:   2300,
+					InTraffic:  150,
+					OutTraffic: 250,
+				},
+			},
+			quotaData: testQuotaData{
+				cpu:  45,
+				ram:  1100,
+				disk: 2300,
+			},
+			alerts: []cloudprotocol.AlertItem{
+				prepareSystemAlertItem("cpu", time.Now(), 45),
+				prepareSystemAlertItem("outTraffic", time.Now(), 250),
+			},
+		},
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 350, outputTraffic: 250},
+			monitoringData: cloudprotocol.MonitoringData{
+				Global: cloudprotocol.GlobalMonitoringData{
+					RAM:        2100,
+					CPU:        45,
+					UsedDisk:   4300,
+					InTraffic:  350,
+					OutTraffic: 250,
+				},
+			},
+			quotaData: testQuotaData{
+				cpu:  45,
+				ram:  2100,
+				disk: 4300,
+			},
+			alerts: []cloudprotocol.AlertItem{
+				prepareSystemAlertItem("cpu", time.Now(), 45),
+				prepareSystemAlertItem("ram", time.Now(), 2100),
+				prepareSystemAlertItem("disk", time.Now(), 4300),
+				prepareSystemAlertItem("inTraffic", time.Now(), 350),
+				prepareSystemAlertItem("outTraffic", time.Now(), 250),
+			},
+		},
+	}
+
+	for _, item := range testData {
+		trafficMonitoring = item.trafficMonitoring
+		systemQuotaData = item.quotaData
+
+		monitor, err := New(
+			&config.Config{
+				WorkingDir: ".",
+				Monitoring: monitoring,
+			}, sender, &trafficMonitoring)
+		if err != nil {
+			t.Fatalf("Can't create monitoring instance: %s", err)
+		}
+
 		select {
-		case <-monitor.GetMonitoringDataChannel():
-			for resource, numAlerts := range alertMap {
-				if numAlerts != 1 {
-					t.Errorf("Wrong number of %s alerts: %d", resource, numAlerts)
+		case monitoringData := <-monitor.GetMonitoringDataChannel():
+			if monitoringData.Global != item.monitoringData.Global {
+				t.Errorf("Incorrect system monitoring data: %v", monitoringData.Global)
+			}
+
+			if len(alerts) != len(item.alerts) {
+				t.Fatalf("Incorrect alerts number: %d", len(alerts))
+			}
+
+			for i, currentAlert := range alerts {
+				if item.alerts[i].Payload != currentAlert.Payload {
+					t.Errorf("Incorrect system alert payload: %v", currentAlert.Payload)
 				}
 			}
 
-			if len(alertMap) != 5 {
-				t.Error("Not enough alerts")
-			}
-
-			return
-
-		case <-time.After(sendDuration * 2):
+		case <-time.After(duration * 2):
 			t.Fatal("Monitoring data timeout")
 		}
+
+		alerts = nil
+
+		monitor.Close()
 	}
 }
 
-func TestServices(t *testing.T) {
-	sendDuration := 2 * time.Second
+func TestInstances(t *testing.T) {
+	duration := 100 * time.Millisecond
+	instanceTrafficMonitoringData = make(map[string]testTrafficMonitoring)
 
-	alertMap := make(map[string]int)
+	var alerts []cloudprotocol.AlertItem
 
-	sender := &testSender{callback: func(serviceID, resource string, time time.Time, value uint64) {
-		alertMap[resource] = alertMap[resource] + 1
-	}}
+	sender := &testSender{
+		alertCallback: func(alert cloudprotocol.AlertItem) {
+			alerts = append(alerts, alert)
+		},
+	}
+
+	trafficMonitoring := &testTrafficMonitoring{}
 
 	monitor, err := New(
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				SendPeriod: config.Duration{Duration: sendDuration},
-				PollPeriod: config.Duration{Duration: 1 * time.Second},
+				SendPeriod: config.Duration{Duration: duration},
+				PollPeriod: config.Duration{Duration: duration},
 			},
 		},
 		sender,
-		networkManager)
+		trafficMonitoring)
 	if err != nil {
 		t.Fatalf("Can't create monitoring instance: %s", err)
 	}
 	defer monitor.Close()
 
-	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1", 0, 0)
-	if err != nil {
-		t.Fatalf("Can't start service: %s", err)
+	alertRules := &aostypes.ServiceAlertRules{
+		CPU: &aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{},
+			MinThreshold: 30,
+			MaxThreshold: 40,
+		},
+		RAM: &aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{},
+			MinThreshold: 1000,
+			MaxThreshold: 2000,
+		},
+		UsedDisk: &aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{},
+			MinThreshold: 2000,
+			MaxThreshold: 3000,
+		},
+		InTraffic: &aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{},
+			MinThreshold: 100,
+			MaxThreshold: 200,
+		},
+		OutTraffic: &aostypes.AlertRule{
+			MinTimeout:   aostypes.Duration{},
+			MinThreshold: 100,
+			MaxThreshold: 200,
+		},
 	}
 
-	cmd2, err := runContainerCmd(path.Join(tmpDir, "service2"), "service2", 0, 0)
-	if err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
+	getUserFSQuotaUsage = testUserFSQuotaUsage
+	getProcesses = getTestProcessesList
 
-	// Wait while .ip amd .pid files are created
-	time.Sleep(1 * time.Second)
+	defer func() {
+		getProcesses = getProcessesList
+	}()
 
-	if err = monitor.StartMonitorService("service1",
-		ServiceMonitoringConfig{
-			ServiceDir: "tmp/service1",
-			UID:        5000,
-			GID:        5000,
-			ServiceRules: &ServiceAlertRules{
-				CPU: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				RAM: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				UsedDisk: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				InTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				OutTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
+	testData := []testAlertData{
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 150, outputTraffic: 150},
+			quotaData: testQuotaData{
+				cpu:  35,
+				ram:  1100,
+				disk: 2300,
 			},
-		}); err != nil {
-		t.Fatalf("Can't start monitoring service: %s", err)
-	}
-
-	if err = monitor.StartMonitorService("service2",
-		ServiceMonitoringConfig{
-			ServiceDir: "tmp/service2",
-			UID:        5002,
-			GID:        5002,
-			ServiceRules: &ServiceAlertRules{
-				CPU: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
+			monitoringConfig: MonitorParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject1",
+					Instance:  1,
 				},
-				RAM: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				UsedDisk: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				InTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
-				OutTraffic: &config.AlertRule{
-					MinTimeout:   config.Duration{},
-					MinThreshold: 0,
-					MaxThreshold: 0,
-				},
+				UID:        5000,
+				GID:        5000,
+				AlertRules: alertRules,
 			},
-		}); err != nil {
-		t.Fatalf("Can't start monitoring service: %s", err)
+		},
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 250, outputTraffic: 150},
+			quotaData: testQuotaData{
+				cpu:  45,
+				ram:  2100,
+				disk: 2300,
+			},
+			monitoringConfig: MonitorParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					ServiceID: "service2",
+					SubjectID: "subject1",
+					Instance:  1,
+				},
+				UID:        3000,
+				GID:        5000,
+				AlertRules: alertRules,
+			},
+			alerts: []cloudprotocol.AlertItem{
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service2",
+					SubjectID: "subject1",
+					Instance:  1,
+				}, "ram", time.Now(), 2100),
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service2",
+					SubjectID: "subject1",
+					Instance:  1,
+				}, "inTraffic", time.Now(), 250),
+			},
+		},
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 150, outputTraffic: 250},
+			quotaData: testQuotaData{
+				cpu:  45,
+				ram:  1100,
+				disk: 2300,
+			},
+			monitoringConfig: MonitorParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				},
+				UID:        2000,
+				GID:        5000,
+				AlertRules: alertRules,
+			},
+			alerts: []cloudprotocol.AlertItem{
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				}, "ram", time.Now(), 2200),
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				}, "outTraffic", time.Now(), 250),
+			},
+		},
+		{
+			trafficMonitoring: testTrafficMonitoring{inputTraffic: 150, outputTraffic: 250},
+			quotaData: testQuotaData{
+				cpu:  45,
+				ram:  1100,
+				disk: 2300,
+			},
+			monitoringConfig: MonitorParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				},
+				UID:        2000,
+				GID:        5000,
+				AlertRules: alertRules,
+			},
+			alerts: []cloudprotocol.AlertItem{
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				}, "ram", time.Now(), 2200),
+				prepareInstanceAlertItem(cloudprotocol.InstanceIdent{
+					ServiceID: "service1",
+					SubjectID: "subject2",
+					Instance:  2,
+				}, "outTraffic", time.Now(), 250),
+			},
+		},
 	}
 
-	terminate := false
+	var expectedInstanceAlertCount int
 
-	for terminate != true {
-		select {
-		case data := <-monitor.GetMonitoringDataChannel():
-			if len(data.ServiceMonitoring) != 2 {
-				t.Errorf("Wrong number of services: %d", len(data.ServiceMonitoring))
-			}
+	monitoringInstances := []cloudprotocol.InstanceMonitoringData{
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{
+				ServiceID: "service1",
+				SubjectID: "subject1",
+				Instance:  1,
+			},
+			RAM:        1100,
+			CPU:        uint64(math.Round(35 / float64(runtime.NumCPU()))),
+			UsedDisk:   2300,
+			InTraffic:  150,
+			OutTraffic: 150,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{
+				ServiceID: "service2",
+				SubjectID: "subject1",
+				Instance:  1,
+			},
+			RAM:        2100,
+			CPU:        uint64(math.Round(45 / float64(runtime.NumCPU()))),
+			UsedDisk:   2300,
+			InTraffic:  250,
+			OutTraffic: 150,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{
+				ServiceID: "service1",
+				SubjectID: "subject2",
+				Instance:  2,
+			},
+			RAM:        2200,
+			CPU:        uint64(math.Round((45 + 45) / float64(runtime.NumCPU()))),
+			UsedDisk:   4600,
+			InTraffic:  150,
+			OutTraffic: 250,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{
+				ServiceID: "service1",
+				SubjectID: "subject2",
+				Instance:  2,
+			},
+			RAM:        2200,
+			CPU:        uint64(math.Round((45 + 45) / float64(runtime.NumCPU()))),
+			UsedDisk:   2300,
+			InTraffic:  150,
+			OutTraffic: 250,
+		},
+	}
 
-			for resource, numAlerts := range alertMap {
-				if numAlerts != 2 {
-					t.Errorf("Wrong number of %s alerts: %d", resource, numAlerts)
+	for i, item := range testData {
+		processesData = append(processesData, &testProcessData{
+			uid:       int32(item.monitoringConfig.UID),
+			quotaData: item.quotaData,
+		})
+
+		instanceID := fmt.Sprintf("instance%d", i)
+		if err := monitor.StartInstanceMonitor(instanceID, item.monitoringConfig); err != nil {
+			t.Fatalf("Can't start monitoring instance: %s", err)
+		}
+
+		instanceTrafficMonitoringData[instanceID] = item.trafficMonitoring
+		expectedInstanceAlertCount += len(item.alerts)
+	}
+
+	defer func() {
+		processesData = nil
+	}()
+
+	select {
+	case monitoringData := <-monitor.GetMonitoringDataChannel():
+		if len(monitoringData.ServiceInstances) != len(monitoringInstances) {
+			t.Fatalf("Incorrect instance monitoring count: %d", len(monitoringData.ServiceInstances))
+		}
+
+	monitoringLoop:
+		for _, receivedMonitoring := range monitoringData.ServiceInstances {
+			for _, expectedMonitoring := range monitoringInstances {
+				if expectedMonitoring == receivedMonitoring {
+					continue monitoringLoop
 				}
 			}
 
-			if len(alertMap) != 5 {
-				t.Error("Not enough alerts")
+			t.Error("Unexpected monitoring data")
+		}
+
+	case <-time.After(duration * 2):
+		t.Fatal("Monitoring data timeout")
+	}
+
+	if len(alerts) != expectedInstanceAlertCount {
+		t.Fatalf("Incorrect alerts number: %d", len(alerts))
+	}
+
+	for i, item := range testData {
+	alertLoop:
+		for _, expectedAlert := range item.alerts {
+			for _, receivedAlert := range alerts {
+				if expectedAlert.Payload == receivedAlert.Payload {
+					continue alertLoop
+				}
 			}
 
-			terminate = true
+			t.Error("Incorrect system alert payload")
+		}
 
-		case <-time.After(sendDuration * 2):
-			t.Fatal("Monitoring data timeout")
+		if err := monitor.StopInstanceMonitor(fmt.Sprintf("instance%d", i)); err != nil {
+			t.Fatalf("Can't stop monitoring instance: %s", err)
 		}
 	}
 
-	alertMap = make(map[string]int)
-
-	err = monitor.StopMonitorService("service1")
-	if err != nil {
-		t.Fatalf("Can't stop monitoring service: %s", err)
-	}
-
-	terminate = false
-
-	for terminate != true {
-		select {
-		case data := <-monitor.GetMonitoringDataChannel():
-			if len(data.ServiceMonitoring) != 1 {
-				t.Errorf("Wrong number of services: %d", len(data.ServiceMonitoring))
-			}
-
-			if len(alertMap) != 0 {
-				t.Error("Not enough alerts")
-			}
-
-			terminate = true
-
-		case <-time.After(sendDuration * 2):
-			t.Fatal("Monitoring data timeout")
+	// this select is used to make sure that the monitoring of the instances has been stopped
+	// and monitoring data is not received on them
+	select {
+	case monitoringData := <-monitor.GetMonitoringDataChannel():
+		if len(monitoringData.ServiceInstances) != 0 {
+			t.Fatalf("Incorrect instance monitoring count: %d", len(monitoringData.ServiceInstances))
 		}
-	}
 
-	err = monitor.StopMonitorService("service2")
-	if err != nil {
-		t.Fatalf("Can't stop monitoring service: %s", err)
-	}
-
-	_ = runContainerWait("service1", cmd1)
-
-	_ = runContainerWait("service2", cmd2)
-}
-
-func TestTrafficLimit(t *testing.T) {
-	sendDuration := 2 * time.Second
-
-	sender := &testSender{}
-
-	monitor, err := New(
-		&config.Config{
-			WorkingDir: ".",
-			Monitoring: config.Monitoring{
-				SendPeriod: config.Duration{Duration: sendDuration},
-				PollPeriod: config.Duration{Duration: 1 * time.Second},
-			},
-		},
-		sender, networkManager)
-	if err != nil {
-		t.Fatalf("Can't create monitoring instance: %s", err)
-	}
-	defer monitor.Close()
-
-	if err := networkManager.SetTrafficPeriod(MinutePeriod); err != nil {
-		t.Errorf("Can't set traffic period: %s", err)
-	}
-
-	// wait for beginning of next minute
-	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
-
-	cmd1, err := runContainerCmd(path.Join(tmpDir, "service1"), "service1", 300, 300)
-	if err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	// Wait while .ip amd .pid files are created
-	time.Sleep(1 * time.Second)
-
-	ipAddress, err := networkManager.GetServiceIP("service1", "default")
-	if err != nil {
-		t.Fatalf("Can't get service IP: %s", err)
-	}
-
-	err = monitor.StartMonitorService("service1",
-		ServiceMonitoringConfig{
-			ServiceDir: "tmp/service1",
-			IPAddress:  ipAddress,
-			UID:        5001,
-			GID:        5001,
-		})
-	if err != nil {
-		t.Fatalf("Can't start monitoring service: %s", err)
-	}
-
-	if err := runContainerWait("service1", cmd1); err == nil {
-		t.Error("Ping should fail")
-	}
-
-	err = monitor.StopMonitorService("service1")
-	if err != nil {
-		t.Fatalf("Can't stop monitoring service: %s", err)
-	}
-
-	// wait for beginning of next minute
-	time.Sleep(time.Duration((60 - time.Now().Second())) * time.Second)
-
-	// Start again
-
-	if cmd1, err = runContainerCmd(path.Join(tmpDir, "service1"), "service1", 2000, 2000); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	if ipAddress, err = networkManager.GetServiceIP("service1", "default"); err != nil {
-		t.Fatalf("Can't get service IP: %s", err)
-	}
-
-	// Wait while .ip amd .pid files are created
-	time.Sleep(1 * time.Second)
-
-	err = monitor.StartMonitorService("service1",
-		ServiceMonitoringConfig{
-			ServiceDir: "tmp/service1",
-			IPAddress:  ipAddress,
-			UID:        5001,
-			GID:        5001,
-		})
-	if err != nil {
-		t.Fatalf("Can't start monitoring service: %s", err)
-	}
-
-	_ = runContainerWait("service1", cmd1)
-
-	err = monitor.StopMonitorService("service1")
-	if err != nil {
-		t.Fatalf("Can't stop monitoring service: %s", err)
+	case <-time.After(duration * 2):
+		t.Fatal("Monitoring data timeout")
 	}
 }
 
-/*******************************************************************************
- * Interfaces
- ******************************************************************************/
+// /********************************************************************************************************************
+//  * Interfaces
+//  *******************************************************************************************************************/
 
-func (instance *testSender) SendResourceAlert(source, resource string, time time.Time, value uint64) {
-	instance.callback(source, resource, time, value)
+func (sender *testSender) SendAlert(alert cloudprotocol.AlertItem) {
+	sender.alertCallback(alert)
 }
 
-func (storage *testTrafficStorage) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
-	storage.chainData[chain] = chainData{timestamp, value}
+// /********************************************************************************************************************
+//  * Private
+//  *******************************************************************************************************************/
 
-	return nil
+func (trafficMonitoring *testTrafficMonitoring) GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error) {
+	return trafficMonitoring.inputTraffic, trafficMonitoring.outputTraffic, nil
 }
 
-func (storage *testTrafficStorage) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
-	data, ok := storage.chainData[chain]
+func (trafficMonitoring *testTrafficMonitoring) GetInstanceTraffic(instanceID string) (
+	inputTraffic, outputTraffic uint64, err error,
+) {
+	trafficMonitoringData, ok := instanceTrafficMonitoringData[instanceID]
 	if !ok {
-		return timestamp, value, errors.New("chain does not exist")
+		return 0, 0, aoserrors.New("incorrect instance ID")
 	}
 
-	return data.timestamp, data.value, nil
+	return trafficMonitoringData.inputTraffic, trafficMonitoringData.outputTraffic, nil
 }
 
-func (storage *testTrafficStorage) RemoveTrafficMonitorData(chain string) (err error) {
-	if _, ok := storage.chainData[chain]; !ok {
-		return errors.New("chain does not exist")
-	}
-
-	delete(storage.chainData, chain)
-
-	return nil
+func getSystemCPUPersent(interval time.Duration, percpu bool) (persent []float64, err error) {
+	return []float64{systemQuotaData.cpu}, nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func setup() (err error) {
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if networkManager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, &trafficStorage); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = createOCIContainer(path.Join(tmpDir, "service1"), "service1", []string{"ping", "8.8.8.8", "-c10", "-w10"}); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
+func getSystemRAM() (virtualMemory *mem.VirtualMemoryStat, err error) {
+	return &mem.VirtualMemoryStat{Used: systemQuotaData.ram}, nil
 }
 
-func cleanup() (err error) {
-	if err := networkManager.DeleteAllNetworks(); err != nil {
-		log.Errorf("Can't remove networks: %s", err)
-	}
-
-	networkManager.Close()
-
-	if err := os.RemoveAll(tmpDir); err != nil {
-		log.Errorf("Can't remove tmp dir: %s", err)
-	}
-
-	return nil
+func getSystemDisk(path string) (diskUsage *disk.UsageStat, err error) {
+	return &disk.UsageStat{Used: systemQuotaData.disk}, nil
 }
 
-func createOCIContainer(imagePath string, containerID string, args []string) (err error) {
-	if err = os.RemoveAll(imagePath); err != nil {
-		return aoserrors.Wrap(err)
-	}
+func (p *testProcessData) Uids() ([]int32, error) {
+	return []int32{p.uid}, nil
+}
 
-	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
+func (p *testProcessData) CPUPercent() (float64, error) {
+	return p.quotaData.cpu, nil
+}
 
-	out, err := exec.Command("runc", "spec", "-b", imagePath).CombinedOutput()
-	if err != nil {
-		return errors.New(string(out))
-	}
+func (p *testProcessData) MemoryInfo() (*process.MemoryInfoStat, error) {
+	return &process.MemoryInfoStat{
+		RSS: p.quotaData.ram,
+	}, nil
+}
 
-	specJSON, err := ioutil.ReadFile(path.Join(imagePath, "config.json"))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := addHostResolvFiles(imagePath); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	var spec runtimespec.Spec
-
-	if err = json.Unmarshal(specJSON, &spec); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	spec.Process.Terminal = false
-
-	spec.Process.Args = args
-
-	for i, ns := range spec.Linux.Namespaces {
-		switch ns.Type {
-		case runtimespec.NetworkNamespace:
-			spec.Linux.Namespaces[i].Path = networkmanager.GetNetNsPathByName(containerID)
+func testUserFSQuotaUsage(path string, uid, gid uint32) (byteUsed uint64, err error) {
+	for _, quota := range processesData {
+		if quota.uid == int32(uid) {
+			return quota.quotaData.disk, nil
 		}
 	}
 
-	for _, mount := range []string{"/bin", "/sbin", "/lib", "/lib64", "/usr"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
-			Destination: mount,
-			Type:        "bind", Source: mount, Options: []string{"bind", "ro"},
-		})
-	}
-
-	for _, mount := range []string{"hosts", "resolv.conf"} {
-		spec.Mounts = append(spec.Mounts, runtimespec.Mount{
-			Destination: path.Join("/etc", mount),
-			Type:        "bind", Source: path.Join(imagePath, "etc", mount), Options: []string{"bind", "ro"},
-		})
-	}
-
-	spec.Process.Capabilities.Bounding = append(spec.Process.Capabilities.Bounding, "CAP_NET_RAW")
-	spec.Process.Capabilities.Effective = append(spec.Process.Capabilities.Effective, "CAP_NET_RAW")
-	spec.Process.Capabilities.Inheritable = append(spec.Process.Capabilities.Inheritable, "CAP_NET_RAW")
-	spec.Process.Capabilities.Permitted = append(spec.Process.Capabilities.Permitted, "CAP_NET_RAW")
-	spec.Process.Capabilities.Ambient = append(spec.Process.Capabilities.Ambient, "CAP_NET_RAW")
-
-	if specJSON, err = json.Marshal(&spec); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
+	return 0, aoserrors.New("incorrect uid")
 }
 
-func addHostResolvFiles(pathToContainer string) (err error) {
-	etcPath := path.Join(pathToContainer, "etc")
+func getTestProcessesList() (processes []processInterface, err error) {
+	processesInterface := make([]processInterface, len(processesData))
 
-	if err = os.MkdirAll(etcPath, 0755); err != nil {
-		return aoserrors.Wrap(err)
+	for i, process := range processesData {
+		processesInterface[i] = process
 	}
 
-	if _, err = os.Create(path.Join(etcPath, "hosts")); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if _, err = os.Create(path.Join(etcPath, "resolv.conf")); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func runContainerCmd(imagePath string, containerID string, downloadLimit, uploadLimit uint64) (cmd *exec.Cmd, err error) {
-	err = networkManager.AddServiceToNetwork(containerID, "default",
-		networkmanager.NetworkParams{
-			DownloadLimit: downloadLimit,
-			UploadLimit:   uploadLimit,
-		})
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	cmd = exec.Command("runc", "run", "--pid-file", path.Join(imagePath, ".pid"), "-b", imagePath, containerID)
-
-	if err := cmd.Start(); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	return cmd, nil
-}
-
-func runContainerWait(containerID string, cmd *exec.Cmd) (err error) {
-	err = cmd.Wait()
-
-	if netErr := networkManager.RemoveServiceFromNetwork(containerID, "default"); netErr != nil {
-		if err == nil {
-			return aoserrors.Wrap(netErr)
-		}
-	}
-
-	return aoserrors.Wrap(err)
+	return processesInterface, nil
 }
