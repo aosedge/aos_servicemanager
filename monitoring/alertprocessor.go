@@ -20,30 +20,30 @@ package monitoring
 import (
 	"time"
 
+	"github.com/aoscloud/aos_common/aostypes"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 type alertCallback func(time time.Time, value uint64)
 
-// alertProcessor object for detection alerts
+// alertProcessor object for detection alerts.
 type alertProcessor struct {
 	name              string
 	source            *uint64
 	callback          alertCallback
-	rule              config.AlertRule
+	rule              aostypes.AlertRule
 	thresholdTime     time.Time
 	thresholdDetected bool
 }
 
-// createAlertProcessor creates alert processor based on configuration
+// createAlertProcessor creates alert processor based on configuration.
 func createAlertProcessor(name string, source *uint64,
-	callback alertCallback, rule config.AlertRule) (alert *alertProcessor) {
+	callback alertCallback, rule aostypes.AlertRule,
+) (alert *alertProcessor) {
 	return &alertProcessor{name: name, source: source, callback: callback, rule: rule}
 }
 
-// checkAlertDetection checks if alert was detected
+// checkAlertDetection checks if alert was detected.
 func (alert *alertProcessor) checkAlertDetection(currentTime time.Time) {
 	value := *alert.source
 
