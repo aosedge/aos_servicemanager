@@ -27,23 +27,23 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/shirou/gopsutil/process"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/platform"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// Service status
+// Service status.
 const (
 	MinutePeriod = iota
 	HourPeriod
@@ -52,36 +52,32 @@ const (
 	YearPeriod
 )
 
-const monitoringChannelSize = 64
+const (
+	monitoringChannelSize = 64
+	// For optimization capacity should be equals numbers of measurement values
+	// 5 - RAM, CPU, UsedDisk, InTraffic, OutTraffic.
+	capacityAlertProcessorElements = 5
+)
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// MonitoringAndAlertSender interface to send resource alerts.
-type MonitoringAndAlertSender interface { //nolint
-	SendResourceAlert(source, resource string, time time.Time, value uint64)
+// AlertSender interface to send resource alerts.
+type AlertSender interface {
+	SendAlert(alert cloudprotocol.AlertItem)
 }
 
 // TrafficMonitoring interface to get network traffic.
 type TrafficMonitoring interface {
 	GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error)
-	GetServiceTraffic(serviceID string) (inputTraffic, outputTraffic uint64, err error)
+	GetInstanceTraffic(instanceID string) (inputTraffic, outputTraffic uint64, err error)
 }
 
-// ServiceAlertRules define service monitoring alerts rules
-type ServiceAlertRules struct {
-	RAM        *config.AlertRule `json:"ram,omitempty"`
-	CPU        *config.AlertRule `json:"cpu,omitempty"`
-	UsedDisk   *config.AlertRule `json:"usedDisk,omitempty"`
-	InTraffic  *config.AlertRule `json:"inTraffic,omitempty"`
-	OutTraffic *config.AlertRule `json:"outTraffic,omitempty"`
-}
-
-// Monitor instance
+// Monitor instance.
 type Monitor struct {
-	monitoringChannel chan *pb.Monitoring
-	dataSender        MonitoringAndAlertSender
+	monitoringChannel chan cloudprotocol.MonitoringData
+	dataSender        AlertSender
 
 	config     config.Monitoring
 	workingDir string
@@ -92,46 +88,60 @@ type Monitor struct {
 
 	sync.Mutex
 
-	currentSystemData pb.SystemMonitoring
+	globalMonitoringData cloudprotocol.GlobalMonitoringData
 
 	alertProcessors *list.List
 
-	serviceMap        map[string]*serviceMonitoring
-	trafficMonitoring TrafficMonitoring
+	instanceMonitoringMap map[string]*instanceMonitoring
+	trafficMonitoring     TrafficMonitoring
 }
 
-// ServiceMonitoringConfig contains info about service and rules for monitoring alerts
-type ServiceMonitoringConfig struct {
-	ServiceDir    string
-	IPAddress     string
-	UID           uint32
-	GID           uint32
-	UploadLimit   uint64
-	DownloadLimit uint64
-	ServiceRules  *ServiceAlertRules
+// MonitorParams instance monitoring parameters.
+type MonitorParams struct {
+	cloudprotocol.InstanceIdent
+	UID        uint32
+	GID        uint32
+	AlertRules *aostypes.ServiceAlertRules
 }
 
-type serviceMonitoring struct {
-	serviceDir             string
+type instanceMonitoring struct {
 	uid                    uint32
 	gid                    uint32
-	monitoringData         pb.ServiceMonitoring
+	monitoringData         cloudprotocol.InstanceMonitoringData
 	alertProcessorElements []*list.Element
 }
 
-/*******************************************************************************
- * Variable
- ******************************************************************************/
+type processInterface interface {
+	Uids() ([]int32, error)
+	CPUPercent() (float64, error)
+	MemoryInfo() (*process.MemoryInfoStat, error)
+}
 
-// ErrDisabled indicates that monitoring is disable in the config
+/***********************************************************************************************************************
+ * Variable
+ **********************************************************************************************************************/
+
+// ErrDisabled indicates that monitoring is disable in the config.
 var ErrDisabled = errors.New("monitoring is disabled")
 
-/*******************************************************************************
- * Public
- ******************************************************************************/
+// These global variables are used to be able to mocking the functionality of getting quota in tests.
+// nolint:gochecknoglobals
+var (
+	systemCPUPersent    = cpu.Percent
+	systemVirtualMemory = mem.VirtualMemory
+	systemDiskUsage     = disk.Usage
+	getUserFSQuotaUsage = platform.GetUserFSQuotaUsage
+	getProcesses        = getProcessesList
+)
 
-// New creates new monitor instance
-func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitoring TrafficMonitoring) (monitor *Monitor, err error) {
+/***********************************************************************************************************************
+ * Public
+ **********************************************************************************************************************/
+
+// New creates new monitor instance.
+func New(config *config.Config, sender AlertSender, trafficMonitoring TrafficMonitoring) (
+	monitor *Monitor, err error,
+) {
 	log.Debug("Create monitor")
 
 	if config.Monitoring.Disabled {
@@ -140,7 +150,7 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 
 	monitor = &Monitor{dataSender: sender, trafficMonitoring: trafficMonitoring}
 
-	monitor.monitoringChannel = make(chan *pb.Monitoring, monitoringChannelSize)
+	monitor.monitoringChannel = make(chan cloudprotocol.MonitoringData, monitoringChannelSize)
 
 	monitor.config = config.Monitoring
 	monitor.workingDir = config.WorkingDir
@@ -152,9 +162,9 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 		if config.Monitoring.CPU != nil {
 			monitor.alertProcessors.PushBack(createAlertProcessor(
 				"System CPU",
-				&monitor.currentSystemData.Cpu,
+				&monitor.globalMonitoringData.CPU,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert("system", "cpu", time, value)
+					monitor.dataSender.SendAlert(prepareSystemAlertItem("cpu", time, value))
 				},
 				*config.Monitoring.CPU))
 		}
@@ -162,9 +172,9 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 		if config.Monitoring.RAM != nil {
 			monitor.alertProcessors.PushBack(createAlertProcessor(
 				"System RAM",
-				&monitor.currentSystemData.Ram,
+				&monitor.globalMonitoringData.RAM,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert("system", "ram", time, value)
+					monitor.dataSender.SendAlert(prepareSystemAlertItem("ram", time, value))
 				},
 				*config.Monitoring.RAM))
 		}
@@ -172,9 +182,9 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 		if config.Monitoring.UsedDisk != nil {
 			monitor.alertProcessors.PushBack(createAlertProcessor(
 				"System Disk",
-				&monitor.currentSystemData.UsedDisk,
+				&monitor.globalMonitoringData.UsedDisk,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert("system", "disk", time, value)
+					monitor.dataSender.SendAlert(prepareSystemAlertItem("disk", time, value))
 				},
 				*config.Monitoring.UsedDisk))
 		}
@@ -182,9 +192,9 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 		if config.Monitoring.InTraffic != nil {
 			monitor.alertProcessors.PushBack(createAlertProcessor(
 				"IN Traffic",
-				&monitor.currentSystemData.InTraffic,
+				&monitor.globalMonitoringData.InTraffic,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert("system", "inTraffic", time, value)
+					monitor.dataSender.SendAlert(prepareSystemAlertItem("inTraffic", time, value))
 				},
 				*config.Monitoring.InTraffic))
 		}
@@ -192,15 +202,15 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 		if config.Monitoring.OutTraffic != nil {
 			monitor.alertProcessors.PushBack(createAlertProcessor(
 				"OUT Traffic",
-				&monitor.currentSystemData.OutTraffic,
+				&monitor.globalMonitoringData.OutTraffic,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert("system", "outTraffic", time, value)
+					monitor.dataSender.SendAlert(prepareSystemAlertItem("outTraffic", time, value))
 				},
 				*config.Monitoring.OutTraffic))
 		}
 	}
 
-	monitor.serviceMap = make(map[string]*serviceMonitoring)
+	monitor.instanceMonitoringMap = make(map[string]*instanceMonitoring)
 
 	monitor.pollTimer = time.NewTicker(monitor.config.PollPeriod.Duration)
 	monitor.sendTimer = time.NewTicker(monitor.config.SendPeriod.Duration)
@@ -214,7 +224,7 @@ func New(config *config.Config, sender MonitoringAndAlertSender, trafficMonitori
 	return monitor, nil
 }
 
-// Close closes monitor instance
+// Close closes monitor instance.
 func (monitor *Monitor) Close() {
 	log.Debug("Close monitor")
 
@@ -222,130 +232,123 @@ func (monitor *Monitor) Close() {
 	monitor.pollTimer.Stop()
 }
 
-func (monitor *Monitor) GetMonitoringDataChannel() (monitoringChannel <-chan *pb.Monitoring) {
+func (monitor *Monitor) GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.MonitoringData) {
 	return monitor.monitoringChannel
 }
 
-// StartMonitorService starts monitoring service
-func (monitor *Monitor) StartMonitorService(serviceID string, monitoringConfig ServiceMonitoringConfig) (err error) {
+// StartInstanceMonitor starts monitoring service.
+func (monitor *Monitor) StartInstanceMonitor(instanceID string, monitoringConfig MonitorParams) error {
 	monitor.Lock()
 	defer monitor.Unlock()
 
-	if _, ok := monitor.serviceMap[serviceID]; ok {
-		log.WithField("id", serviceID).Warning("Service already under monitoring")
+	if _, ok := monitor.instanceMonitoringMap[instanceID]; ok {
+		log.WithField("id", instanceID).Warning("Service already under monitoring")
+
 		return nil
 	}
 
-	log.WithFields(log.Fields{
-		"id": serviceID,
-		"ip": monitoringConfig.IPAddress,
-	}).Debug("Start service monitoring")
+	log.WithFields(log.Fields{"id": instanceID}).Debug("Start service monitoring")
 
-	serviceMonitoring := serviceMonitoring{
-		serviceDir: monitoringConfig.ServiceDir,
-		uid:        monitoringConfig.UID,
-		gid:        monitoringConfig.GID,
-		monitoringData: pb.ServiceMonitoring{
-			ServiceId: serviceID,
-		},
+	serviceMonitoring := instanceMonitoring{
+		uid:            monitoringConfig.UID,
+		gid:            monitoringConfig.GID,
+		monitoringData: cloudprotocol.InstanceMonitoringData{InstanceIdent: monitoringConfig.InstanceIdent},
 	}
 
-	rules := monitoringConfig.ServiceRules
+	rules := monitoringConfig.AlertRules
 
 	if monitor.dataSender != nil {
-		// For optimization capacity should be equals numbers of measurement values
-		// 5 - RAM, CPU, UsedDisk, InTraffic, OutTraffic
-		serviceMonitoring.alertProcessorElements = make([]*list.Element, 0, 5)
+		serviceMonitoring.alertProcessorElements = make([]*list.Element, 0, capacityAlertProcessorElements)
 
 		if rules != nil && rules.CPU != nil {
 			e := monitor.alertProcessors.PushBack(createAlertProcessor(
-				serviceID+" CPU",
-				&serviceMonitoring.monitoringData.Cpu,
+				instanceID+" CPU",
+				&serviceMonitoring.monitoringData.CPU,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert(serviceID, "cpu", time, value)
-				},
-				*rules.CPU))
+					monitor.dataSender.SendAlert(
+						prepareInstanceAlertItem(monitoringConfig.InstanceIdent, "cpu", time, value))
+				}, *rules.CPU))
 
 			serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 		}
 
 		if rules != nil && rules.RAM != nil {
 			e := monitor.alertProcessors.PushBack(createAlertProcessor(
-				serviceID+" RAM",
-				&serviceMonitoring.monitoringData.Ram,
+				instanceID+" RAM",
+				&serviceMonitoring.monitoringData.RAM,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert(serviceID, "ram", time, value)
-				},
-				*rules.RAM))
+					monitor.dataSender.SendAlert(
+						prepareInstanceAlertItem(monitoringConfig.InstanceIdent, "ram", time, value))
+				}, *rules.RAM))
 
 			serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 		}
 
 		if rules != nil && rules.UsedDisk != nil {
 			e := monitor.alertProcessors.PushBack(createAlertProcessor(
-				serviceID+" Disk",
+				instanceID+" Disk",
 				&serviceMonitoring.monitoringData.UsedDisk,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert(serviceID, "disk", time, value)
-				},
-				*rules.UsedDisk))
+					monitor.dataSender.SendAlert(
+						prepareInstanceAlertItem(monitoringConfig.InstanceIdent, "disk", time, value))
+				}, *rules.UsedDisk))
 
 			serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 		}
 
 		if rules != nil && rules.InTraffic != nil {
 			e := monitor.alertProcessors.PushBack(createAlertProcessor(
-				serviceID+" Traffic IN",
+				instanceID+" Traffic IN",
 				&serviceMonitoring.monitoringData.InTraffic,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert(serviceID, "inTraffic", time, value)
-				},
-				*rules.InTraffic))
+					monitor.dataSender.SendAlert(
+						prepareInstanceAlertItem(monitoringConfig.InstanceIdent, "inTraffic", time, value))
+				}, *rules.InTraffic))
 
 			serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 		}
 
 		if rules != nil && rules.OutTraffic != nil {
 			e := monitor.alertProcessors.PushBack(createAlertProcessor(
-				serviceID+" Traffic OUT",
+				instanceID+" Traffic OUT",
 				&serviceMonitoring.monitoringData.OutTraffic,
 				func(time time.Time, value uint64) {
-					monitor.dataSender.SendResourceAlert(serviceID, "outTraffic", time, value)
-				},
-				*rules.OutTraffic))
+					monitor.dataSender.SendAlert(
+						prepareInstanceAlertItem(monitoringConfig.InstanceIdent, "outTraffic", time, value))
+				}, *rules.OutTraffic))
 
 			serviceMonitoring.alertProcessorElements = append(serviceMonitoring.alertProcessorElements, e)
 		}
 	}
 
-	monitor.serviceMap[serviceID] = &serviceMonitoring
+	monitor.instanceMonitoringMap[instanceID] = &serviceMonitoring
 
 	return nil
 }
 
-// StopMonitorService stops monitoring service
-func (monitor *Monitor) StopMonitorService(serviceID string) (err error) {
+// StopInstanceMonitor stops monitoring service.
+func (monitor *Monitor) StopInstanceMonitor(instanceID string) error {
 	monitor.Lock()
 	defer monitor.Unlock()
 
-	log.WithField("id", serviceID).Debug("Stop service monitoring")
+	log.WithField("id", instanceID).Debug("Stop instance monitoring")
 
-	if _, ok := monitor.serviceMap[serviceID]; !ok {
+	if _, ok := monitor.instanceMonitoringMap[instanceID]; !ok {
 		return nil
 	}
 
-	for _, e := range monitor.serviceMap[serviceID].alertProcessorElements {
+	for _, e := range monitor.instanceMonitoringMap[instanceID].alertProcessorElements {
 		monitor.alertProcessors.Remove(e)
 	}
 
-	delete(monitor.serviceMap, serviceID)
+	delete(monitor.instanceMonitoringMap, instanceID)
 
 	return nil
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func (monitor *Monitor) run() error {
 	for {
@@ -358,7 +361,7 @@ func (monitor *Monitor) run() error {
 		case <-monitor.pollTimer.C:
 			monitor.Lock()
 			monitor.getCurrentSystemData()
-			monitor.getCurrentServicesData()
+			monitor.getCurrentInstanceData()
 			monitor.processAlerts()
 			monitor.Unlock()
 		}
@@ -367,17 +370,15 @@ func (monitor *Monitor) run() error {
 
 func (monitor *Monitor) sendMonitoringData() {
 	// Update services
-	channelData := &pb.Monitoring{}
-	channelData.ServiceMonitoring = make([]*pb.ServiceMonitoring, 0, len(monitor.serviceMap))
-
-	for _, service := range monitor.serviceMap {
-		serviceMonitoringData := service.monitoringData // nolint
-		channelData.ServiceMonitoring = append(channelData.ServiceMonitoring, &serviceMonitoringData)
+	channelData := cloudprotocol.MonitoringData{
+		Global:           monitor.globalMonitoringData,
+		Timestamp:        time.Now(),
+		ServiceInstances: make([]cloudprotocol.InstanceMonitoringData, 0, len(monitor.instanceMonitoringMap)),
 	}
 
-	currentSystemMonitoring := monitor.currentSystemData // nolint
-	channelData.SystemMonitoring = &currentSystemMonitoring
-	channelData.Timestamp = timestamppb.Now()
+	for _, instance := range monitor.instanceMonitoringMap {
+		channelData.ServiceInstances = append(channelData.ServiceInstances, instance.monitoringData)
+	}
 
 	monitor.monitoringChannel <- channelData
 }
@@ -388,64 +389,70 @@ func (monitor *Monitor) getCurrentSystemData() {
 		log.Errorf("Can't get system CPU: %s", err)
 	}
 
-	monitor.currentSystemData.Cpu = uint64(math.Round(cpu))
+	monitor.globalMonitoringData.CPU = uint64(math.Round(cpu))
 
-	monitor.currentSystemData.Ram, err = getSystemRAMUsage()
+	monitor.globalMonitoringData.RAM, err = getSystemRAMUsage()
 	if err != nil {
 		log.Errorf("Can't get system RAM: %s", err)
 	}
 
-	monitor.currentSystemData.UsedDisk, err = getSystemDiskUsage(monitor.workingDir)
+	monitor.globalMonitoringData.UsedDisk, err = getSystemDiskUsage(monitor.workingDir)
 	if err != nil {
 		log.Errorf("Can't get system Disk usage: %s", err)
 	}
 
-	monitor.currentSystemData.InTraffic, monitor.currentSystemData.OutTraffic, err = monitor.trafficMonitoring.GetSystemTraffic()
+	inTraffic, outTraffic, err := monitor.trafficMonitoring.GetSystemTraffic()
 	if err != nil {
 		log.Errorf("Can't get system traffic value: %s", err)
 	}
 
+	monitor.globalMonitoringData.InTraffic = inTraffic
+	monitor.globalMonitoringData.OutTraffic = outTraffic
+
 	log.WithFields(log.Fields{
-		"CPU":  monitor.currentSystemData.Cpu,
-		"RAM":  monitor.currentSystemData.Ram,
-		"Disk": monitor.currentSystemData.UsedDisk,
-		"IN":   monitor.currentSystemData.InTraffic,
-		"OUT":  monitor.currentSystemData.OutTraffic,
+		"CPU":  monitor.globalMonitoringData.CPU,
+		"RAM":  monitor.globalMonitoringData.RAM,
+		"Disk": monitor.globalMonitoringData.UsedDisk,
+		"IN":   monitor.globalMonitoringData.InTraffic,
+		"OUT":  monitor.globalMonitoringData.OutTraffic,
 	}).Debug("Monitoring data")
 }
 
-func (monitor *Monitor) getCurrentServicesData() {
-	for serviceID, value := range monitor.serviceMap {
-		cpuUsage, err := getServiceCPUUsage(int32(value.uid))
+func (monitor *Monitor) getCurrentInstanceData() {
+	for instanceID, value := range monitor.instanceMonitoringMap {
+		cpuUsage, err := getInstanceCPUUsage(int32(value.uid))
 		if err != nil {
 			log.Errorf("Can't get service CPU: %s", err)
 		}
 
-		value.monitoringData.Cpu = uint64(math.Round(cpuUsage / float64(runtime.NumCPU())))
+		value.monitoringData.CPU = uint64(math.Round(cpuUsage / float64(runtime.NumCPU())))
 
-		value.monitoringData.Ram, err = getServiceRAMUsage(int32(value.uid))
+		value.monitoringData.RAM, err = getInstanceRAMUsage(int32(value.uid))
 		if err != nil {
 			log.Errorf("Can't get service RAM: %s", err)
 		}
 
-		value.monitoringData.UsedDisk, err = getServiceDiskUsage(monitor.storageDir, value.uid, value.gid)
+		value.monitoringData.UsedDisk, err = getInstanceDiskUsage(monitor.storageDir, value.uid, value.gid)
 		if err != nil {
 			log.Errorf("Can't get service Disc usage: %s", err)
 		}
 
-		value.monitoringData.InTraffic, value.monitoringData.OutTraffic, err = monitor.trafficMonitoring.GetServiceTraffic(serviceID)
+		inTraffic, outTraffic, err := monitor.trafficMonitoring.GetInstanceTraffic(instanceID)
 		if err != nil {
 			log.Errorf("Can't get service traffic: %s", err)
 		}
 
+		value.monitoringData.InTraffic = inTraffic
+		value.monitoringData.OutTraffic = outTraffic
+
 		log.WithFields(log.Fields{
-			"id":   serviceID,
-			"CPU":  value.monitoringData.Cpu,
-			"RAM":  value.monitoringData.Ram,
+			"id":   instanceID,
+			"CPU":  value.monitoringData.CPU,
+			"RAM":  value.monitoringData.RAM,
 			"Disk": value.monitoringData.UsedDisk,
 			"IN":   value.monitoringData.InTraffic,
 			"OUT":  value.monitoringData.OutTraffic,
-		}).Debug("Service monitoring data")
+		}).Debug("Instance monitoring data")
 	}
 }
 
@@ -453,13 +460,20 @@ func (monitor *Monitor) processAlerts() {
 	currentTime := time.Now()
 
 	for e := monitor.alertProcessors.Front(); e != nil; e = e.Next() {
-		e.Value.(*alertProcessor).checkAlertDetection(currentTime)
+		alertProcessor, ok := e.Value.(*alertProcessor)
+
+		if !ok {
+			log.Error("Unexpected alert processors type")
+			return
+		}
+
+		alertProcessor.checkAlertDetection(currentTime)
 	}
 }
 
-// getSystemCPUUsage returns CPU usage in parcent
+// getSystemCPUUsage returns CPU usage in parcent.
 func getSystemCPUUsage() (cpuUse float64, err error) {
-	v, err := cpu.Percent(0, false)
+	v, err := systemCPUPersent(0, false)
 	if err != nil {
 		return 0, aoserrors.Wrap(err)
 	}
@@ -469,9 +483,9 @@ func getSystemCPUUsage() (cpuUse float64, err error) {
 	return cpuUse, nil
 }
 
-// getSystemRAMUsage returns RAM usage in bytes
+// getSystemRAMUsage returns RAM usage in bytes.
 func getSystemRAMUsage() (ram uint64, err error) {
-	v, err := mem.VirtualMemory()
+	v, err := systemVirtualMemory()
 	if err != nil {
 		return ram, aoserrors.Wrap(err)
 	}
@@ -479,9 +493,9 @@ func getSystemRAMUsage() (ram uint64, err error) {
 	return v.Used, nil
 }
 
-// getSystemDiskUsage returns disc usage in bytes
+// getSystemDiskUsage returns disc usage in bytes.
 func getSystemDiskUsage(path string) (discUse uint64, err error) {
-	v, err := disk.Usage(path)
+	v, err := systemDiskUsage(path)
 	if err != nil {
 		return discUse, aoserrors.Wrap(err)
 	}
@@ -489,9 +503,9 @@ func getSystemDiskUsage(path string) (discUse uint64, err error) {
 	return v.Used, nil
 }
 
-// getServiceCPUUsage returns service CPU usage in percent
-func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
-	processes, err := process.Processes()
+// getServiceCPUUsage returns service CPU usage in percent.
+func getInstanceCPUUsage(uid int32) (cpuUse float64, err error) {
+	processes, err := getProcesses()
 	if err != nil {
 		return 0, aoserrors.Wrap(err)
 	}
@@ -506,10 +520,11 @@ func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
 			if id == uid {
 				cpu, err := process.CPUPercent()
 				if err != nil {
-					return 0, err
+					return 0, aoserrors.Wrap(err)
 				}
 
 				cpuUse += cpu
+
 				break
 			}
 		}
@@ -518,9 +533,9 @@ func getServiceCPUUsage(uid int32) (cpuUse float64, err error) {
 	return cpuUse, nil
 }
 
-// getServiceRAMUsage returns service RAM usage in bytes
-func getServiceRAMUsage(uid int32) (ram uint64, err error) {
-	processes, err := process.Processes()
+// getServiceRAMUsage returns service RAM usage in bytes.
+func getInstanceRAMUsage(uid int32) (ram uint64, err error) {
+	processes, err := getProcesses()
 	if err != nil {
 		return 0, aoserrors.Wrap(err)
 	}
@@ -535,10 +550,11 @@ func getServiceRAMUsage(uid int32) (ram uint64, err error) {
 			if id == uid {
 				memInfo, err := process.MemoryInfo()
 				if err != nil {
-					return 0, err
+					return 0, aoserrors.Wrap(err)
 				}
 
 				ram += memInfo.RSS
+
 				break
 			}
 		}
@@ -547,11 +563,51 @@ func getServiceRAMUsage(uid int32) (ram uint64, err error) {
 	return ram, nil
 }
 
-// getServiceDiskUsage returns service disk usage in bytes
-func getServiceDiskUsage(path string, uid, gid uint32) (diskUse uint64, err error) {
-	if diskUse, err = platform.GetUserFSQuotaUsage(path, uid, gid); err != nil {
+func getProcessesList() (processes []processInterface, err error) {
+	proc, err := process.Processes()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	processes = make([]processInterface, len(proc))
+
+	for i, process := range proc {
+		processes[i] = process
+	}
+
+	return processes, nil
+}
+
+// getServiceDiskUsage returns service disk usage in bytes.
+func getInstanceDiskUsage(path string, uid, gid uint32) (diskUse uint64, err error) {
+	if diskUse, err = getUserFSQuotaUsage(path, uid, gid); err != nil {
 		return diskUse, aoserrors.Wrap(err)
 	}
 
 	return diskUse, nil
+}
+
+func prepareSystemAlertItem(parameter string, timestamp time.Time, value uint64) cloudprotocol.AlertItem {
+	return cloudprotocol.AlertItem{
+		Timestamp: timestamp,
+		Tag:       cloudprotocol.AlertTagSystemQuota,
+		Payload: cloudprotocol.SystemQuotaAlert{
+			Parameter: parameter,
+			Value:     value,
+		},
+	}
+}
+
+func prepareInstanceAlertItem(
+	instanceIndent cloudprotocol.InstanceIdent, parameter string, timestamp time.Time, value uint64,
+) cloudprotocol.AlertItem {
+	return cloudprotocol.AlertItem{
+		Timestamp: timestamp,
+		Tag:       cloudprotocol.AlertTagInstanceQuota,
+		Payload: cloudprotocol.InstanceQuotaAlert{
+			InstanceIdent: instanceIndent,
+			Parameter:     parameter,
+			Value:         value,
+		},
+	}
 }
