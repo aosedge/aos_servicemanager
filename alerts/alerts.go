@@ -21,6 +21,7 @@ package alerts
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ const (
 	AlertTagAosCore     = "aosCore"
 	AlertTagResource    = "resourceAlert"
 	AlertDeviceErrors   = "deviceErrors"
+	aosServicePrefix    = "aos_"
 )
 
 const (
@@ -356,6 +358,21 @@ func (instance *Alerts) processJournal() (err error) {
 			}
 
 			unit = entry.Fields["UNIT"]
+		}
+
+		// with cgroup v2 logs from container do not contains _SYSTEMD_UNIT due to restrictions
+		// that's why id should be extracted from _SYSTEMD_CGROUP
+		// format: /system.slice/AOS_SERVICE_UUID
+		if len(unit) == 0 {
+			systemdCgroup := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_CGROUP]
+
+			if len(systemdCgroup) > 0 {
+				// add prefix 'aos_' and postfix '.service'
+				// to service uuid and get proper seervice object from DB
+				unit = aosServicePrefix + filepath.Base(systemdCgroup) + ".service"
+			} else {
+				continue
+			}
 		}
 
 		if strings.HasPrefix(unit, "aos") {
