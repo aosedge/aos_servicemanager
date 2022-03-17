@@ -20,6 +20,7 @@ package logging
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,8 +40,9 @@ import (
 const (
 	logChannelSize = 32
 
-	serviceField = "_SYSTEMD_UNIT"
-	unitField    = "UNIT"
+	cgroupField      = "_SYSTEMD_CGROUP"
+	unitField        = "UNIT"
+	aosServicePrefix = "aos_"
 )
 
 /*******************************************************************************
@@ -195,7 +197,7 @@ func (instance *Logging) getLog(request getLogRequest) {
 	if request.serviceID != "" {
 		needUnitField = false
 
-		if _, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID); err != nil {
+		if _, err = instance.addServiceCgroupFilter(journal, request.serviceID); err != nil {
 			err = aoserrors.Wrap(err)
 			return
 		}
@@ -286,7 +288,7 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 	}
 	defer journal.Close()
 
-	if _, err = instance.addServiceIDFilter(journal, unitField, request.serviceID); err != nil {
+	if err = instance.addUnitFilter(journal, request.serviceID); err != nil {
 		err = aoserrors.Wrap(err)
 		return
 	}
@@ -363,7 +365,7 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 
 		var unitName string
 
-		unitName, err = instance.addServiceIDFilter(journal, serviceField, request.serviceID)
+		unitName, err = instance.addServiceCgroupFilter(journal, request.serviceID)
 		if err != nil {
 			err = aoserrors.Wrap(err)
 			return
@@ -393,7 +395,7 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 				break
 			}
 
-			if serviceName, ok := logEntry.Fields[serviceField]; ok && unitName == serviceName {
+			if unitName == getUnitNameFromLog(logEntry) {
 				if err = archInstance.addLog(createLogString(logEntry, false)); err != nil {
 					err = aoserrors.Wrap(err)
 					return
@@ -416,22 +418,49 @@ func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	instance.logChannel <- response
 }
 
-func (instance *Logging) addServiceIDFilter(journal *sdjournal.Journal,
-	fieldName, serviceID string) (unitName string, err error) {
+func (instance *Logging) addServiceCgroupFilter(journal *sdjournal.Journal,
+	serviceID string) (unitName string, err error) {
 	if serviceID == "" {
-		return unitName, nil
+		return unitName, aoserrors.New("serviceID is empty")
 	}
 
 	service, err := instance.serviceProvider.GetService(serviceID)
+
 	if err != nil {
-		return unitName, nil
+		return unitName, aoserrors.Wrap(err)
 	}
 
-	if err = journal.AddMatch(fieldName + "=" + service.UnitName); err != nil {
+	// for supporting cgroup v1
+	// format: /system.slice/aos_AOS_SERVICE_UUID.service
+	if err = journal.AddMatch(cgroupField + "=/system.slice/" + service.UnitName); err != nil {
+		return unitName, aoserrors.Wrap(err)
+	}
+
+	// for supporting cgroup v2
+	// format: /system.slice/AOS_SERVICE_UUID
+	if err = journal.AddMatch(cgroupField + "=/system.slice/" + serviceID); err != nil {
 		return unitName, aoserrors.Wrap(err)
 	}
 
 	return service.UnitName, nil
+}
+
+func (instance *Logging) addUnitFilter(journal *sdjournal.Journal, serviceID string) (err error) {
+	if serviceID == "" {
+		return aoserrors.New("serviceID is empty")
+	}
+
+	service, err := instance.serviceProvider.GetService(serviceID)
+
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = journal.AddMatch(unitField + "=" + service.UnitName); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time) (err error) {
@@ -453,4 +482,24 @@ func createLogString(entry *sdjournal.JournalEntry, addUnit bool) (logStr string
 
 func getLogDate(entry *sdjournal.JournalEntry) (date time.Time) {
 	return time.Unix(int64(entry.RealtimeTimestamp/1000000), int64((entry.RealtimeTimestamp%1000000))*1000)
+}
+
+func getUnitNameFromLog(logEntry *sdjournal.JournalEntry) (unitName string) {
+	systemdCgroup := logEntry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_CGROUP]
+
+	if len(systemdCgroup) == 0 {
+		return ""
+	}
+
+	unitName = filepath.Base(systemdCgroup)
+
+	if !strings.Contains(unitName, aosServicePrefix) {
+		// with cgroup v2 logs from container do not contains _SYSTEMD_UNIT due to restrictions
+		// that's why id should be checked via _SYSTEMD_CGROUP
+		// format: /system.slice/AOS_SERVICE_UUID
+
+		return fmt.Sprintf("%s%s.service", aosServicePrefix, unitName)
+	}
+
+	return unitName
 }
