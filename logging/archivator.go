@@ -23,35 +23,37 @@ import (
 	"errors"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 type archivator struct {
 	zw           *gzip.Writer
 	logBuffers   []bytes.Buffer
-	logChannel   chan<- *pb.LogData
+	logChannel   chan<- cloudprotocol.PushLog
 	partCount    uint64
 	partSize     uint64
 	maxPartSize  uint64
 	maxPartCount uint64
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Variables
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 var errMaxPartCount = errors.New("max part count reached")
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func newArchivator(logChannel chan<- *pb.LogData, maxPartSize, maxPartCount uint64) (instance *archivator, err error) {
+func newArchivator(
+	logChannel chan<- cloudprotocol.PushLog, maxPartSize, maxPartCount uint64,
+) (instance *archivator, err error) {
 	instance = &archivator{logChannel: logChannel, maxPartSize: maxPartSize, maxPartCount: maxPartCount}
 
 	instance.logBuffers = make([]bytes.Buffer, 1)
@@ -105,15 +107,17 @@ func (instance *archivator) sendLog(logID string) (err error) {
 	if instance.partCount == 0 {
 		var part uint64 = 1
 
-		instance.logChannel <- &pb.LogData{
-			LogId:     logID,
+		instance.logChannel <- cloudprotocol.PushLog{
+			LogID:     logID,
 			PartCount: part,
 			Part:      part,
-			Data:      []byte{}}
+			Data:      []byte{},
+		}
 
 		log.WithFields(log.Fields{
 			"part": part,
-			"size": 0}).Debugf("Push log")
+			"size": 0,
+		}).Debugf("Push log")
 
 		return nil
 	}
@@ -126,13 +130,15 @@ func (instance *archivator) sendLog(logID string) (err error) {
 
 		log.WithFields(log.Fields{
 			"part": part,
-			"size": len(data)}).Debugf("Push log")
+			"size": len(data),
+		}).Debugf("Push log")
 
-		instance.logChannel <- &pb.LogData{
-			LogId:     logID,
+		instance.logChannel <- cloudprotocol.PushLog{
+			LogID:     logID,
 			PartCount: instance.partCount,
 			Part:      part,
-			Data:      data}
+			Data:      data,
+		}
 	}
 
 	return nil

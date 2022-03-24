@@ -20,33 +20,27 @@ package logging_test
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
-	"path"
-	"path/filepath"
+	"strconv"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
-	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/logging"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Init
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -58,36 +52,20 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-type testServiceProvider struct {
-	services map[string]*launcher.Service
+type testInstanceIDProvider struct {
+	instances map[string]cloudprotocol.InstanceFilter
 }
 
-/*******************************************************************************
- * Vars
- ******************************************************************************/
-
-var systemd *dbus.Conn
-
-var serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
-
-/*******************************************************************************
- * Main
- ******************************************************************************/
-
-func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
-	}
-
-	ret := m.Run()
-
-	cleanup()
-
-	os.Exit(ret)
+type testSystemdJournal struct {
+	sync.RWMutex
+	messages       []*sdjournal.JournalEntry
+	currentMessage int
+	systemdMatches []string
+	simulateError  bool
 }
 
 /*******************************************************************************
@@ -95,236 +73,223 @@ func TestMain(m *testing.M) {
  ******************************************************************************/
 
 func TestGetServiceLog(t *testing.T) {
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
+
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
+
 	logging, err := logging.New(&config.Config{Logging: config.Logging{
 		MaxPartSize: 1024, MaxPartCount: 10,
-	}}, &serviceProvider)
+	}}, &instanceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
 	defer logging.Close()
 
-	from := time.Now()
+	var (
+		from           = time.Now()
+		instanceFilter = createInstanceFilter("logservice0", "subject0", 0)
+		instanceID     = instanceProvider.addFilter(instanceFilter)
+		unitName       = "aos-service@" + instanceID + ".service"
+		till           = from.Add(5 * time.Second)
+	)
 
-	if err = createService("logservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	testJournal.addMessage("This is log", unitName, "", "2")
+
+	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &from, Till: &till,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
 	}
-
-	if err = startService("logservice0"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	time.Sleep(10 * time.Second)
-
-	if err = stopService("logservice0"); err != nil {
-		t.Fatalf("Can't stop service: %s", err)
-	}
-
-	till := from.Add(5 * time.Second)
-
-	logging.GetServiceLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice0",
-		LogId:     "log0",
-		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till),
-	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
-	logging.GetServiceLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice0",
-		LogId:     "log0",
-		From:      timestamppb.New(from),
-	})
+	etalonMatches := []string{
+		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + unitName,
+		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + instanceID,
+	}
+
+	if err = testJournal.isMatchesEqual(etalonMatches); err != nil {
+		t.Error(err)
+	}
+
+	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &from,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
 
 	currentTime := time.Now()
+
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &currentTime)
 }
 
-func TestGetWrongServiceLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
-	if err != nil {
-		t.Fatalf("Can't create logging: %s", err)
-	}
-	defer logging.Close()
-
-	till := time.Now()
-	from := till.Add(-1 * time.Hour)
-
-	logging.GetServiceLog(&pb.ServiceLogRequest{
-		ServiceId: "nonExisting",
-		LogId:     "log1",
-		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till),
-	})
-
-	select {
-	case result := <-logging.GetLogsDataChannel():
-		if result.Error == "" {
-			log.Error("Expect log error")
-		}
-
-	case <-time.After(5 * time.Second):
-		log.Errorf("Receive log timeout")
-	}
-}
-
 func TestGetSystemLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
+
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
+
+	logging, err := logging.New(&config.Config{Logging: config.Logging{
+		MaxPartSize: 1024, MaxPartCount: 10,
+	}}, &instanceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
 	defer logging.Close()
 
-	from := time.Now()
+	var (
+		from = time.Now()
+		till = from.Add(5 * time.Second)
+	)
 
 	for i := 0; i < 20; i++ {
-		cmd := exec.Command("logger", "Hello World")
-		if err := cmd.Run(); err != nil {
-			t.Error(err)
-		}
+		testJournal.addMessage("Hello World", "logger", "", "2")
 	}
 
-	time.Sleep(7 * time.Second)
+	logging.GetSystemLog(cloudprotocol.RequestSystemLog{
+		LogID: "log10",
+		From:  &from,
+		Till:  &till,
+	})
 
-	till := from.Add(5 * time.Second)
+	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
 
-	logging.GetSystemLog(&pb.SystemLogRequest{
-		LogId: "log10",
-		From:  timestamppb.New(from),
-		Till:  timestamppb.New(till),
+	logging.GetSystemLog(cloudprotocol.RequestSystemLog{
+		LogID: "log10",
+		Till:  &till,
 	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
 }
 
 func TestGetEmptyLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
+
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
+
+	logging, err := logging.New(
+		&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &instanceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
 	defer logging.Close()
 
-	if err = createService("logservice2"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	var (
+		instanceFilter = createInstanceFilter("logservice2", "subject2", 0)
+		from           = time.Now()
+		till           = from.Add(5 * time.Second)
+	)
+
+	_ = instanceProvider.addFilter(instanceFilter)
+
+	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &from, Till: &till,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
 	}
-
-	from := time.Now()
-
-	time.Sleep(5 * time.Second)
-
-	till := time.Now()
-
-	logging.GetServiceLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice2",
-		LogId:     "log0",
-		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till),
-	})
 
 	checkEmptyLog(t, logging.GetLogsDataChannel())
 }
 
 func TestGetServiceCrashLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10}}, &serviceProvider)
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
+
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
+
+	logging, err := logging.New(&config.Config{
+		Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10},
+	}, &instanceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
 	defer logging.Close()
 
-	if err = createService("logservice3"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	var (
+		instanceFilter = createInstanceFilter("logservice3", "subject3", 0)
+		instanceID     = instanceProvider.addFilter(instanceFilter)
+		unitName       = "aos-service@" + instanceID + ".service"
+		from           = time.Now()
+		till           = from.Add(2 * time.Second)
+	)
+
+	testJournal.addMessage("Started", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
+	testJournal.addMessage("somelog1", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
+	testJournal.addMessage("somelog2", unitName, "/system.slice/system-aos@service.slice/"+instanceID, "2")
+	testJournal.addMessage("somelog3", unitName, "", "2")
+	testJournal.addMessage("process exited", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
+
+	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: instanceFilter,
+	}); err != nil {
+		t.Fatalf("Can't get instance crash log: %s", err)
 	}
-
-	from := time.Now()
-
-	if err = startService("logservice3"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
-	}
-
-	time.Sleep(5 * time.Second)
-
-	crashService("logservice3")
-
-	till := time.Now()
-
-	time.Sleep(1 * time.Second)
-
-	logging.GetServiceCrashLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice3",
-		LogId:     "log2",
-	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
-	if err = createService("logservice5"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	etalonMatches := []string{
+		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + unitName,
+		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + instanceID,
+		"UNIT=" + unitName,
 	}
 
-	from = time.Now()
-
-	if err = startService("logservice5"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
+	if err = testJournal.isMatchesEqual(etalonMatches); err != nil {
+		t.Error(err)
 	}
 
-	time.Sleep(5 * time.Second)
-
-	crashService("logservice5")
-
-	time.Sleep(1 * time.Second)
-
-	till = time.Now()
-
-	time.Sleep(1 * time.Second)
-
-	if err = startService("logservice5"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
+	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: instanceFilter,
+		From:           &from, Till: &till,
+	}); err != nil {
+		t.Fatalf("Can't get instance crash log: %s", err)
 	}
-
-	time.Sleep(5 * time.Second)
-
-	crashService("logservice5")
-
-	logging.GetServiceCrashLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice5",
-		LogId:     "log5",
-		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till),
-	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 }
 
 func TestMaxPartCountLog(t *testing.T) {
-	logging, err := logging.New(&config.Config{Logging: config.Logging{MaxPartSize: 512, MaxPartCount: 2}}, &serviceProvider)
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
+
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
+
+	logging, err := logging.New(&config.Config{
+		Logging: config.Logging{MaxPartSize: 512, MaxPartCount: 2},
+	}, &instanceProvider)
 	if err != nil {
 		t.Fatalf("Can't create logging: %s", err)
 	}
 	defer logging.Close()
 
-	from := time.Now()
+	var (
+		instanceFilter = createInstanceFilter("logservice4", "subject4", 0)
+		instanceID     = instanceProvider.addFilter(instanceFilter)
+		unitName       = "aos-service@" + instanceID + ".service"
+		from           = time.Now()
+		till           = from.Add(20 * time.Second)
+	)
 
-	if err = createService("logservice4"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	for i := 0; i < 200; i++ {
+		testJournal.addMessage(fmt.Sprintf("Super mega log %d", i),
+			unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
 	}
 
-	if err = startService("logservice4"); err != nil {
-		t.Fatalf("Can't start service: %s", err)
+	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &from, Till: &till,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
 	}
-
-	time.Sleep(20 * time.Second)
-
-	if err = stopService("logservice4"); err != nil {
-		t.Fatalf("Can't stop service: %s", err)
-	}
-
-	till := from.Add(20 * time.Second)
-
-	logging.GetServiceLog(&pb.ServiceLogRequest{
-		ServiceId: "logservice4",
-		LogId:     "log0",
-		From:      timestamppb.New(from),
-		Till:      timestamppb.New(till),
-	})
 
 	for {
 		select {
@@ -365,150 +330,274 @@ func TestMaxPartCountLog(t *testing.T) {
 	}
 }
 
-/*******************************************************************************
- * Interfaces
- ******************************************************************************/
+func TestLogErrorCases(t *testing.T) {
+	instanceProvider := testInstanceIDProvider{instances: make(map[string]cloudprotocol.InstanceFilter)}
+	defer instanceProvider.Close()
 
-func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
-	s, ok := serviceProvider.services[serviceID]
-	if !ok {
-		return service, fmt.Errorf("service %s does not exist", serviceID)
-	}
+	testJournal := testSystemdJournal{}
+	logging.SDJournal = &testJournal
 
-	return *s, nil
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func setup() (err error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func cleanup() {
-	for _, service := range serviceProvider.services {
-		if err := stopService(service.ID); err != nil {
-			log.Errorf("Can't stop service: %s", err)
-		}
-
-		if _, err := systemd.DisableUnitFilesContext(context.Background(),
-			[]string{service.UnitName}, false); err != nil {
-			log.Errorf("Can't disable service: %s", err)
-		}
-	}
-
-	systemd.Close()
-
-	if err := os.RemoveAll("tmp"); err != nil {
-		log.Errorf("Can't remove tmp folder: %s", err)
-	}
-}
-
-func createService(serviceID string) (err error) {
-	serviceContent := `[Unit]
-	Description=AOS Service
-	After=network.target
-	
-	[Service]
-	Type=simple
-	Restart=always
-	RestartSec=1
-	ExecStart=/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'
-	
-	[Install]
-	WantedBy=multi-user.target
-`
-
-	serviceName := "aos_" + serviceID + ".service"
-
-	if _, ok := serviceProvider.services[serviceID]; ok {
-		return errors.New("service already exists")
-	}
-
-	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
-
-	fileName, err := filepath.Abs(path.Join("tmp", serviceName))
+	loggingInstance, err := logging.New(&config.Config{
+		Logging: config.Logging{MaxPartSize: 1024, MaxPartCount: 10},
+	}, &instanceProvider)
 	if err != nil {
-		return aoserrors.Wrap(err)
+		t.Fatalf("Can't create logging: %s", err)
+	}
+	defer loggingInstance.Close()
+
+	if err := loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: createInstanceFilter("noService", "", -1),
+	}); err == nil {
+		t.Error("should be error: no instance ids for log request")
 	}
 
-	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0644); err != nil {
-		return aoserrors.Wrap(err)
+	if err := loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: createInstanceFilter("noService", "", -1),
+	}); err == nil {
+		t.Error("should be error: no instance ids for log request")
 	}
 
-	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
-		return aoserrors.Wrap(err)
+	var (
+		instanceFilter = createInstanceFilter("logservice5", "subject5", 0)
+		faultTime      = time.Time{}
+		unitName       = "aos-service@" + instanceProvider.addFilter(instanceFilter) + ".service"
+	)
+
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &faultTime,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
 	}
 
-	if err = systemd.ReloadContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
+	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
+
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", Till: &faultTime,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
+
+	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
+
+	testJournal.simulateError = true
+
+	testJournal.addMessage("Started", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
+
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0",
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
+
+	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
+
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0",
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
+
+	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
+
+	logging.SDJournal = nil
+
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", From: &faultTime,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
+
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
+		InstanceFilter: instanceFilter,
+		LogID:          "log0", Till: &faultTime,
+	}); err != nil {
+		t.Fatalf("Can't get instance log: %s", err)
+	}
+}
+
+/***********************************************************************************************************************
+ * Interfaces
+ **********************************************************************************************************************/
+
+func (provider *testInstanceIDProvider) GetInstanceIDs(
+	filter cloudprotocol.InstanceFilter,
+) (instances []string, err error) {
+	for key, value := range provider.instances {
+		if filter.ServiceID != value.ServiceID {
+			continue
+		}
+
+		if filter.SubjectID != nil && (*filter.SubjectID != *value.SubjectID) {
+			continue
+		}
+
+		if filter.Instance != nil && (*filter.Instance != *value.Instance) {
+			continue
+		}
+
+		instances = append(instances, key)
+	}
+
+	return instances, nil
+}
+
+func (provider *testInstanceIDProvider) addFilter(filter cloudprotocol.InstanceFilter) (instanceID string) {
+	instanceID = instanceFormFilter(filter)
+
+	provider.instances[instanceID] = filter
+
+	return instanceID
+}
+
+func (provider *testInstanceIDProvider) Close() {
+}
+
+func (journal *testSystemdJournal) Close() error { return nil }
+
+func (journal *testSystemdJournal) AddMatch(match string) error {
+	journal.systemdMatches = append(journal.systemdMatches, match)
+
+	return nil
+}
+
+func (journal *testSystemdJournal) AddDisjunction() error { return nil }
+
+func (journal *testSystemdJournal) SeekTail() error {
+	journal.currentMessage = len(journal.messages)
+
+	return nil
+}
+
+func (journal *testSystemdJournal) SeekHead() error {
+	journal.currentMessage = -1
+
+	return nil
+}
+
+func (journal *testSystemdJournal) SeekRealtimeUsec(usec uint64) error {
+	if usec == uint64(time.Time{}.UnixNano()/1000) {
+		return aoserrors.New("incorrect time")
+	}
+
+	journal.currentMessage = -1
+
+	return nil
+}
+
+func (journal *testSystemdJournal) Previous() (uint64, error) {
+	if len(journal.messages) == 0 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
+	}
+
+	if journal.currentMessage == 0 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
+	}
+
+	if journal.currentMessage == -1 {
+		journal.currentMessage = len(journal.messages)
+	}
+
+	journal.currentMessage--
+
+	return uint64(sdjournal.SD_JOURNAL_APPEND), nil
+}
+
+func (journal *testSystemdJournal) Next() (uint64, error) {
+	if len(journal.messages) == 0 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
+	}
+
+	if journal.currentMessage >= len(journal.messages)-1 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
+	}
+
+	journal.currentMessage++
+
+	return uint64(sdjournal.SD_JOURNAL_APPEND), nil
+}
+
+func (journal *testSystemdJournal) GetEntry() (entry *sdjournal.JournalEntry, err error) {
+	if journal.simulateError {
+		return entry, aoserrors.New("simulated error")
+	}
+
+	entry = journal.messages[journal.currentMessage]
+
+	return entry, nil
+}
+
+func (journal *testSystemdJournal) addMessage(message, systemdUnit, cgroupUnit, priority string) {
+	journalEntry := sdjournal.JournalEntry{Fields: make(map[string]string)}
+
+	currentTime := time.Now()
+
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE] = fmt.Sprintf(
+		"[%s] %s", currentTime.Format("2006-01-02 15:04:05.999999999Z07:00"), message+"@@@@")
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT] = systemdUnit
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_CGROUP] = cgroupUnit
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY] = priority
+
+	journalEntry.RealtimeTimestamp = uint64(currentTime.UnixNano() / 1000)
+	journalEntry.MonotonicTimestamp = uint64(currentTime.UnixNano() / 1000)
+
+	journal.messages = append(journal.messages, &journalEntry)
+}
+
+func (journal *testSystemdJournal) isMatchesEqual(etalonMatches []string) error {
+matchLoop:
+	for _, etalonMatch := range etalonMatches {
+		for _, journalMatch := range journal.systemdMatches {
+			if etalonMatch == journalMatch {
+				continue matchLoop
+			}
+		}
+
+		return aoserrors.Errorf("Journal filter doesn't contains: %s", etalonMatch)
 	}
 
 	return nil
 }
 
-func startService(serviceID string) (err error) {
-	channel := make(chan string)
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
 
-	if _, err = systemd.RestartUnitContext(context.Background(),
-		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	<-channel
-
-	return nil
-}
-
-func stopService(serviceID string) (err error) {
-	channel := make(chan string)
-
-	if _, err = systemd.StopUnitContext(context.Background(),
-		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	<-channel
-
-	return nil
-}
-
-func crashService(serviceID string) {
-	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
+func instanceFormFilter(filter cloudprotocol.InstanceFilter) string {
+	return fmt.Sprintf("%s.%s.%s", filter.ServiceID, *filter.SubjectID, strconv.FormatUint(*filter.Instance, 10))
 }
 
 func getTimeRange(logData string) (from, till time.Time, err error) {
 	list := strings.Split(logData, "\n")
 
 	if len(list) < 2 || len(list[0]) < 37 || len(list[len(list)-2]) < 37 {
-		return from, till, errors.New("bad log data")
+		return from, till, aoserrors.New("bad log data")
 	}
 
 	fromLog := list[0][strings.IndexByte(list[0], '['):]
+	lastindex := strings.LastIndex(fromLog, "]")
 
-	if from, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", fromLog[1:36]); err != nil {
-		return from, till, err
+	if from, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", fromLog[1:lastindex]); err != nil {
+		return from, till, aoserrors.Wrap(err)
 	}
 
 	tillLog := list[len(list)-2][strings.IndexByte(list[len(list)-2], '['):]
+	lastindex = strings.LastIndex(tillLog, "]")
 
-	if till, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", tillLog[1:36]); err != nil {
-		return from, till, err
+	if till, err = time.Parse("2006-01-02 15:04:05.999999999Z07:00", tillLog[1:lastindex]); err != nil {
+		return from, till, aoserrors.Wrap(err)
 	}
 
 	return from, till, nil
 }
 
-func checkReceivedLog(t *testing.T, logChannel <-chan *pb.LogData, from, till *time.Time) {
+func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, from, till *time.Time) {
+	t.Helper()
+
 	receivedLog := ""
 
 	for {
@@ -567,7 +656,9 @@ func checkReceivedLog(t *testing.T, logChannel <-chan *pb.LogData, from, till *t
 	}
 }
 
-func checkEmptyLog(t *testing.T, logChannel <-chan *pb.LogData) {
+func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
+	t.Helper()
+
 	for {
 		select {
 		case result := <-logChannel:
@@ -588,4 +679,39 @@ func checkEmptyLog(t *testing.T, logChannel <-chan *pb.LogData) {
 			return
 		}
 	}
+}
+
+func checkErrorLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
+	t.Helper()
+
+	for {
+		select {
+		case result := <-logChannel:
+			if result.Error == "" {
+				t.Errorf("Should be error %s", result.Error)
+			}
+
+			return
+
+		case <-time.After(5 * time.Second):
+			t.Error("Receive log timeout")
+			return
+		}
+	}
+}
+
+func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
+	filter.ServiceID = serviceID
+
+	if subjectID != "" {
+		filter.SubjectID = &subjectID
+	}
+
+	if instance != -1 {
+		localInstance := (uint64)(instance)
+
+		filter.Instance = &localInstance
+	}
+
+	return filter
 }
