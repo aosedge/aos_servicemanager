@@ -15,197 +15,212 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package logging provides set of API to retrieve system and services log
+// Package logging provides set of API to retrieve system and instance log
 package logging
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	logChannelSize = 32
 
 	cgroupField      = "_SYSTEMD_CGROUP"
 	unitField        = "UNIT"
-	aosServicePrefix = "aos_"
+	aosServicePrefix = "aos-service@"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// ServiceProvider provides service info
-type ServiceProvider interface {
-	GetService(serviceID string) (service launcher.Service, err error)
+// InstanceIDProvider provides instances ID.
+type InstanceIDProvider interface {
+	GetInstanceIDs(cloudprotocol.InstanceFilter) ([]string, error)
 }
 
-// Logging instance
+// Logging instance.
 type Logging struct {
-	logChannel chan *pb.LogData
+	logChannel       chan cloudprotocol.PushLog
+	instanceProvider InstanceIDProvider
+	config           config.Logging
+}
 
-	serviceProvider ServiceProvider
-	config          config.Logging
+type JournalInterface interface {
+	Close() error
+	AddMatch(match string) error
+	AddDisjunction() error
+	SeekTail() error
+	SeekHead() error
+	SeekRealtimeUsec(usec uint64) error
+	Previous() (uint64, error)
+	Next() (uint64, error)
+	GetEntry() (*sdjournal.JournalEntry, error)
 }
 
 type getLogRequest struct {
-	serviceID string
-	logID     string
-	from      *time.Time
-	till      *time.Time
+	instanceIDs []string
+	logID       string
+	from        *time.Time
+	till        *time.Time
 }
 
-/*******************************************************************************
- * Public
- ******************************************************************************/
+/***********************************************************************************************************************
+ * Variable
+ **********************************************************************************************************************/
 
-// New creates new logging object
-func New(config *config.Config, serviceProvider ServiceProvider) (instance *Logging, err error) {
+// SDJournal is using to mock systemd journal in unit tests.
+var SDJournal JournalInterface // nolint:gochecknoglobals
+
+/***********************************************************************************************************************
+ * Public
+ **********************************************************************************************************************/
+
+// New creates new logging object.
+func New(config *config.Config, instanceProvider InstanceIDProvider) (instance *Logging, err error) {
 	log.Debug("New logging")
 
-	instance = &Logging{serviceProvider: serviceProvider, config: config.Logging}
-
-	instance.logChannel = make(chan *pb.LogData, logChannelSize)
+	instance = &Logging{
+		instanceProvider: instanceProvider,
+		config:           config.Logging,
+		logChannel:       make(chan cloudprotocol.PushLog, logChannelSize),
+	}
 
 	return instance, nil
 }
 
-// Close closes logging
+// Close closes logging.
 func (instance *Logging) Close() {
 	log.Debug("Close logging")
 }
 
-// GetServiceLog returns service log
-func (instance *Logging) GetServiceLog(request *pb.ServiceLogRequest) {
-	log.WithFields(log.Fields{
-		"serviceID": request.ServiceId,
-		"logID":     request.LogId,
-		"dateFrom":  request.From,
-		"dateTill":  request.Till}).Debug("Get service log")
+// GetInstanceLog returns instance log.
+func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestServiceLog) error {
+	log.WithField("request", logRequestToString(request)).Debug("Get instance log")
+
+	instances, err := instance.instanceProvider.GetInstanceIDs(request.InstanceFilter)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if len(instances) == 0 {
+		return aoserrors.New("no instance IDs for log request")
+	}
 
 	logRequest := getLogRequest{
-		serviceID: request.ServiceId,
-		logID:     request.LogId,
+		instanceIDs: instances,
+		logID:       request.LogID,
+		from:        request.From,
+		till:        request.Till,
 	}
 
-	if request.From != nil {
-		localTime := request.GetFrom().AsTime()
-		logRequest.from = &localTime
-	}
+	go func() {
+		if err := instance.getLog(logRequest); err != nil {
+			log.Errorf("Can't get instanace logs: %s", err)
 
-	if request.Till != nil {
-		localTime := request.GetTill().AsTime()
-		logRequest.till = &localTime
-	}
-
-	go instance.getLog(logRequest)
-}
-
-// GetServiceCrashLog returns service crash log
-func (instance *Logging) GetServiceCrashLog(request *pb.ServiceLogRequest) {
-	log.WithFields(log.Fields{
-		"serviceID": request.ServiceId,
-		"logID":     request.LogId}).Debug("Get service crash log")
-
-	logRequest := getLogRequest{
-		serviceID: request.ServiceId,
-		logID:     request.LogId,
-	}
-
-	if request.From != nil {
-		localTime := request.GetFrom().AsTime()
-		logRequest.from = &localTime
-	}
-
-	if request.Till != nil {
-		localTime := request.GetTill().AsTime()
-		logRequest.till = &localTime
-	}
-
-	go instance.getServiceCrashLog(logRequest)
-}
-
-// GetSystemLog returns system log
-func (instance *Logging) GetSystemLog(request *pb.SystemLogRequest) {
-	log.WithFields(log.Fields{
-		"logID":    request.LogId,
-		"dateFrom": request.From,
-		"dateTill": request.Till}).Debug("Get system log")
-
-	logRequest := getLogRequest{
-		logID: request.LogId,
-	}
-
-	if request.From != nil {
-		localTime := request.GetFrom().AsTime()
-		logRequest.from = &localTime
-	}
-
-	if request.Till != nil {
-		localTime := request.GetTill().AsTime()
-		logRequest.till = &localTime
-	}
-
-	go instance.getLog(logRequest)
-}
-
-func (instance *Logging) GetLogsDataChannel() (channel <-chan *pb.LogData) {
-	return instance.logChannel
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func (instance *Logging) getLog(request getLogRequest) {
-	var err error
-
-	// error handling
-	defer func() {
-		if err != nil {
-			log.Error("Can't get logs: ", err)
-
-			instance.sendErrorResponse(err.Error(), request.logID)
+			instance.sendErrorResponse(err.Error(), logRequest.logID)
 		}
 	}()
 
-	var journal *sdjournal.Journal
+	return nil
+}
 
-	journal, err = sdjournal.NewJournal()
+// GetServiceCrashLog returns instance crash log.
+func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog) error {
+	log.WithField("request", logRequestToString(request)).Debug("Get instance crash log")
+
+	instances, err := instance.instanceProvider.GetInstanceIDs(request.InstanceFilter)
 	if err != nil {
-		err = aoserrors.Wrap(err)
-		return
+		return aoserrors.Wrap(err)
+	}
+
+	if len(instances) == 0 {
+		return aoserrors.New("no instance ids for crash log request")
+	}
+
+	logRequest := getLogRequest{
+		instanceIDs: instances,
+		logID:       request.LogID,
+		from:        request.From,
+		till:        request.Till,
+	}
+
+	go func() {
+		if err := instance.getInstanceCrashLog(logRequest); err != nil {
+			log.Errorf("Can't get instance crash logs: %s", err)
+
+			instance.sendErrorResponse(err.Error(), logRequest.logID)
+		}
+	}()
+
+	return nil
+}
+
+// GetSystemLog returns system log.
+func (instance *Logging) GetSystemLog(request cloudprotocol.RequestSystemLog) {
+	log.WithField("request", logRequestToString(request)).Debug("Get system log")
+
+	logRequest := getLogRequest{
+		logID: request.LogID,
+		from:  request.From,
+		till:  request.Till,
+	}
+
+	go func() {
+		if err := instance.getLog(logRequest); err != nil {
+			log.Errorf("Can't get system logs: %s", err)
+
+			instance.sendErrorResponse(err.Error(), logRequest.logID)
+		}
+	}()
+}
+
+// GetLogsDataChannel returns channel with logs that are ready to send.
+func (instance *Logging) GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog) {
+	return instance.logChannel
+}
+
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
+
+func (instance *Logging) getLog(request getLogRequest) (err error) {
+	journal := SDJournal
+	if journal == nil {
+		if journal, err = sdjournal.NewJournal(); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 	defer journal.Close()
 
 	needUnitField := true
 
-	if request.serviceID != "" {
+	if len(request.instanceIDs) != 0 {
 		needUnitField = false
 
-		if _, err = instance.addServiceCgroupFilter(journal, request.serviceID); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+		if err = instance.addServiceCgroupFilter(journal, request.instanceIDs); err != nil {
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	if err = instance.seekToTime(journal, request.from); err != nil {
-		err = aoserrors.Wrap(err)
-		return
+		return aoserrors.Wrap(err)
 	}
 
 	var tillRealtime uint64
@@ -217,19 +232,28 @@ func (instance *Logging) getLog(request getLogRequest) {
 	var archInstance *archivator
 
 	if archInstance, err = newArchivator(instance.logChannel,
-		instance.config.MaxPartSize,
-		instance.config.MaxPartCount); err != nil {
-		err = aoserrors.Wrap(err)
-
-		return
+		instance.config.MaxPartSize, instance.config.MaxPartCount); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	for {
-		var rowCount uint64
+	if err = instance.processJournalToGetInstanceLog(archInstance, journal, tillRealtime, needUnitField); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-		if rowCount, err = journal.Next(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+	if err = archInstance.sendLog(request.logID); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (instance *Logging) processJournalToGetInstanceLog(
+	archInstance *archivator, journal JournalInterface, tillRealtime uint64, needUnitField bool,
+) error {
+	for {
+		rowCount, err := journal.Next()
+		if err != nil {
+			return aoserrors.Wrap(err)
 		}
 
 		// end of log
@@ -237,11 +261,13 @@ func (instance *Logging) getLog(request getLogRequest) {
 			break
 		}
 
-		var logEntry *sdjournal.JournalEntry
+		logEntry, err := journal.GetEntry()
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
 
-		if logEntry, err = journal.GetEntry(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+		if logEntry == nil {
+			break
 		}
 
 		// till time reached
@@ -250,69 +276,78 @@ func (instance *Logging) getLog(request getLogRequest) {
 		}
 
 		if err = archInstance.addLog(createLogString(logEntry, needUnitField)); err != nil {
-			if err == errMaxPartCount {
+			if errors.Is(err, errMaxPartCount) {
 				log.Warn(err)
 				break
 			}
 
-			err = aoserrors.Wrap(err)
-
-			return
+			return aoserrors.Wrap(err)
 		}
 	}
 
-	if err = archInstance.sendLog(request.logID); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
+	return nil
 }
 
-func (instance *Logging) getServiceCrashLog(request getLogRequest) {
-	var err error
-
-	// error handling
-	defer func() {
-		if err != nil {
-			log.Error("Can't get service crash logs: ", err)
-
-			instance.sendErrorResponse(err.Error(), request.logID)
+func (instance *Logging) getInstanceCrashLog(request getLogRequest) (err error) {
+	journal := SDJournal
+	if journal == nil {
+		if journal, err = sdjournal.NewJournal(); err != nil {
+			return aoserrors.Wrap(err)
 		}
-	}()
-
-	var journal *sdjournal.Journal
-
-	journal, err = sdjournal.NewJournal()
-	if err != nil {
-		err = aoserrors.Wrap(err)
-		return
 	}
 	defer journal.Close()
 
-	if err = instance.addUnitFilter(journal, request.serviceID); err != nil {
-		err = aoserrors.Wrap(err)
-		return
+	if err = instance.addUnitFilter(journal, request.instanceIDs); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	if request.till == nil {
 		if err = journal.SeekTail(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+			return aoserrors.Wrap(err)
 		}
 	} else {
 		if err = journal.SeekRealtimeUsec(uint64(request.till.UnixNano() / 1000)); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+			return aoserrors.Wrap(err)
 		}
 	}
 
 	var crashTime uint64
 
+	crashTime, err = instance.getCrashTime(journal, request.from)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if crashTime == 0 {
+		return nil
+	}
+
+	if err = journal.AddDisjunction(); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = instance.addServiceCgroupFilter(journal, request.instanceIDs); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	archInstance, err := instance.archivateCrashLog(journal, crashTime, request.instanceIDs)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = archInstance.sendLog(request.logID); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (instance *Logging) getCrashTime(journal JournalInterface, from *time.Time) (crashTime uint64, err error) {
 	for {
 		var rowCount uint64
 
 		if rowCount, err = journal.Previous(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+			return crashTime, aoserrors.Wrap(err)
 		}
 
 		// end of log
@@ -323,12 +358,11 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 		var logEntry *sdjournal.JournalEntry
 
 		if logEntry, err = journal.GetEntry(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+			return crashTime, aoserrors.Wrap(err)
 		}
 
-		if request.from != nil {
-			if logEntry.RealtimeTimestamp <= uint64(request.from.UnixNano()/1000) {
+		if from != nil {
+			if logEntry.RealtimeTimestamp <= uint64(from.UnixNano()/1000) {
 				break
 			}
 		}
@@ -338,8 +372,8 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 				crashTime = logEntry.MonotonicTimestamp
 
 				log.WithFields(log.Fields{
-					"serviceID": request.serviceID,
-					"time":      getLogDate(logEntry)}).Debug("Crash detected")
+					"time": getLogDate(logEntry),
+				}).Debug("Crash detected")
 			}
 		} else {
 			if strings.HasPrefix(logEntry.Fields["MESSAGE"], "Started") {
@@ -348,122 +382,91 @@ func (instance *Logging) getServiceCrashLog(request getLogRequest) {
 		}
 	}
 
-	var archInstance *archivator
+	return crashTime, nil
+}
 
-	if archInstance, err = newArchivator(instance.logChannel,
-		instance.config.MaxPartSize,
-		instance.config.MaxPartCount); err != nil {
-		err = aoserrors.Wrap(err)
-		return
+func (instance *Logging) archivateCrashLog(
+	journal JournalInterface, crashTime uint64, instanceIDs []string,
+) (archivator *archivator, err error) {
+	archivator, err = newArchivator(instance.logChannel, instance.config.MaxPartSize, instance.config.MaxPartCount)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
 	}
 
-	if crashTime > 0 {
-		if err = journal.AddDisjunction(); err != nil {
-			err = aoserrors.Wrap(err)
-			return
+	for {
+		var rowCount uint64
+
+		if rowCount, err = journal.Next(); err != nil {
+			return archivator, aoserrors.Wrap(err)
 		}
 
-		var unitName string
-
-		unitName, err = instance.addServiceCgroupFilter(journal, request.serviceID)
-		if err != nil {
-			err = aoserrors.Wrap(err)
-			return
+		// end of log
+		if rowCount == 0 {
+			break
 		}
 
-		for {
-			var rowCount uint64
+		var logEntry *sdjournal.JournalEntry
 
-			if rowCount, err = journal.Next(); err != nil {
-				err = aoserrors.Wrap(err)
-				return
-			}
+		if logEntry, err = journal.GetEntry(); err != nil {
+			return archivator, aoserrors.Wrap(err)
+		}
 
-			// end of log
-			if rowCount == 0 {
-				break
-			}
+		if logEntry.MonotonicTimestamp > crashTime {
+			break
+		}
 
-			var logEntry *sdjournal.JournalEntry
-
-			if logEntry, err = journal.GetEntry(); err != nil {
-				err = aoserrors.Wrap(err)
-				return
-			}
-
-			if logEntry.MonotonicTimestamp > crashTime {
-				break
-			}
-
-			if unitName == getUnitNameFromLog(logEntry) {
-				if err = archInstance.addLog(createLogString(logEntry, false)); err != nil {
-					err = aoserrors.Wrap(err)
-					return
+		for _, instanceID := range instanceIDs {
+			if strings.Contains(getUnitNameFromLog(logEntry), makeUnitNameFromInstanceID(instanceID)) {
+				if err = archivator.addLog(createLogString(logEntry, false)); err != nil {
+					return archivator, aoserrors.Wrap(err)
 				}
 			}
 		}
 	}
 
-	if err = archInstance.sendLog(request.logID); err != nil {
-		err = aoserrors.Wrap(err)
-		return
-	}
+	return archivator, nil
 }
 
 func (instance *Logging) sendErrorResponse(errorStr, logID string) {
-	response := &pb.LogData{
-		LogId: logID,
-		Error: errorStr}
+	response := cloudprotocol.PushLog{
+		LogID: logID,
+		Error: errorStr,
+	}
 
 	instance.logChannel <- response
 }
 
-func (instance *Logging) addServiceCgroupFilter(journal *sdjournal.Journal,
-	serviceID string) (unitName string, err error) {
-	if serviceID == "" {
-		return unitName, aoserrors.New("serviceID is empty")
-	}
+func (instance *Logging) addServiceCgroupFilter(journal JournalInterface, instanceIDs []string) (err error) {
+	for _, instanceID := range instanceIDs {
+		// for supporting cgroup v1
+		// format: /system.slice/system-aos@service.slice/aos-service@AOS_INSTANCE_ID.service
+		if err = journal.AddMatch(
+			cgroupField +
+				"=/system.slice/system-aos\\x2dservice.slice/" + aosServicePrefix + instanceID + ".service"); err != nil {
+			return aoserrors.Wrap(err)
+		}
 
-	service, err := instance.serviceProvider.GetService(serviceID)
-
-	if err != nil {
-		return unitName, aoserrors.Wrap(err)
-	}
-
-	// for supporting cgroup v1
-	// format: /system.slice/aos_AOS_SERVICE_UUID.service
-	if err = journal.AddMatch(cgroupField + "=/system.slice/" + service.UnitName); err != nil {
-		return unitName, aoserrors.Wrap(err)
-	}
-
-	// for supporting cgroup v2
-	// format: /system.slice/AOS_SERVICE_UUID
-	if err = journal.AddMatch(cgroupField + "=/system.slice/" + serviceID); err != nil {
-		return unitName, aoserrors.Wrap(err)
-	}
-
-	return service.UnitName, nil
-}
-
-func (instance *Logging) addUnitFilter(journal *sdjournal.Journal, serviceID string) (err error) {
-	if serviceID == "" {
-		return aoserrors.New("serviceID is empty")
-	}
-
-	service, err := instance.serviceProvider.GetService(serviceID)
-
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = journal.AddMatch(unitField + "=" + service.UnitName); err != nil {
-		return aoserrors.Wrap(err)
+		// for supporting cgroup v2
+		// format: /system.slice/system-aos@service.slice/AOS_INSTANCE_ID
+		if err = journal.AddMatch(cgroupField + "=/system.slice/system-aos\\x2dservice.slice/" + instanceID); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil
 }
 
-func (instance *Logging) seekToTime(journal *sdjournal.Journal, from *time.Time) (err error) {
+func (instance *Logging) addUnitFilter(journal JournalInterface, instancesIDs []string) (err error) {
+	for _, instanceID := range instancesIDs {
+		if err = journal.AddMatch(unitField + "=" + makeUnitNameFromInstanceID(instanceID)); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func (instance *Logging) seekToTime(journal JournalInterface, from *time.Time) (err error) {
 	if from != nil {
 		return aoserrors.Wrap(journal.SeekRealtimeUsec(uint64(from.UnixNano() / 1000)))
 	}
@@ -496,10 +499,22 @@ func getUnitNameFromLog(logEntry *sdjournal.JournalEntry) (unitName string) {
 	if !strings.Contains(unitName, aosServicePrefix) {
 		// with cgroup v2 logs from container do not contains _SYSTEMD_UNIT due to restrictions
 		// that's why id should be checked via _SYSTEMD_CGROUP
-		// format: /system.slice/AOS_SERVICE_UUID
+		// format: /system.slice/system-aos@service.slice/AOS_INSTANCE_ID
 
 		return fmt.Sprintf("%s%s.service", aosServicePrefix, unitName)
 	}
 
 	return unitName
+}
+
+func makeUnitNameFromInstanceID(instanceID string) string {
+	return fmt.Sprintf("%s%s.service", aosServicePrefix, instanceID)
+}
+
+func logRequestToString(log interface{}) string {
+	if data, err := json.Marshal(log); err == nil {
+		return string(data)
+	}
+
+	return ""
 }
