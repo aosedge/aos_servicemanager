@@ -3,6 +3,7 @@
 
 [![CI](https://github.com/aoscloud/aos_servicemanager/workflows/CI/badge.svg)](https://github.com/aoscloud/aos_servicemanager/actions?query=workflow%3ACI)
 [![codecov](https://codecov.io/gh/aoscloud/aos_servicemanager/branch/main/graph/badge.svg?token=mZKEdNf2fx)](https://codecov.io/gh/aoscloud/aos_servicemanager)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=aoscloud_aos_servicemanager&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=aoscloud_aos_servicemanager)
 
 
 Aos Service Manager (SM) is a part of Aos system which resides on the device side and stands for the following tasks:
