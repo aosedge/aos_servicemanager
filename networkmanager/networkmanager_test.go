@@ -25,12 +25,14 @@ import (
 	"net"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 	"unicode"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -58,9 +60,17 @@ type cniNetwork struct {
 	Plugins    []json.RawMessage `json:"plugins"`
 }
 
+type testDNSParam struct {
+	hosts              []string
+	expectedCountHosts int
+	networkID          string
+	expectedError      bool
+}
+
 type testPluginsData struct {
 	params        networkmanager.NetworkParams
 	networkConfig string
+	dnsParam      testDNSParam
 }
 
 type testTrafficMonitoringData struct {
@@ -382,6 +392,236 @@ func TestBandwithPlugin(t *testing.T) {
 
 		if err := manager.RemoveInstanceFromNetwork("instance0", "network0"); err != nil {
 			t.Fatalf("Can't remove instance from network: %s", err)
+		}
+	}
+}
+
+func TestDNSPluginPositive(t *testing.T) {
+	testData := []testPluginsData{
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  0,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+			},
+			dnsParam: testDNSParam{
+				hosts: []string{
+					"0.user1.service0", "user1.service0", "0.user1.service0.network0", "user1.service0.network0",
+				},
+				expectedCountHosts: 4,
+				networkID:          "network0",
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  1,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+				Hostname: "myHost",
+			},
+			dnsParam: testDNSParam{
+				hosts:              []string{"myHost", "1.user1.service0", "1.user1.service0.network0"},
+				expectedCountHosts: 3,
+				networkID:          "network0",
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				Hostname: "myHost1.domain",
+			},
+			dnsParam: testDNSParam{
+				hosts:              []string{"myHost1.domain", "myHost1.domain.network0"},
+				expectedCountHosts: 2,
+				networkID:          "network0",
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  2,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+				Hostname: "myHost2",
+				Aliases:  []string{"alias1", "alias2.domain", "alias3"},
+			},
+			dnsParam: testDNSParam{
+				hosts: []string{
+					"alias1", "alias2.domain", "alias3", "myHost2",
+					"2.user1.service0", "alias2.domain.network0", "2.user1.service0.network0",
+				},
+				expectedCountHosts: 7,
+				networkID:          "network0",
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  0,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+			},
+			dnsParam: testDNSParam{
+				hosts: []string{
+					"0.user1.service0", "user1.service0", "0.user1.service0.network1", "user1.service0.network1",
+				},
+				expectedCountHosts: 4,
+				networkID:          "network1",
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  2,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+				Hostname: "myHost2.domain",
+				Aliases:  []string{"alias1.domain", "alias2", "alias3"},
+			},
+			dnsParam: testDNSParam{
+				hosts: []string{
+					"alias1.domain", "alias2", "alias3", "myHost2.domain", "2.user1.service0",
+					"alias1.domain.network1", "myHost2.domain.network1", "2.user1.service0.network1",
+				},
+				expectedCountHosts: 8,
+				networkID:          "network1",
+			},
+		},
+	}
+
+	cniInterface := &testCNIInterface{}
+
+	networkmanager.CNIPlugins = cniInterface
+	networkmanager.GetIPSubnet = getIPSubnet
+
+	defer func() {
+		networkmanager.GetIPSubnet = nil
+	}()
+
+	manager, err := networkmanager.New(&config.Config{}, nil)
+	if err != nil {
+		t.Fatalf("Can't create network manager: %s", err)
+	}
+	defer manager.Close()
+
+	for i, item := range testData {
+		if err := manager.AddInstanceToNetwork(
+			fmt.Sprintf("instance%d", i), item.dnsParam.networkID, item.params); err != nil {
+			t.Fatalf("Can't add instance to network: %s", err)
+		}
+
+		aliases, ok := cniInterface.runtimeConfig.CapabilityArgs["aliases"].(map[string][]string)
+		if !ok {
+			t.Error("Incorrect aliases type")
+		}
+
+		hosts := aliases[item.dnsParam.networkID]
+		if item.dnsParam.expectedCountHosts != len(hosts) {
+			t.Errorf("Incorrect hosts count, expected %d", item.dnsParam.expectedCountHosts)
+		}
+
+		if !reflect.DeepEqual(hosts, item.dnsParam.hosts) {
+			t.Errorf("Incorrect list of hosts %s", hosts)
+		}
+	}
+
+	for i, item := range testData {
+		if err := manager.RemoveInstanceFromNetwork(fmt.Sprintf("instance%d", i), item.dnsParam.networkID); err != nil {
+			t.Fatalf("Can't remove instance from network: %s", err)
+		}
+	}
+}
+
+func TestDNSPluginNegative(t *testing.T) {
+	testData := []testPluginsData{
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  0,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+			},
+			dnsParam: testDNSParam{
+				networkID:     "network0",
+				expectedError: false,
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  0,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+				Hostname: "myHost",
+			},
+			dnsParam: testDNSParam{
+				networkID:     "network0",
+				expectedError: true,
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  0,
+					SubjectID: "user1",
+					ServiceID: "service0",
+				},
+				Aliases: []string{"alias1", "alias2", "alias3"},
+			},
+			dnsParam: testDNSParam{
+				networkID:     "network1",
+				expectedError: false,
+			},
+		},
+		{
+			params: networkmanager.NetworkParams{
+				InstanceIdent: cloudprotocol.InstanceIdent{
+					Instance:  1,
+					SubjectID: "user2",
+					ServiceID: "service0",
+				},
+				Hostname: "myHost",
+				Aliases:  []string{"alias1"},
+			},
+			dnsParam: testDNSParam{
+				networkID:     "network1",
+				expectedError: true,
+			},
+		},
+	}
+
+	cniInterface := &testCNIInterface{}
+
+	networkmanager.CNIPlugins = cniInterface
+	networkmanager.GetIPSubnet = getIPSubnet
+
+	defer func() {
+		networkmanager.GetIPSubnet = nil
+	}()
+
+	manager, err := networkmanager.New(&config.Config{}, nil)
+	if err != nil {
+		t.Fatalf("Can't create network manager: %s", err)
+	}
+	defer manager.Close()
+
+	for i, item := range testData {
+		err := manager.AddInstanceToNetwork(fmt.Sprintf("instance%d", i), item.dnsParam.networkID, item.params)
+		if !item.dnsParam.expectedError && err != nil {
+			t.Fatalf("Can't add instance to network: %s", err)
+			continue
+		}
+
+		if item.dnsParam.expectedError && err == nil {
+			t.Fatalf("Should be error: can't add instance to network")
 		}
 	}
 }
