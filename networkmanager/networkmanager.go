@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -61,6 +63,11 @@ const (
  * Types
  **********************************************************************************************************************/
 
+type netInstanceData struct {
+	instanceIP string
+	hosts      []string
+}
+
 // NetworkManager network manager instance.
 type NetworkManager struct {
 	sync.Mutex
@@ -69,11 +76,12 @@ type NetworkManager struct {
 	hosts             []config.Host
 	networkDir        string
 	trafficMonitoring *trafficMonitoring
-	networkInstanceIP map[string]map[string]string
+	instancesData     map[string]map[string]netInstanceData
 }
 
 // NetworkParams network parameters set for instance.
 type NetworkParams struct {
+	cloudprotocol.InstanceIdent
 	Hostname           string
 	Aliases            []string
 	IngressKbit        uint64
@@ -169,9 +177,9 @@ func New(cfg *config.Config, trafficStorage TrafficStorage) (manager *NetworkMan
 	cniDir := path.Join(cfg.WorkingDir, "cni")
 
 	manager = &NetworkManager{
-		hosts:             cfg.Hosts,
-		networkDir:        path.Join(cniDir, "networks"),
-		networkInstanceIP: make(map[string]map[string]string),
+		hosts:         cfg.Hosts,
+		networkDir:    path.Join(cniDir, "networks"),
+		instancesData: make(map[string]map[string]netInstanceData),
 	}
 
 	if manager.cniInterface = CNIPlugins; manager.cniInterface == nil {
@@ -258,7 +266,7 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 		}
 	}()
 
-	netConfig, runtimeConfig, err := manager.prepareNetRuntimeConfig(instanceID, networkID, ipSubnet, params)
+	netConfig, runtimeConfig, hosts, err := manager.prepareCNIConfig(instanceID, networkID, ipSubnet, params)
 	if err != nil {
 		return err
 	}
@@ -287,11 +295,14 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 		}
 	}
 
-	if _, ok := manager.networkInstanceIP[networkID]; !ok {
-		manager.networkInstanceIP[networkID] = make(map[string]string)
+	if _, ok := manager.instancesData[networkID]; !ok {
+		manager.instancesData[networkID] = make(map[string]netInstanceData)
 	}
 
-	manager.networkInstanceIP[networkID][instanceID] = instanceIP
+	manager.instancesData[networkID][instanceID] = netInstanceData{
+		instanceIP: instanceIP,
+		hosts:      hosts,
+	}
 
 	log.WithFields(log.Fields{
 		"instanceID": instanceID,
@@ -322,9 +333,9 @@ func (manager *NetworkManager) RemoveInstanceFromNetwork(instanceID, networkID s
 		return aoserrors.Wrap(err)
 	}
 
-	delete(manager.networkInstanceIP[networkID], instanceID)
+	delete(manager.instancesData[networkID], instanceID)
 
-	if len(manager.networkInstanceIP[networkID]) == 0 {
+	if len(manager.instancesData[networkID]) == 0 {
 		return aoserrors.Wrap(manager.clearNetwork(networkID))
 	}
 
@@ -344,7 +355,7 @@ func (manager *NetworkManager) GetInstanceIP(instanceID, networkID string) (ip s
 		return "", aoserrors.New("Instance is not in network")
 	}
 
-	return manager.networkInstanceIP[networkID][instanceID], nil
+	return manager.instancesData[networkID][instanceID].instanceIP, nil
 }
 
 func (manager *NetworkManager) GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error) {
@@ -472,25 +483,23 @@ func (manager *NetworkManager) getIPSubnet(networkID string) (allocIPNet *net.IP
 	return ipSubnet, nil
 }
 
-func (manager *NetworkManager) prepareNetRuntimeConfig(
+func (manager *NetworkManager) prepareCNIConfig(
 	instanceID, networkID string, ipSubnet *net.IPNet, params NetworkParams) (
-	netConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf, err error,
+	netConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf, hosts []string, err error,
 ) {
-	netConfig, err = prepareNetworkConfigList(manager.networkDir, instanceID, networkID, ipSubnet, &params)
-	if err != nil {
-		return nil, nil, aoserrors.Wrap(err)
+	if hosts, err = manager.prepareHostnameList(networkID, params); err != nil {
+		return nil, nil, nil, err
 	}
 
-	runtimeConfig, err = manager.prepareRuntimeConfig(instanceID, networkID, params.Hostname, params.Aliases)
-	if err != nil {
-		return nil, nil, aoserrors.Wrap(err)
+	if netConfig, err = prepareNetworkConfigList(manager.networkDir, instanceID, networkID, ipSubnet, params); err != nil {
+		return nil, nil, nil, aoserrors.Wrap(err)
 	}
 
 	if _, err = manager.cniInterface.ValidateNetworkList(context.Background(), netConfig); err != nil {
-		return nil, nil, aoserrors.Wrap(err)
+		return nil, nil, nil, aoserrors.Wrap(err)
 	}
 
-	return netConfig, runtimeConfig, nil
+	return netConfig, manager.prepareRuntimeConfig(instanceID, networkID, hosts), hosts, nil
 }
 
 func (manager *NetworkManager) deleteAllNetworks() error {
@@ -520,7 +529,7 @@ func (manager *NetworkManager) deleteAllNetworks() error {
 }
 
 func (manager *NetworkManager) isInstanceInNetwork(instanceID, networkID string) (status bool) {
-	if instances, ok := manager.networkInstanceIP[networkID]; ok {
+	if instances, ok := manager.instancesData[networkID]; ok {
 		if _, ok := instances[instanceID]; ok {
 			return true
 		}
@@ -644,8 +653,8 @@ func (manager *NetworkManager) postNetworkClear(networkID string) error {
 	return nil
 }
 
-func (manager *NetworkManager) prepareRuntimeConfig(instanceID, networkID, hostname string, aliases []string) (
-	runtimeConfig *cni.RuntimeConf, err error,
+func (manager *NetworkManager) prepareRuntimeConfig(instanceID, networkID string, hosts []string) (
+	runtimeConfig *cni.RuntimeConf,
 ) {
 	runtimeConfig = &cni.RuntimeConf{
 		ContainerID: instanceID,
@@ -658,15 +667,66 @@ func (manager *NetworkManager) prepareRuntimeConfig(instanceID, networkID, hostn
 		CapabilityArgs: make(map[string]interface{}),
 	}
 
-	if hostname != "" {
-		aliases = append([]string{hostname}, aliases...)
+	if len(hosts) != 0 {
+		runtimeConfig.CapabilityArgs["aliases"] = map[string][]string{networkID: hosts}
 	}
 
-	if len(aliases) != 0 {
-		runtimeConfig.CapabilityArgs["aliases"] = map[string][]string{networkID: aliases}
+	return runtimeConfig
+}
+
+func (manager *NetworkManager) isHostnameExists(networkID string, hosts []string) error {
+	instances, ok := manager.instancesData[networkID]
+	if !ok {
+		return nil
 	}
 
-	return runtimeConfig, nil
+	for _, networkInstanceData := range instances {
+		for _, existHostname := range networkInstanceData.hosts {
+			for _, newHostname := range hosts {
+				if existHostname == newHostname {
+					return aoserrors.Errorf("hostname %s already exists", newHostname)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (manager *NetworkManager) prepareHostnameList(networkID string, params NetworkParams) (hosts []string, err error) {
+	hosts = append(hosts, params.Aliases...)
+
+	if params.Hostname != "" {
+		hosts = append(hosts, params.Hostname)
+	}
+
+	if params.ServiceID != "" && params.SubjectID != "" {
+		hosts = append(hosts, fmt.Sprintf("%d.%s.%s", params.Instance, params.SubjectID, params.ServiceID))
+
+		if params.Instance == 0 {
+			hosts = append(hosts, fmt.Sprintf("%s.%s", params.SubjectID, params.ServiceID))
+		}
+	}
+
+	if len(hosts) != 0 {
+		hosts = tryAppendDomainNameToHostname(hosts, networkID)
+
+		if err = manager.isHostnameExists(networkID, hosts); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+	}
+
+	return hosts, nil
+}
+
+func tryAppendDomainNameToHostname(hosts []string, networkID string) []string {
+	for _, hostname := range hosts {
+		if strings.ContainsAny(hostname, ".") {
+			hosts = append(hosts, strings.Join([]string{hostname, networkID}, "."))
+		}
+	}
+
+	return hosts
 }
 
 func readInstanceIDFromFile(pathToInstanceID string) (instanceID string, err error) {
@@ -831,7 +891,7 @@ func getRuntimeNetConfig(instanceID, networkID string) (
 }
 
 func prepareNetworkConfigList(networkDir, instanceID, networkID string, subnetwork *net.IPNet,
-	params *NetworkParams,
+	params NetworkParams,
 ) (cniNetworkConfig *cni.NetworkConfigList, err error) {
 	networkConfig := cniNetwork{Name: networkID, CNIVersion: cniVersion}
 
