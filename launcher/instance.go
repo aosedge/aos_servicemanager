@@ -42,6 +42,21 @@ type instanceInfo struct {
 	overrideEnvVars []string
 }
 
+type byPriority []*instanceInfo
+
+/***********************************************************************************************************************
+ * Sort instance priority
+ **********************************************************************************************************************/
+
+func (instances byPriority) Len() int { return len(instances) }
+
+func (instances byPriority) Less(i, j int) bool {
+	return instances[i].SubjectID < instances[j].SubjectID ||
+		instances[i].ServiceID < instances[j].ServiceID ||
+		instances[i].Instance < instances[j].Instance
+}
+func (instances byPriority) Swap(i, j int) { instances[i], instances[j] = instances[j], instances[i] }
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -131,4 +146,21 @@ func instanceFilterLogFields(filter cloudprotocol.InstanceFilter, extraFields lo
 	}
 
 	return logFields
+}
+
+func appendInstances(instances []*instanceInfo, instance ...*instanceInfo) []*instanceInfo {
+	var newInstances []*instanceInfo
+
+instanceLoop:
+	for _, newInstance := range instance {
+		for _, existingInstance := range instances {
+			if newInstance == existingInstance {
+				continue instanceLoop
+			}
+		}
+
+		newInstances = append(newInstances, newInstance)
+	}
+
+	return newInstances
 }

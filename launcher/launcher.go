@@ -113,7 +113,9 @@ type ResourceManager interface {
 	GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error)
 	GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error)
 	AllocateDevice(device, instanceID string) error
+	ReleaseDevice(device, instanceID string) error
 	ReleaseDevices(instanceID string) error
+	GetDeviceInstances(name string) (instanceIDs []string, err error)
 }
 
 // NetworkManager provides network access.
@@ -812,11 +814,17 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 }
 
 func (launcher *Launcher) startInstances(instances []*instanceInfo) {
+	sort.Sort(byPriority(instances))
+
+	var conflictInstances []*instanceInfo
+
 	// Allocate devices
+
 	i := 0
 
 	for _, instance := range instances {
-		if err := launcher.allocateDevices(instance); err != nil {
+		currentConflictInstances, err := launcher.allocateDevices(instance)
+		if err != nil {
 			launcher.instanceFailed(instance, err)
 
 			continue
@@ -824,9 +832,25 @@ func (launcher *Launcher) startInstances(instances []*instanceInfo) {
 
 		instances[i] = instance
 		i++
+
+		conflictInstances = appendInstances(conflictInstances, currentConflictInstances...)
 	}
 
 	instances = instances[:i]
+
+	for _, instance := range conflictInstances {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Debug("Release instance due to device conflicts")
+
+		launcher.doStopAction(instance)
+	}
+
+	launcher.actionHandler.Wait()
+
+	for _, instance := range conflictInstances {
+		launcher.instanceFailed(instance, aoserrors.Wrap(resourcemanager.ErrNoAvailableDevice))
+	}
 
 	// Start instances
 	for _, instance := range instances {
@@ -922,24 +946,87 @@ func (launcher *Launcher) setupNetwork(instance *instanceInfo) (err error) {
 	return nil
 }
 
-func (launcher *Launcher) allocateDevices(instance *instanceInfo) (err error) {
+func (launcher *Launcher) getLowPriorityInstance(instance *instanceInfo, deviceName string) (*instanceInfo, error) {
+	deviceInstances, err := launcher.resourceManager.GetDeviceInstances(deviceName)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	checkInstances := make([]*instanceInfo, 0, len(deviceInstances)+1)
+
+	for _, instanceID := range deviceInstances {
+		currentInstance, ok := launcher.currentInstances[instanceID]
+		if !ok {
+			return nil, aoserrors.Errorf("can't get allocated device instance: %s", instanceID)
+		}
+
+		checkInstances = append(checkInstances, currentInstance)
+	}
+
+	checkInstances = append(checkInstances, instance)
+
+	sort.Sort(byPriority(checkInstances))
+
+	lowPriorityInstance := checkInstances[len(checkInstances)-1]
+
+	if lowPriorityInstance == instance {
+		return nil, aoserrors.Wrap(resourcemanager.ErrNoAvailableDevice)
+	}
+
+	return lowPriorityInstance, nil
+}
+
+func (launcher *Launcher) allocateDevices(instance *instanceInfo) (conflictInstances []*instanceInfo, err error) {
+	releasedDevices := make(map[string]*instanceInfo)
+
 	defer func() {
 		if err != nil {
-			if releaseErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); releaseErr != nil {
-				log.WithFields(
-					instanceIdentLogFields(instance.InstanceIdent, nil),
-				).Errorf("Can't release instance devices: %v", releaseErr)
-			}
+			launcher.revertDeviceAllocation(instance, releasedDevices)
 		}
 	}()
 
 	for _, device := range instance.service.serviceConfig.Devices {
-		if err := launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
-			return aoserrors.Wrap(err)
+		if err = launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
+			if !errors.Is(err, resourcemanager.ErrNoAvailableDevice) {
+				return nil, aoserrors.Wrap(err)
+			}
+
+			lowPriorityInstance, err := launcher.getLowPriorityInstance(instance, device.Name)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = launcher.resourceManager.ReleaseDevice(device.Name, lowPriorityInstance.InstanceID); err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
+
+			releasedDevices[device.Name] = lowPriorityInstance
+			conflictInstances = appendInstances(conflictInstances, lowPriorityInstance)
+
+			if err = launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
 		}
 	}
 
-	return nil
+	return conflictInstances, nil
+}
+
+func (launcher *Launcher) revertDeviceAllocation(instance *instanceInfo, releasedDevices map[string]*instanceInfo) {
+	if err := launcher.resourceManager.ReleaseDevices(instance.InstanceID); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't release instance devices: %v", err)
+	}
+
+	// Allocate back released devices
+	for device, releasedInstance := range releasedDevices {
+		if err := launcher.resourceManager.AllocateDevice(device, releasedInstance.InstanceID); err != nil {
+			log.WithFields(
+				instanceIdentLogFields(instance.InstanceIdent, nil),
+			).Errorf("Can't allocate device %s: %v", device, err)
+		}
+	}
 }
 
 func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {

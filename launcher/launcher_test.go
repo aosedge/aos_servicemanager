@@ -96,6 +96,7 @@ type testRunner struct {
 }
 
 type testResourceManager struct {
+	sync.RWMutex
 	allocatedDevices map[string][]string
 	devices          map[string]resourcemanager.DeviceInfo
 	resources        map[string]resourcemanager.ResourceInfo
@@ -1867,6 +1868,181 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 }
 
+func TestInstancePriorities(t *testing.T) {
+	type testData struct {
+		instances []testInstance
+	}
+
+	data := []testData{
+		// Try to allocate device0 (shared count 1) by 3 instances of one serveice for the same subject. Instance with
+		// index 0 should allocate the device.
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service1", subjectID: "subject1", numInstances: 3,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					err: []error{
+						nil,
+						resourcemanager.ErrNoAvailableDevice,
+						resourcemanager.ErrNoAvailableDevice,
+					},
+				},
+			},
+		},
+		// Add same service instance with higher priority subject.
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service1", subjectID: "subject1", numInstances: 3,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					err: []error{
+						resourcemanager.ErrNoAvailableDevice,
+						resourcemanager.ErrNoAvailableDevice,
+						resourcemanager.ErrNoAvailableDevice,
+					},
+				},
+				{
+					serviceID: "service1", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+				},
+			},
+		},
+		// Add higher priority service for the same subject.
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service1", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					err:           []error{resourcemanager.ErrNoAvailableDevice},
+				},
+				{
+					serviceID: "service0", subjectID: "subject1", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+				},
+			},
+		},
+		// Multiple devices test 1
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service0", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device0", Permissions: "rw"},
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+				},
+				{
+					serviceID: "service1", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device0", Permissions: "rw"},
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+					err: []error{resourcemanager.ErrNoAvailableDevice},
+				},
+				{
+					serviceID: "service2", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+				},
+				{
+					serviceID: "service3", subjectID: "subject0", numInstances: 2,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device2", Permissions: "rw"},
+					}},
+					err: []error{nil, resourcemanager.ErrNoAvailableDevice},
+				},
+			},
+		},
+		// Multiple devices test 2
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service0", subjectID: "subject0", numInstances: 3,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device0", Permissions: "rw"},
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+					err: []error{nil, resourcemanager.ErrNoAvailableDevice, resourcemanager.ErrNoAvailableDevice},
+				},
+				{
+					serviceID: "service1", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device0", Permissions: "rw"},
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+					err: []error{resourcemanager.ErrNoAvailableDevice},
+				},
+				{
+					serviceID: "service2", subjectID: "subject0", numInstances: 2,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device2", Permissions: "rw"},
+					}},
+				},
+			},
+		},
+		// Multiple devices test 3
+		{
+			instances: []testInstance{
+				{
+					serviceID: "service1", subjectID: "subject0", numInstances: 1,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device0", Permissions: "rw"},
+						{Name: "device1", Permissions: "rw"},
+						{Name: "device2", Permissions: "rw"},
+					}},
+				},
+				{
+					serviceID: "service2", subjectID: "subject0", numInstances: 2,
+					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+						{Name: "device2", Permissions: "rw"},
+					}},
+				},
+			},
+		},
+	}
+
+	resourceManager := newTestResourceManager()
+	serviceProvider := newTestServiceProvider()
+
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device0", SharedCount: 1})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1", SharedCount: 2})
+	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2", SharedCount: 3})
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	for i, item := range data {
+		t.Logf("Run instances: %d", i)
+
+		if err = serviceProvider.fromTestInstances(item.instances, true); err != nil {
+			t.Fatalf("Can't create test services: %v", err)
+		}
+
+		if err = testLauncher.RunInstances(createInstancesInfos(item.instances)); err != nil {
+			t.Fatalf("Can't run instances: %v", err)
+		}
+
+		runtimeStatus := launcher.RuntimeStatus{
+			RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(item.instances)},
+		}
+
+		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+			t.Errorf("Check runtime status error: %v", err)
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
@@ -2259,6 +2435,9 @@ func newTestResourceManager() *testResourceManager {
 }
 
 func (manager *testResourceManager) GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error) {
+	manager.RLock()
+	defer manager.RUnlock()
+
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
 		return resourcemanager.DeviceInfo{}, aoserrors.New("device info not found")
@@ -2268,6 +2447,9 @@ func (manager *testResourceManager) GetDeviceInfo(device string) (resourcemanage
 }
 
 func (manager *testResourceManager) GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error) {
+	manager.RLock()
+	defer manager.RUnlock()
+
 	resourceInfo, ok := manager.resources[resource]
 	if !ok {
 		return resourcemanager.ResourceInfo{}, aoserrors.New("resource info not found")
@@ -2277,6 +2459,9 @@ func (manager *testResourceManager) GetResourceInfo(resource string) (resourcema
 }
 
 func (manager *testResourceManager) AllocateDevice(device, instanceID string) error {
+	manager.Lock()
+	defer manager.Unlock()
+
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
 		return aoserrors.New("device info not found")
@@ -2289,7 +2474,7 @@ func (manager *testResourceManager) AllocateDevice(device, instanceID string) er
 	}
 
 	if deviceInfo.SharedCount != 0 && len(manager.allocatedDevices[device]) >= deviceInfo.SharedCount {
-		return aoserrors.Errorf("device %s shared count exceeds", device)
+		return resourcemanager.ErrNoAvailableDevice
 	}
 
 	manager.allocatedDevices[device] = append(manager.allocatedDevices[device], instanceID)
@@ -2297,7 +2482,30 @@ func (manager *testResourceManager) AllocateDevice(device, instanceID string) er
 	return nil
 }
 
+func (manager *testResourceManager) ReleaseDevice(device, instanceID string) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+	if _, ok := manager.devices[device]; !ok {
+		return aoserrors.New("device info not found")
+	}
+
+	for i, allocatedInstanceID := range manager.allocatedDevices[device] {
+		if allocatedInstanceID == instanceID {
+			manager.allocatedDevices[device] = append(manager.allocatedDevices[device][:i],
+				manager.allocatedDevices[device][i+1:]...)
+
+			return nil
+		}
+	}
+
+	return aoserrors.Errorf("device %s is not allocated for instance %s", device, instanceID)
+}
+
 func (manager *testResourceManager) ReleaseDevices(instanceID string) error {
+	manager.Lock()
+	defer manager.Unlock()
+
 	for device, instanceIDs := range manager.allocatedDevices {
 		for i, allocatedInstanceID := range instanceIDs {
 			if allocatedInstanceID == instanceID {
@@ -2314,11 +2522,28 @@ func (manager *testResourceManager) ReleaseDevices(instanceID string) error {
 	return nil
 }
 
+func (manager *testResourceManager) GetDeviceInstances(name string) (instanceIDs []string, err error) {
+	manager.RLock()
+	defer manager.RUnlock()
+
+	if _, ok := manager.devices[name]; !ok {
+		return nil, aoserrors.New("device info not found")
+	}
+
+	return manager.allocatedDevices[name], nil
+}
+
 func (manager *testResourceManager) addDevice(device resourcemanager.DeviceInfo) {
+	manager.Lock()
+	defer manager.Unlock()
+
 	manager.devices[device.Name] = device
 }
 
 func (manager *testResourceManager) addResource(resource resourcemanager.ResourceInfo) {
+	manager.Lock()
+	defer manager.Unlock()
+
 	for _, mount := range resource.Mounts {
 		if err := os.MkdirAll(mount.Source, 0o755); err != nil {
 			log.Errorf("Can't create mount dir: %v", err)
