@@ -18,35 +18,27 @@
 package alerts_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"log/syslog"
 	"os"
-	"path"
-	"reflect"
-	"strings"
-	"syscall"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
-	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/alerts"
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Init
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -58,54 +50,47 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-type testServiceProvider struct {
-	services map[string]*launcher.Service
+type testInstanceProvider struct {
+	instancesInfo map[string]cloudprotocol.InstanceIdent
 }
 
 type testCursorStorage struct {
 	cursor string
 }
 
-/*******************************************************************************
- * Vars
- ******************************************************************************/
-
-var systemd *dbus.Conn
-
-var errTimeout = aoserrors.New("timeout")
-
-var (
-	serviceProvider = testServiceProvider{services: make(map[string]*launcher.Service)}
-	cursorStorage   testCursorStorage
-)
-
-var tmpDir string
-
-/*******************************************************************************
- * Main
- ******************************************************************************/
-
-func TestMain(m *testing.M) {
-	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
-	}
-
-	ret := m.Run()
-
-	cleanup()
-
-	os.Exit(ret)
+type testSystemdJournal struct {
+	sync.RWMutex
+	messages       []*sdjournal.JournalEntry
+	currentMessage int
+	systemdMatches []string
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var (
+	errTimeout       = errors.New("timeout")
+	errIncorrectType = errors.New("incorrect alert type")
+)
+
+var (
+	instanceProvider = testInstanceProvider{instancesInfo: make(map[string]cloudprotocol.InstanceIdent)}
+	cursorStorage    testCursorStorage
+)
+
+/***********************************************************************************************************************
  * Tests
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestGetSystemError(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
 	const numMessages = 5
 
 	alertsHandler, err := alerts.New(&config.Config{
@@ -114,17 +99,11 @@ func TestGetSystemError(t *testing.T) {
 			SystemAlertPriority:  3,
 		},
 	},
-		&serviceProvider, &cursorStorage)
+		&instanceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
-
-	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
-	if err != nil {
-		t.Fatalf("Can't create syslog: %s", err)
-	}
-	defer sysLog.Close()
 
 	// Check crit message received
 
@@ -133,139 +112,105 @@ func TestGetSystemError(t *testing.T) {
 	for i := 0; i < numMessages; i++ {
 		messages = append(messages, uuid.New().String())
 
-		if err = sysLog.Crit(messages[len(messages)-1]); err != nil {
-			t.Errorf("Can't write to syslog: %s", err)
-		}
-
-		time.Sleep(500 * time.Millisecond)
+		testJournal.addMessage(messages[i], "someSystemService", "", "3")
 	}
 
 	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second,
-		alerts.AlertTagSystemError, "system", 0, messages); err != nil {
-		t.Errorf("Result failed: %s", err)
-	}
-
-	// Check non crit message not received
-
-	messages = make([]string, 0, numMessages)
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Warning(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Notice(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Info(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	messages = append(messages, uuid.New().String())
-	if err = sysLog.Debug(messages[len(messages)-1]); err != nil {
-		t.Errorf("Can't write to syslog: %s", err)
-	}
-
-	if err = waitResult(alertsHandler.GetAlertsChannel(), 5*time.Second,
-		func(alert *pb.Alert) (success bool, err error) {
-			if alert.Tag == alerts.AlertTagSystemError {
-				for _, originMessage := range messages {
-					systemAlert := alert.GetSystemAlert()
-					if systemAlert == nil {
-						return false, aoserrors.New("wrong alert type")
-					}
-
-					if originMessage == systemAlert.Message {
-						return false, aoserrors.New("unexpected message: " + systemAlert.Message)
-					}
-				}
-			}
-
-			return false, nil
-		}); err != nil && !errors.Is(err, errTimeout) {
+		cloudprotocol.AlertTagSystemError, cloudprotocol.InstanceIdent{}, 0, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
 
 func TestGetServiceError(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
 			SystemAlertPriority:  3,
 		},
 	},
-		&serviceProvider, &cursorStorage)
+		&instanceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
 
-	if err = createService("alertservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
+	instanceInfo := cloudprotocol.InstanceIdent{
+		ServiceID: "alertservice0",
+		SubjectID: "subject0",
+		Instance:  0,
 	}
 
-	if err = startService("alertservice0"); err != nil {
-		t.Fatalf("Can't create service: %s", err)
-	}
+	instanceID := fmt.Sprintf(
+		"%s_%s_%s", instanceInfo.ServiceID, instanceInfo.SubjectID, strconv.FormatUint(instanceInfo.Instance, 10))
 
-	time.Sleep(1 * time.Second)
+	unitName := "aos-service@" + instanceID + ".service"
 
-	crashService("alertservice0")
+	instanceProvider.instancesInfo[instanceID] = instanceInfo
 
-	messages := []string{
-		"aos_alertservice0.service: Main process exited, code=dumped, status=11/SEGV",
-		"aos_alertservice0.service: Failed with result 'core-dump'.",
-	}
+	messages := []string{}
+
+	// msg 1
+	testJournal.addMessage("starting", "init.scope", "", "4")
+
+	// msg 2
+	message := unitName + ": Main process exited, code=dumped, status=11/SEGV"
+
+	testJournal.addMessage(message, unitName, "", "3")
+
+	messages = append(messages, message)
+
+	// msg 3
+	message = unitName + ": Failed with result 'core-dump'."
+
+	testJournal.addMessage(message, "", "/system.slice/system-aos@service.slice/"+unitName, "3")
+
+	messages = append(messages, message)
 
 	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second,
-		alerts.AlertTagSystemError, "alertservice0", 0, messages); err != nil {
+		cloudprotocol.AlertTagServiceInstance, instanceInfo, 0, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
 
 func TestGetServiceManagerAlerts(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
+	alertsHandler, err := alerts.New(&config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3,
+		},
+	},
+		&instanceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
 	const numMessages = 5
 
 	messages := make([]string, 0, numMessages)
 
 	for i := 0; i < numMessages; i++ {
 		messages = append(messages, uuid.New().String())
+
+		testJournal.addMessage(messages[i], "aos-servicemanager.service", "", "3")
 	}
 
-	command := fmt.Sprintf("/usr/bin/systemd-cat -p3 /bin/bash -c 'for message in %s ; do echo $message ; done'",
-		strings.Join(messages, " "))
-
-	if err := createSystemdUnit("oneshot", command,
-		path.Join(tmpDir, "aos-servicemanager.service")); err != nil {
-		t.Fatalf("Can't create systemd unit: %s", err)
-	}
-
-	alertsHandler, err := alerts.New(&config.Config{
-		Alerts: config.Alerts{
-			ServiceAlertPriority: 4,
-			SystemAlertPriority:  3,
-		},
-	},
-		&serviceProvider, &cursorStorage)
-	if err != nil {
-		t.Fatalf("Can't create alerts: %s", err)
-	}
-	defer alertsHandler.Close()
-
-	if err = startSystemdUnit("aos-servicemanager.service"); err != nil {
-		t.Fatalf("Can't start systemd unit: %s", err)
-	}
-
-	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second, alerts.AlertTagAosCore,
-		"aos-servicemanager.service", 0, messages); err != nil {
+	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second, cloudprotocol.AlertTagAosCore,
+		cloudprotocol.InstanceIdent{}, 0, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
 
 func TestMessageFilter(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
 	const numMessages = 3
 
 	filter := []string{"test", "regexp"}
@@ -275,41 +220,35 @@ func TestMessageFilter(t *testing.T) {
 		SystemAlertPriority:  3,
 		Filter:               filter,
 	}},
-		&serviceProvider, &cursorStorage)
+		&instanceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
 
-	sysLog, err := syslog.New(syslog.LOG_CRIT, "")
-	if err != nil {
-		t.Fatalf("Can't create syslog: %s", err)
-	}
-	defer sysLog.Close()
-
 	validMessage := "message should not be filterout"
 	messages := []string{"test mesage to filterout", validMessage, "regexp mesage to filterout"}
 
-	for _, msg := range messages {
-		if err = sysLog.Crit(msg); err != nil {
-			t.Errorf("Can't write to syslog: %s", err)
-		}
-
-		time.Sleep(100 * time.Millisecond)
+	for i := range messages {
+		testJournal.addMessage(messages[i], "test.service", "", "3")
 	}
 
 	foundCount := 0
 
 	for i := 0; i < numMessages; i++ {
 		err := waitResult(alertsHandler.GetAlertsChannel(), 1*time.Second,
-			func(alert *pb.Alert) (success bool, err error) {
-				systemAlert := (alert.GetSystemAlert())
-				if systemAlert == nil {
+			func(alert cloudprotocol.AlertItem) (success bool, err error) {
+				if alert.Tag != cloudprotocol.AlertTagSystemError {
 					return false, aoserrors.New("wrong alert type")
 				}
 
+				systemAlert, ok := alert.Payload.(cloudprotocol.SystemAlert)
+				if !ok {
+					return false, aoserrors.New("wrong alert type content")
+				}
+
 				if systemAlert.Message != validMessage {
-					return false, aoserrors.New("Receive unexpected alert mesage")
+					return false, aoserrors.New("receive unexpected alert mesage")
 				}
 
 				return true, nil
@@ -332,122 +271,99 @@ func TestMessageFilter(t *testing.T) {
 }
 
 func TestWrongFilter(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
 	alertsHandler, err := alerts.New(&config.Config{Alerts: config.Alerts{
 		Filter:               []string{"", "*(test)^"},
 		ServiceAlertPriority: 4,
 		SystemAlertPriority:  3,
 	}},
-		&serviceProvider, &cursorStorage)
+		&instanceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
 }
 
-func TestOtheralerts(t *testing.T) {
+func TestAlertQueueLimit(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
+
 	alertsHandler, err := alerts.New(&config.Config{
 		Alerts: config.Alerts{
 			ServiceAlertPriority: 4,
 			SystemAlertPriority:  3,
 		},
 	},
-		&serviceProvider, &cursorStorage)
+		&instanceProvider, &cursorStorage)
 	if err != nil {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 	defer alertsHandler.Close()
 
-	time := time.Now()
-	alertsHandler.SendResourceAlert("test", "testResource", time, 42)
-
-	resourceAlert := pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       alerts.AlertTagResource,
-		Source:    "test",
-		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
-			Parameter: "testResource",
-			Value:     42,
-		}},
+	for i := 1; i < 55; i++ {
+		alertsHandler.SendAlert(cloudprotocol.AlertItem{
+			Tag:     cloudprotocol.AlertTagSystemError,
+			Payload: cloudprotocol.SystemAlert{Message: "some error"},
+		})
 	}
 
-	if err = waitResult(alertsHandler.GetAlertsChannel(), 5, func(alert *pb.Alert) (success bool, err error) {
-		if !proto.Equal(alert, &resourceAlert) {
-			return false, aoserrors.New("received resource alert != send alert")
-		}
-
-		return true, nil
-	}); err != nil {
-		t.Errorf("Result failed: %s", err)
+	if len(alertsHandler.GetAlertsChannel()) != 50 {
+		t.Error("Incorrect channel size ", len(alertsHandler.GetAlertsChannel()))
 	}
+}
 
-	deviceErrors := make(map[string][]error)
-	deviceErrors["dev1"] = []error{aoserrors.New("some error")}
+func TestJournalSetup(t *testing.T) {
+	testJournal := testSystemdJournal{}
+	alerts.SDJournal = &testJournal
 
-	alertsHandler.SendValidateResourceAlert("test", deviceErrors)
-
-	convertedErrors := make([]*pb.ResourceValidateErrors, 0)
-
-	for name, reason := range deviceErrors {
-		var messages []string
-
-		for _, item := range reason {
-			messages = append(messages, item.Error())
-		}
-
-		resourceError := pb.ResourceValidateErrors{
-			Name:     name,
-			ErrorMsg: messages,
-		}
-
-		convertedErrors = append(convertedErrors, &resourceError)
-	}
-
-	validationAlert := pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       alerts.AlertTagAosCore,
-		Source:    "test",
-		Payload: &pb.Alert_ResourceValidateAlert{
-			ResourceValidateAlert: &pb.ResourceValidateAlert{
-				Type:   alerts.AlertDeviceErrors,
-				Errors: convertedErrors,
-			},
+	alertsConfig := config.Config{
+		Alerts: config.Alerts{
+			ServiceAlertPriority: 4,
+			SystemAlertPriority:  3,
 		},
 	}
 
-	if err = waitResult(alertsHandler.GetAlertsChannel(), 5, func(alert *pb.Alert) (success bool, err error) {
-		alert.Timestamp = validationAlert.Timestamp
-		if !proto.Equal(alert, &validationAlert) {
-			return false, aoserrors.New("received validation alert != send alert")
+	etalonMatches := []string{"_SYSTEMD_UNIT=init.scope"}
+
+	for priorityLevel := 0; priorityLevel <= alertsConfig.Alerts.SystemAlertPriority; priorityLevel++ {
+		etalonMatches = append(etalonMatches, fmt.Sprintf("PRIORITY=%d", alertsConfig.Alerts.SystemAlertPriority))
+	}
+
+	_ = cursorStorage.SetJournalCursor("somecursor")
+
+	alertsHandler, err := alerts.New(&alertsConfig, &instanceProvider, &cursorStorage)
+	if err != nil {
+		t.Fatalf("Can't create alerts: %s", err)
+	}
+	defer alertsHandler.Close()
+
+matchLoop:
+	for _, etalonMatch := range etalonMatches {
+		for _, journalMatch := range testJournal.systemdMatches {
+			if etalonMatch == journalMatch {
+				continue matchLoop
+			}
 		}
 
-		return true, nil
-	}); err != nil {
-		t.Errorf("Result failed: %s", err)
+		t.Errorf("Journal filter doesn't contains: %s", etalonMatch)
 	}
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Interfaces
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func (serviceProvider *testServiceProvider) GetService(serviceID string) (service launcher.Service, err error) {
-	s, ok := serviceProvider.services[serviceID]
+func (instanceProvider *testInstanceProvider) GetInstanceInfoByID(id string) (
+	instance cloudprotocol.InstanceIdent, aosVersion uint64, err error,
+) {
+	instance, ok := instanceProvider.instancesInfo[id]
 	if !ok {
-		return service, aoserrors.New(fmt.Sprintf("service %s does not exist", serviceID))
+		err = aoserrors.New("Instance does not exist")
 	}
 
-	return *s, nil
-}
-
-func (serviceProvider *testServiceProvider) GetServiceByUnitName(unitName string) (service launcher.Service,
-	err error) {
-	for _, s := range serviceProvider.services {
-		if s.UnitName == unitName {
-			return *s, nil
-		}
-	}
-
-	return service, aoserrors.New(fmt.Sprintf("service with unit %s does not exist", unitName))
+	return instance, 0, err
 }
 
 func (cursorStorage *testCursorStorage) SetJournalCursor(cursor string) (err error) {
@@ -460,44 +376,95 @@ func (cursorStorage *testCursorStorage) GetJournalCursor() (cursor string, err e
 	return cursorStorage.cursor, nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
+func (journal *testSystemdJournal) Next() (uint64, error) {
+	journal.Lock()
+	defer journal.Unlock()
 
-func setup() (err error) {
-	tmpDir, err = ioutil.TempDir("", "sm_")
-	if err != nil {
-		log.Fatalf("Error create temporary dir: %s", err)
+	if len(journal.messages) == 0 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
 	}
 
-	if systemd, err = dbus.NewSystemConnectionContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
+	if journal.currentMessage >= len(journal.messages)-1 {
+		return uint64(sdjournal.SD_JOURNAL_NOP), nil
 	}
+
+	journal.currentMessage++
+
+	return uint64(sdjournal.SD_JOURNAL_APPEND), nil
+}
+
+func (journal *testSystemdJournal) GetEntry() (entry *sdjournal.JournalEntry, err error) {
+	journal.RLock()
+	defer journal.RUnlock()
+
+	entry = journal.messages[journal.currentMessage]
+
+	return entry, nil
+}
+
+func (journal *testSystemdJournal) Wait(timeout time.Duration) int {
+	time.Sleep(timeout)
+
+	journal.RLock()
+	defer journal.RUnlock()
+
+	if len(journal.messages) == 0 {
+		return sdjournal.SD_JOURNAL_NOP
+	}
+
+	if journal.currentMessage >= len(journal.messages)-1 {
+		return sdjournal.SD_JOURNAL_NOP
+	}
+
+	return sdjournal.SD_JOURNAL_APPEND
+}
+
+func (journal *testSystemdJournal) Close() error { return nil }
+
+func (journal *testSystemdJournal) AddMatch(match string) error {
+	journal.systemdMatches = append(journal.systemdMatches, match)
 
 	return nil
 }
 
-func cleanup() {
-	for _, service := range serviceProvider.services {
-		if err := stopService(service.ID); err != nil {
-			log.Errorf("Can't stop service: %s", err)
-		}
+func (journal *testSystemdJournal) AddDisjunction() error { return nil }
 
-		if _, err := systemd.DisableUnitFilesContext(context.Background(),
-			[]string{service.UnitName}, false); err != nil {
-			log.Errorf("Can't disable service: %s", err)
-		}
-	}
+func (journal *testSystemdJournal) SeekTail() error { return nil }
 
-	systemd.Close()
+func (journal *testSystemdJournal) Previous() (uint64, error) {
+	journal.Lock()
+	defer journal.Unlock()
 
-	if err := os.RemoveAll(tmpDir); err != nil {
-		log.Errorf("Error removing tmp dir: %s", err)
-	}
+	journal.currentMessage = -1
+
+	return uint64(sdjournal.SD_JOURNAL_NOP), nil
 }
 
-func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration,
-	checkAlert func(alert *pb.Alert) (success bool, err error)) (err error) {
+func (journal *testSystemdJournal) SeekCursor(cursor string) error { return nil }
+
+func (journal *testSystemdJournal) GetCursor() (string, error) { return "", nil }
+
+func (journal *testSystemdJournal) addMessage(message, systemdUnit, cgroupUnit, priority string) {
+	journal.Lock()
+	defer journal.Unlock()
+
+	journalEntry := sdjournal.JournalEntry{Fields: make(map[string]string)}
+
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE] = message
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT] = systemdUnit
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_CGROUP] = cgroupUnit
+	journalEntry.Fields[sdjournal.SD_JOURNAL_FIELD_PRIORITY] = priority
+
+	journal.messages = append(journal.messages, &journalEntry)
+}
+
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
+
+func waitResult(alertsChannel <-chan cloudprotocol.AlertItem, timeout time.Duration,
+	checkAlert func(alert cloudprotocol.AlertItem) (success bool, err error),
+) (err error) {
 	for {
 		select {
 		case alert := <-alertsChannel:
@@ -516,29 +483,48 @@ func waitResult(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 	}
 }
 
-func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
-	tag, source string, version uint64, data []string) (err error) {
-	return waitResult(alertsChannel, timeout, func(alert *pb.Alert) (success bool, err error) {
+func waitAlerts(alertsChannel <-chan cloudprotocol.AlertItem, timeout time.Duration,
+	tag string, instance cloudprotocol.InstanceIdent, version uint64, data []string,
+) (err error) {
+	return waitResult(alertsChannel, timeout, func(alert cloudprotocol.AlertItem) (success bool, err error) {
 		if alert.Tag != tag {
 			return false, nil
 		}
 
-		systemAlert := alert.GetSystemAlert()
-		if systemAlert == nil {
-			return false, aoserrors.New("wrong alert type")
-		}
-
 		for i, message := range data {
-			if systemAlert.Message == message {
+			var alertMsg string
+			switch alert.Tag {
+			case cloudprotocol.AlertTagAosCore:
+				castedAlert, ok := alert.Payload.(cloudprotocol.CoreAlert)
+				if !ok {
+					return false, errIncorrectType
+				}
+
+				alertMsg = castedAlert.Message
+
+			case cloudprotocol.AlertTagServiceInstance:
+				castedAlert, ok := alert.Payload.(cloudprotocol.ServiceInstanceAlert)
+				if !ok {
+					return false, errIncorrectType
+				}
+
+				if castedAlert.InstanceIdent != instance || version != castedAlert.AosVersion {
+					continue
+				}
+
+				alertMsg = castedAlert.Message
+
+			case cloudprotocol.AlertTagSystemError:
+				castedAlert, ok := alert.Payload.(cloudprotocol.SystemAlert)
+				if !ok {
+					return false, errIncorrectType
+				}
+
+				alertMsg = castedAlert.Message
+			}
+
+			if alertMsg == message {
 				data = append(data[:i], data[i+1:]...)
-
-				if alert.Source != source {
-					return false, aoserrors.New("wrong alert source: " + alert.Source)
-				}
-
-				if !reflect.DeepEqual(alert.AosVersion, version) {
-					return false, aoserrors.New("AosVersion field missing")
-				}
 
 				if len(data) == 0 {
 					return true, nil
@@ -550,88 +536,4 @@ func waitAlerts(alertsChannel <-chan *pb.Alert, timeout time.Duration,
 
 		return false, nil
 	})
-}
-
-func createService(serviceID string) (err error) {
-	serviceName := "aos_" + serviceID + ".service"
-
-	if _, ok := serviceProvider.services[serviceID]; ok {
-		return aoserrors.New("service already exists")
-	}
-
-	serviceProvider.services[serviceID] = &launcher.Service{ID: serviceID, UnitName: serviceName}
-
-	if err = createSystemdUnit("simple",
-		`/bin/bash -c 'while true; do echo "[$(date --rfc-3339=ns)] This is log"; sleep 0.1; done'`,
-		path.Join(tmpDir, serviceName)); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func startService(serviceID string) (err error) {
-	if err = startSystemdUnit("aos_" + serviceID + ".service"); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func createSystemdUnit(serviceType, command, fileName string) (err error) {
-	serviceTemplate := `[Unit]
-	After=network.target
-	
-	[Service]
-	Type=%s
-	ExecStart=%s
-	
-	[Install]
-	WantedBy=multi-user.target
-`
-
-	serviceContent := fmt.Sprintf(serviceTemplate, serviceType, command)
-
-	if err = ioutil.WriteFile(fileName, []byte(serviceContent), 0o600); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{fileName}, false, true); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = systemd.ReloadContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func startSystemdUnit(name string) (err error) {
-	channel := make(chan string)
-
-	if _, err = systemd.RestartUnitContext(context.Background(), name, "replace", channel); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	<-channel
-
-	return nil
-}
-
-func stopService(serviceID string) (err error) {
-	channel := make(chan string)
-
-	if _, err = systemd.StopUnitContext(context.Background(),
-		"aos_"+serviceID+".service", "replace", channel); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	<-channel
-
-	return nil
-}
-
-func crashService(serviceID string) {
-	systemd.KillUnitContext(context.Background(), "aos_"+serviceID+".service", int32(syscall.SIGSEGV))
 }

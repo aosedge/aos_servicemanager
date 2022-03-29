@@ -30,26 +30,18 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-const (
-	AlertTagSystemError = "systemError"
-	AlertTagAosCore     = "aosCore"
-	AlertTagResource    = "resourceAlert"
-	AlertDeviceErrors   = "deviceErrors"
-	aosServicePrefix    = "aos_"
-)
+const aosServicePrefix = "aos-service@"
 
 const (
 	waitJournalTimeout = 1 * time.Second
@@ -58,16 +50,15 @@ const (
 
 const alertChannelSize = 50
 
-const microSecondsinSecond = 1000000
+const microSecondsInSecond = 1000000
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// ServiceProvider provides service info.
-type ServiceProvider interface {
-	GetService(serviceID string) (service launcher.Service, err error)
-	GetServiceByUnitName(unitName string) (service launcher.Service, err error)
+// InstanceProvider provides instance info.
+type InstanceProvider interface {
+	GetInstanceInfoByID(instanceID string) (instance cloudprotocol.InstanceIdent, aosVersion uint64, err error)
 }
 
 // CursorStorage provides API to set and get journal cursor.
@@ -76,42 +67,58 @@ type CursorStorage interface {
 	GetJournalCursor() (cursor string, err error)
 }
 
-// Alerts instance.
-type Alerts struct {
-	alertsChannel   chan *pb.Alert
-	config          config.Alerts
-	cursorStorage   CursorStorage
-	serviceProvider ServiceProvider
-	filterRegexp    []*regexp.Regexp
-
-	sync.Mutex
-
-	journal      *sdjournal.Journal
-	ticker       *time.Ticker
-	closeChannel chan bool
+// JournalInterface systemd journal interface.
+type JournalInterface interface {
+	Close() error
+	AddMatch(match string) error
+	AddDisjunction() error
+	SeekTail() error
+	Previous() (uint64, error)
+	SeekCursor(cursor string) error
+	Next() (uint64, error)
+	GetEntry() (*sdjournal.JournalEntry, error)
+	Wait(timeout time.Duration) int
+	GetCursor() (string, error)
 }
 
-/*******************************************************************************
+// Alerts instance.
+type Alerts struct {
+	sync.Mutex
+	alertsChannel    chan cloudprotocol.AlertItem
+	config           config.Alerts
+	cursorStorage    CursorStorage
+	instanceProvider InstanceProvider
+	filterRegexp     []*regexp.Regexp
+	journal          JournalInterface
+	ticker           *time.Ticker
+	closeChannel     chan bool
+}
+
+/***********************************************************************************************************************
  * Variable
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // ErrDisabled indicates that alerts is disable in the config.
 var ErrDisabled = errors.New("alerts is disabled")
 
-var aosServices = []string{
-	"aos-servicemanager.service",
-	"aos-updatemanager.service",
-	"aos-iamanager.service",
-	"aos-communicationmanager.service",
+var coreComponents = []string{ // nolint:gochecknoglobals
+	"aos-servicemanager",
+	"aos-updatemanager",
+	"aos-iamanager",
+	"aos-communicationmanager",
 }
 
-/*******************************************************************************
+// SDJournal is using to mock systemd journal in unit tests.
+var SDJournal JournalInterface // nolint:gochecknoglobals
+
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // New creates new alerts object.
-func New(config *config.Config, serviceProvider ServiceProvider,
-	cursorStorage CursorStorage) (instance *Alerts, err error) {
+func New(config *config.Config, instanceProvider InstanceProvider,
+	cursorStorage CursorStorage,
+) (instance *Alerts, err error) {
 	log.Debug("New alerts")
 
 	if config.Alerts.Disabled {
@@ -120,14 +127,11 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 
 	instance = &Alerts{
 		config: config.Alerts, cursorStorage: cursorStorage,
-		serviceProvider: serviceProvider,
+		instanceProvider: instanceProvider,
+		alertsChannel:    make(chan cloudprotocol.AlertItem, alertChannelSize),
+		closeChannel:     make(chan bool),
+		ticker:           time.NewTicker(journalSavePeriod),
 	}
-
-	instance.alertsChannel = make(chan *pb.Alert, alertChannelSize)
-
-	instance.closeChannel = make(chan bool)
-
-	instance.ticker = time.NewTicker(journalSavePeriod)
 
 	for _, substr := range instance.config.Filter {
 		if len(substr) == 0 {
@@ -155,7 +159,7 @@ func New(config *config.Config, serviceProvider ServiceProvider,
 
 // Close closes logging.
 func (instance *Alerts) Close() {
-	log.Debug("Close Alerts")
+	log.Debug("Close alerts")
 
 	instance.closeChannel <- true
 
@@ -169,95 +173,24 @@ func (instance *Alerts) Close() {
 }
 
 // GetAlertsChannel returns channel with alerts to be sent.
-func (instance *Alerts) GetAlertsChannel() (channel <-chan *pb.Alert) {
+func (instance *Alerts) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
 	return instance.alertsChannel
 }
 
-// SendValidateResourceAlert sends request/releases resource alert.
-func (instance *Alerts) SendValidateResourceAlert(source string, errors map[string][]error) {
-	time := time.Now()
-
-	log.WithFields(log.Fields{
-		"timestamp": time,
-		"source":    source,
-		"errors":    errors,
-	}).Debug("Validate Resource alert")
-
-	convertedErrors := make([]*pb.ResourceValidateErrors, 0)
-
-	for name, reason := range errors {
-		var messages []string
-
-		for _, item := range reason {
-			messages = append(messages, item.Error())
-		}
-
-		resourceError := pb.ResourceValidateErrors{
-			Name:     name,
-			ErrorMsg: messages,
-		}
-
-		convertedErrors = append(convertedErrors, &resourceError)
-	}
-
-	alert := pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       AlertTagAosCore,
-		Source:    source,
-		Payload: &pb.Alert_ResourceValidateAlert{
-			ResourceValidateAlert: &pb.ResourceValidateAlert{
-				Type:   AlertDeviceErrors,
-				Errors: convertedErrors,
-			},
-		},
-	}
-
-	instance.pushAlert(&alert)
-}
-
 // SendResourceAlert sends resource alert.
-func (instance *Alerts) SendResourceAlert(source, resource string, time time.Time, value uint64) {
-	log.WithFields(log.Fields{
-		"timestamp": time,
-		"source":    source,
-		"resource":  resource,
-		"value":     value,
-	}).Debug("Resource alert")
-
-	alert := pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       AlertTagResource,
-		Source:    source,
-		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
-			Parameter: resource,
-			Value:     value,
-		}},
-	}
-
-	instance.pushAlert(&alert)
+func (instance *Alerts) SendAlert(alert cloudprotocol.AlertItem) {
+	instance.pushAlert(alert)
 }
 
-// SendRequestResourceAlert send request resource alert.
-func (instance *Alerts) SendRequestResourceAlert(source string, message string) {
-	instance.pushAlert(&pb.Alert{
-		Timestamp: timestamppb.Now(),
-		Tag:       AlertTagAosCore,
-		Source:    source,
-		Payload: &pb.Alert_SystemAlert{
-			SystemAlert: &pb.SystemAlert{
-				Message: message,
-			},
-		},
-	})
-}
-
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func (instance *Alerts) setupJournal() (err error) {
-	if instance.journal, err = sdjournal.NewJournal(); err != nil {
-		return aoserrors.Wrap(err)
+	if instance.journal = SDJournal; instance.journal == nil {
+		if instance.journal, err = sdjournal.NewJournal(); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	for priorityLevel := 0; priorityLevel <= instance.config.SystemAlertPriority; priorityLevel++ {
@@ -297,34 +230,36 @@ func (instance *Alerts) setupJournal() (err error) {
 		}
 	}
 
-	go func() {
-		result := sdjournal.SD_JOURNAL_APPEND
-
-		for {
-			select {
-			case <-instance.ticker.C:
-				if err = instance.storeCurrentCursor(); err != nil {
-					log.Error("Can't store journal cursor: ", err)
-				}
-
-			case <-instance.closeChannel:
-				return
-
-			default:
-				if result != sdjournal.SD_JOURNAL_NOP {
-					if err = instance.processJournal(); err != nil {
-						log.Errorf("Journal process error: %s", err)
-					}
-				}
-
-				if result = instance.journal.Wait(waitJournalTimeout); result < 0 {
-					log.Errorf("Wait journal error: %s", syscall.Errno(-result))
-				}
-			}
-		}
-	}()
+	go instance.handleChannels()
 
 	return nil
+}
+
+func (instance *Alerts) handleChannels() {
+	result := sdjournal.SD_JOURNAL_APPEND
+
+	for {
+		select {
+		case <-instance.ticker.C:
+			if err := instance.storeCurrentCursor(); err != nil {
+				log.Error("Can't store journal cursor: ", err)
+			}
+
+		case <-instance.closeChannel:
+			return
+
+		default:
+			if result != sdjournal.SD_JOURNAL_NOP {
+				if err := instance.processJournal(); err != nil {
+					log.Errorf("Journal process error: %s", err)
+				}
+			}
+
+			if result = instance.journal.Wait(waitJournalTimeout); result < 0 {
+				log.Errorf("Wait journal error: %s", syscall.Errno(-result))
+			}
+		}
+	}
 }
 
 func (instance *Alerts) processJournal() (err error) {
@@ -343,11 +278,9 @@ func (instance *Alerts) processJournal() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		var version uint64
-
-		source := "system"
-
-		tag := AlertTagSystemError
+		if entry == nil {
+			return nil
+		}
 
 		unit := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT]
 
@@ -362,66 +295,36 @@ func (instance *Alerts) processJournal() (err error) {
 
 		// with cgroup v2 logs from container do not contains _SYSTEMD_UNIT due to restrictions
 		// that's why id should be extracted from _SYSTEMD_CGROUP
-		// format: /system.slice/AOS_SERVICE_UUID
+		// format: /system.slice/system-aos@service.slice/AOS_INSTANCE_ID
 		if len(unit) == 0 {
 			systemdCgroup := entry.Fields[sdjournal.SD_JOURNAL_FIELD_SYSTEMD_CGROUP]
 
 			if len(systemdCgroup) > 0 {
-				// add prefix 'aos_' and postfix '.service'
+				// add prefix 'aos-service@' and postfix '.service'
 				// to service uuid and get proper seervice object from DB
-				unit = aosServicePrefix + filepath.Base(systemdCgroup) + ".service"
+				unit = systemdCgroup
 			} else {
 				continue
 			}
 		}
 
-		if strings.HasPrefix(unit, "aos") {
-			service, err := instance.serviceProvider.GetServiceByUnitName(unit)
-			if err == nil {
-				source = service.ID
-				version = service.AosVersion
-			} else {
-				for _, aosService := range aosServices {
-					if unit == aosService {
-						source = unit
-						tag = AlertTagAosCore
-					}
-				}
-			}
+		alert := cloudprotocol.AlertItem{
+			Timestamp: time.Unix(int64(entry.RealtimeTimestamp/microSecondsInSecond),
+				int64((entry.RealtimeTimestamp%microSecondsInSecond)*1000)),
 		}
 
-		t := time.Unix(int64(entry.RealtimeTimestamp/microSecondsinSecond),
-			int64((entry.RealtimeTimestamp%microSecondsinSecond)*1000)) // nolint
+		instance.fillServiceInstanceAlert(&alert, entry, unit)
 
-		skipsend := false
-
-		for _, substr := range instance.filterRegexp {
-			skipsend = substr.MatchString(entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
-
-			if skipsend {
-				break
-			}
+		if alert.Payload == nil {
+			instance.fillCoreComponentAlert(&alert, entry, unit)
 		}
 
-		if !skipsend {
-			log.WithFields(log.Fields{
-				"time":    t,
-				"message": entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
-				"tag":     tag,
-				"source":  source,
-			}).Debug("System alert")
+		if alert.Payload == nil {
+			instance.fillSystemAlert(&alert, entry)
+		}
 
-			instance.pushAlert(&pb.Alert{
-				Timestamp:  timestamppb.New(t),
-				Tag:        tag,
-				Source:     source,
-				AosVersion: version,
-				Payload: &pb.Alert_SystemAlert{
-					SystemAlert: &pb.SystemAlert{
-						Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
-					},
-				},
-			})
+		if alert.Payload != nil {
+			instance.pushAlert(alert)
 		}
 	}
 }
@@ -439,7 +342,7 @@ func (instance *Alerts) storeCurrentCursor() (err error) {
 	return nil
 }
 
-func (instance *Alerts) pushAlert(alert *pb.Alert) {
+func (instance *Alerts) pushAlert(alert cloudprotocol.AlertItem) {
 	if len(instance.alertsChannel) >= cap(instance.alertsChannel) {
 		log.Warn("Skip alert, channel is full")
 
@@ -447,4 +350,69 @@ func (instance *Alerts) pushAlert(alert *pb.Alert) {
 	}
 
 	instance.alertsChannel <- alert
+}
+
+func (instance *Alerts) fillServiceInstanceAlert(
+	alert *cloudprotocol.AlertItem, entry *sdjournal.JournalEntry, unitName string,
+) {
+	if strings.Contains(unitName, aosServicePrefix) {
+		instanceID := filepath.Base(unitName)
+		instanceID = strings.TrimPrefix(instanceID, aosServicePrefix)
+		instanceID = strings.TrimSuffix(instanceID, ".service")
+
+		var (
+			instanceAlert cloudprotocol.ServiceInstanceAlert
+			err           error
+		)
+
+		instanceAlert.InstanceIdent, instanceAlert.AosVersion, err = instance.instanceProvider.GetInstanceInfoByID(
+			instanceID)
+		if err != nil {
+			log.Errorf("Can't get instance info: %s", err)
+
+			return
+		}
+
+		instanceAlert.Message = entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]
+
+		alert.Tag = cloudprotocol.AlertTagServiceInstance
+		alert.Payload = instanceAlert
+	}
+}
+
+func (instance *Alerts) fillCoreComponentAlert(
+	alert *cloudprotocol.AlertItem, entry *sdjournal.JournalEntry, unitName string,
+) {
+	for _, component := range coreComponents {
+		if strings.Contains(unitName, component) {
+			coreAlert := cloudprotocol.CoreAlert{
+				CoreComponent: component,
+				Message:       entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
+			}
+
+			alert.Tag = cloudprotocol.AlertTagAosCore
+			alert.Payload = coreAlert
+
+			return
+		}
+	}
+}
+
+func (instance *Alerts) fillSystemAlert(alert *cloudprotocol.AlertItem, entry *sdjournal.JournalEntry) {
+	skipped := false
+
+	for _, substr := range instance.filterRegexp {
+		skipped = substr.MatchString(entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
+
+		if skipped {
+			break
+		}
+	}
+
+	if !skipped {
+		systemAlert := cloudprotocol.SystemAlert{Message: entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]}
+
+		alert.Payload = systemAlert
+		alert.Tag = cloudprotocol.AlertTagSystemError
+	}
 }
