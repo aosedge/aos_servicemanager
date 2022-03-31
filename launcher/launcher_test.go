@@ -114,9 +114,10 @@ type testRegistrar struct {
 
 type testStorageStateProvider struct {
 	sync.Mutex
-	testInstances []testInstance
-	infos         map[string]storageStateInfo
-	stateChannel  chan storagestate.StateChangedInfo
+	testInstances    []testInstance
+	removedInstances []string
+	infos            map[string]storageStateInfo
+	stateChannel     chan storagestate.StateChangedInfo
 }
 
 type testInstanceMonitor struct {
@@ -2090,6 +2091,86 @@ func TestStopInstancesOnStart(t *testing.T) {
 	}
 }
 
+func TestRemoveOutdatedInstances(t *testing.T) {
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+	storageStateProvider := newTestStorageStateProvider(nil)
+
+	testInstances := []testInstance{
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
+	}
+
+	if err := serviceProvider.fromTestInstances(testInstances, true); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	storage.fromTestInstances(testInstances, false)
+
+	outdatedInstances := []launcher.InstanceInfo{
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0},
+			InstanceID:    uuid.NewString(),
+			UID:           6000,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1},
+			InstanceID:    uuid.NewString(),
+			UID:           6001,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 0},
+			InstanceID:    uuid.NewString(),
+			UID:           6002,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 1},
+			InstanceID:    uuid.NewString(),
+			UID:           6003,
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject2", Instance: 0},
+			InstanceID:    uuid.NewString(),
+			UID:           6004,
+		},
+	}
+
+	for _, instance := range outdatedInstances {
+		if err := storage.AddInstance(instance); err != nil {
+			t.Fatalf("Can't add instance: %v", err)
+		}
+	}
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), storageStateProvider, newTestInstanceMonitor())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	expectedRemovedStorages := make([]string, 0, len(outdatedInstances))
+
+	for _, instance := range outdatedInstances {
+		expectedRemovedStorages = append(expectedRemovedStorages, instance.InstanceID)
+
+		if _, err := storage.GetInstanceByID(instance.InstanceID); !errors.Is(err, launcher.ErrNotExist) {
+			t.Errorf("Instance should be removed: %s", instance.InstanceID)
+		}
+	}
+
+	if !compareArrays(len(expectedRemovedStorages), len(storageStateProvider.removedInstances),
+		func(index1, index2 int) bool {
+			return expectedRemovedStorages[index1] == storageStateProvider.removedInstances[index2]
+		}) {
+		t.Errorf("Wrong removed storages instance IDs: %v", storageStateProvider.removedInstances)
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/
@@ -2743,6 +2824,11 @@ func (provider *testStorageStateProvider) Cleanup(instanceID string) error {
 }
 
 func (provider *testStorageStateProvider) Remove(instanceID string) error {
+	provider.Lock()
+	defer provider.Unlock()
+
+	provider.removedInstances = append(provider.removedInstances, instanceID)
+
 	return nil
 }
 
