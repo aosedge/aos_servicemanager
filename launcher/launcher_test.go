@@ -2043,6 +2043,53 @@ func TestInstancePriorities(t *testing.T) {
 	}
 }
 
+func TestStopInstancesOnStart(t *testing.T) {
+	stopCounts := make(map[string]int)
+
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+	instanceRunner := newTestRunner(nil,
+		func(instanceID string) error {
+			stopCounts[instanceID]++
+
+			return nil
+		},
+	)
+
+	testInstances := []testInstance{
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
+		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
+		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
+		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
+	}
+
+	if err := serviceProvider.fromTestInstances(testInstances, true); err != nil {
+		t.Fatalf("Can't create test services: %v", err)
+	}
+
+	storage.fromTestInstances(testInstances, true)
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if len(stopCounts) != 13 {
+		t.Errorf("Wrong stop instances count: %d", len(stopCounts))
+	}
+
+	for instanceID, count := range stopCounts {
+		if count != 1 {
+			t.Errorf("Wrong stop count for instance %s: %d", instanceID, count)
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * testStorage
  **********************************************************************************************************************/

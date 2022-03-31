@@ -274,6 +274,11 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 		log.Errorf("Can't get current env vars: %v", err)
 	}
 
+	// Stop all running instances in case some of them still running on SM start. It could be if SM crashes, etc.
+	if err = launcher.stopRunningInstances(); err != nil {
+		log.Errorf("Stop running instances error: %v", err)
+	}
+
 	return launcher, nil
 }
 
@@ -1380,6 +1385,40 @@ func (launcher *Launcher) createMountPoints(path string, mounts []runtimespec.Mo
 			}
 		}
 	}
+
+	return nil
+}
+
+func (launcher *Launcher) stopRunningInstances() error {
+	log.Debug("Stop running instances")
+
+	runningInstances, err := launcher.storage.GetRunningInstances()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	launcher.cacheCurrentServices(runningInstances)
+
+	stopInstances := make([]*instanceInfo, 0, len(runningInstances))
+
+	for _, runningInstance := range runningInstances {
+		service, err := launcher.getCurrentServiceInfo(runningInstance.ServiceID)
+		if err != nil {
+			log.WithFields(
+				instanceIdentLogFields(runningInstance.InstanceIdent, nil),
+			).Errorf("Can't get service info: %v", err)
+
+			continue
+		}
+
+		stopInstances = append(stopInstances, &instanceInfo{
+			InstanceInfo: runningInstance,
+			isStarted:    true,
+			service:      service,
+		})
+	}
+
+	launcher.stopInstances(stopInstances)
 
 	return nil
 }
