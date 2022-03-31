@@ -279,6 +279,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 		log.Errorf("Stop running instances error: %v", err)
 	}
 
+	if err = launcher.removeOutdatedInstances(); err != nil {
+		log.Errorf("Can't remove outdated instances: %v", err)
+	}
+
 	return launcher, nil
 }
 
@@ -1421,4 +1425,54 @@ func (launcher *Launcher) stopRunningInstances() error {
 	launcher.stopInstances(stopInstances)
 
 	return nil
+}
+
+func (launcher *Launcher) removeOutdatedInstances() error {
+	log.Debug("Remove outdated instances")
+
+	instances, err := launcher.storage.GetAllInstances()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	launcher.cacheCurrentServices(instances)
+
+	for _, instance := range instances {
+		if _, serviceErr := launcher.getCurrentServiceInfo(instance.ServiceID); serviceErr != nil {
+			if errors.Is(serviceErr, servicemanager.ErrNotExist) {
+				if removeErr := launcher.removeInstance(instance); removeErr != nil {
+					if err == nil {
+						err = removeErr
+					}
+
+					log.WithFields(
+						instanceIdentLogFields(instance.InstanceIdent, nil),
+					).Errorf("Can't remove outdated instance: %v", removeErr)
+				}
+
+				continue
+			}
+
+			log.WithFields(
+				instanceIdentLogFields(instance.InstanceIdent, nil),
+			).Errorf("Instance service error: %v", err)
+		}
+	}
+
+	return err
+}
+
+func (launcher *Launcher) removeInstance(instance InstanceInfo) (err error) {
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Remove outdated instance")
+
+	if storageStateErr := launcher.storageStateProvider.Remove(
+		instance.InstanceID); storageStateErr != nil && err == nil {
+		err = storageStateErr
+	}
+
+	if removeErr := launcher.storage.RemoveInstance(instance.InstanceID); removeErr != nil && err == nil {
+		err = removeErr
+	}
+
+	return err
 }
