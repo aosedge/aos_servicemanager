@@ -147,6 +147,11 @@ type InstanceMonitor interface {
 	StopInstanceMonitor(instanceID string) error
 }
 
+// AlertSender provides interface to send alerts.
+type AlertSender interface {
+	SendAlert(alert cloudprotocol.AlertItem)
+}
+
 // InstanceInfo instance information.
 type InstanceInfo struct {
 	cloudprotocol.InstanceIdent
@@ -188,6 +193,7 @@ type Launcher struct {
 	instanceRegistrar    InstanceRegistrar
 	storageStateProvider StorageStateProvider
 	instanceMonitor      InstanceMonitor
+	alertSender          AlertSender
 
 	config                 *config.Config
 	currentSubjects        []string
@@ -239,6 +245,7 @@ var (
 func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, layerProvider LayerProvider,
 	instanceRunner InstanceRunner, resourceManager ResourceManager, networkManager NetworkManager,
 	instanceRegistrar InstanceRegistrar, storageStateProvider StorageStateProvider, instanceMonitor InstanceMonitor,
+	alertSender AlertSender,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
@@ -246,7 +253,7 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 		storage: storage, serviceProvider: serviceProvider, layerProvider: layerProvider,
 		instanceRunner: instanceRunner, resourceManager: resourceManager, networkManager: networkManager,
 		instanceRegistrar: instanceRegistrar, storageStateProvider: storageStateProvider,
-		instanceMonitor: instanceMonitor,
+		instanceMonitor: instanceMonitor, alertSender: alertSender,
 
 		config:               config,
 		actionHandler:        action.New(maxParallelInstanceActions),
@@ -1002,6 +1009,10 @@ func (launcher *Launcher) allocateDevices(instance *instanceInfo) (conflictInsta
 
 			lowPriorityInstance, err := launcher.getLowPriorityInstance(instance, device.Name)
 			if err != nil {
+				if errors.Is(err, resourcemanager.ErrNoAvailableDevice) {
+					launcher.alertSender.SendAlert(deviceAllocateAlert(instance, device.Name, err))
+				}
+
 				return nil, err
 			}
 
@@ -1016,6 +1027,10 @@ func (launcher *Launcher) allocateDevices(instance *instanceInfo) (conflictInsta
 				return nil, aoserrors.Wrap(err)
 			}
 		}
+	}
+
+	for device, instance := range releasedDevices {
+		launcher.alertSender.SendAlert(deviceAllocateAlert(instance, device, resourcemanager.ErrNoAvailableDevice))
 	}
 
 	return conflictInstances, nil
@@ -1475,4 +1490,16 @@ func (launcher *Launcher) removeInstance(instance InstanceInfo) (err error) {
 	}
 
 	return err
+}
+
+func deviceAllocateAlert(instance *instanceInfo, device string, err error) cloudprotocol.AlertItem {
+	return cloudprotocol.AlertItem{
+		Timestamp: time.Now(),
+		Tag:       cloudprotocol.AlertTagDeviceAllocate,
+		Payload: cloudprotocol.DeviceAllocateAlert{
+			InstanceIdent: instance.InstanceIdent,
+			Device:        device,
+			Message:       err.Error(),
+		},
+	}
 }
