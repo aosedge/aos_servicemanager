@@ -206,6 +206,10 @@ type testDevice struct {
 	permissions   string
 }
 
+type testAlertSender struct {
+	alerts []cloudprotocol.DeviceAllocateAlert
+}
+
 /***********************************************************************************************************************
  * Vars
  **********************************************************************************************************************/
@@ -330,7 +334,7 @@ func TestRunInstances(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -371,7 +375,7 @@ func TestUpdateInstances(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		storageStateProvider, newTestInstanceMonitor())
+		storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -468,7 +472,7 @@ func TestSendCurrentRuntimeStatus(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -541,7 +545,7 @@ func TestRestartInstances(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
 		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -664,7 +668,7 @@ func TestSubjectsChanged(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -709,7 +713,7 @@ func TestHostFSDir(t *testing.T) {
 	},
 		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
 		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil),
-		newTestInstanceMonitor())
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -770,7 +774,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
-		storageStateProvider, newTestInstanceMonitor())
+		storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1198,7 +1202,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2"})
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider, instanceMonitor)
+		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider,
+		instanceMonitor, newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1439,7 +1444,7 @@ func TestRevertApplyService(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1811,7 +1816,7 @@ func TestOverrideEnvVars(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1872,6 +1877,7 @@ func TestOverrideEnvVars(t *testing.T) {
 func TestInstancePriorities(t *testing.T) {
 	type testData struct {
 		instances []testInstance
+		alerts    []cloudprotocol.DeviceAllocateAlert
 	}
 
 	data := []testData{
@@ -1888,6 +1894,14 @@ func TestInstancePriorities(t *testing.T) {
 						resourcemanager.ErrNoAvailableDevice,
 					},
 				},
+			},
+			alerts: []cloudprotocol.DeviceAllocateAlert{
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
+				}, "device0"),
 			},
 		},
 		// Add same service instance with higher priority subject.
@@ -1907,6 +1921,17 @@ func TestInstancePriorities(t *testing.T) {
 					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
 				},
 			},
+			alerts: []cloudprotocol.DeviceAllocateAlert{
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject1", Instance: 0,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
+				}, "device0"),
+			},
 		},
 		// Add higher priority service for the same subject.
 		{
@@ -1920,6 +1945,11 @@ func TestInstancePriorities(t *testing.T) {
 					serviceID: "service0", subjectID: "subject1", numInstances: 1,
 					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
 				},
+			},
+			alerts: []cloudprotocol.DeviceAllocateAlert{
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
+				}, "device0"),
 			},
 		},
 		// Multiple devices test 1
@@ -1957,6 +1987,14 @@ func TestInstancePriorities(t *testing.T) {
 					err: []error{nil, resourcemanager.ErrNoAvailableDevice},
 				},
 			},
+			alerts: []cloudprotocol.DeviceAllocateAlert{
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service3", SubjectID: "subject0", Instance: 1,
+				}, "device2"),
+			},
 		},
 		// Multiple devices test 2
 		{
@@ -1986,6 +2024,17 @@ func TestInstancePriorities(t *testing.T) {
 					}},
 				},
 			},
+			alerts: []cloudprotocol.DeviceAllocateAlert{
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+				}, "device0"),
+				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
+				}, "device0"),
+			},
 		},
 		// Multiple devices test 3
 		{
@@ -2010,6 +2059,7 @@ func TestInstancePriorities(t *testing.T) {
 
 	resourceManager := newTestResourceManager()
 	serviceProvider := newTestServiceProvider()
+	alertSender := newTestAlertSender()
 
 	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device0", SharedCount: 1})
 	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1", SharedCount: 2})
@@ -2017,7 +2067,7 @@ func TestInstancePriorities(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorageStateProvider(nil), newTestInstanceMonitor(), alertSender)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2025,6 +2075,8 @@ func TestInstancePriorities(t *testing.T) {
 
 	for i, item := range data {
 		t.Logf("Run instances: %d", i)
+
+		alertSender.alerts = nil
 
 		if err = serviceProvider.fromTestInstances(item.instances, true); err != nil {
 			t.Fatalf("Can't create test services: %v", err)
@@ -2040,6 +2092,10 @@ func TestInstancePriorities(t *testing.T) {
 
 		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
+		}
+
+		if err = compareDeviceAllocateAlerts(item.alerts, alertSender.alerts); err != nil {
+			t.Errorf("Compare device allocation alerts error: %v", err)
 		}
 	}
 }
@@ -2074,7 +2130,7 @@ func TestStopInstancesOnStart(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor())
+		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2147,7 +2203,7 @@ func TestRemoveOutdatedInstances(t *testing.T) {
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), storageStateProvider, newTestInstanceMonitor())
+		newTestRegistrar(), storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2923,6 +2979,20 @@ func (mounter *testMounter) Unmount(mountPoint string) error {
 }
 
 /***********************************************************************************************************************
+ * testAlertSender
+ **********************************************************************************************************************/
+
+func newTestAlertSender() *testAlertSender {
+	return &testAlertSender{}
+}
+
+func (sender *testAlertSender) SendAlert(alertItem cloudprotocol.AlertItem) {
+	if alert, ok := alertItem.Payload.(cloudprotocol.DeviceAllocateAlert); ok {
+		sender.alerts = append(sender.alerts, alert)
+	}
+}
+
+/***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
@@ -3550,6 +3620,36 @@ func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstan
 			})
 		}) {
 		return aoserrors.New("override env vars status mismatch")
+	}
+
+	return nil
+}
+
+func createDeviceAllocateAlert(
+	instanceIdent cloudprotocol.InstanceIdent, device string,
+) cloudprotocol.DeviceAllocateAlert {
+	return cloudprotocol.DeviceAllocateAlert{
+		InstanceIdent: instanceIdent,
+		Device:        device,
+		Message:       resourcemanager.ErrNoAvailableDevice.Error(),
+	}
+}
+
+func compareDeviceAllocateAlerts(alerts1, alerts2 []cloudprotocol.DeviceAllocateAlert) error {
+	if !compareArrays(len(alerts1), len(alerts2),
+		func(index1, index2 int) bool {
+			if alerts1[index1].InstanceIdent != alerts2[index2].InstanceIdent {
+				return false
+			}
+
+			if alerts1[index1].Device != alerts2[index2].Device {
+				return false
+			}
+
+			return (strings.HasPrefix(alerts1[index1].Message, alerts2[index2].Message) ||
+				(strings.HasPrefix(alerts2[index2].Message, alerts1[index1].Message)))
+		}) {
+		return aoserrors.New("device allocate alerts mismatch")
 	}
 
 	return nil
