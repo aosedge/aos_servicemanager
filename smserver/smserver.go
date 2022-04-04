@@ -20,11 +20,14 @@ package smserver
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v2"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/golang/protobuf/ptypes/timestamp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -82,12 +85,12 @@ type BoardConfigProcessor interface {
 	UpdateBoardConfig(configJSON string) (err error)
 }
 
-// LogsProvider logs data provider interface
+// LogsProvider logs data provider interface.
 type LogsProvider interface {
-	GetServiceLog(request *pb.ServiceLogRequest)
-	GetServiceCrashLog(request *pb.ServiceLogRequest)
-	GetSystemLog(request *pb.SystemLogRequest)
-	GetLogsDataChannel() (channel <-chan *pb.LogData)
+	GetInstanceLog(request cloudprotocol.RequestServiceLog) error
+	GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog) error
+	GetSystemLog(request cloudprotocol.RequestSystemLog)
+	GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog)
 }
 
 // CertificateProvider certificate and key provider interface
@@ -108,7 +111,7 @@ type SMServer struct {
 	alertChannel         <-chan *pb.Alert
 	monitoringChannel    <-chan *pb.Monitoring
 	stateChannel         <-chan *pb.SMNotifications
-	logsChannel          <-chan *pb.LogData
+	logsChannel          <-chan cloudprotocol.PushLog
 	pb.UnimplementedSMServiceServer
 }
 
@@ -120,7 +123,8 @@ type SMServer struct {
 func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
 	monitoringProvider MonitoringDataProvider,
 	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext,
-	certProvider CertificateProvider, insecure bool) (server *SMServer, err error) {
+	certProvider CertificateProvider, insecure bool,
+) (server *SMServer, err error) {
 	server = &SMServer{
 		launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
 		logsProvider: logsProvider,
@@ -228,7 +232,8 @@ func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (sta
 
 // CheckBoardConfig checks new board configuration.
 func (server *SMServer) CheckBoardConfig(ctx context.Context,
-	boardConfig *pb.BoardConfig) (status *pb.BoardConfigStatus, err error) {
+	boardConfig *pb.BoardConfig,
+) (status *pb.BoardConfigStatus, err error) {
 	version, err := server.boardConfigProcessor.CheckBoardConfig(boardConfig.GetBoardConfig())
 
 	return &pb.BoardConfigStatus{VendorVersion: version}, err
@@ -267,7 +272,8 @@ func (server *SMServer) SetServiceState(ctx context.Context, state *pb.ServiceSt
 
 // OverrideEnvVars overrides entrainment variables for the service.
 func (server *SMServer) OverrideEnvVars(ctx context.Context,
-	envVars *pb.OverrideEnvVarsRequest) (status *pb.OverrideEnvVarStatus, err error) {
+	envVars *pb.OverrideEnvVarsRequest,
+) (status *pb.OverrideEnvVarStatus, err error) {
 	varsStatus, err := server.launcher.ProcessDesiredEnvVarsList(envVars.GetEnvVars())
 
 	return &pb.OverrideEnvVarStatus{EnvVarStatus: varsStatus}, err
@@ -288,24 +294,34 @@ func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.SMS
 }
 
 // GetSystemLog gets system logs.
-func (server *SMServer) GetSystemLog(ctx context.Context, req *pb.SystemLogRequest) (ret *empty.Empty, err error) {
-	server.logsProvider.GetSystemLog(req)
+func (server *SMServer) GetSystemLog(ctx context.Context, req *pb.SystemLogRequest) (*empty.Empty, error) {
+	getSystemLogRequest := cloudprotocol.RequestSystemLog{LogID: req.LogId}
+
+	getSystemLogRequest.From, getSystemLogRequest.Till = getFromTillTimeFromPB(req.From, req.Till)
+
+	server.logsProvider.GetSystemLog(getSystemLogRequest)
 
 	return &emptypb.Empty{}, nil
 }
 
-// GetServiceLog gets the service logs.
-func (server *SMServer) GetServiceLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
-	server.logsProvider.GetServiceLog(req)
+// GetInstanceLog gets instance service logs.
+func (server *SMServer) GetInstanceLog(ctx context.Context, req *pb.InstanceLogRequest) (*empty.Empty, error) {
+	getInstanceLogRequest := cloudprotocol.RequestServiceLog{LogID: req.LogId}
 
-	return &emptypb.Empty{}, nil
+	getInstanceLogRequest.From, getInstanceLogRequest.Till = getFromTillTimeFromPB(req.From, req.Till)
+	getInstanceLogRequest.InstanceFilter = getInstanceFilterFromPB(req.Instance)
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.logsProvider.GetInstanceLog(getInstanceLogRequest))
 }
 
-// GetServiceCrashLog gets the service crash logs.
-func (server *SMServer) GetServiceCrashLog(ctx context.Context, req *pb.ServiceLogRequest) (ret *empty.Empty, err error) {
-	server.logsProvider.GetServiceCrashLog(req)
+// GetInstanceCrashLog gets instance service crash logs.
+func (server *SMServer) GetInstanceCrashLog(ctx context.Context, req *pb.InstanceLogRequest) (*empty.Empty, error) {
+	getInstanceCrashLogRequest := cloudprotocol.RequestServiceCrashLog{LogID: req.LogId}
 
-	return &emptypb.Empty{}, nil
+	getInstanceCrashLogRequest.From, getInstanceCrashLogRequest.Till = getFromTillTimeFromPB(req.From, req.Till)
+	getInstanceCrashLogRequest.InstanceFilter = getInstanceFilterFromPB(req.Instance)
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest))
 }
 
 /*******************************************************************************
@@ -345,7 +361,7 @@ func (server *SMServer) handleChannels() {
 		case logs := <-server.logsChannel:
 			if err := server.notificationStream.Send(
 				&pb.SMNotifications{
-					SMNotification: &pb.SMNotifications_Log{Log: logs},
+					SMNotification: &pb.SMNotifications_Log{Log: cloudprotocolLogToPB(logs)},
 				}); err != nil {
 				log.Errorf("Can't send logs: %s ", err)
 
@@ -356,4 +372,40 @@ func (server *SMServer) handleChannels() {
 			return
 		}
 	}
+}
+
+func getFromTillTimeFromPB(fromPB, tillPB *timestamp.Timestamp) (from, till *time.Time) {
+	if fromPB != nil {
+		localFrom := fromPB.AsTime()
+
+		from = &localFrom
+	}
+
+	if tillPB != nil {
+		localTill := tillPB.AsTime()
+
+		till = &localTill
+	}
+
+	return from, till
+}
+
+func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {
+	filter.ServiceID = ident.ServiceId
+
+	if ident.SubjectId != "" {
+		filter.SubjectID = &ident.SubjectId
+	}
+
+	if ident.Instance != -1 {
+		instance := (uint64)(ident.Instance)
+
+		filter.Instance = &instance
+	}
+
+	return filter
+}
+
+func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
+	return &pb.LogData{LogId: log.LogID, PartCount: log.PartCount, Part: log.Part, Error: log.Error, Data: log.Data}
 }
