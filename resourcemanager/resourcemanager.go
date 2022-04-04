@@ -263,6 +263,20 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device, instanceID string)
 	return nil
 }
 
+// GetDeviceInstances returns ID list of instances that allocate specific device.
+func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]string, error) {
+	if _, err := resourcemanager.getAvailableDevice(device); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	instances, ok := resourcemanager.allocatedDevices[device]
+	if !ok {
+		return nil, nil
+	}
+
+	return instances, nil
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
