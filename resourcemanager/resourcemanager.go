@@ -263,6 +263,26 @@ func (resourcemanager *ResourceManager) ReleaseDevice(device, instanceID string)
 	return nil
 }
 
+// ReleaseDevices releases all previously allocated device.
+func (resourcemanager *ResourceManager) ReleaseDevices(instanceID string) (err error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	for device, instances := range resourcemanager.allocatedDevices {
+		if contains(instances, instanceID) {
+			log.WithFields(log.Fields{"instanceID": instanceID, "device": device}).Debug("Release device")
+
+			resourcemanager.allocatedDevices[device] = removeFromSlice(instances, instanceID)
+
+			if len(resourcemanager.allocatedDevices[device]) == 0 {
+				delete(resourcemanager.allocatedDevices, device)
+			}
+		}
+	}
+
+	return nil
+}
+
 // GetDeviceInstances returns ID list of instances that allocate specific device.
 func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]string, error) {
 	if _, err := resourcemanager.getAvailableDevice(device); err != nil {

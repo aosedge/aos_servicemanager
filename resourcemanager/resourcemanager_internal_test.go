@@ -359,6 +359,55 @@ func TestGetDeviceInstances(t *testing.T) {
 	}
 }
 
+func TestReleaseDevices(t *testing.T) {
+	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write board config: %s", err)
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %s", err)
+	}
+
+	allocateDevices := []string{"random", "null", "input", "stdin"}
+
+	for _, device := range allocateDevices {
+		if err = rm.AllocateDevice(device, "instance0"); err != nil {
+			t.Fatalf("Can't allocate device: %s", err)
+		}
+	}
+
+	for _, device := range allocateDevices {
+		instances, err := rm.GetDeviceInstances(device)
+		if err != nil {
+			t.Fatalf("Can't get device instances: %s", err)
+		}
+
+		if len(instances) == 0 {
+			t.Fatalf("Wrong device instances count: %d", len(instances))
+		}
+
+		if instances[0] != "instance0" {
+			t.Errorf("Wrong instance ID: %s", instances[0])
+		}
+	}
+
+	if err = rm.ReleaseDevices("instance0"); err != nil {
+		t.Fatalf("Can't release devices: %s", err)
+	}
+
+	for _, device := range allocateDevices {
+		instances, err := rm.GetDeviceInstances(device)
+		if err != nil {
+			t.Fatalf("Can't get device instances: %s", err)
+		}
+
+		if len(instances) > 0 {
+			t.Errorf("Wrong device instances count: %d", len(instances))
+		}
+	}
+}
+
 func TestNotExistBoardConfig(t *testing.T) {
 	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), testAlertSender)
 	if err != nil {
