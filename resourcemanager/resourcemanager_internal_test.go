@@ -24,9 +24,11 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -34,16 +36,15 @@ import (
  * Types
  **********************************************************************************************************************/
 
-type alertSender struct{}
+type alertSender struct {
+	alert cloudprotocol.ResourceValidateAlert
+}
 
 /***********************************************************************************************************************
  * Vars
  **********************************************************************************************************************/
 
-var (
-	tmpDir          string
-	testAlertSender = &alertSender{}
-)
+var tmpDir string
 
 /***********************************************************************************************************************
  * Init
@@ -86,7 +87,7 @@ func TestValidBoardConfiguration(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -101,7 +102,7 @@ func TestEmptyResourcesConfig(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -116,6 +117,8 @@ func TestInvalidBoardConfiguration(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
+	testAlertSender := &alertSender{}
+
 	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
@@ -124,10 +127,12 @@ func TestInvalidBoardConfiguration(t *testing.T) {
 	if err = rm.boardConfigError; err == nil {
 		t.Error("Can't detect unavailable devices")
 	}
+
+	testAlertSender.checkAlert(t)
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -146,7 +151,7 @@ func TestGetDeviceInfo(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -175,7 +180,7 @@ func TestGetResourceInfo(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -209,7 +214,7 @@ func TestAllocateAndReleaseDevices(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -236,7 +241,7 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -251,7 +256,7 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -281,7 +286,7 @@ func TestAllocateLimitedDevice(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -310,7 +315,7 @@ func TestGetDeviceInstances(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -364,7 +369,7 @@ func TestReleaseDevices(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -409,7 +414,7 @@ func TestReleaseDevices(t *testing.T) {
 }
 
 func TestNotExistBoardConfig(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -424,7 +429,7 @@ func TestInvalidVersionBoardConfig(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -441,7 +446,7 @@ func TestGetBoardConfigInfo(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -458,7 +463,7 @@ func TestUpdateBoardConfig(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -483,6 +488,8 @@ func TestUpdateErrorBoardConfig(t *testing.T) {
 		t.Fatalf("Can't write board config: %s", err)
 	}
 
+	testAlertSender := &alertSender{}
+
 	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
@@ -496,6 +503,8 @@ func TestUpdateErrorBoardConfig(t *testing.T) {
 	if version != currentConfigVersion {
 		t.Errorf("Wrong board config version: %s", version)
 	}
+
+	testAlertSender.checkAlert(t)
 }
 
 /***********************************************************************************************************************
@@ -643,10 +652,33 @@ func writeTestBoardConfigFile(content string) (err error) {
 	return nil
 }
 
-func (sender *alertSender) SendValidateResourceAlert(source string, errors map[string][]error) {
-	log.Debugf("SendValidateResourceAlert source %s", source)
+func (sender *alertSender) SendAlert(alert cloudprotocol.AlertItem) {
+	resourceValidateAlert, ok := alert.Payload.(cloudprotocol.ResourceValidateAlert)
+	if !ok {
+		return
+	}
+
+	sender.alert = resourceValidateAlert
 }
 
-func (sender *alertSender) SendRequestResourceAlert(source string, message string) {
-	log.Debugf("SendRequestResourceAlert source %s, message %s", source, message)
+func (sender *alertSender) checkAlert(t *testing.T) {
+	t.Helper()
+
+	if len(sender.alert.ResourcesErrors) != 1 {
+		t.Fatalf("Wrong resources errors count: %d", len(sender.alert.ResourcesErrors))
+	}
+
+	if sender.alert.ResourcesErrors[0].Name != "some_not_existed_device" {
+		t.Errorf("Wrong alert device name: %s", sender.alert.ResourcesErrors[0].Name)
+	}
+
+	if len(sender.alert.ResourcesErrors[0].Errors) != 2 {
+		t.Errorf("Wrong alert errors count: %d", len(sender.alert.ResourcesErrors[0].Errors))
+	}
+
+	for _, errMessage := range sender.alert.ResourcesErrors[0].Errors {
+		if !strings.Contains(errMessage, "is not present on system") {
+			t.Errorf("Wrong alert error message: %s", errMessage)
+		}
+	}
 }
