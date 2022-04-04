@@ -21,6 +21,7 @@ package resourcemanager
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -29,41 +30,41 @@ import (
 	"sync"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/jinzhu/copier"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-const devHostDirectory = "/dev/"
-const userHostDirectory = "/etc/group"
-const supportedFormatVersion = 1
+const (
+	devHostDirectory       = "/dev/"
+	userHostDirectory      = "/etc/group"
+	supportedFormatVersion = 1
+)
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// ResourceManager instance
+// ResourceManager instance.
 type ResourceManager struct {
 	sync.Mutex
 
-	deviceWithServices map[string][]string // [device_name]:[serviceIDs,...]
-	hostDevices        []string
-	hostGroups         []string
-	boardConfigFile    string
-	boardConfiguration BoardConfiguration
-	boardConfigError   error
-	alertSender        AlertSender
+	allocatedDevices map[string][]string
+	hostDevices      []string
+	hostGroups       []string
+	boardConfigFile  string
+	boardConfig      BoardConfig
+	boardConfigError error
+	alertSender      AlertSender
 }
 
-// AlertSender provides alert sender interface
+// AlertSender provides alert sender interface.
 type AlertSender interface {
 	SendValidateResourceAlert(source string, errors map[string][]error)
-	SendRequestResourceAlert(source string, message string)
 }
 
 // FileSystemMount specifies a mount instructions.
@@ -74,16 +75,16 @@ type FileSystemMount struct {
 	Options     []string `json:"options,omitempty"`
 }
 
-// DeviceResource describes Device available resource
-type DeviceResource struct {
+// DeviceInfo device information.
+type DeviceInfo struct {
 	Name        string   `json:"name"`
 	SharedCount int      `json:"sharedCount,omitempty"`
 	Groups      []string `json:"groups,omitempty"`
 	HostDevices []string `json:"hostDevices"`
 }
 
-// BoardResource describes other board resource
-type BoardResource struct {
+// ResourceInfo resource information.
+type ResourceInfo struct {
 	Name   string            `json:"name"`
 	Groups []string          `json:"groups,omitempty"`
 	Mounts []FileSystemMount `json:"mounts,omitempty"`
@@ -91,25 +92,33 @@ type BoardResource struct {
 	Hosts  []config.Host     `json:"hosts,omitempty"`
 }
 
-// BoardConfiguration resources that are proviced by Cloud for using at AOS services
-type BoardConfiguration struct {
-	FormatVersion uint64           `json:"formatVersion"`
-	VendorVersion string           `json:"vendorVersion"`
-	Devices       []DeviceResource `json:"devices"`
-	Resources     []BoardResource  `json:"resources"`
+// BoardConfig board configuration.
+type BoardConfig struct {
+	FormatVersion uint64         `json:"formatVersion"`
+	VendorVersion string         `json:"vendorVersion"`
+	Devices       []DeviceInfo   `json:"devices"`
+	Resources     []ResourceInfo `json:"resources"`
 }
 
-/*******************************************************************************
- * Public
- ******************************************************************************/
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
 
-// New creates new resource manager object
+// ErrNoAvailableDevice indicates there is no device available.
+var ErrNoAvailableDevice = errors.New("no device available")
+
+/***********************************************************************************************************************
+ * Public
+ **********************************************************************************************************************/
+
+// New creates new resource manager object.
 func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
-	log.Debug("New ResourceManager")
+	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
 		boardConfigFile: boardConfigFile,
-		alertSender:     alertSender}
+		alertSender:     alertSender,
+	}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -119,27 +128,26 @@ func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *Reso
 		return nil, aoserrors.Wrap(err)
 	}
 
-	// init map with available device names
-	resourcemanager.deviceWithServices = make(map[string][]string)
+	resourcemanager.allocatedDevices = make(map[string][]string)
 
 	if err = resourcemanager.loadBoardConfiguration(); err != nil {
 		log.Errorf("Board configuration error: %s", err)
 	}
 
-	log.WithField("version", resourcemanager.boardConfiguration.VendorVersion).Debug("Board config version")
+	log.WithField("version", resourcemanager.boardConfig.VendorVersion).Debug("Board config version")
 
 	return resourcemanager, nil
 }
 
-// GetBoardConfigInfo returns board config info
+// GetBoardConfigInfo returns board config info.
 func (resourcemanager *ResourceManager) GetBoardConfigInfo() (version string) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.boardConfiguration.VendorVersion
+	return resourcemanager.boardConfig.VendorVersion
 }
 
-// CheckBoardConfig checks board config
+// CheckBoardConfig checks board config.
 func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) (vendorVersion string, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
@@ -147,19 +155,19 @@ func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) (ven
 	return resourcemanager.checkBoardConfig(configJSON)
 }
 
-// UpdateBoardConfig updates board configuration
+// UpdateBoardConfig updates board configuration.
 func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) (err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	newVendorVersion, err := resourcemanager.checkBoardConfig(configJSON)
+	version, err := resourcemanager.checkBoardConfig(configJSON)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	log.WithField("newVersion", newVendorVersion).Debug("Update board configuration")
+	log.WithField("version", version).Debug("Update board configuration")
 
-	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0644); err != nil {
+	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -170,150 +178,103 @@ func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) (er
 	return nil
 }
 
-// RequestDeviceResourceByName requests list of device resources for class names
-func (resourcemanager *ResourceManager) RequestDeviceResourceByName(name string) (deviceResource DeviceResource, err error) {
+// GetDeviceInfo returns device information.
+func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo DeviceInfo, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	log.Debugf("ResourceManager: RequestDeviceResourceByName(%s)", name)
-
-	tempDeviceResource, err := resourcemanager.getAvailableDeviceByName(name)
-	if err != nil {
-		return deviceResource, aoserrors.Wrap(err)
+	if deviceInfo, err = resourcemanager.getAvailableDevice(name); err != nil {
+		return deviceInfo, aoserrors.Wrap(err)
 	}
 
-	if err = copier.Copy(&deviceResource, &tempDeviceResource); err != nil {
-		return deviceResource, aoserrors.Wrap(err)
-	}
-
-	//Cleanup host devices, releasing allocated memory
-	deviceResource.HostDevices = nil
-
-	for _, hostDevice := range tempDeviceResource.HostDevices {
-		listOfDevices, err := resourcemanager.processHostDevice(hostDevice)
-		if err != nil {
-			log.Errorf("ResourceManager: RequestDeviceResourceByName(%s). Can't get list of devices for %s", name, hostDevice)
-			return deviceResource, aoserrors.Wrap(err)
-		}
-
-		deviceResource.HostDevices = append(deviceResource.HostDevices, listOfDevices...)
-	}
-
-	if err != nil {
-		return deviceResource, aoserrors.Wrap(err)
-	}
-
-	return deviceResource, nil
+	return deviceInfo, nil
 }
 
-// RequestDevice requests Device by name for service id
-func (resourcemanager *ResourceManager) RequestDevice(device string, serviceID string) (err error) {
+// GetResourceInfo returns resource information.
+func (resourcemanager *ResourceManager) GetResourceInfo(name string) (ResourceInfo, error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	log.Debugf("ResourceManager: RequestDevice(%s, %s)", device, serviceID)
-
-	// check board configuration
-	// if it has error, send alert to cloud and return error
-	if resourcemanager.boardConfigError != nil {
-		message := aoserrors.Errorf("resource configuration error: %s", resourcemanager.boardConfigError)
-
-		if resourcemanager.alertSender != nil {
-			resourcemanager.alertSender.SendRequestResourceAlert(serviceID, message.Error())
-		}
-
-		return message
-	}
-
-	// check that requested device class is contained in available resources
-	// it can be file or directory
-	deviceResource, err := resourcemanager.getAvailableDeviceByName(device)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	// get list of services that are using this device
-	listOfServices := resourcemanager.deviceWithServices[device]
-
-	// deviceResource.SharedCount == 0: device can be shared unlimited times
-	// deviceResource.SharedCount > len(listOfServices): provide device until list less then sharedCount value
-	if deviceResource.SharedCount == 0 || deviceResource.SharedCount > len(listOfServices) {
-		if contains(listOfServices, serviceID) {
-			log.Warnf("Device %s is already used by %s service", device, serviceID)
-		} else {
-			log.Debugf("Provide Device %s for %s service", device, serviceID)
-
-			// update map of devices
-			// 1. Append list of used service
-			// 2. set updated device's map to devices' class map by key: name (class name of device (alias))
-			resourcemanager.deviceWithServices[device] = append(listOfServices, serviceID)
-		}
-	} else {
-		message := aoserrors.Errorf("device: %s is unavailable", device)
-
-		if resourcemanager.alertSender != nil {
-			resourcemanager.alertSender.SendRequestResourceAlert(serviceID, message.Error())
-		}
-
-		return message
-	}
-
-	return nil
-}
-
-// RequestBoardResourceByName requests configuration by name
-func (resourcemanager *ResourceManager) RequestBoardResourceByName(name string) (boardResource BoardResource, err error) {
-	resourcemanager.Lock()
-	defer resourcemanager.Unlock()
-
-	log.Debugf("ResourceManager: RequestBoardResourceByName(%s)", name)
-
-	for _, resource := range resourcemanager.boardConfiguration.Resources {
+	for _, resource := range resourcemanager.boardConfig.Resources {
 		if resource.Name == name {
 			return resource, nil
 		}
 	}
 
-	return boardResource, aoserrors.Errorf("resource is not present in board configuration")
+	return ResourceInfo{}, aoserrors.New("resource is not available")
 }
 
-// ReleaseDevice request to release device for service id
-func (resourcemanager *ResourceManager) ReleaseDevice(device string, serviceID string) (err error) {
+// AllocateDevice tries to allocate device.
+func (resourcemanager *ResourceManager) AllocateDevice(device, instanceID string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	log.Debugf("ResourceManager: ReleaseDevice(%s, %s)", device, serviceID)
+	log.WithFields(log.Fields{"instanceID": instanceID, "device": device}).Debug("Allocate device")
 
-	// get list of services that are using this device
-	listOfServices, ok := resourcemanager.deviceWithServices[device]
-	if !ok || !contains(listOfServices, serviceID) {
-		log.Warnf("Device: %s was not provided for %s service", device, serviceID)
+	if resourcemanager.boardConfigError != nil {
+		return aoserrors.Wrap(resourcemanager.boardConfigError)
+	}
+
+	deviceInfo, err := resourcemanager.getAvailableDevice(device)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	// get list of instances that are using this device
+	instances := resourcemanager.allocatedDevices[device]
+
+	if contains(instances, instanceID) {
+		log.WithFields(log.Fields{
+			"device": device, "instanceID": instanceID,
+		}).Warn("Device is already allocated by instance")
 
 		return nil
 	}
 
-	log.Debugf("Release Device %s for %s service", device, serviceID)
+	// deviceInfo.SharedCount == 0: device can be shared unlimited times
+	// len(instances) < deviceInfo.SharedCount: provide device until list less then sharedCount value
+	if deviceInfo.SharedCount != 0 && len(instances) >= deviceInfo.SharedCount {
+		return aoserrors.Wrap(ErrNoAvailableDevice)
+	}
 
-	// update map of devices
-	// 1. remove serviceID from list of services for device
-	// 2. set updated device's map to devices' class map by key: name (class name of device (alias))
-	resourcemanager.deviceWithServices[device] = removeFromSlice(listOfServices, serviceID)
+	resourcemanager.allocatedDevices[device] = append(instances, instanceID)
 
 	return nil
 }
 
-/*******************************************************************************
+// ReleaseDevice releases device for instance.
+func (resourcemanager *ResourceManager) ReleaseDevice(device, instanceID string) error {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	log.WithFields(log.Fields{"instanceID": instanceID, "device": device}).Debug("Release device")
+
+	instances, ok := resourcemanager.allocatedDevices[device]
+	if !ok || !contains(instances, instanceID) {
+		return aoserrors.New("device is not allocated for instance")
+	}
+
+	resourcemanager.allocatedDevices[device] = removeFromSlice(instances, instanceID)
+
+	if len(resourcemanager.allocatedDevices[device]) == 0 {
+		delete(resourcemanager.allocatedDevices, device)
+	}
+
+	return nil
+}
+
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) (vendorVersion string, err error) {
-	boardConfig := BoardConfiguration{VendorVersion: "unknown"}
+	boardConfig := BoardConfig{VendorVersion: "unknown"}
 
 	if err = json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
 		return boardConfig.VendorVersion, aoserrors.Wrap(err)
 	}
 
-	if boardConfig.VendorVersion == resourcemanager.boardConfiguration.VendorVersion {
+	if boardConfig.VendorVersion == resourcemanager.boardConfig.VendorVersion {
 		return boardConfig.VendorVersion, aoserrors.New("invalid vendor version")
 	}
 
@@ -322,46 +283,6 @@ func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) (ven
 	}
 
 	return boardConfig.VendorVersion, nil
-}
-
-func handleDir(device string) (hostDevices []string, err error) {
-	err = filepath.Walk(device,
-		func(path string, info os.FileInfo, err error) error {
-			if info.IsDir() || err != nil {
-				return aoserrors.Wrap(err)
-			}
-
-			if info.Mode()&os.ModeSymlink == os.ModeSymlink {
-				linkName, err := filepath.EvalSymlinks(path)
-				if err != nil {
-					return aoserrors.Wrap(err)
-				}
-
-				hostDevices = append(hostDevices, linkName)
-			} else {
-				hostDevices = append(hostDevices, path)
-			}
-			return nil
-		})
-
-	return hostDevices, aoserrors.Wrap(err)
-}
-
-func (resourcemanager *ResourceManager) processHostDevice(device string) (hostDevices []string, err error) {
-	fi, err := os.Lstat(device)
-	if err != nil {
-		return []string{}, aoserrors.Wrap(err)
-	}
-
-	if fi.IsDir() {
-		return handleDir(device)
-		//this is dir
-	} else if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
-		s, err := filepath.EvalSymlinks(device)
-		return []string{s}, aoserrors.Wrap(err)
-	}
-
-	return []string{device}, nil
 }
 
 func (resourcemanager *ResourceManager) discoverHostDevices() (hostDevices []string, err error) {
@@ -404,9 +325,10 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 			}
 		}
 
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			return hostGroups, aoserrors.Wrap(err)
 		}
@@ -420,67 +342,62 @@ func (resourcemanager *ResourceManager) loadBoardConfiguration() (err error) {
 		resourcemanager.boardConfigError = aoserrors.Wrap(err)
 	}()
 
-	resourcemanager.boardConfiguration = BoardConfiguration{}
+	resourcemanager.boardConfig = BoardConfig{}
 
 	byteValue, err := ioutil.ReadFile(resourcemanager.boardConfigFile)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = json.Unmarshal(byteValue, &resourcemanager.boardConfiguration); err != nil {
+	if err = json.Unmarshal(byteValue, &resourcemanager.boardConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = resourcemanager.validateBoardConfig(resourcemanager.boardConfiguration); err != nil {
+	if err = resourcemanager.validateBoardConfig(resourcemanager.boardConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfiguration) (err error) {
+func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfig) (err error) {
 	if config.FormatVersion != supportedFormatVersion {
 		return aoserrors.New("unsupported board configuration format version")
 	}
 
-	if err = resourcemanager.validateDeviceResources(config.Devices); err != nil {
+	if err = resourcemanager.validateDevices(config.Devices); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-// compare available devices from resources configuration with host (real) devices
-func (resourcemanager *ResourceManager) validateDeviceResources(devices []DeviceResource) (err error) {
-	log.Debugf("ResourceManager: validateDeviceResources()")
-
+// compare available devices from board config with host (real) devices.
+func (resourcemanager *ResourceManager) validateDevices(devices []DeviceInfo) error {
 	deviceErrors := make(map[string][]error)
 
 	// compare available device names and additional groups with system ones
-	for _, avaliableDevice := range devices {
+	for _, device := range devices {
 		// check devices
-		for _, availableHostDevice := range avaliableDevice.HostDevices {
-			if !contains(resourcemanager.hostDevices, availableHostDevice) {
-				deviceErrors[avaliableDevice.Name] = append(deviceErrors[avaliableDevice.Name],
-					aoserrors.Errorf("device: %s is not presented on system", availableHostDevice))
+		for _, hostDevice := range device.HostDevices {
+			if !contains(resourcemanager.hostDevices, hostDevice) {
+				deviceErrors[device.Name] = append(deviceErrors[device.Name],
+					aoserrors.Errorf("device %s is not present on system", hostDevice))
 			}
 		}
 
 		// check additional groups
-		for _, additionalGroup := range avaliableDevice.Groups {
-			if !contains(resourcemanager.hostGroups, additionalGroup) {
-				deviceErrors[avaliableDevice.Name] = append(deviceErrors[avaliableDevice.Name],
-					aoserrors.Errorf("%s group is not presented on system", additionalGroup))
+		for _, group := range device.Groups {
+			if !contains(resourcemanager.hostGroups, group) {
+				deviceErrors[device.Name] = append(deviceErrors[device.Name],
+					aoserrors.Errorf("%s group is not present on system", group))
 			}
 		}
 	}
 
 	if len(deviceErrors) != 0 {
-		for name, reasons := range deviceErrors {
-			log.Errorf("Device error -> name: %s", name)
-			for _, reason := range reasons {
-				log.Errorf("Reason: %s", reason.Error())
-			}
+		for name, err := range deviceErrors {
+			log.WithFields(log.Fields{"name": name, "err": err}).Error("Device validation error")
 		}
 
 		if resourcemanager.alertSender != nil {
@@ -493,20 +410,19 @@ func (resourcemanager *ResourceManager) validateDeviceResources(devices []Device
 	return nil
 }
 
-func (resourcemanager *ResourceManager) getAvailableDeviceByName(
-	name string) (deviceResource DeviceResource, err error) {
-	for _, deviceResource = range resourcemanager.boardConfiguration.Devices {
-		if strings.Contains(name, deviceResource.Name) {
-			return deviceResource, nil
+func (resourcemanager *ResourceManager) getAvailableDevice(name string) (deviceInfo DeviceInfo, err error) {
+	for _, deviceInfo = range resourcemanager.boardConfig.Devices {
+		if deviceInfo.Name == name {
+			return deviceInfo, nil
 		}
 	}
 
-	return deviceResource, aoserrors.Errorf("device is not presented at available resources")
+	return deviceInfo, aoserrors.Errorf("device is not available")
 }
 
 func contains(arr []string, str string) bool {
 	for _, a := range arr {
-		if strings.Contains(a, str) {
+		if a == str {
 			return true
 		}
 	}
