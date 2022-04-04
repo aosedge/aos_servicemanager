@@ -28,8 +28,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
@@ -64,7 +66,7 @@ type ResourceManager struct {
 
 // AlertSender provides alert sender interface.
 type AlertSender interface {
-	SendValidateResourceAlert(source string, errors map[string][]error)
+	SendAlert(alert cloudprotocol.AlertItem)
 }
 
 // FileSystemMount specifies a mount instructions.
@@ -408,34 +410,48 @@ func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfig) 
 
 // compare available devices from board config with host (real) devices.
 func (resourcemanager *ResourceManager) validateDevices(devices []DeviceInfo) error {
-	deviceErrors := make(map[string][]error)
+	var deviceErrors []cloudprotocol.ResourceValidateError
 
 	// compare available device names and additional groups with system ones
 	for _, device := range devices {
+		deviceError := cloudprotocol.ResourceValidateError{Name: device.Name}
+
 		// check devices
 		for _, hostDevice := range device.HostDevices {
 			if !contains(resourcemanager.hostDevices, hostDevice) {
-				deviceErrors[device.Name] = append(deviceErrors[device.Name],
-					aoserrors.Errorf("device %s is not present on system", hostDevice))
+				err := aoserrors.Errorf("device %s is not present on system", hostDevice)
+
+				log.Errorf("Device validation error: %s", err)
+
+				deviceError.Errors = append(deviceError.Errors, err.Error())
 			}
 		}
 
 		// check additional groups
 		for _, group := range device.Groups {
 			if !contains(resourcemanager.hostGroups, group) {
-				deviceErrors[device.Name] = append(deviceErrors[device.Name],
-					aoserrors.Errorf("%s group is not present on system", group))
+				err := aoserrors.Errorf("%s group is not present on system", group)
+
+				log.Errorf("Device validation error: %s", err)
+
+				deviceError.Errors = append(deviceError.Errors, err.Error())
 			}
+		}
+
+		if len(deviceError.Errors) > 0 {
+			deviceErrors = append(deviceErrors, deviceError)
 		}
 	}
 
 	if len(deviceErrors) != 0 {
-		for name, err := range deviceErrors {
-			log.WithFields(log.Fields{"name": name, "err": err}).Error("Device validation error")
-		}
-
 		if resourcemanager.alertSender != nil {
-			resourcemanager.alertSender.SendValidateResourceAlert("servicemanager", deviceErrors)
+			resourcemanager.alertSender.SendAlert(cloudprotocol.AlertItem{
+				Timestamp: time.Now(),
+				Tag:       cloudprotocol.AlertTagResourceValidate,
+				Payload: cloudprotocol.ResourceValidateAlert{
+					ResourcesErrors: deviceErrors,
+				},
+			})
 		}
 
 		return aoserrors.New("device resources are not valid")
