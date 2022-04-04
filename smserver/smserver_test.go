@@ -26,7 +26,8 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	pb "github.com/aoscloud/aos_common/api/servicemanager/v2"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -65,12 +66,24 @@ type testAlertProvider struct {
 	alertsChannel chan *pb.Alert
 }
 
+type testLogProvider struct {
+	currentLogRequest cloudprotocol.RequestServiceLog
+	testLogs          []testLogData
+	sentIndex         int
+	channel           chan cloudprotocol.PushLog
+}
+
 type testMonitoringProvider struct {
 	monitoringChannel chan *pb.Monitoring
 }
 
 type testResourceManager struct {
 	version string
+}
+
+type testLogData struct {
+	intrenalLog   cloudprotocol.PushLog
+	expectedPBLog pb.LogData
 }
 
 /*******************************************************************************
@@ -418,6 +431,101 @@ func TestServiceStateProcessing(t *testing.T) {
 	}
 }
 
+func TestLogsNotification(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
+
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create SM server: %s", err)
+	}
+
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
+
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+
+	defer client.close()
+
+	notifications, err := client.pbclient.SubscribeSMNotifications(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't subscribe: %s", err)
+	}
+
+	logProvider.testLogs = []testLogData{
+		{
+			intrenalLog:   cloudprotocol.PushLog{LogID: "systemLog", Data: []byte{1, 2, 3}},
+			expectedPBLog: pb.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
+		},
+		{
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pb.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+		},
+		{
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pb.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+		},
+		{
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pb.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+		},
+		{
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceCrashLog", Data: []byte{1, 2, 4}, Error: "some error", Part: 1},
+			expectedPBLog: pb.LogData{LogId: "serviceCrashLog", Data: []byte{1, 2, 4}, Error: "some error", Part: 1},
+		},
+	}
+
+	if _, err := smServer.GetSystemLog(context.Background(), &pb.SystemLogRequest{LogId: "systemlog"}); err != nil {
+		t.Fatalf("Can't get system log: %s", err)
+	}
+
+	instanceLogRequests := []pb.InstanceLogRequest{
+		{
+			Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "", Instance: -1},
+			LogId:    "serviceLog1",
+		},
+		{
+			Instance: &pb.InstanceIdent{ServiceId: "id2", SubjectId: "s1", Instance: 10},
+			LogId:    "serviceLog2",
+		},
+		{
+			Instance: &pb.InstanceIdent{ServiceId: "id3", SubjectId: "s1", Instance: 10},
+			From:     timestamppb.Now(), Till: timestamppb.Now(),
+			LogId: "serviceLog3",
+		},
+	}
+
+	for i := range instanceLogRequests {
+		if _, err := smServer.GetInstanceLog(context.Background(), &instanceLogRequests[i]); err != nil {
+			t.Fatalf("Can't get instance log: %s", err)
+		}
+
+		if err := compareServiceLogRequest(&instanceLogRequests[i], logProvider.currentLogRequest); err != nil {
+			t.Errorf("Service log requests mismatch: %s", err)
+		}
+	}
+
+	if _, err := smServer.GetInstanceCrashLog(context.Background(),
+		&pb.InstanceLogRequest{LogId: "serviceCrashLog", Instance: &pb.InstanceIdent{ServiceId: "id3"}}); err != nil {
+		t.Fatalf("Can't get instance crash log: %s", err)
+	}
+
+	if err := waitAndCheckLogs(notifications, logProvider.testLogs); err != nil {
+		t.Fatalf("Incorrect logs: %s", err)
+	}
+}
+
 /*******************************************************************************
  * Interfaces
  ******************************************************************************/
@@ -459,7 +567,8 @@ func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEn
 }
 
 func (launcher *testLauncher) GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus,
-	layersInfo []*pb.LayerStatus, err error) {
+	layersInfo []*pb.LayerStatus, err error,
+) {
 	return servicesInfo, layersInfo, nil
 }
 
@@ -473,6 +582,30 @@ func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 
 func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan *pb.Alert) {
 	return alerts.alertsChannel
+}
+
+func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestServiceLog) error {
+	logProvider.currentLogRequest = request
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.sentIndex++
+
+	return nil
+}
+
+func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog) error {
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.sentIndex++
+
+	return nil
+}
+
+func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestSystemLog) {
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.sentIndex++
+}
+
+func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog) {
+	return logProvider.channel
 }
 
 func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (channel <-chan *pb.Monitoring) {
@@ -514,4 +647,105 @@ func (client *testClient) close() {
 	if client.connection != nil {
 		client.connection.Close()
 	}
+}
+
+func waitAndCheckLogs(notification pb.SMService_SubscribeSMNotificationsClient, testLogs []testLogData) (err error) {
+	notificationChan := make(chan *pb.SMNotifications, 1)
+
+	go func() {
+		for {
+			smData, err := notification.Recv()
+			if err != nil {
+				log.Errorf("Can't receive log: %s", err)
+			}
+
+			notificationChan <- smData
+		}
+	}()
+
+	var currentIndex int
+
+	for {
+		select {
+		case rawLog := <-notificationChan:
+			logData := rawLog.GetLog()
+
+			if logData == nil {
+				return aoserrors.New("incorrect notification type")
+			}
+
+			if !proto.Equal(logData, &testLogs[currentIndex].expectedPBLog) {
+				return aoserrors.New("received log doesn't match sent log")
+			}
+
+			currentIndex++
+
+			if currentIndex >= len(testLogs) {
+				return nil
+			}
+
+		case <-time.After(5 * time.Second):
+			return aoserrors.New("timeout")
+		}
+	}
+}
+
+func compareServiceLogRequest(expected *pb.InstanceLogRequest, received cloudprotocol.RequestServiceLog) error {
+	switch {
+	case received.LogID != expected.LogId:
+		return aoserrors.New("incorrect LogID")
+
+	case received.From == nil:
+		if expected.From != nil {
+			return aoserrors.New("incorrect from timestamp")
+		}
+
+	case received.From != nil:
+		if expected.From == nil {
+			return aoserrors.New("incorrect from timestamp")
+		}
+
+		if *received.From != expected.From.AsTime() {
+			return aoserrors.New("incorrect from timestamp")
+		}
+
+	case received.Till == nil:
+		if expected.Till != nil {
+			return aoserrors.New("incorrect till timestamp")
+		}
+
+	case received.Till != nil:
+		if expected.Till == nil {
+			return aoserrors.New("incorrect till timestamp")
+		}
+
+		if *received.Till != expected.Till.AsTime() {
+			return aoserrors.New("incorrect till timestamp")
+		}
+
+	case received.ServiceID != expected.Instance.ServiceId:
+		return aoserrors.New("incorrect ServiceID")
+
+	case received.SubjectID == nil:
+		if expected.Instance.SubjectId != "" {
+			return aoserrors.New("incorrect subject ID")
+		}
+
+	case received.SubjectID != nil:
+		if *received.SubjectID != expected.Instance.SubjectId {
+			return aoserrors.New("incorrect subject ID")
+		}
+
+	case received.Instance == nil:
+		if expected.Instance.Instance != -1 {
+			return aoserrors.New("incorrect instance")
+		}
+
+	case received.Instance != nil:
+		if *received.Instance != uint64(expected.Instance.Instance) {
+			return aoserrors.New("incorrect instance")
+		}
+	}
+
+	return nil
 }
