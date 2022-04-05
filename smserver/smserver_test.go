@@ -73,7 +73,7 @@ type testLogProvider struct {
 }
 
 type testMonitoringProvider struct {
-	monitoringChannel chan *pb.Monitoring
+	monitoringChannel chan cloudprotocol.MonitoringData
 }
 
 type testResourceManager struct {
@@ -425,7 +425,7 @@ func TestMonitoringNotifications(t *testing.T) {
 		SMServerURL: serverURL,
 	}
 
-	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan *pb.Monitoring, 10)}
+	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan cloudprotocol.MonitoringData, 10)}
 
 	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
 	if err != nil {
@@ -437,12 +437,14 @@ func TestMonitoringNotifications(t *testing.T) {
 			t.Errorf("Can't start sm server")
 		}
 	}()
+
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test client: %s", err)
 	}
+
 	defer client.close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -450,28 +452,66 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
 	if err != nil {
-		t.Fatalf("Can't Subscribes: %s", err)
+		t.Fatalf("Can't subscribe: %s", err)
 	}
 
-	monitoringToSend := &pb.Monitoring{
-		SystemMonitoring: &pb.SystemMonitoring{
-			Ram: 10, UsedDisk: 20, Cpu: 30, InTraffic: 40, OutTraffic: 50,
+	type testMonitoringElement struct {
+		sendMonitoring     cloudprotocol.MonitoringData
+		expectedMonitoring pb.Monitoring
+	}
+
+	testMonitoringData := []testMonitoringElement{
+		{
+			sendMonitoring: cloudprotocol.MonitoringData{
+				Global: cloudprotocol.GlobalMonitoringData{RAM: 10, CPU: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50},
+			},
+			expectedMonitoring: pb.Monitoring{
+				SystemMonitoring: &pb.SystemMonitoring{Ram: 10, Cpu: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50},
+			},
 		},
-		Timestamp: timestamppb.Now(),
-		ServiceMonitoring: []*pb.ServiceMonitoring{{
-			ServiceId: "service1", Ram: 110, UsedDisk: 120, Cpu: 130, InTraffic: 140, OutTraffic: 150,
-		}},
+		{
+			sendMonitoring: cloudprotocol.MonitoringData{
+				Global: cloudprotocol.GlobalMonitoringData{RAM: 10, CPU: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50},
+				ServiceInstances: []cloudprotocol.InstanceMonitoringData{
+					{
+						InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
+						RAM:           10, CPU: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 0,
+					},
+					{
+						InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
+						RAM:           0, CPU: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50,
+					},
+				},
+			},
+			expectedMonitoring: pb.Monitoring{
+				SystemMonitoring: &pb.SystemMonitoring{Ram: 10, Cpu: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50},
+				InstanceMonitoring: []*pb.InstanceMonitoring{
+					{
+						Instance: &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
+						Ram:      10, Cpu: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 0,
+					},
+					{
+						Instance: &pb.InstanceIdent{ServiceId: "service2", SubjectId: "s1", Instance: 1},
+						Ram:      0, Cpu: 20, UsedDisk: 30, InTraffic: 40, OutTraffic: 50,
+					},
+				},
+			},
+		},
 	}
 
-	testMonitoring.monitoringChannel <- monitoringToSend
+	for i := range testMonitoringData {
+		testMonitoring.monitoringChannel <- testMonitoringData[i].sendMonitoring
 
-	receiveMonitoringData, err := notifications.Recv()
-	if err != nil {
-		t.Errorf("Can't receive monitoring data: %s", err)
-	}
+		receivedMonitoring, err := notifications.Recv()
+		if err != nil {
+			t.Fatalf("Can't receive monitoring: %s", err)
+		}
 
-	if !proto.Equal(receiveMonitoringData.GetMonitoring(), monitoringToSend) {
-		log.Error("received monitoring data != sent data")
+		receivedMonitoring.GetMonitoring().Timestamp = nil
+
+		if !proto.Equal(receivedMonitoring.GetMonitoring(), &testMonitoringData[i].expectedMonitoring) {
+			t.Errorf("Incorrect monitoring data")
+		}
 	}
 }
 
@@ -721,7 +761,7 @@ func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudpr
 	return logProvider.channel
 }
 
-func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (channel <-chan *pb.Monitoring) {
+func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (channel <-chan cloudprotocol.MonitoringData) {
 	return monitoring.monitoringChannel
 }
 

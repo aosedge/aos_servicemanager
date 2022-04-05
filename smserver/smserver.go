@@ -77,9 +77,9 @@ type AlertsProvider interface {
 	GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem)
 }
 
-// MonitoringDataProvider monitoring data provider interface
+// MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
-	GetMonitoringDataChannel() (monitoringChannel <-chan *pb.Monitoring)
+	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.MonitoringData)
 }
 
 // BoardConfigProcessor board configuration handler
@@ -113,7 +113,7 @@ type SMServer struct {
 	logsProvider         LogsProvider
 	notificationStream   pb.SMService_SubscribeSMNotificationsServer
 	alertChannel         <-chan cloudprotocol.AlertItem
-	monitoringChannel    <-chan *pb.Monitoring
+	monitoringChannel    <-chan cloudprotocol.MonitoringData
 	stateChannel         <-chan *pb.SMNotifications
 	logsChannel          <-chan cloudprotocol.PushLog
 	pb.UnimplementedSMServiceServer
@@ -355,7 +355,7 @@ func (server *SMServer) handleChannels() {
 			if err := server.notificationStream.Send(
 				&pb.SMNotifications{
 					SMNotification: &pb.SMNotifications_Monitoring{
-						Monitoring: monitoringData,
+						Monitoring: cloudprotocolMonitoringToPB(monitoringData),
 					},
 				}); err != nil {
 				log.Errorf("Can't send monitoring notification: %s ", err)
@@ -557,4 +557,31 @@ func getPBInstanceAlertFromPayload(payload interface{}) (*pb.Alert_InstanceAlert
 
 func cloudprotocolInstanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
 	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+}
+
+func cloudprotocolMonitoringToPB(monitoring cloudprotocol.MonitoringData) *pb.Monitoring {
+	pbMonitoring := &pb.Monitoring{
+		Timestamp: timestamppb.New(monitoring.Timestamp),
+		SystemMonitoring: &pb.SystemMonitoring{
+			Ram:        monitoring.Global.RAM,
+			Cpu:        monitoring.Global.CPU,
+			UsedDisk:   monitoring.Global.UsedDisk,
+			InTraffic:  monitoring.Global.InTraffic,
+			OutTraffic: monitoring.Global.OutTraffic,
+		},
+		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
+	}
+
+	for i := range monitoring.ServiceInstances {
+		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
+			Instance:   cloudprotocolInstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+			Ram:        monitoring.ServiceInstances[i].RAM,
+			Cpu:        monitoring.ServiceInstances[i].CPU,
+			UsedDisk:   monitoring.ServiceInstances[i].UsedDisk,
+			InTraffic:  monitoring.ServiceInstances[i].InTraffic,
+			OutTraffic: monitoring.ServiceInstances[i].OutTraffic,
+		}
+	}
+
+	return pbMonitoring
 }
