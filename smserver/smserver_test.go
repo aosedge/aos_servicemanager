@@ -34,7 +34,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/aoscloud/aos_servicemanager/alerts"
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/smserver"
 )
@@ -63,7 +62,7 @@ type testClient struct {
 }
 
 type testAlertProvider struct {
-	alertsChannel chan *pb.Alert
+	alertsChannel chan cloudprotocol.AlertItem
 }
 
 type testLogProvider struct {
@@ -189,7 +188,7 @@ func TestAlertNotifications(t *testing.T) {
 		SMServerURL: serverURL,
 	}
 
-	testAlerts := &testAlertProvider{alertsChannel: make(chan *pb.Alert, 10)}
+	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
 	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, nil,
 		nil, nil, nil, true)
@@ -202,12 +201,14 @@ func TestAlertNotifications(t *testing.T) {
 			t.Errorf("Can't start sm server: %s", err)
 		}
 	}()
+
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test client: %s", err)
 	}
+
 	defer client.close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -215,95 +216,207 @@ func TestAlertNotifications(t *testing.T) {
 
 	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
 	if err != nil {
-		t.Fatalf("Can't subscribes: %s", err)
+		t.Fatalf("Can't subscribe: %s", err)
 	}
 
-	systemAlert := &pb.Alert{
-		Timestamp: timestamppb.Now(),
-		Tag:       "core",
-		Source:    "system",
-		Payload: &pb.Alert_SystemAlert{
-			SystemAlert: &pb.SystemAlert{
-				Message: "some alert",
+	type testAlertItem struct {
+		sendAlert     cloudprotocol.AlertItem
+		expectedAlert pb.Alert
+	}
+
+	testAlertItems := []testAlertItem{
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag:     cloudprotocol.AlertTagSystemError,
+				Payload: cloudprotocol.SystemAlert{Message: "SystemAlertMessage"},
+			},
+			expectedAlert: pb.Alert{
+				Tag:     cloudprotocol.AlertTagSystemError,
+				Payload: &pb.Alert_SystemAlert{SystemAlert: &pb.SystemAlert{Message: "SystemAlertMessage"}},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag:     cloudprotocol.AlertTagAosCore,
+				Payload: cloudprotocol.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
+			},
+			expectedAlert: pb.Alert{
+				Tag:     cloudprotocol.AlertTagAosCore,
+				Payload: &pb.Alert_CoreAlert{CoreAlert: &pb.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"}},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag: cloudprotocol.AlertTagResourceValidate,
+				Payload: cloudprotocol.ResourceValidateAlert{
+					ResourcesErrors: []cloudprotocol.ResourceValidateError{
+						{Name: "someName1", Errors: []string{"error1", "error2"}},
+						{Name: "someName2", Errors: []string{"error3", "error4"}},
+					},
+				},
+			},
+			expectedAlert: pb.Alert{
+				Tag: cloudprotocol.AlertTagResourceValidate,
+				Payload: &pb.Alert_ResourceValidateAlert{
+					ResourceValidateAlert: &pb.ResourceValidateAlert{
+						Errors: []*pb.ResourceValidateErrors{
+							{Name: "someName1", ErrorMsg: []string{"error1", "error2"}},
+							{Name: "someName2", ErrorMsg: []string{"error3", "error4"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag: cloudprotocol.AlertTagDeviceAllocate,
+				Payload: cloudprotocol.DeviceAllocateAlert{
+					InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+					Device:        "someDevice", Message: "someMessage",
+				},
+			},
+			expectedAlert: pb.Alert{
+				Tag: cloudprotocol.AlertTagDeviceAllocate,
+				Payload: &pb.Alert_DeviceAllocateAlert{
+					DeviceAllocateAlert: &pb.DeviceAllocateAlert{
+						Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+						Device:   "someDevice", Message: "someMessage",
+					},
+				},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag:     cloudprotocol.AlertTagSystemQuota,
+				Payload: cloudprotocol.SystemQuotaAlert{Parameter: "param1", Value: 42},
+			},
+			expectedAlert: pb.Alert{
+				Tag: cloudprotocol.AlertTagSystemQuota,
+				Payload: &pb.Alert_SystemQuotaAlert{
+					SystemQuotaAlert: &pb.SystemQuotaAlert{Parameter: "param1", Value: 42},
+				},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag: cloudprotocol.AlertTagInstanceQuota,
+				Payload: cloudprotocol.InstanceQuotaAlert{
+					InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+					Parameter:     "param1", Value: 42,
+				},
+			},
+			expectedAlert: pb.Alert{
+				Tag: cloudprotocol.AlertTagInstanceQuota,
+				Payload: &pb.Alert_InstanceQuotaAlert{
+					InstanceQuotaAlert: &pb.InstanceQuotaAlert{
+						Instance:  &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+						Parameter: "param1", Value: 42,
+					},
+				},
+			},
+		},
+		{
+			sendAlert: cloudprotocol.AlertItem{
+				Tag: cloudprotocol.AlertTagServiceInstance,
+				Payload: cloudprotocol.ServiceInstanceAlert{
+					InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+					Message:       "ServiceInstanceAlert", AosVersion: 42,
+				},
+			},
+			expectedAlert: pb.Alert{
+				Tag: cloudprotocol.AlertTagServiceInstance,
+				Payload: &pb.Alert_InstanceAlert{
+					InstanceAlert: &pb.InstanceAlert{
+						Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+						Message:  "ServiceInstanceAlert", AosVersion: 42,
+					},
+				},
 			},
 		},
 	}
 
-	testAlerts.alertsChannel <- systemAlert
+	for i := range testAlertItems {
+		testAlerts.alertsChannel <- testAlertItems[i].sendAlert
 
-	receivedAlert, err := notifications.Recv()
-	if err != nil {
-		t.Errorf("Can't receive alert: %s", err)
-	}
-
-	if !proto.Equal(receivedAlert.GetAlert(), systemAlert) {
-		log.Error("received alert != send alert")
-	}
-
-	time := time.Now()
-
-	resourceAlert := &pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       alerts.AlertTagResource,
-		Source:    "test",
-		Payload: &pb.Alert_ResourceAlert{ResourceAlert: &pb.ResourceAlert{
-			Parameter: "testResource",
-			Value:     42,
-		}},
-	}
-
-	testAlerts.alertsChannel <- resourceAlert
-
-	receivedResAlert, err := notifications.Recv()
-	if err != nil {
-		t.Errorf("Can't receive alert: %s", err)
-	}
-
-	if !proto.Equal(receivedResAlert.GetAlert(), resourceAlert) {
-		log.Error("received resource alert != send alert")
-	}
-
-	deviceErrors := make(map[string][]error)
-	deviceErrors["dev1"] = []error{fmt.Errorf("some error")}
-
-	var convertedErrors []*pb.ResourceValidateErrors
-
-	for name, reason := range deviceErrors {
-		var messages []string
-
-		for _, item := range reason {
-			messages = append(messages, item.Error())
+		receivedAlert, err := notifications.Recv()
+		if err != nil {
+			t.Errorf("Can't receive alert: %s", err)
 		}
 
-		resourceError := pb.ResourceValidateErrors{
-			Name:     name,
-			ErrorMsg: messages,
-		}
+		receivedAlert.GetAlert().Timestamp = nil
 
-		convertedErrors = append(convertedErrors, &resourceError)
+		if !proto.Equal(receivedAlert.GetAlert(), &testAlertItems[i].expectedAlert) {
+			t.Errorf("Incorrect log item %s", receivedAlert.GetAlert().Tag)
+		}
 	}
 
-	validationAlert := &pb.Alert{
-		Timestamp: timestamppb.New(time),
-		Tag:       alerts.AlertTagAosCore,
-		Source:    "test",
-		Payload: &pb.Alert_ResourceValidateAlert{
-			ResourceValidateAlert: &pb.ResourceValidateAlert{
-				Type:   alerts.AlertDeviceErrors,
-				Errors: convertedErrors,
+	// test incorrect alerts
+	invalidAlerts := []cloudprotocol.AlertItem{
+		{
+			Tag:     cloudprotocol.AlertTagAosCore,
+			Payload: cloudprotocol.SystemAlert{Message: "SystemAlertMessage"},
+		},
+		{
+			Tag:     cloudprotocol.AlertTagDeviceAllocate,
+			Payload: cloudprotocol.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
+		},
+		{
+			Tag: cloudprotocol.AlertTagSystemError,
+			Payload: cloudprotocol.ResourceValidateAlert{
+				ResourcesErrors: []cloudprotocol.ResourceValidateError{
+					{Name: "someName1", Errors: []string{"error1", "error2"}},
+					{Name: "someName2", Errors: []string{"error3", "error4"}},
+				},
+			},
+		},
+		{
+			Tag: cloudprotocol.AlertTagSystemQuota,
+			Payload: cloudprotocol.DeviceAllocateAlert{
+				InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Device:        "someDevice", Message: "someMessage",
+			},
+		},
+
+		{
+			Tag:     cloudprotocol.AlertTagInstanceQuota,
+			Payload: cloudprotocol.SystemQuotaAlert{Parameter: "param1", Value: 42},
+		},
+
+		{
+			Tag: cloudprotocol.AlertTagServiceInstance,
+			Payload: cloudprotocol.InstanceQuotaAlert{
+				InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Parameter:     "param1", Value: 42,
+			},
+		},
+
+		{
+			Tag: cloudprotocol.AlertTagResourceValidate,
+			Payload: cloudprotocol.ServiceInstanceAlert{
+				InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Message:       "ServiceInstanceAlert", AosVersion: 42,
 			},
 		},
 	}
 
-	testAlerts.alertsChannel <- validationAlert
-
-	receivedValidationAlert, err := notifications.Recv()
-	if err != nil {
-		t.Errorf("Can't receive validation alert: %s", err)
+	for i := range invalidAlerts {
+		testAlerts.alertsChannel <- invalidAlerts[i]
 	}
 
-	if !proto.Equal(receivedValidationAlert.GetAlert(), validationAlert) {
-		log.Error("received validation alert != send alert")
+	alertChan := make(chan *pb.SMNotifications, 1)
+
+	go func() {
+		receivedAlert, err := notifications.Recv()
+		if err == nil {
+			alertChan <- receivedAlert
+		}
+	}()
+
+	select {
+	case <-alertChan:
+		t.Error("Unexpected Alert")
+
+	case <-time.After(2 * time.Second):
 	}
 }
 
@@ -580,7 +693,7 @@ func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 	return nil
 }
 
-func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan *pb.Alert) {
+func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
 	return alerts.alertsChannel
 }
 
