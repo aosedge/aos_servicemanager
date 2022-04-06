@@ -38,6 +38,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
 /*******************************************************************************
@@ -54,13 +55,16 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
  * Types
  ******************************************************************************/
 
-// ServiceLauncher services launcher interface
+// ServiceManager service manager intergace.
+type ServiceManager interface {
+	InstallService(
+		newService servicemanager.ServiceInfo, imageURL string, fileInfo image.FileInfo) error
+	GetAllServicesStatus() ([]servicemanager.ServiceInfo, error)
+}
+
+// ServiceLauncher services launcher interface.
 type ServiceLauncher interface {
 	SetUsers(users []string) (err error)
-	InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error)
-	UninstallService(removeReq *pb.RemoveServiceRequest) (err error)
-	GetServicesInfo() (services []*pb.ServiceStatus, err error)
-	GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus, layersInfo []*pb.LayerStatus, err error)
 	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
 	SetServiceState(state *pb.ServiceState) (err error)
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
@@ -108,6 +112,7 @@ type CertificateProvider interface {
 type SMServer struct {
 	url                  string
 	launcher             ServiceLauncher
+	serviceManager       ServiceManager
 	layerProvider        LayerProvider
 	grpcServer           *grpc.Server
 	listener             net.Listener
@@ -126,14 +131,13 @@ type SMServer struct {
  ******************************************************************************/
 
 // New creates new IAM server instance.
-func New(cfg *config.Config, launcher ServiceLauncher, layerProvider LayerProvider, alertsProvider AlertsProvider,
-	monitoringProvider MonitoringDataProvider,
-	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext,
-	certProvider CertificateProvider, insecure bool,
+func New(cfg *config.Config, launcher ServiceLauncher, serviceManager ServiceManager, layerProvider LayerProvider,
+	alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider, boardConfigProcessor BoardConfigProcessor,
+	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, certProvider CertificateProvider, insecure bool,
 ) (server *SMServer, err error) {
 	server = &SMServer{
-		launcher: launcher, layerProvider: layerProvider, boardConfigProcessor: boardConfigProcessor,
-		logsProvider: logsProvider,
+		launcher: launcher, serviceManager: serviceManager, layerProvider: layerProvider,
+		boardConfigProcessor: boardConfigProcessor, logsProvider: logsProvider,
 	}
 
 	if alertsProvider != nil {
@@ -202,35 +206,6 @@ func (server *SMServer) Stop() {
 	}
 }
 
-// GetUsersStatus gets current SM status for user.
-func (server *SMServer) GetUsersStatus(ctx context.Context, users *pb.Users) (status *pb.SMStatus, err error) {
-	status = &pb.SMStatus{}
-
-	status.Services, status.Layers, err = server.launcher.GetServicesLayersInfoByUsers(users.GetUsers())
-	if err != nil {
-		return status, aoserrors.Wrap(err)
-	}
-
-	return status, nil
-}
-
-// GetAllStatus gets current SM status.
-func (server *SMServer) GetAllStatus(ctx context.Context, req *empty.Empty) (status *pb.SMStatus, err error) {
-	status = &pb.SMStatus{}
-
-	status.Services, err = server.launcher.GetServicesInfo()
-	if err != nil {
-		return status, aoserrors.Wrap(err)
-	}
-
-	status.Layers, err = server.layerProvider.GetLayersInfo()
-	if err != nil {
-		return status, aoserrors.Wrap(err)
-	}
-
-	return status, nil
-}
-
 // GetBoardConfigStatus gets current board configuration status.
 func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (*pb.BoardConfigStatus, error) {
 	return &pb.BoardConfigStatus{VendorVersion: server.boardConfigProcessor.GetBoardConfigInfo()}, nil
@@ -251,13 +226,33 @@ func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.Boar
 }
 
 // InstallService installs aos service.
-func (server *SMServer) InstallService(ctx context.Context, service *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
-	return server.launcher.InstallService(service)
+func (server *SMServer) InstallService(ctx context.Context, service *pb.InstallServiceRequest) (*empty.Empty, error) {
+	installInfo := servicemanager.ServiceInfo{
+		ServiceID: service.ServiceId, AosVersion: service.AosVersion,
+		ServiceProvider: service.ProviderId, Description: service.Description,
+	}
+
+	fileInfo := image.FileInfo{Sha256: service.Sha256, Sha512: service.Sha512, Size: service.Size}
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.serviceManager.InstallService(installInfo, service.Url, fileInfo))
 }
 
-// InstallService removes aos service.
-func (server *SMServer) RemoveService(ctx context.Context, service *pb.RemoveServiceRequest) (ret *empty.Empty, err error) {
-	return &emptypb.Empty{}, server.launcher.UninstallService(service)
+// GetServicesStatus gets installed services info.
+func (server *SMServer) GetServicesStatus(context.Context, *empty.Empty) (*pb.ServicesStatus, error) {
+	statuses, err := server.serviceManager.GetAllServicesStatus()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	services := &pb.ServicesStatus{Services: make([]*pb.ServiceStatus, len(statuses))}
+
+	for i, serviceStatus := range statuses {
+		services.Services[i] = &pb.ServiceStatus{
+			ServiceId: serviceStatus.ServiceID, AosVersion: serviceStatus.AosVersion,
+		}
+	}
+
+	return services, nil
 }
 
 // ServiceStateAcceptance accepts new services state.

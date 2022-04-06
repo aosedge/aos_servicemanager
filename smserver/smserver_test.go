@@ -19,7 +19,6 @@ package smserver_test
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"strconv"
@@ -38,6 +37,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
 	"github.com/aoscloud/aos_servicemanager/smserver"
 )
 
@@ -56,6 +56,11 @@ const (
 type testLauncher struct {
 	stateChannel chan *pb.SMNotifications
 	wasRestart   bool
+}
+
+type testServiceManager struct {
+	currentInstallRequests testServiceInstallRequest
+	services               []servicemanager.ServiceInfo
 }
 
 type testLayerManager struct {
@@ -91,6 +96,12 @@ type testResourceManager struct {
 type testLogData struct {
 	intrenalLog   cloudprotocol.PushLog
 	expectedPBLog pb.LogData
+}
+
+type testServiceInstallRequest struct {
+	installInfo servicemanager.ServiceInfo
+	serviceURL  string
+	fileInfo    image.FileInfo
 }
 
 type testLayerInstallRequest struct {
@@ -132,7 +143,8 @@ func TestBoardConfiguration(t *testing.T) {
 		expectedBoardConfig = "{someboardconfig}"
 	)
 
-	smServer, err := smserver.New(&smConfig, &testLauncher, nil, nil, nil, &testResourceManager, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, &testLauncher, nil, nil, nil, nil,
+		&testResourceManager, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -186,6 +198,87 @@ func TestBoardConfiguration(t *testing.T) {
 	}
 }
 
+func TestServicesMessages(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	testServiceManager := testServiceManager{}
+
+	smServer, err := smserver.New(&smConfig, nil, &testServiceManager, nil, nil, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
+
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+
+	defer client.close()
+
+	expectedServiceStatuses := &pb.ServicesStatus{}
+
+	for i := 0; i < 5; i++ {
+		installRequest := pb.InstallServiceRequest{
+			Url:         "someurl" + strconv.Itoa(i),
+			ServiceId:   "testService" + strconv.Itoa(i),
+			ProviderId:  "provider" + strconv.Itoa(i),
+			AosVersion:  uint64(i),
+			AlertRules:  "alertRule" + strconv.Itoa(i),
+			Description: "description" + strconv.Itoa(i),
+			Sha256:      []byte{0, 0, 0, byte(i + 200)},
+			Sha512:      []byte{byte(i + 300), 0, 0, 0},
+			Size:        uint64(i + 500),
+		}
+
+		expectedInstallRequest := testServiceInstallRequest{
+			installInfo: servicemanager.ServiceInfo{
+				ServiceID:       "testService" + strconv.Itoa(i),
+				AosVersion:      uint64(i),
+				ServiceProvider: "provider" + strconv.Itoa(i),
+				Description:     "description" + strconv.Itoa(i),
+			},
+			serviceURL: "someurl" + strconv.Itoa(i),
+			fileInfo: image.FileInfo{
+				Sha256: []byte{0, 0, 0, byte(i + 200)}, Sha512: []byte{byte(i + 300), 0, 0, 0},
+				Size: uint64(i + 500),
+			},
+		}
+
+		expectedStatus := pb.ServiceStatus{
+			ServiceId: "testService" + strconv.Itoa(i), AosVersion: uint64(i),
+		}
+
+		if _, err := smServer.InstallService(context.Background(), &installRequest); err != nil {
+			t.Fatalf("Can't install service: %s", err)
+		}
+
+		if !reflect.DeepEqual(expectedInstallRequest, testServiceManager.currentInstallRequests) {
+			t.Error("Incorrect service install request")
+		}
+
+		expectedServiceStatuses.Services = append(expectedServiceStatuses.Services, &expectedStatus)
+	}
+
+	serviceStatuses, err := smServer.GetServicesStatus(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get service statuses: %s", err)
+	}
+
+	if !proto.Equal(serviceStatuses, expectedServiceStatuses) {
+		t.Errorf("Incorrect service statuses")
+	}
+}
+
 func TestLayerMessages(t *testing.T) {
 	smConfig := config.Config{
 		SMServerURL: serverURL,
@@ -193,7 +286,7 @@ func TestLayerMessages(t *testing.T) {
 
 	testLayerManager := &testLayerManager{}
 
-	smServer, err := smserver.New(&smConfig, nil, testLayerManager, nil, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, testLayerManager, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -268,7 +361,7 @@ func TestAlertNotifications(t *testing.T) {
 
 	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, testAlerts, nil, nil,
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, testAlerts, nil, nil,
 		nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
@@ -505,7 +598,7 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan cloudprotocol.MonitoringData, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -600,7 +693,7 @@ func TestServiceStateProcessing(t *testing.T) {
 
 	launcher := &testLauncher{stateChannel: make(chan *pb.SMNotifications, 10)}
 
-	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -669,7 +762,7 @@ func TestLogsNotification(t *testing.T) {
 
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -765,20 +858,6 @@ func (launcher *testLauncher) SetUsers(users []string) (err error) {
 	return nil
 }
 
-func (launcher *testLauncher) GetServicesInfo() (currentServices []*pb.ServiceStatus, err error) {
-	currentServices = append(currentServices, &pb.ServiceStatus{ServiceId: "123"})
-
-	return currentServices, nil
-}
-
-func (launcher *testLauncher) InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
-	return &pb.ServiceStatus{ServiceId: serviceInfo.ServiceId, StateChecksum: "some state check sum"}, nil
-}
-
-func (launcher *testLauncher) UninstallService(removeReq *pb.RemoveServiceRequest) (err error) {
-	return nil
-}
-
 func (launcher *testLauncher) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
 	return nil
 }
@@ -801,10 +880,21 @@ func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEn
 	return status, nil
 }
 
-func (launcher *testLauncher) GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus,
-	layersInfo []*pb.LayerStatus, err error,
-) {
-	return servicesInfo, layersInfo, nil
+func (serviceMgr *testServiceManager) InstallService(
+	newService servicemanager.ServiceInfo, imageURL string, fileInfo image.FileInfo,
+) error {
+	serviceMgr.currentInstallRequests = testServiceInstallRequest{
+		installInfo: newService,
+		serviceURL:  imageURL, fileInfo: fileInfo,
+	}
+
+	serviceMgr.services = append(serviceMgr.services, newService)
+
+	return nil
+}
+
+func (serviceMgr *testServiceManager) GetAllServicesStatus() ([]servicemanager.ServiceInfo, error) {
+	return serviceMgr.services, nil
 }
 
 func (layerMgr *testLayerManager) GetLayersInfo() ([]layermanager.LayerInfo, error) {
