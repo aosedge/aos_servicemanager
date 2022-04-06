@@ -64,7 +64,7 @@ type ServiceLauncher interface {
 	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
 	SetServiceState(state *pb.ServiceState) (err error)
 	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
-	RestartServices()
+	RestartInstances() error
 	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
 }
 
@@ -84,10 +84,10 @@ type MonitoringDataProvider interface {
 	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.MonitoringData)
 }
 
-// BoardConfigProcessor board configuration handler
+// BoardConfigProcessor board configuration handler.
 type BoardConfigProcessor interface {
 	GetBoardConfigInfo() (version string)
-	CheckBoardConfig(configJSON string) (vendorVersion string, err error)
+	CheckBoardConfig(configJSON string) (err error)
 	UpdateBoardConfig(configJSON string) (err error)
 }
 
@@ -232,28 +232,22 @@ func (server *SMServer) GetAllStatus(ctx context.Context, req *empty.Empty) (sta
 }
 
 // GetBoardConfigStatus gets current board configuration status.
-func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (status *pb.BoardConfigStatus, err error) {
+func (server *SMServer) GetBoardConfigStatus(context.Context, *empty.Empty) (*pb.BoardConfigStatus, error) {
 	return &pb.BoardConfigStatus{VendorVersion: server.boardConfigProcessor.GetBoardConfigInfo()}, nil
 }
 
 // CheckBoardConfig checks new board configuration.
-func (server *SMServer) CheckBoardConfig(ctx context.Context,
-	boardConfig *pb.BoardConfig,
-) (status *pb.BoardConfigStatus, err error) {
-	version, err := server.boardConfigProcessor.CheckBoardConfig(boardConfig.GetBoardConfig())
-
-	return &pb.BoardConfigStatus{VendorVersion: version}, err
+func (server *SMServer) CheckBoardConfig(ctx context.Context, boardConfig *pb.BoardConfig) (*empty.Empty, error) {
+	return &emptypb.Empty{}, aoserrors.Wrap(server.boardConfigProcessor.CheckBoardConfig(boardConfig.GetBoardConfig()))
 }
 
 // SetBoardConfig sets new board configuration.
-func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.BoardConfig) (ret *empty.Empty, err error) {
-	if err = server.boardConfigProcessor.UpdateBoardConfig(boardConfig.GetBoardConfig()); err != nil {
-		return &emptypb.Empty{}, err
+func (server *SMServer) SetBoardConfig(ctx context.Context, boardConfig *pb.BoardConfig) (*empty.Empty, error) {
+	if err := server.boardConfigProcessor.UpdateBoardConfig(boardConfig.GetBoardConfig()); err != nil {
+		return &emptypb.Empty{}, aoserrors.Wrap(err)
 	}
 
-	server.launcher.RestartServices()
-
-	return &emptypb.Empty{}, nil
+	return &emptypb.Empty{}, aoserrors.Wrap(server.launcher.RestartInstances())
 }
 
 // InstallService installs aos service.
