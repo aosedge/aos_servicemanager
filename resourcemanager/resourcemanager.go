@@ -150,7 +150,7 @@ func (resourcemanager *ResourceManager) GetBoardConfigInfo() (version string) {
 }
 
 // CheckBoardConfig checks board config.
-func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) (vendorVersion string, err error) {
+func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -158,24 +158,23 @@ func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) (ven
 }
 
 // UpdateBoardConfig updates board configuration.
-func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) (err error) {
+func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	version, err := resourcemanager.checkBoardConfig(configJSON)
-	if err != nil {
+	if err := resourcemanager.checkBoardConfig(configJSON); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	log.WithField("version", version).Debug("Update board configuration")
-
-	if err = ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0o600); err != nil {
+	if err := ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = resourcemanager.loadBoardConfiguration(); err != nil {
+	if err := resourcemanager.loadBoardConfiguration(); err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	log.WithField("version", resourcemanager.boardConfig.VendorVersion).Debug("Update board configuration")
 
 	return nil
 }
@@ -303,22 +302,22 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
  * Private
  **********************************************************************************************************************/
 
-func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) (vendorVersion string, err error) {
-	boardConfig := BoardConfig{VendorVersion: "unknown"}
+func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) error {
+	boardConfig := BoardConfig{}
 
-	if err = json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
-		return boardConfig.VendorVersion, aoserrors.Wrap(err)
+	if err := json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
 	if boardConfig.VendorVersion == resourcemanager.boardConfig.VendorVersion {
-		return boardConfig.VendorVersion, aoserrors.New("invalid vendor version")
+		return aoserrors.New("invalid vendor version")
 	}
 
-	if err = resourcemanager.validateBoardConfig(boardConfig); err != nil {
-		return boardConfig.VendorVersion, aoserrors.Wrap(err)
+	if err := resourcemanager.validateBoardConfig(boardConfig); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	return boardConfig.VendorVersion, nil
+	return nil
 }
 
 func (resourcemanager *ResourceManager) discoverHostDevices() (hostDevices []string, err error) {
