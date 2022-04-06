@@ -55,6 +55,7 @@ const (
 
 type testLauncher struct {
 	stateChannel chan *pb.SMNotifications
+	wasRestart   bool
 }
 
 type testLayerManager struct {
@@ -83,7 +84,8 @@ type testMonitoringProvider struct {
 }
 
 type testResourceManager struct {
-	version string
+	version             string
+	receivedBoardConfig string
 }
 
 type testLogData struct {
@@ -192,6 +194,71 @@ func TestConnection(t *testing.T) {
 	_, err = client.pbclient.InstallLayer(ctx, &pb.InstallLayerRequest{})
 	if err != nil {
 		t.Fatalf("Can't install layer: %s", err)
+	}
+}
+
+func TestBoardConfiguration(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	var (
+		testLauncher        = testLauncher{}
+		testResourceManager = testResourceManager{version: "bcv1"}
+		expectedBoardConfig = "{someboardconfig}"
+	)
+
+	smServer, err := smserver.New(&smConfig, &testLauncher, nil, nil, nil, &testResourceManager, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
+
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+
+	defer client.close()
+
+	expectedBCStatus := &pb.BoardConfigStatus{VendorVersion: testResourceManager.version}
+
+	bcStatus, err := client.pbclient.GetBoardConfigStatus(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't set board config: %s", err)
+	}
+
+	if !proto.Equal(expectedBCStatus, bcStatus) {
+		t.Error("Incorrect board config status")
+	}
+
+	if _, err := client.pbclient.CheckBoardConfig(
+		context.Background(), &pb.BoardConfig{BoardConfig: expectedBoardConfig}); err != nil {
+		t.Fatalf("Can't check board config: %s", err)
+	}
+
+	if testResourceManager.receivedBoardConfig != expectedBoardConfig {
+		t.Error("Incorrect board config in check board config call")
+	}
+
+	if _, err := client.pbclient.SetBoardConfig(
+		context.Background(), &pb.BoardConfig{BoardConfig: expectedBoardConfig}); err != nil {
+		t.Fatalf("Can't set board config: %s", err)
+	}
+
+	if !testLauncher.wasRestart {
+		t.Error("Should be restart services call")
+	}
+
+	if testResourceManager.receivedBoardConfig != expectedBoardConfig {
+		t.Error("Incorrect board config in set board config call")
 	}
 }
 
@@ -800,7 +867,11 @@ func (launcher *testLauncher) GetStateMessageChannel() (channel <-chan *pb.SMNot
 	return launcher.stateChannel
 }
 
-func (launcher *testLauncher) RestartServices() {}
+func (launcher *testLauncher) RestartInstances() error {
+	launcher.wasRestart = true
+
+	return nil
+}
 
 func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
 	return status, nil
@@ -868,11 +939,15 @@ func (resMgr *testResourceManager) GetBoardConfigInfo() (version string) {
 	return resMgr.version
 }
 
-func (resMgr *testResourceManager) CheckBoardConfig(configJSON string) (vendorVersion string, err error) {
-	return resMgr.version, nil
+func (resMgr *testResourceManager) CheckBoardConfig(configJSON string) error {
+	resMgr.receivedBoardConfig = configJSON
+
+	return nil
 }
 
-func (resMgr *testResourceManager) UpdateBoardConfig(configJSON string) (err error) {
+func (resMgr *testResourceManager) UpdateBoardConfig(configJSON string) error {
+	resMgr.receivedBoardConfig = configJSON
+
 	return nil
 }
 
