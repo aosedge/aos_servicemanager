@@ -19,15 +19,17 @@ package smserver_test
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v2"
+	"github.com/aoscloud/aos_common/image"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -35,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/smserver"
 )
 
@@ -54,7 +57,10 @@ type testLauncher struct {
 	stateChannel chan *pb.SMNotifications
 }
 
-type testLayerManager struct{}
+type testLayerManager struct {
+	currentInstallRequests testLayerInstallRequest
+	layers                 []layermanager.LayerInfo
+}
 
 type testClient struct {
 	connection *grpc.ClientConn
@@ -83,6 +89,12 @@ type testResourceManager struct {
 type testLogData struct {
 	intrenalLog   cloudprotocol.PushLog
 	expectedPBLog pb.LogData
+}
+
+type testLayerInstallRequest struct {
+	installInfo layermanager.LayerInfo
+	layerURL    string
+	fileInfo    image.FileInfo
 }
 
 /*******************************************************************************
@@ -180,6 +192,81 @@ func TestConnection(t *testing.T) {
 	_, err = client.pbclient.InstallLayer(ctx, &pb.InstallLayerRequest{})
 	if err != nil {
 		t.Fatalf("Can't install layer: %s", err)
+	}
+}
+
+func TestLayerMessages(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	testLayerManager := &testLayerManager{}
+
+	smServer, err := smserver.New(&smConfig, nil, testLayerManager, nil, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server")
+		}
+	}()
+
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+
+	defer client.close()
+
+	expectedLayerStatuses := &pb.LayersStatus{}
+
+	for i := 0; i < 5; i++ {
+		installRequest := pb.InstallLayerRequest{
+			Url: "someurl" + strconv.Itoa(i), LayerId: "testLayer" + strconv.Itoa(i), AosVersion: uint64(i),
+			VendorVersion: strconv.Itoa(i + 1), Digest: "digest" + strconv.Itoa(i),
+			Sha256: []byte{0, 0, 0, byte(i + 100)}, Sha512: []byte{byte(i + 100), 0, 0, 0},
+			Description: "desc" + strconv.Itoa(i), Size: uint64(i + 500),
+		}
+
+		expectedInstallRequest := testLayerInstallRequest{
+			installInfo: layermanager.LayerInfo{
+				Digest: "digest" + strconv.Itoa(i), LayerID: "testLayer" + strconv.Itoa(i), AosVersion: uint64(i),
+				VendorVersion: strconv.Itoa(i + 1), Description: "desc" + strconv.Itoa(i),
+			},
+			layerURL: "someurl" + strconv.Itoa(i),
+			fileInfo: image.FileInfo{
+				Sha256: []byte{0, 0, 0, byte(i + 100)}, Sha512: []byte{byte(i + 100), 0, 0, 0},
+				Size: uint64(i + 500),
+			},
+		}
+
+		expectedStatus := pb.LayerStatus{
+			LayerId: "testLayer" + strconv.Itoa(i), AosVersion: uint64(i), VendorVersion: strconv.Itoa(i + 1),
+			Digest: "digest" + strconv.Itoa(i),
+		}
+
+		if _, err := smServer.InstallLayer(context.Background(), &installRequest); err != nil {
+			t.Fatalf("Can't install layer")
+		}
+
+		if !reflect.DeepEqual(expectedInstallRequest, testLayerManager.currentInstallRequests) {
+			t.Error("Incorrect install request")
+		}
+
+		expectedLayerStatuses.Layers = append(expectedLayerStatuses.Layers, &expectedStatus)
+	}
+
+	layerStatuses, err := smServer.GetLayersStatus(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get layer statuses: %s", err)
+	}
+
+	if !proto.Equal(layerStatuses, expectedLayerStatuses) {
+		t.Errorf("Incorrect layer statuses")
 	}
 }
 
@@ -725,11 +812,23 @@ func (launcher *testLauncher) GetServicesLayersInfoByUsers(users []string) (serv
 	return servicesInfo, layersInfo, nil
 }
 
-func (layerMgr *testLayerManager) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
-	return layersList, nil
+func (layerMgr *testLayerManager) GetLayersInfo() ([]layermanager.LayerInfo, error) {
+	return layerMgr.layers, nil
 }
 
-func (layerMgr *testLayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
+func (layerMgr *testLayerManager) InstallLayer(
+	installInfo layermanager.LayerInfo, layerURL string, fileInfo image.FileInfo,
+) error {
+	layerMgr.currentInstallRequests = testLayerInstallRequest{
+		installInfo: installInfo,
+		layerURL:    layerURL, fileInfo: fileInfo,
+	}
+
+	layerMgr.layers = append(layerMgr.layers, layermanager.LayerInfo{
+		Digest: installInfo.Digest, LayerID: installInfo.LayerID, AosVersion: installInfo.AosVersion,
+		VendorVersion: installInfo.VendorVersion, Description: installInfo.Description,
+	})
+
 	return nil
 }
 

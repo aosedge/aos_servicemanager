@@ -26,6 +26,7 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v2"
+	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/golang/protobuf/ptypes/timestamp"
@@ -36,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 )
 
 /*******************************************************************************
@@ -66,10 +68,10 @@ type ServiceLauncher interface {
 	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
 }
 
-// LayerProvider services layer manager interface
+// LayerProvider services layer manager interface.
 type LayerProvider interface {
-	GetLayersInfo() (info []*pb.LayerStatus, err error)
-	InstallLayer(installInfo *pb.InstallLayerRequest) (err error)
+	GetLayersInfo() (info []layermanager.LayerInfo, err error)
+	InstallLayer(installInfo layermanager.LayerInfo, layerURL string, fileInfo image.FileInfo) error
 }
 
 // AlertsProvider alert data provider interface.
@@ -284,8 +286,34 @@ func (server *SMServer) OverrideEnvVars(ctx context.Context,
 }
 
 // InstallLayer installs the layer.
-func (server *SMServer) InstallLayer(ctx context.Context, layer *pb.InstallLayerRequest) (ret *empty.Empty, err error) {
-	return &emptypb.Empty{}, server.layerProvider.InstallLayer(layer)
+func (server *SMServer) InstallLayer(ctx context.Context, layer *pb.InstallLayerRequest) (*empty.Empty, error) {
+	installInfo := layermanager.LayerInfo{
+		Digest: layer.Digest, LayerID: layer.LayerId, AosVersion: layer.AosVersion,
+		VendorVersion: layer.VendorVersion, Description: layer.Description,
+	}
+
+	fileInfo := image.FileInfo{Sha256: layer.Sha256, Sha512: layer.Sha512, Size: layer.Size}
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.layerProvider.InstallLayer(installInfo, layer.Url, fileInfo))
+}
+
+// GetLayersStatus gets installed layer info.
+func (server *SMServer) GetLayersStatus(context.Context, *empty.Empty) (*pb.LayersStatus, error) {
+	info, err := server.layerProvider.GetLayersInfo()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	layers := &pb.LayersStatus{Layers: make([]*pb.LayerStatus, len(info))}
+
+	for i, layerInfo := range info {
+		layers.Layers[i] = &pb.LayerStatus{
+			LayerId: layerInfo.LayerID, AosVersion: layerInfo.AosVersion, VendorVersion: layerInfo.VendorVersion,
+			Digest: layerInfo.Digest,
+		}
+	}
+
+	return layers, nil
 }
 
 // SubscribeSMNotifications subscribes for SM notifications.
