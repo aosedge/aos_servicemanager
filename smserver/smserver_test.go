@@ -54,13 +54,19 @@ const (
  ******************************************************************************/
 
 type testLauncher struct {
-	stateChannel chan *pb.SMNotifications
-	wasRestart   bool
+	wasRestart bool
 }
 
 type testServiceManager struct {
 	currentInstallRequests testServiceInstallRequest
 	services               []servicemanager.ServiceInfo
+}
+
+type testStateHandler struct {
+	newStateChan           chan cloudprotocol.NewState
+	stateReqChan           chan cloudprotocol.StateRequest
+	currentStateAcceptance cloudprotocol.StateAcceptance
+	currentUpdateState     cloudprotocol.UpdateState
 }
 
 type testLayerManager struct {
@@ -143,7 +149,7 @@ func TestBoardConfiguration(t *testing.T) {
 		expectedBoardConfig = "{someboardconfig}"
 	)
 
-	smServer, err := smserver.New(&smConfig, &testLauncher, nil, nil, nil, nil,
+	smServer, err := smserver.New(&smConfig, &testLauncher, nil, nil, nil, nil, nil,
 		&testResourceManager, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
@@ -205,7 +211,7 @@ func TestServicesMessages(t *testing.T) {
 
 	testServiceManager := testServiceManager{}
 
-	smServer, err := smserver.New(&smConfig, nil, &testServiceManager, nil, nil, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, &testServiceManager, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -286,7 +292,7 @@ func TestLayerMessages(t *testing.T) {
 
 	testLayerManager := &testLayerManager{}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, testLayerManager, nil, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, testLayerManager, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -361,7 +367,7 @@ func TestAlertNotifications(t *testing.T) {
 
 	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, testAlerts, nil, nil,
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, testAlerts, nil, nil,
 		nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
@@ -598,7 +604,7 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan cloudprotocol.MonitoringData, 10)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -686,14 +692,17 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 }
 
-func TestServiceStateProcessing(t *testing.T) {
+func TestInstanceStateProcessing(t *testing.T) {
 	smConfig := config.Config{
 		SMServerURL: serverURL,
 	}
 
-	launcher := &testLauncher{stateChannel: make(chan *pb.SMNotifications, 10)}
+	stateHandler := testStateHandler{
+		newStateChan: make(chan cloudprotocol.NewState, 10),
+		stateReqChan: make(chan cloudprotocol.StateRequest, 10),
+	}
 
-	smServer, err := smserver.New(&smConfig, launcher, nil, nil, nil, nil, nil, nil, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, &stateHandler, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
@@ -703,12 +712,14 @@ func TestServiceStateProcessing(t *testing.T) {
 			t.Errorf("Can't start sm server")
 		}
 	}()
+
 	defer smServer.Stop()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test client: %s", err)
 	}
+
 	defer client.close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -719,39 +730,84 @@ func TestServiceStateProcessing(t *testing.T) {
 		t.Fatalf("Can't subscribe: %s", err)
 	}
 
-	etalonNewStateMsg := &pb.NewServiceState{
-		CorrelationId: "corelationID",
-		ServiceState:  &pb.ServiceState{ServiceId: "serviecId1", StateChecksum: "someCheckSum", State: []byte("state1")},
+	var (
+		stateStr    = "super mega test state"
+		checkSumStr = "someCheckSum"
+	)
+
+	expectedNewState := &pb.SMNotifications{SMNotification: &pb.SMNotifications_NewInstanceState{
+		NewInstanceState: &pb.NewInstanceState{State: &pb.InstanceState{
+			Instance:      &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2},
+			StateChecksum: checkSumStr,
+			State:         []byte(stateStr),
+		}},
+	}}
+
+	stateHandler.newStateChan <- cloudprotocol.NewState{
+		InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 2},
+		Checksum:      checkSumStr, State: stateStr,
 	}
 
-	launcher.stateChannel <- &pb.SMNotifications{
-		SMNotification: &pb.SMNotifications_NewServiceState{NewServiceState: etalonNewStateMsg},
-	}
-
-	receiveNewSate, err := notifications.Recv()
+	receivedNewState, err := notifications.Recv()
 	if err != nil {
-		t.Errorf("Can't receive monitoring data: %s", err)
+		t.Fatalf("Can't receive notification data: %s", err)
 	}
 
-	if !proto.Equal(receiveNewSate.GetNewServiceState(), etalonNewStateMsg) {
-		log.Error("received newSate data != sent data")
+	if !proto.Equal(expectedNewState, receivedNewState) {
+		t.Error("received new state doesn't match sent data")
 	}
 
-	etalonStateRequest := &pb.ServiceStateRequest{ServiceId: "serviceId2", Default: false}
+	expectedStateStateAcceptance := cloudprotocol.StateAcceptance{
+		InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 2},
+		Checksum:      checkSumStr, Result: "result", Reason: "OK",
+	}
 
-	launcher.stateChannel <- &pb.SMNotifications{
-		SMNotification: &pb.SMNotifications_ServiceStateRequest{
-			ServiceStateRequest: etalonStateRequest,
+	if _, err := smServer.InstanceStateAcceptance(context.Background(),
+		&pb.StateAcceptance{
+			Instance:      &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2},
+			StateChecksum: checkSumStr, Result: "result", Reason: "OK",
+		}); err != nil {
+		t.Fatalf("Can't call instance state acceptance: %s", err)
+	}
+
+	if !reflect.DeepEqual(expectedStateStateAcceptance, stateHandler.currentStateAcceptance) {
+		t.Errorf("Incorrect state acceptance message")
+	}
+
+	expectedStateRequest := &pb.SMNotifications{SMNotification: &pb.SMNotifications_InstanceStateRequest{
+		InstanceStateRequest: &pb.InstanceStateRequest{
+			Instance: &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2}, Default: true,
 		},
+	}}
+
+	stateHandler.stateReqChan <- cloudprotocol.StateRequest{
+		InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 2}, Default: true,
 	}
 
-	receivedSateRequest, err := notifications.Recv()
+	receivedStateRequest, err := notifications.Recv()
 	if err != nil {
-		t.Errorf("Can't receive monitoring data: %s", err)
+		t.Fatalf("Can't receive notification data: %s", err)
 	}
 
-	if !proto.Equal(receivedSateRequest.GetServiceStateRequest(), etalonStateRequest) {
-		log.Error("received state request data != sent data")
+	if !proto.Equal(expectedStateRequest, receivedStateRequest) {
+		t.Error("received state doesn't match sent data")
+	}
+
+	expectedUpdateState := cloudprotocol.UpdateState{
+		InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 2},
+		Checksum:      checkSumStr, State: stateStr,
+	}
+
+	if _, err := smServer.SetInstanceState(context.Background(), &pb.InstanceState{
+		Instance:      &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2},
+		StateChecksum: checkSumStr,
+		State:         []byte(stateStr),
+	}); err != nil {
+		t.Fatalf("Can't set instance state: %s", err)
+	}
+
+	if !reflect.DeepEqual(expectedUpdateState, stateHandler.currentUpdateState) {
+		t.Errorf("Received update state doesn't match expected one")
 	}
 }
 
@@ -762,7 +818,7 @@ func TestLogsNotification(t *testing.T) {
 
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
-	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+	smServer, err := smserver.New(&smConfig, nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
@@ -858,16 +914,24 @@ func (launcher *testLauncher) SetUsers(users []string) (err error) {
 	return nil
 }
 
-func (launcher *testLauncher) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
+func (handler *testStateHandler) NewStateChannel() <-chan cloudprotocol.NewState {
+	return handler.newStateChan
+}
+
+func (handler *testStateHandler) StateRequestChannel() <-chan cloudprotocol.StateRequest {
+	return handler.stateReqChan
+}
+
+func (handler *testStateHandler) UpdateState(updateState cloudprotocol.UpdateState) error {
+	handler.currentUpdateState = updateState
+
 	return nil
 }
 
-func (launcher *testLauncher) SetServiceState(state *pb.ServiceState) (err error) {
-	return nil
-}
+func (handler *testStateHandler) StateAcceptance(stateAcceptance cloudprotocol.StateAcceptance) error {
+	handler.currentStateAcceptance = stateAcceptance
 
-func (launcher *testLauncher) GetStateMessageChannel() (channel <-chan *pb.SMNotifications) {
-	return launcher.stateChannel
+	return nil
 }
 
 func (launcher *testLauncher) RestartInstances() error {
