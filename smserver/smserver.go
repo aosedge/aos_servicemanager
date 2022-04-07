@@ -65,11 +65,16 @@ type ServiceManager interface {
 // ServiceLauncher services launcher interface.
 type ServiceLauncher interface {
 	SetUsers(users []string) (err error)
-	StateAcceptance(acceptance *pb.StateAcceptance) (err error)
-	SetServiceState(state *pb.ServiceState) (err error)
-	GetStateMessageChannel() (stateChannel <-chan *pb.SMNotifications)
 	RestartInstances() error
 	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
+}
+
+// StateHandler instance state handler interface.
+type StateHandler interface {
+	NewStateChannel() <-chan cloudprotocol.NewState
+	StateRequestChannel() <-chan cloudprotocol.StateRequest
+	UpdateState(updateState cloudprotocol.UpdateState) error
+	StateAcceptance(updateState cloudprotocol.StateAcceptance) error
 }
 
 // LayerProvider services layer manager interface.
@@ -114,6 +119,7 @@ type SMServer struct {
 	launcher             ServiceLauncher
 	serviceManager       ServiceManager
 	layerProvider        LayerProvider
+	stateHandler         StateHandler
 	grpcServer           *grpc.Server
 	listener             net.Listener
 	boardConfigProcessor BoardConfigProcessor
@@ -121,7 +127,8 @@ type SMServer struct {
 	notificationStream   pb.SMService_SubscribeSMNotificationsServer
 	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    <-chan cloudprotocol.MonitoringData
-	stateChannel         <-chan *pb.SMNotifications
+	newStateChannel      <-chan cloudprotocol.NewState
+	stateReqChannel      <-chan cloudprotocol.StateRequest
 	logsChannel          <-chan cloudprotocol.PushLog
 	pb.UnimplementedSMServiceServer
 }
@@ -132,11 +139,12 @@ type SMServer struct {
 
 // New creates new IAM server instance.
 func New(cfg *config.Config, launcher ServiceLauncher, serviceManager ServiceManager, layerProvider LayerProvider,
-	alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider, boardConfigProcessor BoardConfigProcessor,
-	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, certProvider CertificateProvider, insecure bool,
+	stateHandler StateHandler, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
+	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext,
+	certProvider CertificateProvider, insecure bool,
 ) (server *SMServer, err error) {
 	server = &SMServer{
-		launcher: launcher, serviceManager: serviceManager, layerProvider: layerProvider,
+		launcher: launcher, serviceManager: serviceManager, layerProvider: layerProvider, stateHandler: stateHandler,
 		boardConfigProcessor: boardConfigProcessor, logsProvider: logsProvider,
 	}
 
@@ -148,8 +156,9 @@ func New(cfg *config.Config, launcher ServiceLauncher, serviceManager ServiceMan
 		server.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
 	}
 
-	if launcher != nil {
-		server.stateChannel = launcher.GetStateMessageChannel()
+	if stateHandler != nil {
+		server.newStateChannel = stateHandler.NewStateChannel()
+		server.stateReqChannel = stateHandler.StateRequestChannel()
 	}
 
 	if logsProvider != nil {
@@ -255,14 +264,24 @@ func (server *SMServer) GetServicesStatus(context.Context, *empty.Empty) (*pb.Se
 	return services, nil
 }
 
-// ServiceStateAcceptance accepts new services state.
-func (server *SMServer) ServiceStateAcceptance(ctx context.Context, acceptance *pb.StateAcceptance) (*empty.Empty, error) {
-	return &emptypb.Empty{}, server.launcher.StateAcceptance(acceptance)
+// InstanceStateAcceptance accepts new services instance state.
+func (server *SMServer) InstanceStateAcceptance(ctx context.Context, accept *pb.StateAcceptance) (*empty.Empty, error) {
+	state := cloudprotocol.StateAcceptance{
+		InstanceIdent: instanceIdentPBToCloudprotocol(accept.Instance),
+		Checksum:      accept.StateChecksum, Result: accept.Result, Reason: accept.Reason,
+	}
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.stateHandler.StateAcceptance(state))
 }
 
-// SetServiceState sets state for aos service.
-func (server *SMServer) SetServiceState(ctx context.Context, state *pb.ServiceState) (ret *empty.Empty, err error) {
-	return &emptypb.Empty{}, server.launcher.SetServiceState(state)
+// SetInstanceState sets state for service instance.
+func (server *SMServer) SetInstanceState(ctx context.Context, state *pb.InstanceState) (*empty.Empty, error) {
+	newState := cloudprotocol.UpdateState{
+		InstanceIdent: instanceIdentPBToCloudprotocol(state.Instance),
+		Checksum:      state.StateChecksum, State: string(state.State),
+	}
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.stateHandler.UpdateState(newState))
 }
 
 // OverrideEnvVars overrides entrainment variables for the service.
@@ -380,9 +399,29 @@ func (server *SMServer) handleChannels() {
 				return
 			}
 
-		case stateMsg := <-server.stateChannel:
-			if err := server.notificationStream.Send(stateMsg); err != nil {
-				log.Errorf("Can't send state notification :%s ", err)
+		case newState := <-server.newStateChannel:
+			if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: &pb.SMNotifications_NewInstanceState{
+				NewInstanceState: &pb.NewInstanceState{State: &pb.InstanceState{
+					Instance:      cloudprotocolInstanceIdentToPB(newState.InstanceIdent),
+					StateChecksum: newState.Checksum,
+					State:         []byte(newState.State),
+				}},
+			}}); err != nil {
+				log.Errorf("Can't send new instance state notification :%s ", err)
+
+				return
+			}
+
+		case stateRquest := <-server.stateReqChannel:
+			if err := server.notificationStream.Send(
+				&pb.SMNotifications{SMNotification: &pb.SMNotifications_InstanceStateRequest{
+					InstanceStateRequest: &pb.InstanceStateRequest{
+						Instance: cloudprotocolInstanceIdentToPB(stateRquest.InstanceIdent),
+						Default:  stateRquest.Default,
+					},
+				}}); err != nil {
+				log.Errorf("Can't send state request notification :%s ", err)
+
 				return
 			}
 
@@ -574,6 +613,12 @@ func getPBInstanceAlertFromPayload(payload interface{}) (*pb.Alert_InstanceAlert
 
 func cloudprotocolInstanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
 	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+}
+
+func instanceIdentPBToCloudprotocol(ident *pb.InstanceIdent) cloudprotocol.InstanceIdent {
+	return cloudprotocol.InstanceIdent{
+		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: uint64(ident.Instance),
+	}
 }
 
 func cloudprotocolMonitoringToPB(monitoring cloudprotocol.MonitoringData) *pb.Monitoring {
