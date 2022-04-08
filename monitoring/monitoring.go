@@ -99,8 +99,8 @@ type Monitor struct {
 // MonitorParams instance monitoring parameters.
 type MonitorParams struct {
 	cloudprotocol.InstanceIdent
-	UID        uint32
-	GID        uint32
+	UID        int
+	GID        int
 	AlertRules *aostypes.ServiceAlertRules
 }
 
@@ -250,8 +250,8 @@ func (monitor *Monitor) StartInstanceMonitor(instanceID string, monitoringConfig
 	log.WithFields(log.Fields{"id": instanceID}).Debug("Start service monitoring")
 
 	serviceMonitoring := instanceMonitoring{
-		uid:            monitoringConfig.UID,
-		gid:            monitoringConfig.GID,
+		uid:            uint32(monitoringConfig.UID),
+		gid:            uint32(monitoringConfig.GID),
 		monitoringData: cloudprotocol.InstanceMonitoringData{InstanceIdent: monitoringConfig.InstanceIdent},
 	}
 
