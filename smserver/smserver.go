@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
@@ -62,11 +63,12 @@ type ServiceManager interface {
 	GetAllServicesStatus() ([]servicemanager.ServiceInfo, error)
 }
 
-// ServiceLauncher services launcher interface.
-type ServiceLauncher interface {
-	SetUsers(users []string) (err error)
+// InstanceLauncher service instances launcher interface.
+type InstanceLauncher interface {
+	RunInstances(instances []cloudprotocol.InstanceInfo) error
 	RestartInstances() error
-	ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error)
+	RuntimeStatusChannel() <-chan launcher.RuntimeStatus
+	OverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) ([]cloudprotocol.EnvVarsInstanceStatus, error)
 }
 
 // StateHandler instance state handler interface.
@@ -113,10 +115,10 @@ type CertificateProvider interface {
 	GetCertKeyURL(keyType string) (certURL, keyURL string, err error)
 }
 
-// SMServer SM server instance
+// SMServer SM server instance.
 type SMServer struct {
 	url                  string
-	launcher             ServiceLauncher
+	launcher             InstanceLauncher
 	serviceManager       ServiceManager
 	layerProvider        LayerProvider
 	stateHandler         StateHandler
@@ -125,6 +127,7 @@ type SMServer struct {
 	boardConfigProcessor BoardConfigProcessor
 	logsProvider         LogsProvider
 	notificationStream   pb.SMService_SubscribeSMNotificationsServer
+	runtimeStatusChannel <-chan launcher.RuntimeStatus
 	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    <-chan cloudprotocol.MonitoringData
 	newStateChannel      <-chan cloudprotocol.NewState
@@ -138,7 +141,7 @@ type SMServer struct {
  ******************************************************************************/
 
 // New creates new IAM server instance.
-func New(cfg *config.Config, launcher ServiceLauncher, serviceManager ServiceManager, layerProvider LayerProvider,
+func New(cfg *config.Config, launcher InstanceLauncher, serviceManager ServiceManager, layerProvider LayerProvider,
 	stateHandler StateHandler, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
 	boardConfigProcessor BoardConfigProcessor, logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext,
 	certProvider CertificateProvider, insecure bool,
@@ -146,6 +149,10 @@ func New(cfg *config.Config, launcher ServiceLauncher, serviceManager ServiceMan
 	server = &SMServer{
 		launcher: launcher, serviceManager: serviceManager, layerProvider: layerProvider, stateHandler: stateHandler,
 		boardConfigProcessor: boardConfigProcessor, logsProvider: logsProvider,
+	}
+
+	if server.launcher != nil {
+		server.runtimeStatusChannel = launcher.RuntimeStatusChannel()
 	}
 
 	if alertsProvider != nil {
@@ -284,13 +291,61 @@ func (server *SMServer) SetInstanceState(ctx context.Context, state *pb.Instance
 	return &emptypb.Empty{}, aoserrors.Wrap(server.stateHandler.UpdateState(newState))
 }
 
-// OverrideEnvVars overrides entrainment variables for the service.
-func (server *SMServer) OverrideEnvVars(ctx context.Context,
-	envVars *pb.OverrideEnvVarsRequest,
-) (status *pb.OverrideEnvVarStatus, err error) {
-	varsStatus, err := server.launcher.ProcessDesiredEnvVarsList(envVars.GetEnvVars())
+// RunInstances run service instances.
+func (server *SMServer) RunInstances(ctx context.Context, runRequest *pb.RunInstancesRequest) (*empty.Empty, error) {
+	instances := make([]cloudprotocol.InstanceInfo, len(runRequest.Instances))
 
-	return &pb.OverrideEnvVarStatus{EnvVarStatus: varsStatus}, err
+	for i, pbInstance := range runRequest.Instances {
+		instances[i] = cloudprotocol.InstanceInfo{
+			ServiceID: pbInstance.ServiceId,
+			SubjectID: pbInstance.SubjectId, NumInstances: pbInstance.NumInstances,
+		}
+	}
+
+	return &emptypb.Empty{}, aoserrors.Wrap(server.launcher.RunInstances(instances))
+}
+
+// OverrideEnvVars overrides entrainment variables for the service.
+func (server *SMServer) OverrideEnvVars(
+	ctx context.Context, envVars *pb.OverrideEnvVarsRequest,
+) (*pb.OverrideEnvVarStatus, error) {
+	envVarsInfo := make([]cloudprotocol.EnvVarsInstanceInfo, len(envVars.EnvVars))
+
+	for i, pbEnvVar := range envVars.EnvVars {
+		envVarsInfo[i] = cloudprotocol.EnvVarsInstanceInfo{
+			InstanceFilter: getInstanceFilterFromPB(pbEnvVar.Instance),
+			EnvVars:        make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.Vars)),
+		}
+
+		for j, envVar := range pbEnvVar.Vars {
+			envVarsInfo[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: envVar.VarId, Variable: envVar.Variable}
+
+			if envVar.Ttl != nil {
+				localTime := envVar.Ttl.AsTime()
+				envVarsInfo[i].EnvVars[j].TTL = &localTime
+			}
+		}
+	}
+
+	envVarsStatuses, err := server.launcher.OverrideEnvVars(envVarsInfo)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	statuses := &pb.OverrideEnvVarStatus{EnvVarsStatus: make([]*pb.EnvVarInstanceStatus, len(envVarsStatuses))}
+
+	for i, status := range envVarsStatuses {
+		statuses.EnvVarsStatus[i] = &pb.EnvVarInstanceStatus{
+			Instance:   cloudprotocolFilterToPBInstance(status.InstanceFilter),
+			VarsStatus: make([]*pb.EnvVarStatus, len(status.Statuses)),
+		}
+
+		for j, varStatus := range status.Statuses {
+			statuses.EnvVarsStatus[i].VarsStatus[j] = &pb.EnvVarStatus{VarId: varStatus.ID, Error: varStatus.Error}
+		}
+	}
+
+	return statuses, nil
 }
 
 // InstallLayer installs the layer.
@@ -371,6 +426,13 @@ func (server *SMServer) GetInstanceCrashLog(ctx context.Context, req *pb.Instanc
 func (server *SMServer) handleChannels() {
 	for {
 		select {
+		case runtimeStatus := <-server.runtimeStatusChannel:
+			if err := server.sendRuntimeInstanceNotifications(runtimeStatus); err != nil {
+				log.Errorf("Can't send runtime instance notification: %s", err)
+
+				return
+			}
+
 		case alert := <-server.alertChannel:
 			pbAlert, err := cloudprotocolAlertToPB(&alert)
 			if err != nil {
@@ -441,6 +503,30 @@ func (server *SMServer) handleChannels() {
 	}
 }
 
+func (server *SMServer) sendRuntimeInstanceNotifications(runtimeStatus launcher.RuntimeStatus) error {
+	if runtimeStatus.RunStatus != nil {
+		runStatusNtf := &pb.SMNotifications_RunInstancesStatus{
+			RunInstancesStatus: runInstanceStatusToPB(runtimeStatus.RunStatus),
+		}
+
+		if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: runStatusNtf}); err != nil {
+			return aoserrors.Errorf("Can't send runtime status notification: %s ", err)
+		}
+	}
+
+	if runtimeStatus.UpdateStatus != nil {
+		updateStatusNtf := &pb.SMNotifications_UpdateInstancesStatus{
+			UpdateInstancesStatus: updateInstanceStatusToPB(runtimeStatus.UpdateStatus),
+		}
+
+		if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: updateStatusNtf}); err != nil {
+			return aoserrors.Errorf("Can't send update status notification: %s ", err)
+		}
+	}
+
+	return nil
+}
+
 func getFromTillTimeFromPB(fromPB, tillPB *timestamp.Timestamp) (from, till *time.Time) {
 	if fromPB != nil {
 		localFrom := fromPB.AsTime()
@@ -471,6 +557,20 @@ func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.Inst
 	}
 
 	return filter
+}
+
+func cloudprotocolFilterToPBInstance(filter cloudprotocol.InstanceFilter) *pb.InstanceIdent {
+	ident := &pb.InstanceIdent{ServiceId: filter.ServiceID, SubjectId: "", Instance: -1}
+
+	if filter.SubjectID != nil {
+		ident.SubjectId = *filter.SubjectID
+	}
+
+	if filter.Instance != nil {
+		ident.Instance = (int64)(*filter.Instance)
+	}
+
+	return ident
 }
 
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
@@ -646,4 +746,54 @@ func cloudprotocolMonitoringToPB(monitoring cloudprotocol.MonitoringData) *pb.Mo
 	}
 
 	return pbMonitoring
+}
+
+func runInstanceStatusToPB(runStatus *launcher.RunInstancesStatus) *pb.RunInstancesStatus {
+	pbStatus := &pb.RunInstancesStatus{
+		UnitSubjects:  runStatus.UnitSubjects,
+		Instances:     make([]*pb.InstanceStatus, len(runStatus.Instances)),
+		ErrorServices: make([]*pb.ServiceError, len(runStatus.ErrorServices)),
+	}
+
+	for i, instance := range runStatus.Instances {
+		pbStatus.Instances[i] = cloudprotocolInstanceStatusToPB(instance)
+	}
+
+	for i, errService := range runStatus.ErrorServices {
+		pbStatus.ErrorServices[i] = &pb.ServiceError{
+			ServiceId: errService.ID, AosVersion: errService.AosVersion,
+			ErrorInfo: cloudprotocolErrorInfoToPB(errService.ErrorInfo),
+		}
+	}
+
+	return pbStatus
+}
+
+func updateInstanceStatusToPB(updateStatus *launcher.UpdateInstancesStatus) *pb.UpdateInstancesStatus {
+	pbStatus := &pb.UpdateInstancesStatus{Instances: make([]*pb.InstanceStatus, len(updateStatus.Instances))}
+
+	for i, instance := range updateStatus.Instances {
+		pbStatus.Instances[i] = cloudprotocolInstanceStatusToPB(instance)
+	}
+
+	return pbStatus
+}
+
+func cloudprotocolInstanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
+	return &pb.InstanceStatus{
+		Instance:   cloudprotocolInstanceIdentToPB(instance.InstanceIdent),
+		AosVersion: instance.AosVersion, StateChecksum: instance.StateChecksum,
+		RunState: instance.RunState, ErrorInfo: cloudprotocolErrorInfoToPB(instance.ErrorInfo),
+	}
+}
+
+func cloudprotocolErrorInfoToPB(errorInfo *cloudprotocol.ErrorInfo) *pb.ErrorInfo {
+	if errorInfo == nil {
+		return nil
+	}
+
+	return &pb.ErrorInfo{
+		AosCode:  int32(errorInfo.AosCode),
+		ExitCode: int32(errorInfo.ExitCode), Message: errorInfo.Message,
+	}
 }
