@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 	"github.com/aoscloud/aos_servicemanager/smserver"
@@ -54,7 +55,10 @@ const (
  ******************************************************************************/
 
 type testLauncher struct {
-	wasRestart bool
+	runtimeStatusChan chan launcher.RuntimeStatus
+	wasRestart        bool
+	envVarRequest     []cloudprotocol.EnvVarsInstanceInfo
+	runRequest        []cloudprotocol.InstanceInfo
 }
 
 type testServiceManager struct {
@@ -201,6 +205,158 @@ func TestBoardConfiguration(t *testing.T) {
 
 	if testResourceManager.receivedBoardConfig != expectedBoardConfig {
 		t.Error("Incorrect board config in set board config call")
+	}
+}
+
+func TestInstanceMessages(t *testing.T) {
+	smConfig := config.Config{
+		SMServerURL: serverURL,
+	}
+
+	testLauncher := &testLauncher{runtimeStatusChan: make(chan launcher.RuntimeStatus, 10)}
+
+	smServer, err := smserver.New(&smConfig, testLauncher, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create: SM Server %s", err)
+	}
+
+	go func() {
+		if err := smServer.Start(); err != nil {
+			t.Errorf("Can't start sm server: %s", err)
+		}
+	}()
+
+	defer smServer.Stop()
+
+	client, err := newTestClient(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test client: %s", err)
+	}
+
+	defer client.close()
+
+	sendEnvVars := &pb.OverrideEnvVarsRequest{EnvVars: []*pb.OverrideInstanceEnvVar{}}
+	expectedRequest := []cloudprotocol.EnvVarsInstanceInfo{}
+	expectedStatus := &pb.OverrideEnvVarStatus{EnvVarsStatus: []*pb.EnvVarInstanceStatus{}}
+
+	for i := 0; i < 5; i++ {
+		curentTime := time.Now()
+
+		sendEnvVars.EnvVars = append(sendEnvVars.EnvVars, &pb.OverrideInstanceEnvVar{
+			Instance: &pb.InstanceIdent{ServiceId: "id" + strconv.Itoa(i), SubjectId: "s1", Instance: int64(i - 1)},
+			Vars: []*pb.EnvVarInfo{
+				{VarId: "varId" + strconv.Itoa(i), Variable: "variable " + strconv.Itoa(i)},
+				{VarId: "varId2" + strconv.Itoa(i), Variable: "variable 2" + strconv.Itoa(i), Ttl: timestamppb.New(curentTime)},
+			},
+		})
+
+		expectedRequest = append(expectedRequest, cloudprotocol.EnvVarsInstanceInfo{
+			InstanceFilter: createInstanceFilter("id"+strconv.Itoa(i), "s1", int64(i-1)),
+			EnvVars: []cloudprotocol.EnvVarInfo{
+				{ID: "varId" + strconv.Itoa(i), Variable: "variable " + strconv.Itoa(i)},
+				{ID: "varId2" + strconv.Itoa(i), Variable: "variable 2" + strconv.Itoa(i), TTL: &curentTime},
+			},
+		})
+
+		expectedStatus.EnvVarsStatus = append(expectedStatus.EnvVarsStatus, &pb.EnvVarInstanceStatus{
+			Instance: &pb.InstanceIdent{ServiceId: "id" + strconv.Itoa(i), SubjectId: "s1", Instance: int64(i - 1)},
+			VarsStatus: []*pb.EnvVarStatus{
+				{VarId: "varId" + strconv.Itoa(i)}, {VarId: "varId2" + strconv.Itoa(i)},
+			},
+		})
+	}
+
+	sendEnvVars.EnvVars[0].Instance.SubjectId = ""
+	expectedRequest[0].InstanceFilter.SubjectID = nil
+	expectedStatus.EnvVarsStatus[0].Instance.SubjectId = ""
+
+	envVarStatus, err := smServer.OverrideEnvVars(context.Background(), sendEnvVars)
+	if err != nil {
+		t.Fatalf("Can't override env vars: %s", err)
+	}
+
+	if !proto.Equal(envVarStatus, expectedStatus) {
+		t.Error("Incorrect override env var status")
+	}
+
+	if reflect.DeepEqual(expectedRequest, testLauncher.envVarRequest) {
+		t.Error("Incorrect env var request")
+	}
+
+	runRequest := &pb.RunInstancesRequest{Instances: []*pb.RunInstanceRequest{}}
+	expectedRunRequest := []cloudprotocol.InstanceInfo{}
+	expectedRuntimeStatus := &pb.RunInstancesStatus{}
+	expectedUpdateStatus := &pb.UpdateInstancesStatus{}
+
+	for i := 0; i < 6; i++ {
+		runRequest.Instances = append(runRequest.Instances, &pb.RunInstanceRequest{
+			ServiceId: "id" + strconv.Itoa(i), SubjectId: "subj" + strconv.Itoa(i), NumInstances: uint64(i + 1),
+		})
+
+		expectedRunRequest = append(expectedRunRequest, cloudprotocol.InstanceInfo{
+			ServiceID: "id" + strconv.Itoa(i),
+			SubjectID: "subj" + strconv.Itoa(i), NumInstances: uint64(i + 1),
+		})
+
+		if i%2 == 0 {
+			expectedRuntimeStatus.Instances = append(expectedRuntimeStatus.Instances,
+				&pb.InstanceStatus{
+					Instance: &pb.InstanceIdent{
+						ServiceId: "id" + strconv.Itoa(i), SubjectId: "subj" + strconv.Itoa(i),
+						Instance: int64(i + 1),
+					},
+					AosVersion: uint64(i), StateChecksum: "checkSum", RunState: "running",
+				})
+
+			expectedRuntimeStatus.UnitSubjects = append(expectedRuntimeStatus.UnitSubjects, "subj"+strconv.Itoa(i))
+		} else {
+			expectedUpdateStatus.Instances = append(expectedUpdateStatus.Instances, &pb.InstanceStatus{
+				Instance: &pb.InstanceIdent{
+					ServiceId: "id" + strconv.Itoa(i), SubjectId: "subj" + strconv.Itoa(i),
+					Instance: int64(i + 1),
+				},
+				AosVersion: uint64(i), StateChecksum: "checkSum", RunState: "running",
+			})
+		}
+	}
+
+	if _, err := smServer.RunInstances(context.Background(), runRequest); err != nil {
+		t.Fatalf("Can't run instances")
+	}
+
+	if !reflect.DeepEqual(expectedRunRequest, testLauncher.runRequest) {
+		t.Errorf("Incorrect run instances request")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	notifications, err := client.pbclient.SubscribeSMNotifications(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Can't subscribe: %s", err)
+	}
+
+	receivedRunNtf, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive run notification: %s", err)
+	}
+
+	if !proto.Equal(receivedRunNtf, &pb.SMNotifications{
+		SMNotification: &pb.SMNotifications_RunInstancesStatus{RunInstancesStatus: expectedRuntimeStatus},
+	}) {
+		t.Error("Incorrect instance run status notification")
+	}
+
+	receivedUpdateNtf, err := notifications.Recv()
+	if err != nil {
+		t.Errorf("Can't receive instance update notification: %s", err)
+	}
+
+	if !proto.Equal(receivedUpdateNtf, &pb.SMNotifications{
+		SMNotification: &pb.SMNotifications_UpdateInstancesStatus{UpdateInstancesStatus: expectedUpdateStatus},
+	}) {
+		t.Error("Incorrect instance update status notification")
 	}
 }
 
@@ -910,10 +1066,6 @@ func TestLogsNotification(t *testing.T) {
  * Interfaces
  ******************************************************************************/
 
-func (launcher *testLauncher) SetUsers(users []string) (err error) {
-	return nil
-}
-
 func (handler *testStateHandler) NewStateChannel() <-chan cloudprotocol.NewState {
 	return handler.newStateChan
 }
@@ -934,13 +1086,68 @@ func (handler *testStateHandler) StateAcceptance(stateAcceptance cloudprotocol.S
 	return nil
 }
 
-func (launcher *testLauncher) RestartInstances() error {
-	launcher.wasRestart = true
+func (testlauncher *testLauncher) RunInstances(instances []cloudprotocol.InstanceInfo) error {
+	testlauncher.runRequest = instances
+
+	var (
+		runStatus    launcher.RunInstancesStatus
+		updateStatus launcher.UpdateInstancesStatus
+		notification launcher.RuntimeStatus
+	)
+
+	for i, runReq := range instances {
+		instanceStatus := cloudprotocol.InstanceStatus{
+			InstanceIdent: cloudprotocol.InstanceIdent{
+				ServiceID: runReq.ServiceID,
+				SubjectID: runReq.SubjectID, Instance: runReq.NumInstances,
+			},
+			AosVersion: uint64(i), StateChecksum: "checkSum", RunState: "running",
+		}
+
+		if i%2 == 0 {
+			runStatus.Instances = append(runStatus.Instances, instanceStatus)
+			runStatus.UnitSubjects = append(runStatus.UnitSubjects, runReq.SubjectID)
+		} else {
+			updateStatus.Instances = append(updateStatus.Instances, instanceStatus)
+		}
+	}
+
+	notification.RunStatus = &runStatus
+	testlauncher.runtimeStatusChan <- notification
+	notification.RunStatus = nil
+	notification.UpdateStatus = &updateStatus
+	testlauncher.runtimeStatusChan <- notification
 
 	return nil
 }
 
-func (launcher *testLauncher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus, err error) {
+func (testlauncher *testLauncher) RuntimeStatusChannel() <-chan launcher.RuntimeStatus {
+	return testlauncher.runtimeStatusChan
+}
+
+func (testlauncher *testLauncher) RestartInstances() error {
+	testlauncher.wasRestart = true
+
+	return nil
+}
+
+func (testlauncher *testLauncher) OverrideEnvVars(
+	envVarsInfo []cloudprotocol.EnvVarsInstanceInfo,
+) (status []cloudprotocol.EnvVarsInstanceStatus, err error) {
+	testlauncher.envVarRequest = envVarsInfo
+
+	for _, info := range envVarsInfo {
+		oneStatus := cloudprotocol.EnvVarsInstanceStatus{
+			InstanceFilter: info.InstanceFilter, Statuses: make([]cloudprotocol.EnvVarStatus, len(info.EnvVars)),
+		}
+
+		for i, envVar := range info.EnvVars {
+			oneStatus.Statuses[i] = cloudprotocol.EnvVarStatus{ID: envVar.ID}
+		}
+
+		status = append(status, oneStatus)
+	}
+
 	return status, nil
 }
 
@@ -1153,4 +1360,20 @@ func compareServiceLogRequest(expected *pb.InstanceLogRequest, received cloudpro
 	}
 
 	return nil
+}
+
+func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
+	filter.ServiceID = serviceID
+
+	if subjectID != "" {
+		filter.SubjectID = &subjectID
+	}
+
+	if instance != -1 {
+		localInstance := (uint64)(instance)
+
+		filter.Instance = &localInstance
+	}
+
+	return filter
 }
