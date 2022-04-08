@@ -42,19 +42,15 @@ import (
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
-/*******************************************************************************
- * Consts
- ******************************************************************************/
-
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 var errIncorrectAlertType = errors.New("incorrect alert type")
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // ServiceManager service manager intergace.
 type ServiceManager interface {
@@ -110,7 +106,7 @@ type LogsProvider interface {
 	GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog)
 }
 
-// CertificateProvider certificate and key provider interface
+// CertificateProvider certificate and key provider interface.
 type CertificateProvider interface {
 	GetCertKeyURL(keyType string) (certURL, keyURL string, err error)
 }
@@ -136,9 +132,9 @@ type SMServer struct {
 	pb.UnimplementedSMServiceServer
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // New creates new IAM server instance.
 func New(cfg *config.Config, launcher InstanceLauncher, serviceManager ServiceManager, layerProvider LayerProvider,
@@ -206,7 +202,11 @@ func (server *SMServer) Start() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	return server.grpcServer.Serve(server.listener)
+	if err := server.grpcServer.Serve(server.listener); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
 
 // Stop stops SM server.
@@ -380,7 +380,9 @@ func (server *SMServer) GetLayersStatus(context.Context, *empty.Empty) (*pb.Laye
 }
 
 // SubscribeSMNotifications subscribes for SM notifications.
-func (server *SMServer) SubscribeSMNotifications(req *empty.Empty, stream pb.SMService_SubscribeSMNotificationsServer) (err error) {
+func (server *SMServer) SubscribeSMNotifications(
+	req *empty.Empty, stream pb.SMService_SubscribeSMNotificationsServer,
+) (err error) {
 	server.notificationStream = stream
 
 	server.handleChannels()
@@ -419,9 +421,9 @@ func (server *SMServer) GetInstanceCrashLog(ctx context.Context, req *pb.Instanc
 	return &emptypb.Empty{}, aoserrors.Wrap(server.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest))
 }
 
-/*******************************************************************************
- * private
- ******************************************************************************/
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
 
 func (server *SMServer) handleChannels() {
 	for {
