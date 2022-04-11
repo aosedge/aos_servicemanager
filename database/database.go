@@ -516,7 +516,7 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
 	if errors.Is(err, sql.ErrNoRows) {
-		return timestamp, value, networkmanager.ErrNotExist
+		return timestamp, value, networkmanager.ErrEntryNotExist
 	}
 
 	if err != nil {
