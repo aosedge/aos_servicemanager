@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"reflect"
 	"testing"
 	"time"
 
@@ -302,6 +303,15 @@ func TestImageParts(t *testing.T) {
 	serviceInfo, err := sm.GetServiceInfo(serviceID)
 	if err != nil {
 		t.Errorf("Can't get service info: %s", err)
+	}
+
+	services, err := sm.GetAllServicesStatus()
+	if err != nil {
+		t.Errorf("Can't get all services: %s", err)
+	}
+
+	if !reflect.DeepEqual(services, serviceStorage.Services) {
+		t.Error("Incorrect services")
 	}
 
 	imageParts, err := sm.GetImageParts(serviceInfo)
@@ -657,7 +667,8 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 }
 
 func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest,
-	srvLayers []digest.Digest) (err error) {
+	srvLayers []digest.Digest,
+) (err error) {
 	type serviceManifest struct {
 		imagespec.Manifest
 		AosService *imagespec.Descriptor `json:"aosService,omitempty"`
