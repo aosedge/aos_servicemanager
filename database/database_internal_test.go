@@ -19,7 +19,6 @@ package database
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -32,9 +31,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
@@ -228,225 +225,6 @@ func TestActivateService(t *testing.T) {
 
 	if serviceFromDB.IsActive != true {
 		t.Error("Wrong active value")
-	}
-}
-
-func TestAddSameUsersService(t *testing.T) {
-	// Add service
-	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Add service
-	err = db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
-	if err == nil {
-		t.Error("Error adding same users service")
-	}
-
-	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
-	}
-}
-
-func TestNotExistUsersServices(t *testing.T) {
-	// GetService
-	_, err := db.GetUsersService([]string{"user2", "user3"}, "service18")
-	if err != nil && !errors.Is(err, ErrNotExist) {
-		t.Fatalf("Can't check if service in users: %s", err)
-	}
-
-	if err == nil {
-		t.Errorf("Error users service: %s", err)
-	}
-}
-
-func TestRemoveUsersService(t *testing.T) {
-	// Add service
-	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Remove service
-	err = db.RemoveServiceFromUsers([]string{"user0", "user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't remove users service: %s", err)
-	}
-
-	_, err = db.GetUsersService([]string{"user0", "user1"}, "service1")
-	if err != nil && !errors.Is(err, ErrNotExist) {
-		t.Fatalf("Can't check if service in users: %s", err)
-	}
-
-	if err == nil {
-		t.Errorf("Error users service: %s", err)
-	}
-}
-
-func TestAddUsersList(t *testing.T) {
-	numUsers := 5
-	numServices := 3
-
-	for i := 0; i < numUsers; i++ {
-		users := []string{fmt.Sprintf("user%d", i)}
-		for j := 0; j < numServices; j++ {
-			err := db.AddServiceToUsers(users, fmt.Sprintf("service%d", j))
-			if err != nil {
-				t.Errorf("Can't add users service: %s", err)
-			}
-		}
-	}
-
-	// Check users list
-	usersList, err := db.getUsersList()
-	if err != nil {
-		t.Fatalf("Can't get users list: %s", err)
-	}
-
-	if len(usersList) != numUsers {
-		t.Fatal("Wrong users count")
-	}
-
-	for _, users := range usersList {
-		ok := false
-
-		for i := 0; i < numUsers; i++ {
-			if users[0] == fmt.Sprintf("user%d", i) {
-				ok = true
-
-				break
-			}
-		}
-
-		if !ok {
-			t.Errorf("Invalid users: %s", users)
-		}
-	}
-
-	for j := 0; j < numServices; j++ {
-		serviceID := fmt.Sprintf("service%d", j)
-
-		usersServices, err := db.GetUsersServicesByServiceID(serviceID)
-		if err != nil {
-			t.Errorf("Can't get users services: %s", err)
-		}
-
-		for _, userService := range usersServices {
-			if userService.ServiceID != serviceID {
-				t.Errorf("Invalid serviceID: %s", userService.ServiceID)
-			}
-
-			ok := false
-
-			for i := 0; i < numUsers; i++ {
-				if userService.Users[0] == fmt.Sprintf("user%d", i) {
-					ok = true
-
-					break
-				}
-			}
-
-			if !ok {
-				t.Errorf("Invalid users: %s", userService.Users)
-			}
-		}
-
-		err = db.RemoveServiceFromAllUsers(serviceID)
-		if err != nil {
-			t.Errorf("Can't delete users: %s", err)
-		}
-	}
-
-	usersList, err = db.getUsersList()
-	if err != nil {
-		t.Fatalf("Can't get users list: %s", err)
-	}
-
-	if len(usersList) != 0 {
-		t.Fatal("Wrong users count")
-	}
-
-	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
-	}
-}
-
-func TestUsersStorage(t *testing.T) {
-	// Add users service
-	err := db.AddServiceToUsers([]string{"user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Check default values
-	usersService, err := db.GetUsersService([]string{"user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't get users service: %s", err)
-	}
-
-	if usersService.StorageFolder != "" || len(usersService.StateChecksum) != 0 {
-		t.Error("Wrong users service value")
-	}
-
-	if err = db.SetUsersStorageFolder([]string{"user1"}, "service1", "stateFolder1"); err != nil {
-		t.Errorf("Can't set users storage folder: %s", err)
-	}
-
-	if err = db.SetUsersStateChecksum([]string{"user1"}, "service1", []byte{0, 1, 2, 3, 4, 5}); err != nil {
-		t.Errorf("Can't set users state checksum: %s", err)
-	}
-
-	usersService, err = db.GetUsersService([]string{"user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't get users service: %s", err)
-	}
-
-	if usersService.StorageFolder != "stateFolder1" ||
-		!reflect.DeepEqual(usersService.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
-		t.Error("Wrong users service value")
-	}
-
-	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
-	}
-}
-
-func TestOverideEnvVars(t *testing.T) {
-	// Add users service
-	if err := db.AddServiceToUsers([]string{"subject1"}, "service1"); err != nil {
-		t.Errorf("Can't add subject service: %s", err)
-	}
-
-	ttl := time.Now().UTC()
-
-	envVars := []*pb.EnvVarInfo{}
-	envVars = append(envVars, &pb.EnvVarInfo{VarId: "some", Variable: "log=10", Ttl: timestamppb.New(ttl)})
-
-	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service2", envVars); err != nil {
-		if !errors.Is(err, ErrNotExist) {
-			t.Errorf("Should be error: %s", ErrNotExist)
-		}
-	}
-
-	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service1", envVars); err != nil {
-		t.Errorf("Can't update override env vars: %s", err)
-	}
-
-	allVars, err := db.GetAllOverrideEnvVars()
-	if err != nil {
-		t.Errorf("Can't get all env vars: %s", err)
-	}
-
-	if len(allVars) != 1 {
-		t.Error("Count of all env vars should be 1")
-	}
-
-	if reflect.DeepEqual(allVars[0].Vars, envVars) == false {
-		t.Error("Incorrect env vars in get all override env vars request")
 	}
 }
 
@@ -683,33 +461,6 @@ func TestMigrationToV1(t *testing.T) {
 /*******************************************************************************
  * Private
  ******************************************************************************/
-
-func (db *Database) getUsersList() (usersList [][]string, err error) {
-	rows, err := db.sql.Query("SELECT DISTINCT users FROM users")
-	if err != nil {
-		return usersList, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	usersList = make([][]string, 0)
-
-	for rows.Next() {
-		var usersJSON []byte
-		if err := rows.Scan(&usersJSON); err != nil {
-			return usersList, aoserrors.Wrap(err)
-		}
-
-		var users []string
-
-		if err = json.Unmarshal(usersJSON, &users); err != nil {
-			return usersList, aoserrors.Wrap(err)
-		}
-
-		usersList = append(usersList, users)
-	}
-
-	return usersList, aoserrors.Wrap(rows.Err())
-}
 
 func createDatabaseV0(name string) (err error) {
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
