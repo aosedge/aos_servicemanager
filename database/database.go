@@ -19,7 +19,6 @@ package database
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +26,6 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/migration"
 	_ "github.com/mattn/go-sqlite3" // ignore lint
 	log "github.com/sirupsen/logrus"
@@ -244,246 +242,6 @@ func (db *Database) ActivateService(service servicemanager.ServiceInfo) error {
 	return aoserrors.Wrap(err)
 }
 
-// AddServiceToUsers adds service ID to users.
-func (db *Database) AddServiceToUsers(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?, ?)")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{}, "")
-
-	return aoserrors.Wrap(err)
-}
-
-// RemoveServiceFromUsers removes service ID from users.
-func (db *Database) RemoveServiceFromUsers(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM users WHERE users = ? AND serviceid = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	_, err = stmt.Exec(usersJSON, serviceID)
-
-	return aoserrors.Wrap(err)
-}
-
-// SetUsersStorageFolder sets users storage folder.
-func (db *Database) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET storageFolder = ? WHERE users = ? AND serviceid = ?",
-		storageFolder, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// SetUsersStateChecksum sets users state checksum.
-func (db *Database) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET stateCheckSum = ? WHERE users = ? AND serviceid = ?",
-		checksum, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetUsersService returns users service.
-func (db *Database) GetUsersService(users []string, serviceID string) (usersService launcher.UsersService, err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-
-	rows, err := db.sql.Query("SELECT storageFolder, stateCheckSum FROM users WHERE users = ? AND serviceid = ?",
-		usersJSON, serviceID)
-	if err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return usersService, aoserrors.Wrap(rows.Err())
-	}
-
-	if !rows.Next() {
-		return usersService, ErrNotExist
-	}
-
-	if err = rows.Scan(&usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-
-	usersService.Users = users
-	usersService.ServiceID = serviceID
-
-	return usersService, nil
-}
-
-// GetUsersServicesByServiceID returns users services by service ID.
-func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices []launcher.UsersService, err error) {
-	rows, err := db.sql.Query("SELECT users, storageFolder, stateCheckSum FROM users WHERE serviceid = ?", serviceID)
-	if err != nil {
-		return usersServices, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		usersService := launcher.UsersService{ServiceID: serviceID}
-		usersJSON := []byte{}
-
-		if err = rows.Scan(&usersJSON, &usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		if err = json.Unmarshal(usersJSON, &usersService.Users); err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		usersServices = append(usersServices, usersService)
-	}
-
-	return usersServices, aoserrors.Wrap(rows.Err())
-}
-
-// RemoveServiceFromAllUsers removes service from all users.
-func (db *Database) RemoveServiceFromAllUsers(serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM users WHERE serviceid = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(serviceID)
-
-	return aoserrors.Wrap(err)
-}
-
-// UpdateOverrideEnvVars add/update/remove overrides env vars.
-func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars []*pb.EnvVarInfo) (err error) {
-	// TODO: Currunt version support only one user. Should be re-implemented
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	varsText := ""
-
-	if len(vars) > 0 {
-		varsJSON, err := json.Marshal(vars)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		varsText = string(varsJSON)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET overrideEnvVars = ? WHERE users = ? AND serviceid = ?",
-		varsText, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetAllOverrideEnvVars returns list of env vars for services.
-func (db *Database) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error) {
-	rows, err := db.sql.Query("SELECT users, serviceid, overrideEnvVars FROM users")
-	if err != nil {
-		return vars, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return vars, aoserrors.Wrap(rows.Err())
-	}
-
-	for rows.Next() {
-		varsText := ""
-		usersText := ""
-		users := []string{}
-
-		var envVar pb.OverrideEnvVar
-
-		err = rows.Scan(&usersText, &envVar.ServiceId, &varsText)
-		if err != nil {
-			return vars, aoserrors.Wrap(err)
-		}
-
-		if err = json.Unmarshal([]byte(usersText), &users); err != nil {
-			return vars, aoserrors.Wrap(err)
-		}
-
-		if len(users) < 1 {
-			return vars, aoserrors.Wrap(ErrNotExist)
-		}
-
-		envVar.SubjectId = users[0] // TODO: currently support only one user
-
-		if varsText != "" {
-			if err = json.Unmarshal([]byte(varsText), &envVar.Vars); err != nil {
-				return vars, aoserrors.Wrap(err)
-			}
-		}
-
-		vars = append(vars, envVar) // nolint
-	}
-
-	return vars, nil
-}
-
 // SetTrafficMonitorData stores traffic monitor data.
 func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
 	result, err := db.sql.Exec("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?", timestamp, value, chain)
@@ -660,7 +418,8 @@ func (db *Database) Close() {
  ******************************************************************************/
 
 func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (db *Database,
-	err error) {
+	err error,
+) {
 	log.WithField("name", name).Debug("Open database")
 
 	// Check and create db path
@@ -717,10 +476,6 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 	}
 
 	if err := db.createServiceTable(); err != nil {
-		return db, aoserrors.Wrap(err)
-	}
-
-	if err := db.createUsersTable(); err != nil {
 		return db, aoserrors.Wrap(err)
 	}
 
@@ -792,19 +547,6 @@ func (db *Database) createServiceTable() (err error) {
 	return aoserrors.Wrap(err)
 }
 
-func (db *Database) createUsersTable() (err error) {
-	log.Info("Create users table")
-
-	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
-															serviceid TEXT NOT NULL,
-															storageFolder TEXT,
-															stateCheckSum BLOB,
-															overrideEnvVars TEXT,
-															PRIMARY KEY(users, serviceid))`)
-
-	return aoserrors.Wrap(err)
-}
-
 func (db *Database) createTrafficMonitorTable() (err error) {
 	log.Info("Create traffic monitor table")
 
@@ -831,12 +573,6 @@ func (db *Database) createLayersTable() (err error) {
 
 func (db *Database) removeAllServices() (err error) {
 	_, err = db.sql.Exec("DELETE FROM services")
-
-	return aoserrors.Wrap(err)
-}
-
-func (db *Database) removeAllUsers() (err error) {
-	_, err = db.sql.Exec("DELETE FROM users")
 
 	return aoserrors.Wrap(err)
 }
