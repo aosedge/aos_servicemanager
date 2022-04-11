@@ -125,12 +125,19 @@ func New(config *config.Config, serviceInfoProvider ServiceStorage) (sm *Service
 
 // InstallService install service to the system.
 func (sm *ServiceManager) InstallService(
-	newService ServiceInfo, imageURL string, fileInfo image.FileInfo) (err error) {
+	newService ServiceInfo, imageURL string, fileInfo image.FileInfo,
+) (err error) {
 	return <-sm.actionHandler.Execute(newService.ServiceID,
 		func(id string) error {
 			return sm.doInstallService(newService, imageURL, fileInfo)
 		},
 	)
+}
+
+// GetAllServicesStatus gets all services status.
+func (sm *ServiceManager) GetAllServicesStatus() ([]ServiceInfo, error) {
+	services, err := sm.serviceInfoProvider.GetAllServices()
+	return services, aoserrors.Wrap(err)
 }
 
 // GetServiceInfo gets service information by id.
