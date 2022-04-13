@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
@@ -412,6 +414,172 @@ func TestLayers(t *testing.T) {
 
 	if layers[0].AosVersion != 1 {
 		t.Errorf("Layer AosVersion should be 1")
+	}
+}
+
+func TestInstances(t *testing.T) {
+	const (
+		testServiceID = "testService"
+		testSubjectID = "testSubject"
+	)
+
+	var subjectInstances, serviceInstances, running, allInstances []launcher.InstanceInfo
+
+	for i := 0; i < 5; i++ {
+		subjectInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+			ServiceID: "someServiceID" + strconv.Itoa(i),
+			SubjectID: testSubjectID, Instance: uint64(i),
+		}, AosVersion: uint64(i), UnitSubject: true, UID: i + 100, InstanceID: uuid.New().String()}
+
+		if i%2 == 0 {
+			subjectInstance.Running = true
+			running = append(running, subjectInstance)
+		}
+
+		if err := db.AddInstance(subjectInstance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+
+		subjectInstances = append(subjectInstances, subjectInstance)
+		allInstances = append(allInstances, subjectInstance)
+
+		serviceInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+			ServiceID: testServiceID,
+			SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
+		}, AosVersion: uint64(i + 20), UnitSubject: true, UID: i + 200, InstanceID: uuid.New().String()}
+
+		if i%2 == 0 {
+			serviceInstance.Running = true
+			running = append(running, serviceInstance)
+		}
+
+		if err := db.AddInstance(serviceInstance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+
+		serviceInstances = append(serviceInstances, serviceInstance)
+		allInstances = append(allInstances, serviceInstance)
+	}
+
+	// Test get all instances
+	allResults, err := db.GetAllInstances()
+	if err != nil {
+		t.Fatalf("Can't get all instances from DB %v", err)
+	}
+
+	if !reflect.DeepEqual(allResults, allInstances) {
+		t.Error("Incorrect get all instances result")
+	}
+
+	// Test get running instances
+	runningResult, err := db.GetRunningInstances()
+	if err != nil {
+		t.Fatalf("Can't get running instances from DB %v", err)
+	}
+
+	if !reflect.DeepEqual(runningResult, running) {
+		t.Error("Incorrect running instances result")
+	}
+
+	// Test get all instances by service ID
+	serviceInstancesResult, err := db.GetServiceInstances(testServiceID)
+	if err != nil {
+		t.Fatalf("Can't get instances by serviceID %v", err)
+	}
+
+	if !reflect.DeepEqual(serviceInstancesResult, serviceInstances) {
+		t.Error("Incorrect instances by serviceID result")
+	}
+
+	// Test get unavailable instances
+	serviceInstancesResult, err = db.GetServiceInstances("notAvailableServiceID")
+	if err != nil {
+		t.Fatalf("Can't get instances by serviceID %v", err)
+	}
+
+	if len(serviceInstancesResult) != 0 {
+		t.Error("incorrect count of instances")
+	}
+
+	// Test get all instances by subject ID
+	subjectInstancesResult, err := db.GetSubjectInstances(testSubjectID)
+	if err != nil {
+		t.Fatalf("Can't get instances by subjectID %v", err)
+	}
+
+	if !reflect.DeepEqual(subjectInstancesResult, subjectInstances) {
+		t.Error("Incorrect instances by subjectID result")
+	}
+
+	// Negative test: add the same instance should be failed
+	testInstanceInfo := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+		ServiceID: testServiceID,
+		SubjectID: testSubjectID, Instance: 42,
+	}, AosVersion: 42, UnitSubject: true, UID: 42, InstanceID: uuid.New().String()}
+
+	if err := db.AddInstance(testInstanceInfo); err != nil {
+		t.Fatalf("Can't add instance to DB %v", err)
+	}
+
+	if err := db.AddInstance(testInstanceInfo); err == nil {
+		t.Error("Should be error can't add instace")
+	}
+
+	// Test update instance
+	instanceResult, err := db.GetInstanceByID(testInstanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance by ID %v", err)
+	}
+
+	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
+		t.Error("Incorrect instance by ID result")
+	}
+
+	if _, err := db.GetInstanceByID("testInstanceID"); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	testInstanceInfo.Running = true
+
+	if err := db.UpdateInstance(testInstanceInfo); err != nil {
+		t.Fatalf("Can't update instance %v", err)
+	}
+
+	// Negative test: update unavailable instance should be failed
+	if err := db.UpdateInstance(
+		launcher.InstanceInfo{InstanceID: "unavailbale"}); !errors.Is(err, launcher.ErrNotExist) {
+		t.Error("Should be error: instance not exist")
+	}
+
+	// Test get all instances identifier
+	testInstanceIdent := cloudprotocol.InstanceIdent{ServiceID: testServiceID, SubjectID: testSubjectID, Instance: 42}
+
+	if instanceResult, err = db.GetInstanceByIdent(testInstanceIdent); err != nil {
+		t.Fatalf("Can't get instance by identifier %v", err)
+	}
+
+	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
+		t.Error("Incorrect instance by identifier result")
+	}
+
+	// Negative test get all instances identifier by unavailable identifier
+	testInstanceIdent.Instance = 10500
+
+	if _, err = db.GetInstanceByIdent(testInstanceIdent); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	// Test remove instance
+	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
+		t.Errorf("Can't remove instance: %v", err)
+	}
+
+	if _, err := db.GetInstanceByID(testInstanceInfo.InstanceID); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
+		t.Errorf("Can't remove instance: %v", err)
 	}
 }
 
