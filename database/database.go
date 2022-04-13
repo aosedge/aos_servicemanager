@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/migration"
 	_ "github.com/mattn/go-sqlite3" // ignore lint
 	log "github.com/sirupsen/logrus"
@@ -408,6 +409,69 @@ func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.Laye
 	return layer, nil
 }
 
+// AddInstance adds instance information to db.
+func (db *Database) AddInstance(instance launcher.InstanceInfo) error {
+	return db.executeQuery("INSERT INTO instances values(?, ?, ?, ?, ?, ?, ?, ?)",
+		instance.InstanceID, instance.ServiceID, instance.SubjectID, instance.Instance,
+		instance.AosVersion, instance.UnitSubject, instance.Running, instance.UID)
+}
+
+// UpdateInstance updates instance information in db.
+func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
+	if err = db.executeQuery(
+		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, aosVersion = ?, unitSubject = ?, running = ?,
+		 uid = ? WHERE instanceID = ?`,
+		instance.ServiceID, instance.SubjectID, instance.Instance, instance.AosVersion, instance.UnitSubject,
+		instance.Running, instance.UID, instance.InstanceID); errors.Is(err, ErrNotExist) {
+		return aoserrors.Wrap(launcher.ErrNotExist)
+	}
+
+	return err
+}
+
+// RemoveInstance removes instance information from db.
+func (db *Database) RemoveInstance(instanceID string) (err error) {
+	if err = db.executeQuery(
+		"DELETE FROM instances WHERE instanceID = ?", instanceID); errors.Is(err, ErrNotExist) {
+		return nil
+	}
+
+	return err
+}
+
+// GetInstanceByIdent returns instance information by serviceID + subjectID + instance.
+func (db *Database) GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (
+	instance launcher.InstanceInfo, err error,
+) {
+	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE serviceID = ? AND subjectID = ? AND instance = ?",
+		instanceIdent.ServiceID, instanceIdent.SubjectID, instanceIdent.Instance)
+}
+
+// GetInstanceByID returns instance information by instanceID.
+func (db *Database) GetInstanceByID(instanceID string) (instance launcher.InstanceInfo, err error) {
+	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
+}
+
+// GetAllInstances returns all instance.
+func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances")
+}
+
+// GetRunningInstances returns all running instances.
+func (db *Database) GetRunningInstances() (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE running = 1")
+}
+
+// GetSubjectInstances returns instances by subject ID.
+func (db *Database) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE subjectID = ?", subjectID)
+}
+
+// GetServiceInstances returns instances by service ID.
+func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE serviceID = ?", serviceID)
+}
+
 // Close closes database.
 func (db *Database) Close() {
 	db.sql.Close()
@@ -485,6 +549,10 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 
 	if err := db.createLayersTable(); err != nil {
 		return db, aoserrors.Wrap(err)
+	}
+
+	if err := db.createInstancesTable(); err != nil {
+		return db, err
 	}
 
 	return db, nil
@@ -571,6 +639,21 @@ func (db *Database) createLayersTable() (err error) {
 	return aoserrors.Wrap(err)
 }
 
+func (db *Database) createInstancesTable() (err error) {
+	log.Info("Create instances table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS instances (instanceID TEXT NOT NULL PRIMARY KEY,
+																serviceID TEXT,
+																subjectID TEXT,
+																instance INTEGER,
+																aosVersion INTEGER,
+																unitSubject TEXT,
+																running INTEGER,
+																uid INTEGER)`)
+
+	return aoserrors.Wrap(err)
+}
+
 func (db *Database) removeAllServices() (err error) {
 	_, err = db.sql.Exec("DELETE FROM services")
 
@@ -581,4 +664,78 @@ func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
 	return aoserrors.Wrap(err)
+}
+
+func (db *Database) executeQuery(query string, args ...interface{}) error {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(args...)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count == 0 {
+		return aoserrors.Wrap(ErrNotExist)
+	}
+
+	return nil
+}
+
+func (db *Database) getInstanceInfoFromQuery(
+	query string, args ...interface{},
+) (instance launcher.InstanceInfo, err error) {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return instance, aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	if err := stmt.QueryRow(args...).Scan(
+		&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
+		&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return instance, aoserrors.Wrap(launcher.ErrNotExist)
+		}
+
+		return instance, aoserrors.Wrap(err)
+	}
+
+	return instance, nil
+}
+
+func (db *Database) getInstancesFromQuery(
+	query string, args ...interface{},
+) (instances []launcher.InstanceInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return instances, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var instance launcher.InstanceInfo
+
+		if err = rows.Scan(
+			&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
+			&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+			return instances, aoserrors.Wrap(err)
+		}
+
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
 }
