@@ -35,6 +35,7 @@ import (
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /*******************************************************************************
@@ -472,6 +473,56 @@ func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.
 	return db.getInstancesFromQuery("SELECT * FROM instances WHERE serviceID = ?", serviceID)
 }
 
+// GetStorageStateInfoByID returns storage and state info by instance ID.
+func (db *Database) GetStorageStateInfoByID(instanceID string) (info storagestate.StorageStateInstanceInfo, err error) {
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM storagestate WHERE instanceID = \"%s\"", instanceID),
+		&instanceID, &info.StorageQuota, &info.StateQuota, &info.StateChecksum); err != nil {
+		if errors.Is(err, ErrNotExist) {
+			return info, storagestate.ErrNotExist
+		}
+
+		return info, err
+	}
+
+	return info, nil
+}
+
+// AddStorageStateInfo adds storage and state info with instance ID.
+func (db *Database) AddStorageStateInfo(instanceID string, info storagestate.StorageStateInstanceInfo) error {
+	return db.executeQuery("INSERT INTO storagestate values(?, ?, ?, ?)",
+		instanceID, info.StorageQuota, info.StateQuota, info.StateChecksum)
+}
+
+// SetStorageStateQuotasByID sets state storage info by instance ID
+func (db *Database) SetStorageStateQuotasByID(instanceID string, storageQuota, stateQuota uint64) (err error) {
+	if err = db.executeQuery("UPDATE storagestate SET storageQuota = ?, stateQuota =?  WHERE instanceID = ?",
+		storageQuota, stateQuota, instanceID); errors.Is(err, ErrNotExist) {
+		return aoserrors.Wrap(storagestate.ErrNotExist)
+	}
+
+	return err
+}
+
+// SetStateChecksumByID updates state checksum by instance ID.
+func (db *Database) SetStateChecksumByID(instanceID string, checksum []byte) (err error) {
+	if err = db.executeQuery("UPDATE storagestate SET stateChecksum = ? WHERE instanceID = ?",
+		checksum, instanceID); errors.Is(err, ErrNotExist) {
+		return aoserrors.Wrap(storagestate.ErrNotExist)
+	}
+
+	return err
+}
+
+// RemoveStorageStateInfoByID removes storage and state info by instance ID.
+func (db *Database) RemoveStorageStateInfoByID(instanceID string) (err error) {
+	if err = db.executeQuery(
+		"DELETE FROM storagestate WHERE instanceID = ?", instanceID); errors.Is(err, ErrNotExist) {
+		return nil
+	}
+
+	return err
+}
+
 // Close closes database.
 func (db *Database) Close() {
 	db.sql.Close()
@@ -552,6 +603,10 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 	}
 
 	if err := db.createInstancesTable(); err != nil {
+		return db, err
+	}
+
+	if err := db.createStorageStateTable(); err != nil {
 		return db, err
 	}
 
@@ -654,6 +709,17 @@ func (db *Database) createInstancesTable() (err error) {
 	return aoserrors.Wrap(err)
 }
 
+func (db *Database) createStorageStateTable() (err error) {
+	log.Info("Create storagestate table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS storagestate (instanceID TEXT NOT NULL PRIMARY KEY,
+																   storageQuota INTEGER,
+																   stateQuota INTEGER,
+																   stateChecksum BLOB)`)
+
+	return aoserrors.Wrap(err)
+}
+
 func (db *Database) removeAllServices() (err error) {
 	_, err = db.sql.Exec("DELETE FROM services")
 
@@ -738,4 +804,22 @@ func (db *Database) getInstancesFromQuery(
 	}
 
 	return instances, nil
+}
+
+func (db *Database) getDataFromQuery(query string, result ...interface{}) error {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	if err = stmt.QueryRow().Scan(result...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotExist
+		}
+
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }

@@ -38,6 +38,7 @@ import (
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /*******************************************************************************
@@ -580,6 +581,85 @@ func TestInstances(t *testing.T) {
 
 	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
 		t.Errorf("Can't remove instance: %v", err)
+	}
+}
+
+func TestStorageState(t *testing.T) {
+	var (
+		testID          = "testInstanceID"
+		newCheckSum     = []byte("newCheckSum")
+		newStorageQuota = uint64(88888)
+		newStateQuota   = uint64(99999)
+	)
+
+	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be entry does not exist")
+	}
+
+	testStateStorageInfo := storagestate.StorageStateInstanceInfo{
+		StorageQuota: 12345, StateQuota: 54321,
+		StateChecksum: []byte("checksum1"),
+	}
+
+	if err := db.AddStorageStateInfo(testID, testStateStorageInfo); err != nil {
+		t.Fatalf("Can't add state storage info: %v", err)
+	}
+
+	info, err := db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("State storage info from database doesn't match expected one")
+	}
+
+	if err := db.SetStateChecksumByID("noID", newCheckSum); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be entry does not exist")
+	}
+
+	if err := db.SetStateChecksumByID(testID, newCheckSum); err != nil {
+		t.Fatalf("Can't update checksum: %v", err)
+	}
+
+	testStateStorageInfo.StateChecksum = newCheckSum
+
+	info, err = db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("Update state storage info from database doesn't match expected one")
+	}
+
+	if err := db.SetStorageStateQuotasByID(
+		"noID", newStorageQuota, newStateQuota); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be: entry does not exist")
+	}
+
+	if err := db.SetStorageStateQuotasByID(testID, newStorageQuota, newStateQuota); err != nil {
+		t.Fatalf("Can't update state and storage quotas: %v", err)
+	}
+
+	testStateStorageInfo.StateQuota = newStateQuota
+	testStateStorageInfo.StorageQuota = newStorageQuota
+
+	info, err = db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("Update state storage info from database doesn't match expected one")
+	}
+
+	if err := db.RemoveStorageStateInfoByID(testID); err != nil {
+		t.Fatalf("Can't remove state storage info: %v", err)
+	}
+
+	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be: entry does not exist")
 	}
 }
 
