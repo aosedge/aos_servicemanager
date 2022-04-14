@@ -39,9 +39,9 @@ import (
 	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	busyTimeout = 60000
@@ -51,9 +51,9 @@ const (
 
 const dbVersion = 5
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // ErrNotExist is returned when requested entry not exist in DB.
 var ErrNotExist = errors.New("entry does not exist")
@@ -61,18 +61,18 @@ var ErrNotExist = errors.New("entry does not exist")
 // ErrMigrationFailed is returned if migration was failed and db returned to the previous state.
 var ErrMigrationFailed = errors.New("database migration failed")
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // Database structure with database information.
 type Database struct {
 	sql *sql.DB
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // New creates new database handle.
 func New(name string, migrationPath string, mergedMigrationPath string) (db *Database, err error) {
@@ -85,69 +85,33 @@ func New(name string, migrationPath string, mergedMigrationPath string) (db *Dat
 
 // GetOperationVersion returns operation version.
 func (db *Database) GetOperationVersion() (version uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT operationVersion FROM config")
-	if err != nil {
-		return version, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&version)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return version, ErrNotExist
-		}
-
-		return version, aoserrors.Wrap(err)
+	if err = db.getDataFromQuery("SELECT operationVersion FROM config", &version); err != nil {
+		return version, err
 	}
 
 	return version, nil
 }
 
 // SetOperationVersion sets operation version.
-func (db *Database) SetOperationVersion(version uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET operationVersion = ?", version)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
+func (db *Database) SetOperationVersion(version uint64) error {
+	return db.executeQuery("UPDATE config SET operationVersion = ?", version)
 }
 
 // AddService adds new service.
 func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?)",
 		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
 		service.GID, service.ManifestDigest, service.IsActive)
-
-	return aoserrors.Wrap(err)
 }
 
 // RemoveService removes existing service.
-func (db *Database) RemoveService(service servicemanager.ServiceInfo) error {
-	stmt, err := db.sql.Prepare("DELETE FROM services WHERE id = ? AND aosVersion = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
+func (db *Database) RemoveService(service servicemanager.ServiceInfo) (err error) {
+	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND aosVersion = ?",
+		service.ServiceID, service.AosVersion); errors.Is(err, ErrNotExist) {
+		return nil
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(service.ServiceID, service.AosVersion)
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // GetService returns service by service ID.
@@ -176,112 +140,47 @@ func (db *Database) GetService(serviceID string) (service servicemanager.Service
 
 // GetAllServices returns all services.
 func (db *Database) GetAllServices() (services []servicemanager.ServiceInfo, err error) {
-	rows, err := db.sql.Query("SELECT * FROM services")
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service servicemanager.ServiceInfo
-
-		if err = rows.Scan(
-			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
-			return services, aoserrors.Wrap(err)
-		}
-
-		services = append(services, service)
-	}
-
-	return services, aoserrors.Wrap(rows.Err())
+	return db.getServicesFromQuery("SELECT * FROM services")
 }
 
 // GetAllServiceVersions returns all service versions.
 func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
-	rows, err := db.sql.Query("SELECT * FROM services WHERE id = ?", id)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service servicemanager.ServiceInfo
-
-		if err = rows.Scan(
-			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
-			return services, aoserrors.Wrap(err)
-		}
-
-		services = append(services, service)
-	}
-
-	return services, aoserrors.Wrap(rows.Err())
+	return db.getServicesFromQuery("SELECT * FROM services WHERE id = ?", id)
 }
 
 // ActivateService sets isActive to true for the service.
-func (db *Database) ActivateService(service servicemanager.ServiceInfo) error {
-	stmt, err := db.sql.Prepare("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(service.ServiceID, service.AosVersion)
-	if err != nil {
-		return aoserrors.Wrap(err)
+func (db *Database) ActivateService(service servicemanager.ServiceInfo) (err error) {
+	if err = db.executeQuery("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?",
+		service.ServiceID, service.AosVersion); errors.Is(err, ErrNotExist) {
+		return aoserrors.Wrap(servicemanager.ErrNotExist)
 	}
 
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // SetTrafficMonitorData stores traffic monitor data.
 func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?", timestamp, value, chain)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		if _, err = db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)",
-			chain, timestamp, value); err != nil {
+	if err = db.executeQuery("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?",
+		timestamp, value, chain); errors.Is(err, ErrNotExist) {
+		if _, err := db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)", chain, timestamp, value); err != nil {
 			return aoserrors.Wrap(err)
 		}
+
+		return nil
 	}
 
-	return nil
+	return err
 }
 
 // GetTrafficMonitorData stores traffic monitor data.
 func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT time, value FROM trafficmonitor WHERE chain = ?")
-	if err != nil {
-		return timestamp, value, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT time, value FROM trafficmonitor WHERE chain = \"%s\"", chain),
+		&timestamp, &value); err != nil {
+		if errors.Is(err, ErrNotExist) {
+			return timestamp, value, networkmanager.ErrEntryNotExist
+		}
 
-	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return timestamp, value, networkmanager.ErrEntryNotExist
-	}
-
-	if err != nil {
-		return timestamp, value, aoserrors.Wrap(err)
+		return timestamp, value, err
 	}
 
 	return timestamp, value, nil
@@ -289,51 +188,22 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 // RemoveTrafficMonitorData removes existing traffic monitor entry.
 func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM trafficmonitor WHERE chain = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
+	if err = db.executeQuery("DELETE FROM trafficmonitor WHERE chain = ?", chain); errors.Is(err, ErrNotExist) {
+		return nil
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(chain)
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // SetJournalCursor stores system logger cursor.
-func (db *Database) SetJournalCursor(cursor string) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET cursor = ?", cursor)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
+func (db *Database) SetJournalCursor(cursor string) error {
+	return db.executeQuery("UPDATE config SET cursor = ?", cursor)
 }
 
 // GetJournalCursor retrieves logger cursor.
 func (db *Database) GetJournalCursor() (cursor string, err error) {
-	stmt, err := db.sql.Prepare("SELECT cursor FROM config")
-	if err != nil {
-		return cursor, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&cursor)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return cursor, ErrNotExist
-		}
-
-		return cursor, aoserrors.Wrap(err)
+	if err = db.getDataFromQuery("SELECT cursor FROM config", &cursor); err != nil {
+		return cursor, err
 	}
 
 	return cursor, nil
@@ -370,29 +240,18 @@ func (db *Database) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstan
 
 // AddLayer add layer to layers table.
 func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(layer.Digest, layer.LayerID, layer.Path, layer.OSVersion, layer.VendorVersion,
+	return db.executeQuery("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)",
+		layer.Digest, layer.LayerID, layer.Path, layer.OSVersion, layer.VendorVersion,
 		layer.Description, layer.AosVersion)
-
-	return aoserrors.Wrap(err)
 }
 
 // DeleteLayerByDigest remove layer from DB by digest.
 func (db *Database) DeleteLayerByDigest(digest string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM layers WHERE digest = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
+	if err = db.executeQuery("DELETE FROM layers WHERE digest = ?", digest); errors.Is(err, ErrNotExist) {
+		return nil
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(digest)
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // GetLayersInfo get all installed layers.
@@ -419,23 +278,15 @@ func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err er
 
 // GetLayerInfoByDigest returns layers information by layer digest.
 func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.LayerInfo, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM layers WHERE digest = ?")
-	if err != nil {
-		return layer, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM layers WHERE digest = \"%s\"", digest),
+		&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+		&layer.VendorVersion, &layer.Description, &layer.AosVersion); err != nil {
+		if errors.Is(err, ErrNotExist) {
+			return layer, layermanager.ErrNotExist
+		}
 
-	err = stmt.QueryRow(digest).Scan(&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
-		&layer.VendorVersion, &layer.Description, &layer.AosVersion)
-	if errors.Is(err, sql.ErrNoRows) {
-		return layer, layermanager.ErrNotExist
+		return layer, err
 	}
-
-	if err != nil {
-		return layer, aoserrors.Wrap(err)
-	}
-
-	layer.Digest = digest
 
 	return layer, nil
 }
@@ -558,33 +409,31 @@ func (db *Database) Close() {
 	db.sql.Close()
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (db *Database,
-	err error,
-) {
+func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (*Database, error) {
 	log.WithField("name", name).Debug("Open database")
 
 	// Check and create db path
-	if _, err = os.Stat(filepath.Dir(name)); err != nil {
+	if _, err := os.Stat(filepath.Dir(name)); err != nil {
 		if !os.IsNotExist(err) {
-			return db, aoserrors.Wrap(err)
+			return nil, aoserrors.Wrap(err)
 		}
 
 		if err = os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-			return db, aoserrors.Wrap(err)
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
 		name, busyTimeout, journalMode, syncMode))
 	if err != nil {
-		return db, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
 
-	db = &Database{sqlite}
+	db := &Database{sqlite}
 
 	defer func() {
 		if err != nil {
@@ -854,4 +703,32 @@ func (db *Database) getDataFromQuery(query string, result ...interface{}) error 
 	}
 
 	return nil
+}
+
+func (db *Database) getServicesFromQuery(
+	query string, args ...interface{},
+) (services []servicemanager.ServiceInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return services, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var service servicemanager.ServiceInfo
+
+		if err = rows.Scan(
+			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
+			return services, aoserrors.Wrap(err)
+		}
+
+		services = append(services, service)
+	}
+
+	return services, nil
 }
