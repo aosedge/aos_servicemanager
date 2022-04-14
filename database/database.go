@@ -19,6 +19,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -338,6 +339,35 @@ func (db *Database) GetJournalCursor() (cursor string, err error) {
 	return cursor, nil
 }
 
+// GetOverrideEnvVars returns override env vars.
+func (db *Database) GetOverrideEnvVars() (vars []cloudprotocol.EnvVarsInstanceInfo, err error) {
+	var textEnvVars string
+
+	if err = db.getDataFromQuery("SELECT envvars FROM config", &textEnvVars); err != nil {
+		return vars, err
+	}
+
+	if textEnvVars == "" {
+		return vars, nil
+	}
+
+	if err = json.Unmarshal([]byte(textEnvVars), &vars); err != nil {
+		return vars, aoserrors.Wrap(err)
+	}
+
+	return vars, err
+}
+
+// SetOverrideEnvVars updates override env vars.
+func (db *Database) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error {
+	rowVars, err := json.Marshal(envVarsInfo)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return db.executeQuery("UPDATE config SET envvars = ?", string(rowVars))
+}
+
 // AddLayer add layer to layers table.
 func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
 	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
@@ -640,14 +670,16 @@ func (db *Database) createConfigTable() (err error) {
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
 			operationVersion INTEGER,
-			cursor TEXT)`); err != nil {
+			cursor TEXT,
+			envvars TEXT)`); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
 			operationVersion,
-			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
+			cursor,
+			envvars) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
