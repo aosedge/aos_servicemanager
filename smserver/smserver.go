@@ -192,25 +192,17 @@ func New(cfg *config.Config, launcher InstanceLauncher, serviceManager ServiceMa
 
 	pb.RegisterSMServiceServer(server.grpcServer, server)
 
+	go func() {
+		if err := server.start(); err != nil {
+			log.Errorf("Can't start gRPC server: %v", err)
+		}
+	}()
+
 	return server, nil
 }
 
-// Start starts SM  server.
-func (server *SMServer) Start() (err error) {
-	server.listener, err = net.Listen("tcp", server.url)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := server.grpcServer.Serve(server.listener); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-// Stop stops SM server.
-func (server *SMServer) Stop() {
+// Close stops SM server.
+func (server *SMServer) Close() {
 	log.Debug("Close grpc server")
 
 	if server.grpcServer != nil {
@@ -424,6 +416,19 @@ func (server *SMServer) GetInstanceCrashLog(ctx context.Context, req *pb.Instanc
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
+
+func (server *SMServer) start() (err error) {
+	server.listener, err = net.Listen("tcp", server.url)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := server.grpcServer.Serve(server.listener); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
 
 func (server *SMServer) handleChannels() {
 	for {
