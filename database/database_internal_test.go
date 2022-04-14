@@ -584,6 +584,48 @@ func TestInstances(t *testing.T) {
 	}
 }
 
+func TestEnvVars(t *testing.T) {
+	vars, err := db.GetOverrideEnvVars()
+	if err != nil {
+		t.Fatalf("Can't get empty env vars: %v", err)
+	}
+
+	if len(vars) != 0 {
+		t.Error("Returned env vars should be empty")
+	}
+
+	curentTime := time.Now().Local()
+
+	testEnvVars := []cloudprotocol.EnvVarsInstanceInfo{
+		{
+			InstanceFilter: createInstanceFilter("id1", "s1", int64(1)),
+			EnvVars: []cloudprotocol.EnvVarInfo{
+				{ID: "varId1", Variable: "variable 1"},
+				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			},
+		},
+		{
+			InstanceFilter: createInstanceFilter("id2", "", -1),
+			EnvVars: []cloudprotocol.EnvVarInfo{
+				{ID: "varId1", Variable: "variable 1"},
+				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			},
+		},
+	}
+
+	if err = db.SetOverrideEnvVars(testEnvVars); err != nil {
+		t.Fatalf("Can't set env vars: %v", err)
+	}
+
+	if vars, err = db.GetOverrideEnvVars(); err != nil {
+		t.Fatalf("Can't get env vars: %v", err)
+	}
+
+	if !reflect.DeepEqual(testEnvVars, vars) {
+		t.Errorf("Incorrect env vars from database")
+	}
+}
+
 func TestStorageState(t *testing.T) {
 	var (
 		testID          = "testInstanceID"
@@ -885,4 +927,20 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	return nil
+}
+
+func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
+	filter.ServiceID = serviceID
+
+	if subjectID != "" {
+		filter.SubjectID = &subjectID
+	}
+
+	if instance != -1 {
+		localInstance := (uint64)(instance)
+
+		filter.Instance = &localInstance
+	}
+
+	return filter
 }
