@@ -155,13 +155,7 @@ func TestBoardConfiguration(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -217,13 +211,7 @@ func TestInstanceMessages(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server: %s", err)
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -368,13 +356,7 @@ func TestServicesMessages(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -449,13 +431,7 @@ func TestLayerMessages(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -525,13 +501,7 @@ func TestAlertNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server: %s", err)
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -761,13 +731,7 @@ func TestMonitoringNotifications(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -859,13 +823,7 @@ func TestInstanceStateProcessing(t *testing.T) {
 		t.Fatalf("Can't create: SM Server %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
@@ -975,13 +933,7 @@ func TestLogsNotification(t *testing.T) {
 		t.Fatalf("Can't create SM server: %s", err)
 	}
 
-	go func() {
-		if err := smServer.Start(); err != nil {
-			t.Errorf("Can't start sm server")
-		}
-	}()
-
-	defer smServer.Stop()
+	defer smServer.Close()
 
 	client, err := newTestClient(serverURL)
 	if err != nil {
