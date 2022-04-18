@@ -34,6 +34,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/alerts"
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
 /***********************************************************************************************************************
@@ -55,7 +56,7 @@ func init() {
  **********************************************************************************************************************/
 
 type testInstanceProvider struct {
-	instancesInfo map[string]cloudprotocol.InstanceIdent
+	instancesInfo map[string]launcher.InstanceInfo
 }
 
 type testCursorStorage struct {
@@ -79,7 +80,7 @@ var (
 )
 
 var (
-	instanceProvider = testInstanceProvider{instancesInfo: make(map[string]cloudprotocol.InstanceIdent)}
+	instanceProvider = testInstanceProvider{instancesInfo: make(map[string]launcher.InstanceInfo)}
 	cursorStorage    testCursorStorage
 )
 
@@ -137,10 +138,13 @@ func TestGetServiceError(t *testing.T) {
 	}
 	defer alertsHandler.Close()
 
-	instanceInfo := cloudprotocol.InstanceIdent{
-		ServiceID: "alertservice0",
-		SubjectID: "subject0",
-		Instance:  0,
+	instanceInfo := launcher.InstanceInfo{
+		InstanceIdent: cloudprotocol.InstanceIdent{
+			ServiceID: "alertservice0",
+			SubjectID: "subject0",
+			Instance:  0,
+		},
+		AosVersion: 0,
 	}
 
 	instanceID := fmt.Sprintf(
@@ -170,7 +174,7 @@ func TestGetServiceError(t *testing.T) {
 	messages = append(messages, message)
 
 	if err = waitAlerts(alertsHandler.GetAlertsChannel(), 5*time.Second,
-		cloudprotocol.AlertTagServiceInstance, instanceInfo, 0, messages); err != nil {
+		cloudprotocol.AlertTagServiceInstance, instanceInfo.InstanceIdent, 0, messages); err != nil {
 		t.Errorf("Result failed: %s", err)
 	}
 }
@@ -355,15 +359,13 @@ matchLoop:
  * Interfaces
  **********************************************************************************************************************/
 
-func (instanceProvider *testInstanceProvider) GetInstanceInfoByID(id string) (
-	instance cloudprotocol.InstanceIdent, aosVersion uint64, err error,
-) {
+func (instanceProvider *testInstanceProvider) GetInstanceByID(id string) (launcher.InstanceInfo, error) {
 	instance, ok := instanceProvider.instancesInfo[id]
 	if !ok {
-		err = aoserrors.New("Instance does not exist")
+		return instance, aoserrors.New("Instance does not exist")
 	}
 
-	return instance, 0, err
+	return instance, nil
 }
 
 func (cursorStorage *testCursorStorage) SetJournalCursor(cursor string) (err error) {
