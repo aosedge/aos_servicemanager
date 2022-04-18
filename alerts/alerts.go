@@ -35,6 +35,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 )
 
 /***********************************************************************************************************************
@@ -58,7 +59,7 @@ const microSecondsInSecond = 1000000
 
 // InstanceProvider provides instance info.
 type InstanceProvider interface {
-	GetInstanceInfoByID(instanceID string) (instance cloudprotocol.InstanceIdent, aosVersion uint64, err error)
+	GetInstanceByID(instanceID string) (launcher.InstanceInfo, error)
 }
 
 // CursorStorage provides API to set and get journal cursor.
@@ -360,23 +361,19 @@ func (instance *Alerts) fillServiceInstanceAlert(
 		instanceID = strings.TrimPrefix(instanceID, aosServicePrefix)
 		instanceID = strings.TrimSuffix(instanceID, ".service")
 
-		var (
-			instanceAlert cloudprotocol.ServiceInstanceAlert
-			err           error
-		)
-
-		instanceAlert.InstanceIdent, instanceAlert.AosVersion, err = instance.instanceProvider.GetInstanceInfoByID(
-			instanceID)
+		instanceInfo, err := instance.instanceProvider.GetInstanceByID(instanceID)
 		if err != nil {
 			log.Errorf("Can't get instance info: %s", err)
 
 			return
 		}
 
-		instanceAlert.Message = entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE]
-
 		alert.Tag = cloudprotocol.AlertTagServiceInstance
-		alert.Payload = instanceAlert
+		alert.Payload = cloudprotocol.ServiceInstanceAlert{
+			Message:       entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE],
+			InstanceIdent: instanceInfo.InstanceIdent,
+			AosVersion:    instanceInfo.AosVersion,
+		}
 	}
 }
 
