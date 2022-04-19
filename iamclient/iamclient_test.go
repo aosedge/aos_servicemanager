@@ -19,7 +19,6 @@ package iamclient_test
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -29,6 +28,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -68,8 +68,8 @@ type testProtectedServer struct {
 }
 
 type servicePermissions struct {
-	serviceID   string
-	permissions map[string]map[string]string
+	instaneIdent cloudprotocol.InstanceIdent
+	permissions  map[string]map[string]string
 }
 
 /***********************************************************************************************************************
@@ -179,24 +179,27 @@ func TestRegisterService(t *testing.T) {
 
 	defer client.Close()
 
-	permissions := map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
+	var (
+		permissions      = map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
+		registerInstance = cloudprotocol.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
+	)
 
-	secret, err := client.RegisterService("serviceID", permissions)
+	secret, err := client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
 		t.Errorf("Can't send a request: %s", err)
 	}
 
-	secret, err = client.RegisterService("serviceID", permissions)
+	secret, err = client.RegisterInstance(registerInstance, permissions)
 	if err == nil || secret != "" {
 		t.Error("Re-registration of the service is prohibited")
 	}
 
-	err = client.UnregisterService("serviceID")
+	err = client.UnregisterInstance(registerInstance)
 	if err != nil {
 		t.Errorf("Can't send a request: %s", err)
 	}
 
-	secret, err = client.RegisterService("serviceID", permissions)
+	secret, err = client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
 		t.Errorf("Can't send a request: %s", err)
 	}
@@ -223,16 +226,17 @@ func TestGetPermissions(t *testing.T) {
 
 	defer client.Close()
 
-	permissions := map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
+	var (
+		permissions      = map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
+		registerInstance = cloudprotocol.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
+	)
 
-	registerServiceID := "serviceID"
-
-	secret, err := client.RegisterService(registerServiceID, permissions)
+	secret, err := client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
 		t.Errorf("Can't send a request: %s", err)
 	}
 
-	serviceID, respPermissions, err := client.GetPermissions(secret, "vis")
+	receivedInstacne, respPermissions, err := client.GetPermissions(secret, "vis")
 	if err != nil {
 		t.Errorf("Can't send a request: %s", err)
 	}
@@ -241,11 +245,11 @@ func TestGetPermissions(t *testing.T) {
 		t.Errorf("Wrong permissions: %v", respPermissions)
 	}
 
-	if registerServiceID != serviceID {
-		t.Errorf("Wrong service id: %v", serviceID)
+	if receivedInstacne != registerInstance {
+		t.Error("Incorrect received instance")
 	}
 
-	err = client.UnregisterService(registerServiceID)
+	err = client.UnregisterInstance(registerInstance)
 	if err != nil {
 		t.Errorf("Can't send a request: %s", err)
 	}
@@ -276,6 +280,7 @@ func newTestServers(publicServerURL, protectedServerURL string, permissionsCache
 	publicServer.grpcServer = grpc.NewServer()
 
 	pb.RegisterIAMPublicServiceServer(publicServer.grpcServer, publicServer)
+
 	go func() {
 		if err := publicServer.grpcServer.Serve(publicListener); err != nil {
 			log.Errorf("Can't serve grpc server: %s", err)
@@ -292,6 +297,7 @@ func newTestServers(publicServerURL, protectedServerURL string, permissionsCache
 	protectedServer.grpcServer = grpc.NewServer()
 
 	pb.RegisterIAMProtectedServiceServer(protectedServer.grpcServer, protectedServer)
+
 	go func() {
 		if err := protectedServer.grpcServer.Serve(protectedListener); err != nil {
 			log.Errorf("Can't serve grpc server: %s", err)
@@ -313,13 +319,15 @@ func (server *testProtectedServer) close() {
 	}
 }
 
-func (server *testProtectedServer) RegisterService(
-	context context.Context, req *pb.RegisterServiceRequest,
-) (rsp *pb.RegisterServiceResponse, err error) {
-	rsp = &pb.RegisterServiceResponse{}
+func (server *testProtectedServer) RegisterInstance(
+	context context.Context, req *pb.RegisterInstanceRequest,
+) (rsp *pb.RegisterInstanceResponse, err error) {
+	rsp = &pb.RegisterInstanceResponse{}
 
-	if secret := server.findServiceID(req.ServiceId); secret != "" {
-		return rsp, aoserrors.New(fmt.Sprintf("service %s is already registered", req.ServiceId))
+	instanceIdent := pbToInstanceIdent(req.Instance)
+
+	if secret := server.findSecret(instanceIdent); secret != "" {
+		return rsp, aoserrors.New("service is already registered")
 	}
 
 	secret := randomString()
@@ -330,19 +338,19 @@ func (server *testProtectedServer) RegisterService(
 		permissions[key] = value.Permissions
 	}
 
-	server.permissionsCache[secret] = servicePermissions{serviceID: req.ServiceId, permissions: permissions}
+	server.permissionsCache[secret] = servicePermissions{instaneIdent: instanceIdent, permissions: permissions}
 
 	return rsp, nil
 }
 
-func (server *testProtectedServer) UnregisterService(
-	ctx context.Context, req *pb.UnregisterServiceRequest,
+func (server *testProtectedServer) UnregisterInstance(
+	ctx context.Context, req *pb.UnregisterInstanceRequest,
 ) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
 
-	secret := server.findServiceID(req.ServiceId)
+	secret := server.findSecret(pbToInstanceIdent(req.Instance))
 	if secret == "" {
-		return rsp, aoserrors.New(fmt.Sprintf("service %s is not registered ", req.ServiceId))
+		return rsp, aoserrors.New("service is not registered ")
 	}
 
 	delete(server.permissionsCache, secret)
@@ -366,7 +374,7 @@ func (server *testPublicServer) GetPermissions(
 	}
 
 	rsp.Permissions = &pb.Permissions{Permissions: permissions}
-	rsp.ServiceId = funcServersPermissions.serviceID
+	rsp.Instance = instanceIdentToPB(funcServersPermissions.instaneIdent)
 
 	return rsp, nil
 }
@@ -395,9 +403,9 @@ func (server *testPublicServer) SubscribeSubjectsChanged(req *empty.Empty,
 	}
 }
 
-func (server *testProtectedServer) findServiceID(serviceID string) (secret string) {
+func (server *testProtectedServer) findSecret(instance cloudprotocol.InstanceIdent) (secret string) {
 	for key, value := range server.permissionsCache {
-		if value.serviceID == serviceID {
+		if value.instaneIdent == instance {
 			return key
 		}
 	}
@@ -415,4 +423,14 @@ func randomString() string {
 	}
 
 	return string(secret)
+}
+
+func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
+	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+}
+
+func pbToInstanceIdent(ident *pb.InstanceIdent) cloudprotocol.InstanceIdent {
+	return cloudprotocol.InstanceIdent{
+		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: uint64(ident.Instance),
+	}
 }
