@@ -38,9 +38,9 @@ import (
 	"github.com/aoscloud/aos_servicemanager/iamclient"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	protectedServerURL = "localhost:8089"
@@ -49,9 +49,9 @@ const (
 	secretSymbols      = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 type testPublicServer struct {
 	pb.UnimplementedIAMPublicServiceServer
@@ -72,15 +72,15 @@ type servicePermissions struct {
 	permissions map[string]map[string]string
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 var tmpDir string
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Init
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -92,9 +92,9 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Main
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestMain(m *testing.M) {
 	var err error
@@ -113,9 +113,9 @@ func TestMain(m *testing.M) {
 	os.Exit(ret)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Tests
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestGetSubjects(t *testing.T) {
 	permissionsCache := make(map[string]servicePermissions)
@@ -256,12 +256,13 @@ func TestGetPermissions(t *testing.T) {
 	}
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func newTestServers(publicServerURL, protectedServerURL string, permissionsCache map[string]servicePermissions) (
-	publicServer *testPublicServer, protectedServer *testProtectedServer, err error) {
+	publicServer *testPublicServer, protectedServer *testProtectedServer, err error,
+) {
 	publicServer = &testPublicServer{
 		subjectsChangedChannel: make(chan []string, 1),
 		permissionsCache:       permissionsCache,
@@ -312,8 +313,9 @@ func (server *testProtectedServer) close() {
 	}
 }
 
-func (server *testProtectedServer) RegisterService(context context.Context,
-	req *pb.RegisterServiceRequest) (rsp *pb.RegisterServiceResponse, err error) {
+func (server *testProtectedServer) RegisterService(
+	context context.Context, req *pb.RegisterServiceRequest,
+) (rsp *pb.RegisterServiceResponse, err error) {
 	rsp = &pb.RegisterServiceResponse{}
 
 	if secret := server.findServiceID(req.ServiceId); secret != "" {
@@ -333,8 +335,9 @@ func (server *testProtectedServer) RegisterService(context context.Context,
 	return rsp, nil
 }
 
-func (server *testProtectedServer) UnregisterService(ctx context.Context, req *pb.UnregisterServiceRequest) (rsp *empty.Empty,
-	err error) {
+func (server *testProtectedServer) UnregisterService(
+	ctx context.Context, req *pb.UnregisterServiceRequest,
+) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
 
 	secret := server.findServiceID(req.ServiceId)
@@ -347,8 +350,9 @@ func (server *testProtectedServer) UnregisterService(ctx context.Context, req *p
 	return rsp, nil
 }
 
-func (server *testPublicServer) GetPermissions(ctx context.Context, req *pb.PermissionsRequest) (rsp *pb.PermissionsResponse,
-	err error) {
+func (server *testPublicServer) GetPermissions(
+	ctx context.Context, req *pb.PermissionsRequest,
+) (rsp *pb.PermissionsResponse, err error) {
 	rsp = &pb.PermissionsResponse{}
 
 	funcServersPermissions, ok := server.permissionsCache[req.Secret]
@@ -374,7 +378,8 @@ func (server *testPublicServer) GetSubjects(context context.Context, req *empty.
 }
 
 func (server *testPublicServer) SubscribeSubjectsChanged(req *empty.Empty,
-	stream pb.IAMPublicService_SubscribeSubjectsChangedServer) (err error) {
+	stream pb.IAMPublicService_SubscribeSubjectsChangedServer,
+) (err error) {
 	for {
 		select {
 		case <-stream.Context().Done():
