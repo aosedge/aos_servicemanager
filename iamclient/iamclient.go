@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
@@ -149,10 +150,15 @@ func (client *Client) GetSubjectsChangedChannel() (channel <-chan []string) {
 	return client.subjectsChangedChannel
 }
 
-// RegisterService registers new service with permissions and create secret.
-func (client *Client) RegisterService(serviceID string, permissions map[string]map[string]string) (secret string,
-	err error) {
-	log.WithField("serviceID", serviceID).Debug("Register service")
+// RegisterInstance registers new service instance with permissions and create secret.
+func (client *Client) RegisterInstance(
+	instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+) (secret string, err error) {
+	log.WithFields(log.Fields{
+		"serviceID": instance.ServiceID,
+		"subjectID": instance.SubjectID,
+		"instance":  instance.Instance,
+	}).Debug("Register instance")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
@@ -162,9 +168,8 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 		reqPermissions[key] = &pb.Permissions{Permissions: value}
 	}
 
-	req := &pb.RegisterServiceRequest{ServiceId: serviceID, Permissions: reqPermissions}
-
-	response, err := client.pbclientProtected.RegisterService(ctx, req)
+	response, err := client.pbclientProtected.RegisterInstance(ctx,
+		&pb.RegisterInstanceRequest{Instance: instanceIdentToPB(instance), Permissions: reqPermissions})
 	if err != nil {
 		return "", aoserrors.Wrap(err)
 	}
@@ -172,17 +177,19 @@ func (client *Client) RegisterService(serviceID string, permissions map[string]m
 	return response.Secret, nil
 }
 
-// UnregisterService unregisters service.
-func (client *Client) UnregisterService(serviceID string) (err error) {
-	log.WithField("serviceID", serviceID).Debug("Unregister service")
+// UnregisterInstance unregisters service instance.
+func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (err error) {
+	log.WithFields(log.Fields{
+		"serviceID": instance.ServiceID,
+		"subjectID": instance.SubjectID,
+		"instance":  instance.Instance,
+	}).Debug("Unregister instance")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	req := &pb.UnregisterServiceRequest{ServiceId: serviceID}
-
-	_, err = client.pbclientProtected.UnregisterService(ctx, req)
-	if err != nil {
+	if _, err := client.pbclientProtected.UnregisterInstance(ctx,
+		&pb.UnregisterInstanceRequest{Instance: instanceIdentToPB(instance)}); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -190,9 +197,9 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 }
 
 // GetPermissions gets permissions by secret and functional server ID.
-func (client *Client) GetPermissions(secret, funcServerID string) (serviceID string,
-	permissions map[string]string, err error,
-) {
+func (client *Client) GetPermissions(
+	secret, funcServerID string,
+) (instance cloudprotocol.InstanceIdent, permissions map[string]string, err error) {
 	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -202,10 +209,13 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 
 	response, err := client.pbclientPublic.GetPermissions(ctx, req)
 	if err != nil {
-		return "", nil, aoserrors.Wrap(err)
+		return instance, nil, aoserrors.Wrap(err)
 	}
 
-	return response.ServiceId, response.Permissions.Permissions, nil
+	return cloudprotocol.InstanceIdent{
+		ServiceID: response.Instance.ServiceId,
+		SubjectID: response.Instance.SubjectId, Instance: uint64(response.Instance.Instance),
+	}, response.Permissions.Permissions, nil
 }
 
 // GetCertKeyURL gets cerificate and key url from IAM.
@@ -326,4 +336,8 @@ func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
 	}
 
 	return true
+}
+
+func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
+	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
 }
