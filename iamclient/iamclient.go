@@ -33,9 +33,9 @@ import (
 	"github.com/aoscloud/aos_servicemanager/config"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	iamRequestTimeout   = 30 * time.Second
@@ -44,9 +44,9 @@ const (
 
 const subjectsChangedChannelSize = 1
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // Client IAM client instance.
 type Client struct {
@@ -63,9 +63,9 @@ type Client struct {
 	subjectsChangedChannel chan []string
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // New creates new IAM client.
 func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecure bool) (client *Client, err error) {
@@ -97,7 +97,8 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 		securePublicOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
-	if client.publicConnection, err = grpc.DialContext(ctx, config.IAMPublicServerURL, securePublicOpt, grpc.WithBlock()); err != nil {
+	if client.publicConnection, err = grpc.DialContext(
+		ctx, config.IAMPublicServerURL, securePublicOpt, grpc.WithBlock()); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
@@ -117,7 +118,8 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 		secureProtectedOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
-	if client.protectedConnection, err = grpc.DialContext(ctx, config.IAMServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
+	if client.protectedConnection, err = grpc.DialContext(
+		ctx, config.IAMServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
@@ -189,7 +191,8 @@ func (client *Client) UnregisterService(serviceID string) (err error) {
 
 // GetPermissions gets permissions by secret and functional server ID.
 func (client *Client) GetPermissions(secret, funcServerID string) (serviceID string,
-	permissions map[string]string, err error) {
+	permissions map[string]string, err error,
+) {
 	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -205,7 +208,7 @@ func (client *Client) GetPermissions(secret, funcServerID string) (serviceID str
 	return response.ServiceId, response.Permissions.Permissions, nil
 }
 
-// GetCertKeyURL gets cerificate and key url from IAM
+// GetCertKeyURL gets cerificate and key url from IAM.
 func (client *Client) GetCertKeyURL(keyType string) (certURL, keyURL string, err error) {
 	response, err := client.pbclientPublic.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
 	if err != nil {
@@ -231,9 +234,9 @@ func (client *Client) Close() (err error) {
 	return nil
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func (client *Client) getSubjects() (subjects []string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
