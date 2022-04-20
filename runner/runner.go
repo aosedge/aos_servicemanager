@@ -146,7 +146,8 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params StartI
 
 	channel := make(chan string)
 
-	if _, status.Err = runner.systemd.StartUnitContext(context.Background(), unitName, "replace", channel); status.Err != nil {
+	if _, status.Err = runner.systemd.StartUnitContext(
+		context.Background(), unitName, "replace", channel); status.Err != nil {
 		return status
 	}
 
