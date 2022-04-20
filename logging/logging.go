@@ -496,7 +496,7 @@ func getUnitNameFromLog(logEntry *sdjournal.JournalEntry) (unitName string) {
 
 	unitName = filepath.Base(systemdCgroup)
 
-	if !strings.Contains(unitName, aosServicePrefix) {
+	if !strings.Contains(unitName, aosServicePrefix) { // nolint:wsl
 		// with cgroup v2 logs from container do not contains _SYSTEMD_UNIT due to restrictions
 		// that's why id should be checked via _SYSTEMD_CGROUP
 		// format: /system.slice/system-aos@service.slice/AOS_INSTANCE_ID
