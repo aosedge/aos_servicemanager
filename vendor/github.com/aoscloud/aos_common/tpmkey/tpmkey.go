@@ -100,7 +100,8 @@ func CreateFromPersistent(device io.ReadWriter, persistentHandle tpmutil.Handle)
 // CreateFromBlobs creates key from blobs.
 // nolint:ireturn // we return different key types
 func CreateFromBlobs(device io.ReadWriter, primaryHandle tpmutil.Handle,
-	password string, privateBlob, publicBlob []byte) (key TPMKey, err error) {
+	password string, privateBlob, publicBlob []byte,
+) (key TPMKey, err error) {
 	tpmPublic, err := tpm2.DecodePublic(publicBlob)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -180,7 +181,21 @@ func makePersistent(key *tpmKey, persistentHandle tpmutil.Handle) (err error) {
 	return nil
 }
 
-func sign(key tpmKey, digest []byte, scheme tpm2.SigScheme) (signature []byte, err error) {
+func sign(key tpmKey, digest []byte, hashFunc crypto.Hash, alg tpm2.Algorithm) (signature []byte, err error) {
+	tpmHash, ok := supportedHash[hashFunc]
+	if !ok {
+		return nil, aoserrors.Errorf("unsupported hash algorithm: %v", hashFunc)
+	}
+
+	if len(digest) != hashFunc.Size() {
+		return nil, aoserrors.Errorf("wrong digest length: got %d, want %d", digest, hashFunc.Size())
+	}
+
+	scheme := tpm2.SigScheme{
+		Alg:  alg,
+		Hash: tpmHash,
+	}
+
 	var keyHandle tpmutil.Handle
 
 	if key.persistentHandle == 0 {

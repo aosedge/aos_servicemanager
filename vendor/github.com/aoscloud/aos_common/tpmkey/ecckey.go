@@ -48,23 +48,7 @@ func (key *eccKey) Password() (password string) {
 
 // Sign signs digest with the private key.
 func (key *eccKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	alg := tpm2.AlgECDSA
-
-	tpmHash, ok := supportedHash[opts.HashFunc()]
-	if !ok {
-		return nil, aoserrors.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
-	}
-
-	if len(digest) != opts.HashFunc().Size() {
-		return nil, aoserrors.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
-	}
-
-	scheme := tpm2.SigScheme{
-		Alg:  alg,
-		Hash: tpmHash,
-	}
-
-	signature, err = sign(key.tpmKey, digest, scheme)
+	signature, err = sign(key.tpmKey, digest, opts.HashFunc(), tpm2.AlgECDSA)
 
 	return signature, aoserrors.Wrap(err)
 }
