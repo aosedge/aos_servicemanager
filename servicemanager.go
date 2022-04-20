@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -89,8 +90,8 @@ type journalHook struct {
  * Vars
  ******************************************************************************/
 
-// GitSummary provided by govvv at compile-time
-var GitSummary = "Unknown"
+// GitSummary provided by govvv at compile-time.
+var GitSummary = "Unknown" // nolint:gochecknoglobals
 
 /*******************************************************************************
  * Init
@@ -127,6 +128,7 @@ func cleanup(cfg *config.Config, dbFile string) {
 	}
 }
 
+// nolint
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	defer func() {
 		if err != nil {
@@ -141,7 +143,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	dbFile := path.Join(cfg.WorkingDir, dbFileName)
 
 	sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath, cfg.Migration.MergedMigrationPath)
-	if err == database.ErrMigrationFailed {
+	if errors.Is(err, database.ErrMigrationFailed) {
 		cleanup(cfg, dbFile)
 
 		if sm.db, err = database.New(dbFile, cfg.Migration.MigrationPath,
@@ -192,7 +194,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	// Create alerts
 	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
-		if err == alerts.ErrDisabled {
+		if errors.Is(err, alerts.ErrDisabled) {
 			log.Warn(err)
 		} else {
 			return sm, aoserrors.Wrap(err)
@@ -357,7 +359,7 @@ func main() {
 
 	// Show version
 	if *showVersion {
-		fmt.Printf("Version: %s\n", GitSummary)
+		fmt.Printf("Version: %s\n", GitSummary) // nolint:forbidigo // logs aren't initialized
 		return
 	}
 
@@ -374,6 +376,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error: %s", err)
 	}
+
 	log.SetLevel(logLevel)
 
 	log.WithFields(log.Fields{"configFile": *configFile, "version": GitSummary}).Info("Start service manager")
