@@ -584,6 +584,68 @@ func TestInstances(t *testing.T) {
 	}
 }
 
+func TestInstancesID(t *testing.T) {
+	addedInstance := []launcher.InstanceInfo{
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
+			InstanceID:    "TestSevrID_TestSubID_0",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
+			InstanceID:    "TestSevrID_TestSubID_1",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
+			InstanceID:    "TestSevrID_TestSubID1_0",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
+			InstanceID:    "TestSevrID2_TestSubID_0",
+		},
+	}
+
+	for _, instance := range addedInstance {
+		if err := db.AddInstance(instance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+	}
+
+	type testData struct {
+		filter      cloudprotocol.InstanceFilter
+		expectedIds []string
+	}
+
+	data := []testData{
+		{
+			filter:      createInstanceFilter("TestSevrID", "TestSubID", 0),
+			expectedIds: []string{"TestSevrID_TestSubID_0"},
+		},
+		{
+			filter:      createInstanceFilter("TestSevrID", "TestSubID", -1),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1"},
+		},
+		{
+			filter:      createInstanceFilter("TestSevrID", "", 0),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID1_0"},
+		},
+		{
+			filter:      createInstanceFilter("TestSevrID", "", -1),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1", "TestSevrID_TestSubID1_0"},
+		},
+	}
+
+	for _, value := range data {
+		ids, err := db.GetInstanceIDs(value.filter)
+		if err != nil {
+			t.Fatalf("Can't get instance ids from DB: %v", err)
+		}
+
+		if !reflect.DeepEqual(ids, value.expectedIds) {
+			t.Error("Incorrect instance ids")
+		}
+	}
+}
+
 func TestEnvVars(t *testing.T) {
 	vars, err := db.GetOverrideEnvVars()
 	if err != nil {
