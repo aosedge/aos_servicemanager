@@ -59,21 +59,7 @@ func (key *rsaKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (sig
 		alg = tpm2.AlgRSAPSS
 	}
 
-	tpmHash, ok := supportedHash[opts.HashFunc()]
-	if !ok {
-		return nil, aoserrors.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
-	}
-
-	if len(digest) != opts.HashFunc().Size() {
-		return nil, aoserrors.Errorf("wrong digest length: got %d, want %d", digest, opts.HashFunc().Size())
-	}
-
-	scheme := tpm2.SigScheme{
-		Alg:  alg,
-		Hash: tpmHash,
-	}
-
-	signature, err = sign(key.tpmKey, digest, scheme)
+	signature, err = sign(key.tpmKey, digest, opts.HashFunc(), alg)
 
 	return signature, aoserrors.Wrap(err)
 }
