@@ -44,23 +44,18 @@ const (
  * Types
  ******************************************************************************/
 
-// Duration represents duration in format "00:00:00".
-type Duration struct {
-	time.Duration
-}
-
 // AlertRule describes alert rule.
 type AlertRule struct {
-	MinTimeout   Duration `json:"minTimeout"`
-	MinThreshold uint64   `json:"minThreshold"`
-	MaxThreshold uint64   `json:"maxThreshold"`
+	MinTimeout   aostypes.Duration `json:"minTimeout"`
+	MinThreshold uint64            `json:"minThreshold"`
+	MaxThreshold uint64            `json:"maxThreshold"`
 }
 
 // Monitoring configuration for system monitoring.
 type Monitoring struct {
-	Disabled   bool     `json:"disabled"`
-	SendPeriod Duration `json:"sendPeriod"`
-	PollPeriod Duration `json:"pollPeriod"`
+	Disabled   bool              `json:"disabled"`
+	SendPeriod aostypes.Duration `json:"sendPeriod"`
+	PollPeriod aostypes.Duration `json:"pollPeriod"`
 	aostypes.ServiceAlertRules
 }
 
@@ -104,15 +99,15 @@ type Config struct {
 	LayersDir          string `json:"layersDir"`
 	DownloadDir        string `json:"downloadDir"`
 
-	BoardConfigFile           string     `json:"boardConfigFile"`
-	DefaultServiceTTLDays     uint64     `json:"defaultServiceTtlDays"`
-	ServiceHealthCheckTimeout Duration   `json:"serviceHealthCheckTimeout"`
-	Monitoring                Monitoring `json:"monitoring"`
-	Logging                   Logging    `json:"logging"`
-	Alerts                    Alerts     `json:"alerts"`
-	HostBinds                 []string   `json:"hostBinds"`
-	Hosts                     []Host     `json:"hosts,omitempty"`
-	Migration                 Migration  `json:"migration"`
+	BoardConfigFile           string            `json:"boardConfigFile"`
+	DefaultServiceTTLDays     uint64            `json:"defaultServiceTtlDays"`
+	ServiceHealthCheckTimeout aostypes.Duration `json:"serviceHealthCheckTimeout"`
+	Monitoring                Monitoring        `json:"monitoring"`
+	Logging                   Logging           `json:"logging"`
+	Alerts                    Alerts            `json:"alerts"`
+	HostBinds                 []string          `json:"hostBinds"`
+	Hosts                     []Host            `json:"hosts,omitempty"`
+	Migration                 Migration         `json:"migration"`
 }
 
 /*******************************************************************************
@@ -127,11 +122,11 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		DefaultServiceTTLDays:     30, // nolint:gomnd
-		ServiceHealthCheckTimeout: Duration{35 * time.Second},
+		DefaultServiceTTLDays:     30,                                            // nolint:gomnd
+		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, // nolint:gomnd
 		Monitoring: Monitoring{
-			SendPeriod: Duration{1 * time.Minute},
-			PollPeriod: Duration{10 * time.Second},
+			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
+			PollPeriod: aostypes.Duration{Duration: 10 * time.Second},
 		},
 		Logging: Logging{
 			MaxPartSize:  524288, // nolint:gomnd
@@ -192,60 +187,4 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	return config, nil
-}
-
-// MarshalJSON marshals JSON Duration type.
-func (d Duration) MarshalJSON() (b []byte, err error) {
-	t, err := time.Parse("15:04:05", "00:00:00")
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	t.Add(d.Duration)
-
-	b, err = json.Marshal(t.Add(d.Duration).Format("15:04:05"))
-	if err != nil {
-		return b, aoserrors.Wrap(err)
-	}
-
-	return b, nil
-}
-
-// UnmarshalJSON unmarshals JSON Duration type.
-func (d *Duration) UnmarshalJSON(b []byte) (err error) {
-	var v interface{}
-
-	if err := json.Unmarshal(b, &v); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	switch value := v.(type) {
-	case float64:
-		d.Duration = time.Duration(value) * time.Second
-
-		return nil
-
-	case string:
-		tmp, err := time.ParseDuration(value)
-		if err != nil {
-			t1, err := time.Parse("15:04:05", value)
-			if err != nil {
-				return aoserrors.Wrap(err)
-			}
-
-			t2, err := time.Parse("15:04:05", "00:00:00")
-			if err != nil {
-				return aoserrors.Wrap(err)
-			}
-
-			tmp = t1.Sub(t2)
-		}
-
-		d.Duration = tmp
-
-		return nil
-
-	default:
-		return aoserrors.Errorf("invalid duration value: %v", value)
-	}
 }
