@@ -43,6 +43,7 @@ func createConfigFile() (err error) {
 	"workingDir" : "workingDir",
 	"certStorage": "sm",
 	"storageDir" : "/var/aos/storage",
+	"stateDir" : "/var/aos/state",
 	"servicesDir": "/var/aos/servicemanager/services",
 	"layersDir": "/var/aos/srvlib",
 	"downloadDir": "/var/aos/servicemanager/download",
@@ -180,6 +181,10 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 
 	if config.StorageDir != "/var/aos/storage" {
 		t.Errorf("Wrong storageDir value: %s", config.StorageDir)
+	}
+
+	if config.StateDir != "/var/aos/state" {
+		t.Errorf("Wrong stateDir value: %s", config.StateDir)
 	}
 }
 
