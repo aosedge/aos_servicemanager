@@ -44,13 +44,6 @@ const (
  * Types
  ******************************************************************************/
 
-// AlertRule describes alert rule.
-type AlertRule struct {
-	MinTimeout   aostypes.Duration `json:"minTimeout"`
-	MinThreshold uint64            `json:"minThreshold"`
-	MaxThreshold uint64            `json:"maxThreshold"`
-}
-
 // Monitoring configuration for system monitoring.
 type Monitoring struct {
 	Disabled   bool              `json:"disabled"`
