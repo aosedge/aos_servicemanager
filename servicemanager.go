@@ -28,6 +28,8 @@ import (
 	"syscall"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/journalalerts"
+	"github.com/aoscloud/aos_common/resourcemonitor"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/coreos/go-systemd/journal"
@@ -40,10 +42,13 @@ import (
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/logging"
-	"github.com/aoscloud/aos_servicemanager/monitoring"
+	"github.com/aoscloud/aos_servicemanager/monitorcontroller"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	resource "github.com/aoscloud/aos_servicemanager/resourcemanager"
+	"github.com/aoscloud/aos_servicemanager/runner"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
 	"github.com/aoscloud/aos_servicemanager/smserver"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /*******************************************************************************
@@ -57,18 +62,23 @@ const dbFileName = "servicemanager.db"
  ******************************************************************************/
 
 type serviceManager struct {
-	cryptoContext   *cryptutils.CryptoContext
-	alerts          *alerts.Alerts
-	smServer        *smserver.SMServer
-	cfg             *config.Config
-	db              *database.Database
-	launcher        *launcher.Launcher
-	resourcemanager *resource.ResourceManager
-	logging         *logging.Logging
-	monitor         *monitoring.Monitor
-	network         *networkmanager.NetworkManager
-	iam             *iamclient.Client
-	layerMgr        *layermanager.LayerManager
+	cryptoContext     *cryptutils.CryptoContext
+	journalAlerts     *journalalerts.JournalAlerts
+	alerts            *alerts.Alerts
+	smServer          *smserver.SMServer
+	cfg               *config.Config
+	db                *database.Database
+	launcher          *launcher.Launcher
+	resourcemanager   *resource.ResourceManager
+	logging           *logging.Logging
+	monitor           *resourcemonitor.ResourceMonitor
+	monitorController *monitorcontroller.MonitorController
+	network           *networkmanager.NetworkManager
+	iam               *iamclient.Client
+	layerMgr          *layermanager.LayerManager
+	serviceMgr        *servicemanager.ServiceManager
+	runner            *runner.Runner
+	storageState      *storagestate.StorageState
 }
 
 type journalHook struct {
@@ -90,7 +100,8 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05.000",
-		FullTimestamp:    true})
+		FullTimestamp:    true,
+	})
 	log.SetOutput(os.Stdout)
 }
 
@@ -101,25 +112,18 @@ func init() {
 func cleanup(cfg *config.Config, dbFile string) {
 	log.Info("System cleanup")
 
-	if err := launcher.Cleanup(cfg); err != nil {
-		log.Errorf("Can't cleanup launcher: %s", err)
+	if err := os.RemoveAll(cfg.ServicesDir); err != nil {
+		log.Errorf("Can't remove services dir: %v", err)
+	}
+
+	if err := os.RemoveAll(cfg.LayersDir); err != nil {
+		log.Errorf("Can't remove services dir: %v", err)
 	}
 
 	log.WithField("file", dbFile).Debug("Delete DB file")
 
 	if err := os.RemoveAll(dbFile); err != nil {
 		log.Errorf("Can't cleanup database: %s", err)
-	}
-
-	log.Debug("Delete networks")
-
-	network, err := networkmanager.New(cfg, nil)
-	if err != nil {
-		log.Errorf("Can't create network: %s", err)
-	}
-
-	if err = network.DeleteAllNetworks(); err != nil {
-		log.Errorf("Can't delete networks: %s", err)
 	}
 }
 
@@ -172,11 +176,16 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
+	if sm.serviceMgr, err = servicemanager.New(cfg, sm.layerMgr, sm.db); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	sm.layerMgr.SetSpaceAllocator(sm.serviceMgr)
+
 	if sm.cryptoContext, err = cryptutils.NewCryptoContext(cfg.CACert); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create IAM client
 	if sm.iam, err = iamclient.New(cfg, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
@@ -190,55 +199,41 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	// Create network
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create monitor
-	if sm.monitor, err = monitoring.New(cfg, sm.alerts, sm.network); err != nil {
-		if err == monitoring.ErrDisabled {
-			log.Warn(err)
-		} else {
-			return sm, aoserrors.Wrap(err)
-		}
+	if sm.monitorController, err = monitorcontroller.New(); err != nil {
+		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create resourcemanager
+	if sm.monitor, err = resourcemonitor.New(cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
 	if sm.resourcemanager, err = resource.New(cfg.BoardConfigFile, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create launcher
-	if sm.launcher, err = launcher.New(cfg, sm.db, sm.layerMgr, sm.monitor,
-		sm.network, sm.resourcemanager, sm.iam); err != nil {
+	if sm.runner, err = runner.New(); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create logging
+	if sm.storageState, err = storagestate.New(cfg, sm.db); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.launcher, err = launcher.New(cfg, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
+		sm.network, sm.iam, sm.storageState, sm.monitor, sm.alerts); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
 	if sm.logging, err = logging.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.smServer, err = smserver.New(cfg, sm.launcher, sm.layerMgr,
-		sm.alerts, sm.monitor, sm.resourcemanager, sm.logging, sm.cryptoContext, sm.iam, false); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
-	if err = sm.checkConsistency(); err != nil {
-		log.Errorf("Consistency error: %s. Cleanup...", err)
-
-		sm.launcher.Close()
-		sm.launcher = nil
-
-		if launcherErr := launcher.Cleanup(sm.cfg); err != nil {
-			log.Errorf("Can't cleanup launcher: %s", launcherErr)
-		}
-
-		if layerErr := sm.layerMgr.Cleanup(); err != nil {
-			log.Errorf("Can't cleanup layermanager: %s", layerErr)
-		}
-
+	if sm.smServer, err = smserver.New(cfg, sm.launcher, sm.serviceMgr, sm.layerMgr, sm.storageState,
+		sm.alerts, sm.monitorController, sm.resourcemanager, sm.logging, sm.cryptoContext, sm.iam, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -248,9 +243,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 func (sm *serviceManager) handleChannels(ctx context.Context) {
 	for {
 		select {
-		case users := <-sm.iam.GetUsersChangedChannel():
-			if err := sm.launcher.SetUsers(users); err != nil {
-				log.Errorf("Can't set users: %s", err)
+		case subjects := <-sm.iam.GetSubjectsChangedChannel():
+			if err := sm.launcher.SubjectsChanged(subjects); err != nil {
+				log.Errorf("Can't set subjects: %v", err)
 			}
 
 		case <-ctx.Done():
@@ -260,57 +255,49 @@ func (sm *serviceManager) handleChannels(ctx context.Context) {
 }
 
 func (sm *serviceManager) close() {
-	// Close logging
+	if sm.smServer != nil {
+		sm.smServer.Close()
+	}
+
 	if sm.logging != nil {
 		sm.logging.Close()
 	}
 
-	// Close grpc server
-	if sm.smServer != nil {
-		sm.smServer.Stop()
-	}
-
-	// Close launcher
 	if sm.launcher != nil {
 		sm.launcher.Close()
 	}
 
-	// Close monitor
+	if sm.storageState != nil {
+		sm.storageState.Close()
+	}
+
+	if sm.runner != nil {
+		sm.runner.Close()
+	}
+
 	if sm.monitor != nil {
 		sm.monitor.Close()
 	}
 
-	// Close network
 	if sm.network != nil {
 		sm.network.Close()
 	}
 
-	// Close alerts
 	if sm.alerts != nil {
 		sm.alerts.Close()
 	}
 
-	// Close DB
+	if sm.iam != nil {
+		sm.iam.Close()
+	}
+
 	if sm.db != nil {
 		sm.db.Close()
 	}
 
-	// Close cryptcoxontext
 	if sm.cryptoContext != nil {
 		sm.cryptoContext.Close()
 	}
-}
-
-func (sm *serviceManager) checkConsistency() (err error) {
-	if err = sm.launcher.CheckServicesConsistency(); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = sm.layerMgr.CheckLayersConsistency(); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
 }
 
 func newJournalHook() (hook *journalHook) {
@@ -322,7 +309,8 @@ func newJournalHook() (hook *journalHook) {
 			log.ErrorLevel: journal.PriErr,
 			log.FatalLevel: journal.PriCrit,
 			log.PanicLevel: journal.PriEmerg,
-		}}
+		},
+	}
 
 	return hook
 }
@@ -404,10 +392,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can't create service manager: %s", err)
 	}
+
 	defer sm.close()
 
-	if err = sm.launcher.SetUsers(sm.iam.GetUsers()); err != nil {
-		log.Fatalf("Can't set users: %s", err)
+	if err = sm.launcher.SubjectsChanged(sm.iam.GetSubjects()); err != nil {
+		log.Errorf("Can't set subjects: %s", err)
 	}
 
 	// Notify systemd
@@ -423,17 +412,7 @@ func main() {
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
-	go func() {
-		<-terminateChannel
+	<-terminateChannel
 
-		fnCancel()
-
-		sm.close()
-
-		os.Exit(0)
-	}()
-
-	if err = sm.smServer.Start(); err != nil {
-		os.Exit(1)
-	}
+	fnCancel()
 }
