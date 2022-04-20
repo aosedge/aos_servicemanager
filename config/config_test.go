@@ -18,7 +18,6 @@
 package config_test
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"log"
 	"os"
@@ -53,15 +52,15 @@ func createConfigFile() (err error) {
 	"defaultServiceTTLDays" : 30,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
-		"sendPeriod": "00:05:00",
-		"pollPeriod": "00:00:01",		
+		"sendPeriod": "5m",
+		"pollPeriod": "1s",
 		"ram": {
-			"minTimeout": "00:00:10",
+			"minTimeout": "10s",
 			"minThreshold": 10,
 			"maxThreshold": 150
 		},
 		"outTraffic": {
-			"minTimeout": "00:00:20",
+			"minTimeout": "20s",
 			"minThreshold": 10,
 			"maxThreshold": 150
 		}
@@ -91,7 +90,7 @@ func createConfigFile() (err error) {
 	}
 }`
 
-	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -262,19 +261,6 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 
 	if config.DefaultServiceTTLDays != 30 {
 		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTLDays)
-	}
-}
-
-func TestDurationMarshal(t *testing.T) {
-	d := config.Duration{Duration: 32 * time.Second}
-
-	result, err := json.Marshal(d)
-	if err != nil {
-		t.Errorf("Can't marshal: %s", err)
-	}
-
-	if string(result) != `"00:00:32"` {
-		t.Errorf("Wrong duration value: %s", result)
 	}
 }
 
