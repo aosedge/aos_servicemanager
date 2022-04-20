@@ -354,6 +354,32 @@ func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.
 	return db.getInstancesFromQuery("SELECT * FROM instances WHERE serviceID = ?", serviceID)
 }
 
+// GetInstanceIDs returns instance ids by filter.
+func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instances []string, err error) {
+	var subjectFiler, instanceFiler string
+
+	if filter.SubjectID != nil {
+		subjectFiler = fmt.Sprintf(" AND subjectID = \"%s\"", *filter.SubjectID)
+	}
+
+	if filter.Instance != nil {
+		instanceFiler = fmt.Sprintf(" AND instance = %d", *filter.Instance)
+	}
+
+	serviceInstances, err := db.getInstancesFromQuery(
+		fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
+			filter.ServiceID, subjectFiler, instanceFiler))
+	if err != nil {
+		return instances, aoserrors.Wrap(err)
+	}
+
+	for _, value := range serviceInstances {
+		instances = append(instances, value.InstanceID)
+	}
+
+	return instances, nil
+}
+
 // GetStorageStateInfoByID returns storage and state info by instance ID.
 func (db *Database) GetStorageStateInfoByID(instanceID string) (info storagestate.StorageStateInstanceInfo, err error) {
 	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM storagestate WHERE instanceID = \"%s\"", instanceID),
