@@ -92,17 +92,18 @@ type Migration struct {
 
 // Config instance.
 type Config struct {
-	CACert                    string     `json:"caCert"`
-	SMServerURL               string     `json:"smServerUrl"`
-	CertStorage               string     `json:"certStorage"`
-	IAMServerURL              string     `json:"iamServer"`
-	IAMPublicServerURL        string     `json:"iamPublicServer"`
-	WorkingDir                string     `json:"workingDir"`
-	StorageDir                string     `json:"storageDir"`
-	ServicesDir               string     `json:"servicesDir"`
-	LayersDir                 string     `json:"layersDir"`
-	DownloadDir               string     `json:"downloadDir"`
-	
+	CACert             string `json:"caCert"`
+	SMServerURL        string `json:"smServerUrl"`
+	CertStorage        string `json:"certStorage"`
+	IAMServerURL       string `json:"iamServer"`
+	IAMPublicServerURL string `json:"iamPublicServer"`
+	WorkingDir         string `json:"workingDir"`
+	StorageDir         string `json:"storageDir"`
+	StateDir           string `json:"stateDir"`
+	ServicesDir        string `json:"servicesDir"`
+	LayersDir          string `json:"layersDir"`
+	DownloadDir        string `json:"downloadDir"`
+
 	BoardConfigFile           string     `json:"boardConfigFile"`
 	DefaultServiceTTLDays     uint64     `json:"defaultServiceTtlDays"`
 	ServiceHealthCheckTimeout Duration   `json:"serviceHealthCheckTimeout"`
