@@ -55,8 +55,8 @@ const dbVersion = 5
  * Vars
  **********************************************************************************************************************/
 
-// ErrNotExist is returned when requested entry not exist in DB.
-var ErrNotExist = errors.New("entry does not exist")
+// errNotExist is returned when requested entry not exist in DB.
+var errNotExist = errors.New("entry does not exist")
 
 // ErrMigrationFailed is returned if migration was failed and db returned to the previous state.
 var ErrMigrationFailed = errors.New("database migration failed")
@@ -107,7 +107,7 @@ func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
 // RemoveService removes existing service.
 func (db *Database) RemoveService(service servicemanager.ServiceInfo) (err error) {
 	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND aosVersion = ?",
-		service.ServiceID, service.AosVersion); errors.Is(err, ErrNotExist) {
+		service.ServiceID, service.AosVersion); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -151,7 +151,7 @@ func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.
 // ActivateService sets isActive to true for the service.
 func (db *Database) ActivateService(service servicemanager.ServiceInfo) (err error) {
 	if err = db.executeQuery("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?",
-		service.ServiceID, service.AosVersion); errors.Is(err, ErrNotExist) {
+		service.ServiceID, service.AosVersion); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(servicemanager.ErrNotExist)
 	}
 
@@ -161,7 +161,7 @@ func (db *Database) ActivateService(service servicemanager.ServiceInfo) (err err
 // SetTrafficMonitorData stores traffic monitor data.
 func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
 	if err = db.executeQuery("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?",
-		timestamp, value, chain); errors.Is(err, ErrNotExist) {
+		timestamp, value, chain); errors.Is(err, errNotExist) {
 		if _, err := db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)", chain, timestamp, value); err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -176,7 +176,7 @@ func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, val
 func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
 	if err = db.getDataFromQuery(fmt.Sprintf("SELECT time, value FROM trafficmonitor WHERE chain = \"%s\"", chain),
 		&timestamp, &value); err != nil {
-		if errors.Is(err, ErrNotExist) {
+		if errors.Is(err, errNotExist) {
 			return timestamp, value, networkmanager.ErrEntryNotExist
 		}
 
@@ -188,7 +188,7 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 // RemoveTrafficMonitorData removes existing traffic monitor entry.
 func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
-	if err = db.executeQuery("DELETE FROM trafficmonitor WHERE chain = ?", chain); errors.Is(err, ErrNotExist) {
+	if err = db.executeQuery("DELETE FROM trafficmonitor WHERE chain = ?", chain); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -247,7 +247,7 @@ func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
 
 // DeleteLayerByDigest remove layer from DB by digest.
 func (db *Database) DeleteLayerByDigest(digest string) (err error) {
-	if err = db.executeQuery("DELETE FROM layers WHERE digest = ?", digest); errors.Is(err, ErrNotExist) {
+	if err = db.executeQuery("DELETE FROM layers WHERE digest = ?", digest); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -281,7 +281,7 @@ func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.Laye
 	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM layers WHERE digest = \"%s\"", digest),
 		&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
 		&layer.VendorVersion, &layer.Description, &layer.AosVersion); err != nil {
-		if errors.Is(err, ErrNotExist) {
+		if errors.Is(err, errNotExist) {
 			return layer, layermanager.ErrNotExist
 		}
 
@@ -304,7 +304,7 @@ func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
 		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, aosVersion = ?, unitSubject = ?, running = ?,
 		 uid = ? WHERE instanceID = ?`,
 		instance.ServiceID, instance.SubjectID, instance.Instance, instance.AosVersion, instance.UnitSubject,
-		instance.Running, instance.UID, instance.InstanceID); errors.Is(err, ErrNotExist) {
+		instance.Running, instance.UID, instance.InstanceID); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(launcher.ErrNotExist)
 	}
 
@@ -314,7 +314,7 @@ func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
 // RemoveInstance removes instance information from db.
 func (db *Database) RemoveInstance(instanceID string) (err error) {
 	if err = db.executeQuery(
-		"DELETE FROM instances WHERE instanceID = ?", instanceID); errors.Is(err, ErrNotExist) {
+		"DELETE FROM instances WHERE instanceID = ?", instanceID); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -384,7 +384,7 @@ func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instanc
 func (db *Database) GetStorageStateInfoByID(instanceID string) (info storagestate.StorageStateInstanceInfo, err error) {
 	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM storagestate WHERE instanceID = \"%s\"", instanceID),
 		&instanceID, &info.StorageQuota, &info.StateQuota, &info.StateChecksum); err != nil {
-		if errors.Is(err, ErrNotExist) {
+		if errors.Is(err, errNotExist) {
 			return info, storagestate.ErrNotExist
 		}
 
@@ -403,7 +403,7 @@ func (db *Database) AddStorageStateInfo(instanceID string, info storagestate.Sto
 // SetStorageStateQuotasByID sets state storage info by instance ID
 func (db *Database) SetStorageStateQuotasByID(instanceID string, storageQuota, stateQuota uint64) (err error) {
 	if err = db.executeQuery("UPDATE storagestate SET storageQuota = ?, stateQuota =?  WHERE instanceID = ?",
-		storageQuota, stateQuota, instanceID); errors.Is(err, ErrNotExist) {
+		storageQuota, stateQuota, instanceID); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(storagestate.ErrNotExist)
 	}
 
@@ -413,7 +413,7 @@ func (db *Database) SetStorageStateQuotasByID(instanceID string, storageQuota, s
 // SetStateChecksumByID updates state checksum by instance ID.
 func (db *Database) SetStateChecksumByID(instanceID string, checksum []byte) (err error) {
 	if err = db.executeQuery("UPDATE storagestate SET stateChecksum = ? WHERE instanceID = ?",
-		checksum, instanceID); errors.Is(err, ErrNotExist) {
+		checksum, instanceID); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(storagestate.ErrNotExist)
 	}
 
@@ -423,7 +423,7 @@ func (db *Database) SetStateChecksumByID(instanceID string, checksum []byte) (er
 // RemoveStorageStateInfoByID removes storage and state info by instance ID.
 func (db *Database) RemoveStorageStateInfoByID(instanceID string) (err error) {
 	if err = db.executeQuery(
-		"DELETE FROM storagestate WHERE instanceID = ?", instanceID); errors.Is(err, ErrNotExist) {
+		"DELETE FROM storagestate WHERE instanceID = ?", instanceID); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -657,7 +657,7 @@ func (db *Database) executeQuery(query string, args ...interface{}) error {
 	}
 
 	if count == 0 {
-		return aoserrors.Wrap(ErrNotExist)
+		return aoserrors.Wrap(errNotExist)
 	}
 
 	return nil
@@ -722,7 +722,7 @@ func (db *Database) getDataFromQuery(query string, result ...interface{}) error 
 
 	if err = stmt.QueryRow().Scan(result...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotExist
+			return errNotExist
 		}
 
 		return aoserrors.Wrap(err)
