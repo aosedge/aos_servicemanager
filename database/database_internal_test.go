@@ -910,7 +910,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 		}
 
 		if count == 0 {
-			return ErrNotExist
+			return errNotExist
 		}
 	}
 
@@ -926,7 +926,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	}
 
 	if !servicesRows.Next() {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	count = 0
@@ -935,7 +935,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	}
 
 	if count == 0 {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	return nil
@@ -960,7 +960,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 		}
 
 		if count != 0 {
-			return ErrNotExist
+			return errNotExist
 		}
 	}
 
@@ -976,7 +976,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	if !servicesRows.Next() {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	count = 0
@@ -985,7 +985,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	if count != 0 {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	return nil
