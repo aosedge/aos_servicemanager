@@ -216,6 +216,12 @@ type Launcher struct {
  * Vars
  **********************************************************************************************************************/
 
+// OperationVersion defines current operation version
+// IMPORTANT: if new functionality doesn't allow existing services to work
+// properly, this value should be increased. It will force to remove all
+// services and their storages before first start.
+const OperationVersion = 8
+
 // Mount, unmount instance FS functions.
 // nolint:gochecknoglobals
 var (
