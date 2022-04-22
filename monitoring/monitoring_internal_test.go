@@ -150,8 +150,8 @@ func TestPeriodicReport(t *testing.T) {
 	monitor, err := New(&config.Config{
 		WorkingDir: ".",
 		Monitoring: config.Monitoring{
-			SendPeriod: config.Duration{Duration: duration},
-			PollPeriod: config.Duration{Duration: duration},
+			SendPeriod: aostypes.Duration{Duration: duration},
+			PollPeriod: aostypes.Duration{Duration: duration},
 		},
 	},
 		sender, trafficMonitoring)
@@ -235,8 +235,8 @@ func TestSystemAlerts(t *testing.T) {
 				MaxThreshold: 200,
 			},
 		},
-		SendPeriod: config.Duration{Duration: duration},
-		PollPeriod: config.Duration{Duration: duration},
+		SendPeriod: aostypes.Duration{Duration: duration},
+		PollPeriod: aostypes.Duration{Duration: duration},
 	}
 
 	testData := []testAlertData{
@@ -361,8 +361,8 @@ func TestInstances(t *testing.T) {
 		&config.Config{
 			WorkingDir: ".",
 			Monitoring: config.Monitoring{
-				SendPeriod: config.Duration{Duration: duration},
-				PollPeriod: config.Duration{Duration: duration},
+				SendPeriod: aostypes.Duration{Duration: duration},
+				PollPeriod: aostypes.Duration{Duration: duration},
 			},
 		},
 		sender,
