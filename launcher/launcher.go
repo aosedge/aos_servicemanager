@@ -383,7 +383,7 @@ func (launcher *Launcher) RunInstances(instances []cloudprotocol.InstanceInfo) e
 
 	log.Debug("Run instances")
 
-	runInstances := make([]InstanceInfo, 0, len(instances))
+	var runInstances []InstanceInfo
 
 	// Convert cloudprotocol InstanceInfo to internal InstanceInfo
 	for _, item := range instances {
@@ -788,7 +788,7 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 }
 
 func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*instanceInfo {
-	startInstances := make([]*instanceInfo, 0, len(runInstances))
+	var startInstances []*instanceInfo // nolint:prealloc // size of startInstances is not determined
 
 	for _, instance := range runInstances {
 		startInstance, ok := launcher.currentInstances[instance.InstanceID]
@@ -968,18 +968,18 @@ func (launcher *Launcher) getLowPriorityInstance(instance *instanceInfo, deviceN
 		return nil, aoserrors.Wrap(err)
 	}
 
-	checkInstances := make([]*instanceInfo, 0, len(deviceInstances)+1)
+	checkInstances := make([]*instanceInfo, len(deviceInstances)+1)
 
-	for _, instanceID := range deviceInstances {
+	for i, instanceID := range deviceInstances {
 		currentInstance, ok := launcher.currentInstances[instanceID]
 		if !ok {
 			return nil, aoserrors.Errorf("can't get allocated device instance: %s", instanceID)
 		}
 
-		checkInstances = append(checkInstances, currentInstance)
+		checkInstances[i] = currentInstance
 	}
 
-	checkInstances = append(checkInstances, instance)
+	checkInstances[len(deviceInstances)] = instance
 
 	sort.Sort(byPriority(checkInstances))
 
@@ -1418,7 +1418,7 @@ func (launcher *Launcher) stopRunningInstances() error {
 
 	launcher.cacheCurrentServices(runningInstances)
 
-	stopInstances := make([]*instanceInfo, 0, len(runningInstances))
+	var stopInstances []*instanceInfo // nolint:prealloc // stopInstances size is not determined
 
 	for _, runningInstance := range runningInstances {
 		service, err := launcher.getCurrentServiceInfo(runningInstance.ServiceID)
