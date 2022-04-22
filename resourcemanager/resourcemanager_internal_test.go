@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
@@ -162,7 +163,7 @@ func TestGetDeviceInfo(t *testing.T) {
 		t.Fatalf("Can't get device info: %s", err)
 	}
 
-	if !reflect.DeepEqual(deviceInfo, DeviceInfo{
+	if !reflect.DeepEqual(deviceInfo, aostypes.DeviceInfo{
 		Name: "random", SharedCount: 0, Groups: []string{"root"},
 		HostDevices: []string{"/dev/random"},
 	}) {
@@ -190,9 +191,9 @@ func TestGetResourceInfo(t *testing.T) {
 		t.Errorf("Can't get resource inf: %s", err)
 	}
 
-	if !reflect.DeepEqual(resourceInfo, ResourceInfo{
+	if !reflect.DeepEqual(resourceInfo, aostypes.ResourceInfo{
 		Name: "system-dbus",
-		Mounts: []FileSystemMount{{
+		Mounts: []aostypes.FileSystemMount{{
 			Destination: "/var/run/dbus/system_bus_socket",
 			Options:     []string{"rw", "bind"},
 			Source:      "/var/run/dbus/system_bus_socket",

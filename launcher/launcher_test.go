@@ -98,8 +98,8 @@ type testRunner struct {
 type testResourceManager struct {
 	sync.RWMutex
 	allocatedDevices map[string][]string
-	devices          map[string]resourcemanager.DeviceInfo
-	resources        map[string]resourcemanager.ResourceInfo
+	devices          map[string]aostypes.DeviceInfo
+	resources        map[string]aostypes.ResourceInfo
 }
 
 type testNetworkManager struct {
@@ -826,15 +826,15 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't remove host device dir: %v", err)
 	}
 
-	resourceManager.addDevice(resourcemanager.DeviceInfo{
+	resourceManager.addDevice(aostypes.DeviceInfo{
 		Name: "input", HostDevices: []string{fmt.Sprintf("%s/input:/dev/input", hostDeviceDir)},
 		Groups: hostGroups[:2],
 	})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{
+	resourceManager.addDevice(aostypes.DeviceInfo{
 		Name: "video", HostDevices: []string{fmt.Sprintf("%s/video:/dev/video", hostDeviceDir)},
 		Groups: hostGroups[2:4],
 	})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{
+	resourceManager.addDevice(aostypes.DeviceInfo{
 		Name: "sound", HostDevices: []string{fmt.Sprintf("%s/sound:/dev/sound", hostDeviceDir)},
 		Groups: hostGroups[4:6],
 	})
@@ -880,7 +880,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	hostDirs := filepath.Join(tmpDir, "mount")
 
-	hostMounts := []resourcemanager.FileSystemMount{
+	hostMounts := []aostypes.FileSystemMount{
 		{Source: filepath.Join(hostDirs, "dir0"), Destination: "/dir0", Type: "bind", Options: []string{"opt0, opt1"}},
 		{Source: filepath.Join(hostDirs, "dir1"), Destination: "/dir1", Type: "bind", Options: []string{"opt2, opt3"}},
 		{Source: filepath.Join(hostDirs, "dir2"), Destination: "/dir2", Type: "bind", Options: []string{"opt4, opt5"}},
@@ -890,13 +890,13 @@ func TestRuntimeSpec(t *testing.T) {
 
 	envVars := []string{"var0=0", "var1=1", "var2=2", "var3=3", "var4=4", "var5=5", "var6=6", "var7=7"}
 
-	resourceManager.addResource(resourcemanager.ResourceInfo{
+	resourceManager.addResource(aostypes.ResourceInfo{
 		Name: "resource1", Mounts: hostMounts[:2], Env: envVars[:2], Groups: hostGroups[6:7],
 	})
-	resourceManager.addResource(resourcemanager.ResourceInfo{
+	resourceManager.addResource(aostypes.ResourceInfo{
 		Name: "resource2", Mounts: hostMounts[2:4], Env: envVars[2:5], Groups: hostGroups[7:8],
 	})
-	resourceManager.addResource(resourcemanager.ResourceInfo{
+	resourceManager.addResource(aostypes.ResourceInfo{
 		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
 	})
 
@@ -1188,18 +1188,18 @@ func TestRuntimeEnvironment(t *testing.T) {
 	storageStateProvider := newTestStorageStateProvider(testInstaces)
 	instanceMonitor := newTestInstanceMonitor()
 
-	resourceHosts := []config.Host{
+	resourceHosts := []aostypes.Host{
 		{IP: "10.0.0.1", Hostname: "host1"},
 		{IP: "10.0.0.2", Hostname: "host2"},
 		{IP: "10.0.0.3", Hostname: "host3"},
 	}
 
-	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource0", Hosts: resourceHosts[:1]})
-	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource1", Hosts: resourceHosts[1:2]})
-	resourceManager.addResource(resourcemanager.ResourceInfo{Name: "resource2", Hosts: resourceHosts[2:]})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device0"})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1"})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2"})
+	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource0", Hosts: resourceHosts[:1]})
+	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource1", Hosts: resourceHosts[1:2]})
+	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource2", Hosts: resourceHosts[2:]})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device0"})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device1"})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2"})
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
 		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider,
@@ -2061,9 +2061,9 @@ func TestInstancePriorities(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	alertSender := newTestAlertSender()
 
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device0", SharedCount: 1})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device1", SharedCount: 2})
-	resourceManager.addDevice(resourcemanager.DeviceInfo{Name: "device2", SharedCount: 3})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device0", SharedCount: 1})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device1", SharedCount: 2})
+	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2", SharedCount: 3})
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(), newTestRegistrar(),
@@ -2628,30 +2628,30 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 func newTestResourceManager() *testResourceManager {
 	return &testResourceManager{
 		allocatedDevices: map[string][]string{},
-		devices:          make(map[string]resourcemanager.DeviceInfo),
-		resources:        make(map[string]resourcemanager.ResourceInfo),
+		devices:          make(map[string]aostypes.DeviceInfo),
+		resources:        make(map[string]aostypes.ResourceInfo),
 	}
 }
 
-func (manager *testResourceManager) GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error) {
+func (manager *testResourceManager) GetDeviceInfo(device string) (aostypes.DeviceInfo, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
-		return resourcemanager.DeviceInfo{}, aoserrors.New("device info not found")
+		return aostypes.DeviceInfo{}, aoserrors.New("device info not found")
 	}
 
 	return deviceInfo, nil
 }
 
-func (manager *testResourceManager) GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error) {
+func (manager *testResourceManager) GetResourceInfo(resource string) (aostypes.ResourceInfo, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 
 	resourceInfo, ok := manager.resources[resource]
 	if !ok {
-		return resourcemanager.ResourceInfo{}, aoserrors.New("resource info not found")
+		return aostypes.ResourceInfo{}, aoserrors.New("resource info not found")
 	}
 
 	return resourceInfo, nil
@@ -2732,14 +2732,14 @@ func (manager *testResourceManager) GetDeviceInstances(name string) (instanceIDs
 	return manager.allocatedDevices[name], nil
 }
 
-func (manager *testResourceManager) addDevice(device resourcemanager.DeviceInfo) {
+func (manager *testResourceManager) addDevice(device aostypes.DeviceInfo) {
 	manager.Lock()
 	defer manager.Unlock()
 
 	manager.devices[device.Name] = device
 }
 
-func (manager *testResourceManager) addResource(resource resourcemanager.ResourceInfo) {
+func (manager *testResourceManager) addResource(resource aostypes.ResourceInfo) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -3378,7 +3378,7 @@ func newTime(value time.Time) *time.Time {
 	return &value
 }
 
-func createSpecMounts(mounts []resourcemanager.FileSystemMount) (specMounts []runtimespec.Mount) {
+func createSpecMounts(mounts []aostypes.FileSystemMount) (specMounts []runtimespec.Mount) {
 	// Manadatory mounts
 	specMounts = append(specMounts, runtimespec.Mount{Source: "proc", Destination: "/proc", Type: "proc"})
 	specMounts = append(specMounts, runtimespec.Mount{

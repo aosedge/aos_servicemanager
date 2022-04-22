@@ -31,10 +31,9 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/aoscloud/aos_servicemanager/config"
 )
 
 /***********************************************************************************************************************
@@ -59,7 +58,7 @@ type ResourceManager struct {
 	hostDevices      []string
 	hostGroups       []string
 	boardConfigFile  string
-	boardConfig      BoardConfig
+	boardConfig      aostypes.BoardConfig
 	boardConfigError error
 	alertSender      AlertSender
 }
@@ -67,39 +66,6 @@ type ResourceManager struct {
 // AlertSender provides alert sender interface.
 type AlertSender interface {
 	SendAlert(alert cloudprotocol.AlertItem)
-}
-
-// FileSystemMount specifies a mount instructions.
-type FileSystemMount struct {
-	Destination string   `json:"destination"`
-	Type        string   `json:"type,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	Options     []string `json:"options,omitempty"`
-}
-
-// DeviceInfo device information.
-type DeviceInfo struct {
-	Name        string   `json:"name"`
-	SharedCount int      `json:"sharedCount,omitempty"`
-	Groups      []string `json:"groups,omitempty"`
-	HostDevices []string `json:"hostDevices"`
-}
-
-// ResourceInfo resource information.
-type ResourceInfo struct {
-	Name   string            `json:"name"`
-	Groups []string          `json:"groups,omitempty"`
-	Mounts []FileSystemMount `json:"mounts,omitempty"`
-	Env    []string          `json:"env,omitempty"`
-	Hosts  []config.Host     `json:"hosts,omitempty"`
-}
-
-// BoardConfig board configuration.
-type BoardConfig struct {
-	FormatVersion uint64         `json:"formatVersion"`
-	VendorVersion string         `json:"vendorVersion"`
-	Devices       []DeviceInfo   `json:"devices"`
-	Resources     []ResourceInfo `json:"resources"`
 }
 
 /***********************************************************************************************************************
@@ -180,7 +146,7 @@ func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) err
 }
 
 // GetDeviceInfo returns device information.
-func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo DeviceInfo, err error) {
+func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo aostypes.DeviceInfo, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -192,7 +158,7 @@ func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo D
 }
 
 // GetResourceInfo returns resource information.
-func (resourcemanager *ResourceManager) GetResourceInfo(name string) (ResourceInfo, error) {
+func (resourcemanager *ResourceManager) GetResourceInfo(name string) (aostypes.ResourceInfo, error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -202,7 +168,7 @@ func (resourcemanager *ResourceManager) GetResourceInfo(name string) (ResourceIn
 		}
 	}
 
-	return ResourceInfo{}, aoserrors.New("resource is not available")
+	return aostypes.ResourceInfo{}, aoserrors.New("resource is not available")
 }
 
 // AllocateDevice tries to allocate device.
@@ -303,7 +269,7 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
  **********************************************************************************************************************/
 
 func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) error {
-	boardConfig := BoardConfig{}
+	boardConfig := aostypes.BoardConfig{}
 
 	if err := json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
 		return aoserrors.Wrap(err)
@@ -377,7 +343,7 @@ func (resourcemanager *ResourceManager) loadBoardConfiguration() (err error) {
 		resourcemanager.boardConfigError = aoserrors.Wrap(err)
 	}()
 
-	resourcemanager.boardConfig = BoardConfig{}
+	resourcemanager.boardConfig = aostypes.BoardConfig{}
 
 	byteValue, err := ioutil.ReadFile(resourcemanager.boardConfigFile)
 	if err != nil {
@@ -395,7 +361,7 @@ func (resourcemanager *ResourceManager) loadBoardConfiguration() (err error) {
 	return nil
 }
 
-func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfig) (err error) {
+func (resourcemanager *ResourceManager) validateBoardConfig(config aostypes.BoardConfig) (err error) {
 	if config.FormatVersion != supportedFormatVersion {
 		return aoserrors.New("unsupported board configuration format version")
 	}
@@ -408,7 +374,7 @@ func (resourcemanager *ResourceManager) validateBoardConfig(config BoardConfig) 
 }
 
 // compare available devices from board config with host (real) devices.
-func (resourcemanager *ResourceManager) validateDevices(devices []DeviceInfo) error {
+func (resourcemanager *ResourceManager) validateDevices(devices []aostypes.DeviceInfo) error {
 	var deviceErrors []cloudprotocol.ResourceValidateError
 
 	// compare available device names and additional groups with system ones
@@ -459,7 +425,7 @@ func (resourcemanager *ResourceManager) validateDevices(devices []DeviceInfo) er
 	return nil
 }
 
-func (resourcemanager *ResourceManager) getAvailableDevice(name string) (deviceInfo DeviceInfo, err error) {
+func (resourcemanager *ResourceManager) getAvailableDevice(name string) (deviceInfo aostypes.DeviceInfo, err error) {
 	for _, deviceInfo = range resourcemanager.boardConfig.Devices {
 		if deviceInfo.Name == name {
 			return deviceInfo, nil

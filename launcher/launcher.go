@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/resourcemonitor"
 	"github.com/aoscloud/aos_common/utils/action"
@@ -111,8 +112,8 @@ type InstanceRunner interface {
 
 // ResourceManager provides API to validate, request and release resources.
 type ResourceManager interface {
-	GetDeviceInfo(device string) (resourcemanager.DeviceInfo, error)
-	GetResourceInfo(resource string) (resourcemanager.ResourceInfo, error)
+	GetDeviceInfo(device string) (aostypes.DeviceInfo, error)
+	GetResourceInfo(resource string) (aostypes.ResourceInfo, error)
 	AllocateDevice(device, instanceID string) error
 	ReleaseDevice(device, instanceID string) error
 	ReleaseDevices(instanceID string) error
@@ -901,7 +902,7 @@ func (launcher *Launcher) doStartAction(instance *instanceInfo) {
 	})
 }
 
-func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []config.Host, err error) {
+func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []aostypes.Host, err error) {
 	for _, resource := range resources {
 		boardResource, err := launcher.resourceManager.GetResourceInfo(resource)
 		if err != nil {

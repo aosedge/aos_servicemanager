@@ -59,12 +59,6 @@ type Alerts struct {
 	SystemAlertPriority  int      `json:"systemAlertPriority"`
 }
 
-// Host strunct represent entry in /etc/hosts.
-type Host struct {
-	IP       string `json:"ip"`
-	Hostname string `json:"hostname"`
-}
-
 // Migration struct represents path for db migration.
 type Migration struct {
 	MigrationPath       string `json:"migrationPath"`
@@ -92,7 +86,7 @@ type Config struct {
 	Logging                   Logging                `json:"logging"`
 	Alerts                    Alerts                 `json:"alerts"`
 	HostBinds                 []string               `json:"hostBinds"`
-	Hosts                     []Host                 `json:"hosts,omitempty"`
+	Hosts                     []aostypes.Host        `json:"hosts,omitempty"`
 	Migration                 Migration              `json:"migration"`
 }
 
