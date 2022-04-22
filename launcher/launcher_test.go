@@ -109,7 +109,7 @@ type testNetworkManager struct {
 
 type testRegistrar struct {
 	sync.Mutex
-	secrets map[string]string
+	secrets map[cloudprotocol.InstanceIdent]string
 }
 
 type testStorageStateProvider struct {
@@ -1095,7 +1095,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	envVars = append(envVars, testInstaces[0].imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
-	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceID]))
+	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
 
 	if !compareArrays(len(envVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
 		return envVars[index1] == runtimeSpec.Process.Env[index2]
@@ -1236,7 +1236,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	// Check registrar
 
-	if _, ok := registrar.secrets[instance.InstanceID]; !ok {
+	if _, ok := registrar.secrets[instance.InstanceIdent]; !ok {
 		t.Error("Instance should be registered")
 	}
 
@@ -1372,7 +1372,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	// Check registrar
 
-	if _, ok := registrar.secrets[instance.InstanceID]; ok {
+	if _, ok := registrar.secrets[instance.InstanceIdent]; ok {
 		t.Error("Instance should be unregistered")
 	}
 
@@ -2780,35 +2780,35 @@ func (manager *testNetworkManager) RemoveInstanceFromNetwork(instanceID, network
  **********************************************************************************************************************/
 
 func newTestRegistrar() *testRegistrar {
-	return &testRegistrar{secrets: make(map[string]string)}
+	return &testRegistrar{secrets: make(map[cloudprotocol.InstanceIdent]string)}
 }
 
 func (registrar *testRegistrar) RegisterInstance(
-	instanceID string, permissions map[string]map[string]string,
+	instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
 ) (secret string, err error) {
 	registrar.Lock()
 	defer registrar.Unlock()
 
-	if _, ok := registrar.secrets[instanceID]; ok {
-		return "", aoserrors.Errorf("instance %s already registered", instanceID)
+	if _, ok := registrar.secrets[instance]; ok {
+		return "", aoserrors.New("instance already registered")
 	}
 
 	secret = uuid.NewString()
 
-	registrar.secrets[instanceID] = secret
+	registrar.secrets[instance] = secret
 
 	return secret, nil
 }
 
-func (registrar *testRegistrar) UnregisterInstance(instanceID string) error {
+func (registrar *testRegistrar) UnregisterInstance(instance cloudprotocol.InstanceIdent) error {
 	registrar.Lock()
 	defer registrar.Unlock()
 
-	if _, ok := registrar.secrets[instanceID]; !ok {
-		return aoserrors.Errorf("instance %s is not registered", instanceID)
+	if _, ok := registrar.secrets[instance]; !ok {
+		return aoserrors.New("instance is not registered")
 	}
 
-	delete(registrar.secrets, instanceID)
+	delete(registrar.secrets, instance)
 
 	return nil
 }

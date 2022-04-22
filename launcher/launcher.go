@@ -127,8 +127,10 @@ type NetworkManager interface {
 
 // InstanceRegistrar provides API to register/unregister instance.
 type InstanceRegistrar interface {
-	RegisterInstance(instanceID string, permissions map[string]map[string]string) (secret string, err error)
-	UnregisterInstance(instanceID string) error
+	RegisterInstance(
+		instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+	) (secret string, err error)
+	UnregisterInstance(instance cloudprotocol.InstanceIdent) error
 }
 
 // StorageStateProvider provides API for instance storage/state.
@@ -728,7 +730,7 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 func (launcher *Launcher) releaseRuntime(instance *instanceInfo) (err error) {
 	if instance.service.serviceConfig.Permissions != nil {
 		if registerErr := launcher.instanceRegistrar.UnregisterInstance(
-			instance.InstanceID); registerErr != nil && err == nil {
+			instance.InstanceIdent); registerErr != nil && err == nil {
 			err = aoserrors.Wrap(registerErr)
 		}
 	}
@@ -1056,7 +1058,7 @@ func (launcher *Launcher) revertDeviceAllocation(instance *instanceInfo, release
 func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
 	if instance.service.serviceConfig.Permissions != nil {
 		secret, err := launcher.instanceRegistrar.RegisterInstance(
-			instance.InstanceID, instance.service.serviceConfig.Permissions)
+			instance.InstanceIdent, instance.service.serviceConfig.Permissions)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
