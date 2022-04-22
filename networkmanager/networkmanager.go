@@ -31,6 +31,7 @@ import (
 	"sync"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
@@ -73,7 +74,7 @@ type NetworkManager struct {
 	sync.Mutex
 	cniInterface      cni.CNI
 	ipamSubnetwork    *ipSubnetwork
-	hosts             []config.Host
+	hosts             []aostypes.Host
 	networkDir        string
 	trafficMonitoring *trafficMonitoring
 	instancesData     map[string]map[string]netInstanceData
@@ -88,7 +89,7 @@ type NetworkParams struct {
 	EgressKbit         uint64
 	ExposedPorts       []string
 	AllowedConnections []string
-	Hosts              []config.Host
+	Hosts              []aostypes.Host
 	DNSSevers          []string
 	HostsFilePath      string
 	ResolvConfFilePath string
