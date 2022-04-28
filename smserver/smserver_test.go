@@ -236,7 +236,7 @@ func TestInstanceMessages(t *testing.T) {
 		})
 
 		expectedRequest = append(expectedRequest, cloudprotocol.EnvVarsInstanceInfo{
-			InstanceFilter: createInstanceFilter("id"+strconv.Itoa(i), "s1", int64(i-1)),
+			InstanceFilter: cloudprotocol.NewInstanceFilter("id"+strconv.Itoa(i), "s1", int64(i-1)),
 			EnvVars: []cloudprotocol.EnvVarInfo{
 				{ID: "varId" + strconv.Itoa(i), Variable: "variable " + strconv.Itoa(i)},
 				{ID: "varId2" + strconv.Itoa(i), Variable: "variable 2" + strconv.Itoa(i), TTL: &curentTime},
@@ -373,7 +373,6 @@ func TestServicesMessages(t *testing.T) {
 			ServiceId:   "testService" + strconv.Itoa(i),
 			ProviderId:  "provider" + strconv.Itoa(i),
 			AosVersion:  uint64(i),
-			AlertRules:  "alertRule" + strconv.Itoa(i),
 			Description: "description" + strconv.Itoa(i),
 			Sha256:      []byte{0, 0, 0, byte(i + 200)},
 			Sha512:      []byte{byte(i + 300), 0, 0, 0},
@@ -1308,20 +1307,4 @@ func compareServiceLogRequest(expected *pb.InstanceLogRequest, received cloudpro
 	}
 
 	return nil
-}
-
-func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
-	filter.ServiceID = serviceID
-
-	if subjectID != "" {
-		filter.SubjectID = &subjectID
-	}
-
-	if instance != -1 {
-		localInstance := (uint64)(instance)
-
-		filter.Instance = &localInstance
-	}
-
-	return filter
 }

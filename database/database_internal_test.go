@@ -662,19 +662,19 @@ func TestInstancesID(t *testing.T) {
 
 	data := []testData{
 		{
-			filter:      createInstanceFilter("TestSevrID", "TestSubID", 0),
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "TestSubID", 0),
 			expectedIds: []string{"TestSevrID_TestSubID_0"},
 		},
 		{
-			filter:      createInstanceFilter("TestSevrID", "TestSubID", -1),
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "TestSubID", -1),
 			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1"},
 		},
 		{
-			filter:      createInstanceFilter("TestSevrID", "", 0),
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "", 0),
 			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID1_0"},
 		},
 		{
-			filter:      createInstanceFilter("TestSevrID", "", -1),
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "", -1),
 			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1", "TestSevrID_TestSubID1_0"},
 		},
 	}
@@ -705,14 +705,14 @@ func TestEnvVars(t *testing.T) {
 
 	testEnvVars := []cloudprotocol.EnvVarsInstanceInfo{
 		{
-			InstanceFilter: createInstanceFilter("id1", "s1", int64(1)),
+			InstanceFilter: cloudprotocol.NewInstanceFilter("id1", "s1", int64(1)),
 			EnvVars: []cloudprotocol.EnvVarInfo{
 				{ID: "varId1", Variable: "variable 1"},
 				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
 			},
 		},
 		{
-			InstanceFilter: createInstanceFilter("id2", "", -1),
+			InstanceFilter: cloudprotocol.NewInstanceFilter("id2", "", -1),
 			EnvVars: []cloudprotocol.EnvVarInfo{
 				{ID: "varId1", Variable: "variable 1"},
 				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
@@ -1034,20 +1034,4 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	return nil
-}
-
-func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
-	filter.ServiceID = serviceID
-
-	if subjectID != "" {
-		filter.SubjectID = &subjectID
-	}
-
-	if instance != -1 {
-		localInstance := (uint64)(instance)
-
-		filter.Instance = &localInstance
-	}
-
-	return filter
 }
