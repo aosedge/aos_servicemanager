@@ -89,7 +89,7 @@ func TestGetServiceLog(t *testing.T) {
 
 	var (
 		from           = time.Now()
-		instanceFilter = createInstanceFilter("logservice0", "subject0", 0)
+		instanceFilter = cloudprotocol.NewInstanceFilter("logservice0", "subject0", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
 		unitName       = "aos-service@" + instanceID + ".service"
 		till           = from.Add(5 * time.Second)
@@ -182,7 +182,7 @@ func TestGetEmptyLog(t *testing.T) {
 	defer logging.Close()
 
 	var (
-		instanceFilter = createInstanceFilter("logservice2", "subject2", 0)
+		instanceFilter = cloudprotocol.NewInstanceFilter("logservice2", "subject2", 0)
 		from           = time.Now()
 		till           = from.Add(5 * time.Second)
 	)
@@ -215,7 +215,7 @@ func TestGetServiceCrashLog(t *testing.T) {
 	defer logging.Close()
 
 	var (
-		instanceFilter = createInstanceFilter("logservice3", "subject3", 0)
+		instanceFilter = cloudprotocol.NewInstanceFilter("logservice3", "subject3", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
 		unitName       = "aos-service@" + instanceID + ".service"
 		from           = time.Now()
@@ -272,7 +272,7 @@ func TestMaxPartCountLog(t *testing.T) {
 	defer logging.Close()
 
 	var (
-		instanceFilter = createInstanceFilter("logservice4", "subject4", 0)
+		instanceFilter = cloudprotocol.NewInstanceFilter("logservice4", "subject4", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
 		unitName       = "aos-service@" + instanceID + ".service"
 		from           = time.Now()
@@ -346,19 +346,19 @@ func TestLogErrorCases(t *testing.T) {
 	defer loggingInstance.Close()
 
 	if err := loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: createInstanceFilter("noService", "", -1),
+		InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
 	}); err == nil {
 		t.Error("should be error: no instance ids for log request")
 	}
 
 	if err := loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: createInstanceFilter("noService", "", -1),
+		InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
 	}); err == nil {
 		t.Error("should be error: no instance ids for log request")
 	}
 
 	var (
-		instanceFilter = createInstanceFilter("logservice5", "subject5", 0)
+		instanceFilter = cloudprotocol.NewInstanceFilter("logservice5", "subject5", 0)
 		faultTime      = time.Time{}
 		unitName       = "aos-service@" + instanceProvider.addFilter(instanceFilter) + ".service"
 	)
@@ -698,20 +698,4 @@ func checkErrorLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 			return
 		}
 	}
-}
-
-func createInstanceFilter(serviceID, subjectID string, instance int64) (filter cloudprotocol.InstanceFilter) {
-	filter.ServiceID = serviceID
-
-	if subjectID != "" {
-		filter.SubjectID = &subjectID
-	}
-
-	if instance != -1 {
-		localInstance := (uint64)(instance)
-
-		filter.Instance = &localInstance
-	}
-
-	return filter
 }
