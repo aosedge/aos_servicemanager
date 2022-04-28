@@ -28,6 +28,7 @@ import (
 	pb "github.com/aoscloud/aos_common/api/servicemanager/v2"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
+	"github.com/aoscloud/aos_common/utils/pbconvert"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	log "github.com/sirupsen/logrus"
@@ -266,7 +267,7 @@ func (server *SMServer) GetServicesStatus(context.Context, *empty.Empty) (*pb.Se
 // InstanceStateAcceptance accepts new services instance state.
 func (server *SMServer) InstanceStateAcceptance(ctx context.Context, accept *pb.StateAcceptance) (*empty.Empty, error) {
 	state := cloudprotocol.StateAcceptance{
-		InstanceIdent: instanceIdentPBToCloudprotocol(accept.Instance),
+		InstanceIdent: pbconvert.NewInstanceIdentFromPB(accept.Instance),
 		Checksum:      accept.StateChecksum, Result: accept.Result, Reason: accept.Reason,
 	}
 
@@ -276,7 +277,7 @@ func (server *SMServer) InstanceStateAcceptance(ctx context.Context, accept *pb.
 // SetInstanceState sets state for service instance.
 func (server *SMServer) SetInstanceState(ctx context.Context, state *pb.InstanceState) (*empty.Empty, error) {
 	newState := cloudprotocol.UpdateState{
-		InstanceIdent: instanceIdentPBToCloudprotocol(state.Instance),
+		InstanceIdent: pbconvert.NewInstanceIdentFromPB(state.Instance),
 		Checksum:      state.StateChecksum, State: string(state.State),
 	}
 
@@ -328,7 +329,7 @@ func (server *SMServer) OverrideEnvVars(
 
 	for i, status := range envVarsStatuses {
 		statuses.EnvVarsStatus[i] = &pb.EnvVarInstanceStatus{
-			Instance:   cloudprotocolFilterToPBInstance(status.InstanceFilter),
+			Instance:   pbconvert.InstanceFilterToPB(status.InstanceFilter),
 			VarsStatus: make([]*pb.EnvVarStatus, len(status.Statuses)),
 		}
 
@@ -471,7 +472,7 @@ func (server *SMServer) handleChannels() {
 		case newState := <-server.newStateChannel:
 			if err := server.notificationStream.Send(&pb.SMNotifications{SMNotification: &pb.SMNotifications_NewInstanceState{
 				NewInstanceState: &pb.NewInstanceState{State: &pb.InstanceState{
-					Instance:      cloudprotocolInstanceIdentToPB(newState.InstanceIdent),
+					Instance:      pbconvert.InstanceIdentToPB(newState.InstanceIdent),
 					StateChecksum: newState.Checksum,
 					State:         []byte(newState.State),
 				}},
@@ -485,7 +486,7 @@ func (server *SMServer) handleChannels() {
 			if err := server.notificationStream.Send(
 				&pb.SMNotifications{SMNotification: &pb.SMNotifications_InstanceStateRequest{
 					InstanceStateRequest: &pb.InstanceStateRequest{
-						Instance: cloudprotocolInstanceIdentToPB(stateRquest.InstanceIdent),
+						Instance: pbconvert.InstanceIdentToPB(stateRquest.InstanceIdent),
 						Default:  stateRquest.Default,
 					},
 				}}); err != nil {
@@ -564,20 +565,6 @@ func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.Inst
 	}
 
 	return filter
-}
-
-func cloudprotocolFilterToPBInstance(filter cloudprotocol.InstanceFilter) *pb.InstanceIdent {
-	ident := &pb.InstanceIdent{ServiceId: filter.ServiceID, SubjectId: "", Instance: -1}
-
-	if filter.SubjectID != nil {
-		ident.SubjectId = *filter.SubjectID
-	}
-
-	if filter.Instance != nil {
-		ident.Instance = (int64)(*filter.Instance)
-	}
-
-	return ident
 }
 
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
@@ -675,7 +662,7 @@ func getPBDeviceAllocateAlertFromPayload(payload interface{}) (*pb.Alert_DeviceA
 	}
 
 	return &pb.Alert_DeviceAllocateAlert{DeviceAllocateAlert: &pb.DeviceAllocateAlert{
-		Instance: cloudprotocolInstanceIdentToPB(devAlert.InstanceIdent), Message: devAlert.Message,
+		Instance: pbconvert.InstanceIdentToPB(devAlert.InstanceIdent), Message: devAlert.Message,
 		Device: devAlert.Device,
 	}}, nil
 }
@@ -699,7 +686,7 @@ func getPBInstanceQuotaAlertFromPayload(payload interface{}) (*pb.Alert_Instance
 	}
 
 	return &pb.Alert_InstanceQuotaAlert{InstanceQuotaAlert: &pb.InstanceQuotaAlert{
-		Instance:  cloudprotocolInstanceIdentToPB(instQuotaAlert.InstanceIdent),
+		Instance:  pbconvert.InstanceIdentToPB(instQuotaAlert.InstanceIdent),
 		Parameter: instQuotaAlert.Parameter,
 		Value:     instQuotaAlert.Value,
 	}}, nil
@@ -712,20 +699,10 @@ func getPBInstanceAlertFromPayload(payload interface{}) (*pb.Alert_InstanceAlert
 	}
 
 	return &pb.Alert_InstanceAlert{InstanceAlert: &pb.InstanceAlert{
-		Instance:   cloudprotocolInstanceIdentToPB(instAlert.InstanceIdent),
+		Instance:   pbconvert.InstanceIdentToPB(instAlert.InstanceIdent),
 		AosVersion: instAlert.AosVersion,
 		Message:    instAlert.Message,
 	}}, nil
-}
-
-func cloudprotocolInstanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
-}
-
-func instanceIdentPBToCloudprotocol(ident *pb.InstanceIdent) cloudprotocol.InstanceIdent {
-	return cloudprotocol.InstanceIdent{
-		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: uint64(ident.Instance),
-	}
 }
 
 func cloudprotocolMonitoringToPB(monitoring cloudprotocol.MonitoringData) *pb.Monitoring {
@@ -743,7 +720,7 @@ func cloudprotocolMonitoringToPB(monitoring cloudprotocol.MonitoringData) *pb.Mo
 
 	for i := range monitoring.ServiceInstances {
 		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
-			Instance:   cloudprotocolInstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+			Instance:   pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
 			Ram:        monitoring.ServiceInstances[i].RAM,
 			Cpu:        monitoring.ServiceInstances[i].CPU,
 			UsedDisk:   monitoring.ServiceInstances[i].UsedDisk,
@@ -788,7 +765,7 @@ func updateInstanceStatusToPB(updateStatus *launcher.UpdateInstancesStatus) *pb.
 
 func cloudprotocolInstanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
 	return &pb.InstanceStatus{
-		Instance:   cloudprotocolInstanceIdentToPB(instance.InstanceIdent),
+		Instance:   pbconvert.InstanceIdentToPB(instance.InstanceIdent),
 		AosVersion: instance.AosVersion, StateChecksum: instance.StateChecksum,
 		RunState: instance.RunState, ErrorInfo: cloudprotocolErrorInfoToPB(instance.ErrorInfo),
 	}
