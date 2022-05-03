@@ -57,6 +57,7 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 type ServiceManager interface {
 	InstallService(
 		newService servicemanager.ServiceInfo, imageURL string, fileInfo image.FileInfo) error
+	RemoveService(serviceID string) error
 	GetAllServicesStatus() ([]servicemanager.ServiceInfo, error)
 }
 
@@ -244,6 +245,11 @@ func (server *SMServer) InstallService(ctx context.Context, service *pb.InstallS
 	fileInfo := image.FileInfo{Sha256: service.Sha256, Sha512: service.Sha512, Size: service.Size}
 
 	return &emptypb.Empty{}, aoserrors.Wrap(server.serviceManager.InstallService(installInfo, service.Url, fileInfo))
+}
+
+// RemoveService removes aos service.
+func (server *SMServer) RemoveService(ctx context.Context, req *pb.RemoveServiceRequest) (*empty.Empty, error) {
+	return &emptypb.Empty{}, aoserrors.Wrap(server.serviceManager.RemoveService(req.ServiceId))
 }
 
 // GetServicesStatus gets installed services info.
