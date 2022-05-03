@@ -64,6 +64,7 @@ type testLauncher struct {
 type testServiceManager struct {
 	currentInstallRequests testServiceInstallRequest
 	services               []servicemanager.ServiceInfo
+	currentRemoveService   string
 }
 
 type testStateHandler struct {
@@ -415,6 +416,17 @@ func TestServicesMessages(t *testing.T) {
 
 	if !proto.Equal(serviceStatuses, expectedServiceStatuses) {
 		t.Errorf("Incorrect service statuses")
+	}
+
+	expectedServiceID := "someID"
+
+	if _, err := smServer.RemoveService(
+		context.Background(), &pb.RemoveServiceRequest{ServiceId: expectedServiceID}); err != nil {
+		t.Fatalf("Can't remove service: %v", err)
+	}
+
+	if expectedServiceID != testServiceManager.currentRemoveService {
+		t.Error("Incorrect service id in remove request")
 	}
 }
 
@@ -1107,6 +1119,12 @@ func (serviceMgr *testServiceManager) InstallService(
 	}
 
 	serviceMgr.services = append(serviceMgr.services, newService)
+
+	return nil
+}
+
+func (serviceMgr *testServiceManager) RemoveService(serviceID string) error {
+	serviceMgr.currentRemoveService = serviceID
 
 	return nil
 }
