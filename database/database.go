@@ -117,13 +117,13 @@ func (db *Database) RemoveService(service servicemanager.ServiceInfo) (err error
 // GetService returns service by service ID.
 func (db *Database) GetService(serviceID string) (service servicemanager.ServiceInfo, err error) {
 	stmt, err := db.sql.Prepare(
-		"SELECT * FROM services WHERE aosVersion = (SELECT MAX(aosVersion) FROM services WHERE id = ?)")
+		"SELECT * FROM services WHERE aosVersion = (SELECT MAX(aosVersion) FROM services WHERE id = ?) AND id = ?")
 	if err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(serviceID).Scan(
+	err = stmt.QueryRow(serviceID, serviceID).Scan(
 		&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
 		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive)
 
