@@ -49,7 +49,7 @@ func createConfigFile() (err error) {
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8089",
 	"iamPublicServer" : "localhost:8090",
-	"defaultServiceTTLDays" : 30,
+	"serviceTTLDays" : 30,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
 		"sendPeriod": "5m",
@@ -259,8 +259,8 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.DefaultServiceTTLDays != 30 {
-		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTLDays)
+	if config.ServiceTTLDays != 30 {
+		t.Errorf("Wrong default service TTL value: %d", config.ServiceTTLDays)
 	}
 }
 

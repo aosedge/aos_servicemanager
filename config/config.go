@@ -86,7 +86,7 @@ type Config struct {
 	DownloadDir        string `json:"downloadDir"`
 
 	BoardConfigFile           string                 `json:"boardConfigFile"`
-	DefaultServiceTTLDays     uint64                 `json:"defaultServiceTtlDays"`
+	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
 	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
 	Monitoring                resourcemonitor.Config `json:"monitoring"`
 	Logging                   Logging                `json:"logging"`
@@ -108,7 +108,7 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		DefaultServiceTTLDays:     30,                                            // nolint:gomnd
+		ServiceTTLDays:            30,                                            // nolint:gomnd
 		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, // nolint:gomnd
 		Monitoring: resourcemonitor.Config{
 			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
@@ -145,11 +145,11 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	if config.LayersDir == "" {
-		config.LayersDir = path.Join(config.WorkingDir, "srvlib")
+		config.LayersDir = path.Join(config.WorkingDir, "layers")
 	}
 
 	if config.ServicesDir == "" {
-		config.ServicesDir = path.Join(config.WorkingDir, "servicemanager", "services")
+		config.ServicesDir = path.Join(config.WorkingDir, "services")
 	}
 
 	if config.DownloadDir == "" {
