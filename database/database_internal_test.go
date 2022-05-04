@@ -109,11 +109,6 @@ func TestAddGetService(t *testing.T) {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service.AosVersion = 2
-	if err := db.AddService(service); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
 	// GetService
 	serviceFromDB, err := db.GetService("service1")
 	if err != nil {
@@ -135,6 +130,20 @@ func TestAddGetService(t *testing.T) {
 
 	if err := db.AddService(service2); err == nil {
 		t.Error("Should be error can't add service")
+	}
+
+	serviceFromDB, err = db.GetService("service2")
+	if err != nil {
+		t.Errorf("Can't get service: %v", err)
+	}
+
+	if !reflect.DeepEqual(serviceFromDB, service2) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service.AosVersion = 2
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
 	}
 
 	services, err := db.GetAllServiceVersions("service1")
