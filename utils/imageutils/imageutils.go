@@ -18,15 +18,27 @@
 package imageutils
 
 import (
-	"context"
+	"archive/tar"
+	"bufio"
+	"compress/gzip"
+	"errors"
 	"io"
-	"net/url"
+	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/image"
 	log "github.com/sirupsen/logrus"
+)
+
+/***********************************************************************************************************************
+ * Consts
+ **********************************************************************************************************************/
+
+const (
+	dirSymlinkSize  = 4 * 1024
+	contentTypeSize = 64
 )
 
 /*******************************************************************************
@@ -59,35 +71,56 @@ func CopyFile(source, destination string) (err error) {
 	return aoserrors.Wrap(err)
 }
 
-// ExtractPackageByUrl extracts package by url and validate checksum.
-func ExtractPackageByURL(
-	extractDir, downloadDir, packageURL string, fileInfo image.FileInfo) (err error) {
-	urlVal, err := url.Parse(packageURL)
+func GetUncompressedTarContentSize(path string) (size int64, err error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return aoserrors.Wrap(err)
+		return 0, aoserrors.Wrap(err)
+	}
+	defer file.Close()
+
+	bReader := bufio.NewReader(file)
+
+	testBytes, err := bReader.Peek(contentTypeSize)
+	if err != nil {
+		return 0, aoserrors.Wrap(err)
 	}
 
-	var sourceFile string
+	reader := io.Reader(bReader)
 
-	if urlVal.Scheme != "file" {
-		if sourceFile, err = image.Download(context.Background(), downloadDir, packageURL); err != nil {
-			return aoserrors.Wrap(err)
+	if strings.Contains(http.DetectContentType(testBytes), "x-gzip") {
+		gzipReader, err := gzip.NewReader(reader)
+		if err != nil {
+			return 0, aoserrors.Wrap(err)
+		}
+		defer gzipReader.Close()
+
+		reader = gzipReader
+	}
+
+	tarReader := tar.NewReader(reader)
+
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			return size, nil
 		}
 
-		defer os.RemoveAll(sourceFile)
-	} else {
-		sourceFile = urlVal.Path
-	}
+		if err != nil {
+			return 0, aoserrors.Wrap(err)
+		}
 
-	if err = image.CheckFileInfo(context.Background(), sourceFile, fileInfo); err != nil {
-		return aoserrors.Wrap(err)
-	}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			size += dirSymlinkSize
 
-	if err = UnpackTarImage(sourceFile, extractDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
+		case tar.TypeSymlink:
+			size += dirSymlinkSize
 
-	return nil
+		case tar.TypeReg:
+			size += header.Size
+
+		}
+	}
 }
 
 /*******************************************************************************
