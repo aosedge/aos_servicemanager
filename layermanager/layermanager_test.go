@@ -21,13 +21,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
@@ -45,7 +50,16 @@ import (
 
 type testLayerStorage struct {
 	sync.Mutex
-	layers []layermanager.LayerInfo
+	layers       []layermanager.LayerInfo
+	addLayerFail bool
+	getLayerFail bool
+}
+
+type testSpaceAllocatorProvider struct {
+	availableSize         int64
+	allocatedSize         int64
+	secondAllocateFail    bool
+	numberAllocateRequest uint64
 }
 
 /***********************************************************************************************************************
@@ -89,12 +103,22 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestInstallRemoveLayer(t *testing.T) {
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, newTestLayerStorage())
+	testLayerStorage := newTestLayerStorage()
+
+	layerManager, err := layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, testLayerStorage)
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
 	}
 
-	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"))
+	layerManager.SetSpaceAllocator(&testSpaceAllocatorProvider{})
+
+	sizeLayerContent := int64(2 * 1024)
+
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"), sizeLayerContent)
 	if err != nil {
 		t.Fatalf("Can't create layer: %s", err)
 	}
@@ -122,8 +146,30 @@ func TestInstallRemoveLayer(t *testing.T) {
 		t.Error("Layer AosVersion should be 1")
 	}
 
-	if err = layerManager.UninstallLayer(digest); err != nil {
+	layerInfo, err := layerManager.GetLayerInfoByDigest(digest)
+	if err != nil {
+		t.Fatalf("Can't get layer info: %v", err)
+	}
+
+	if layerInfo.Digest != digest {
+		t.Errorf("Unexpected layer digest: %v", layerInfo.Digest)
+	}
+
+	if layerInfo.LayerID != "LayerId1" {
+		t.Errorf("Unexpected layer Id: %v", layerInfo.LayerID)
+	}
+
+	if layerInfo.Path != path.Join(tmpDir, "layers", strings.Replace(digest, ":", "/", 1)) {
+		t.Errorf("Unexpected layer Path: %v", layerInfo.Path)
+	}
+
+	size, err := layerManager.UninstallLayer(digest)
+	if err != nil {
 		t.Fatalf("Can't uninstall layer: %s", err)
+	}
+
+	if size != sizeLayerContent {
+		t.Errorf("Unexpected uninstall layer size: %v", size)
 	}
 
 	list, err = layerManager.GetLayersInfo()
@@ -134,62 +180,276 @@ func TestInstallRemoveLayer(t *testing.T) {
 	if len(list) != 0 {
 		t.Error("Count of layers should be 0")
 	}
+
+	testLayerStorage.addLayerFail = true
+
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+		layerFile, fileInfo); err == nil {
+		t.Fatal("Layer should not be installed")
+	}
+
+	testLayerStorage.getLayerFail = true
+
+	if _, err = layerManager.GetLayersInfo(); err == nil {
+		t.Error("Should be error: can't get layers list")
+	}
 }
 
-func TestLayerConsistencyCheck(t *testing.T) {
-	layerStorage := newTestLayerStorage()
+func TestRemoveDemageLayerFolder(t *testing.T) {
+	testStorage := newTestLayerStorage()
 
-	layerManager, err := layermanager.New(&config.Config{WorkingDir: tmpDir}, layerStorage)
+	layerManager, err := layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, testStorage)
 	if err != nil {
-		t.Fatalf("Can't create layer manager: %s", err)
+		t.Fatalf("Can't create layer manager: %v", err)
 	}
 
-	layerFile1, digest1, fileInfo1, err := createLayer(path.Join(tmpDir, "layerdir1"))
-	if err != nil {
-		t.Fatalf("Can't create layer: %s", err)
-	}
+	layerManager.SetSpaceAllocator(&testSpaceAllocatorProvider{})
 
-	layerFile2, digest2, fileInfo2, err := createLayer(path.Join(tmpDir, "layerdir2"))
+	sizeLayerContent := int64(1 * 1024)
+
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"), sizeLayerContent)
 	if err != nil {
-		t.Fatalf("Can't create layer: %s", err)
+		t.Fatalf("Can't create layer: %v", err)
 	}
 
 	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest1, AosVersion: 1},
-		layerFile1, fileInfo1); err != nil {
-		t.Fatalf("Can't install layer: %s", err)
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+		layerFile, fileInfo); err != nil {
+		t.Fatalf("Can't install layer: %v", err)
+	}
+
+	testLayerDir := path.Join(tmpDir, "layers/sha256/test")
+	if err := os.MkdirAll(testLayerDir, 0o755); err != nil {
+		t.Fatalf("Can't create test layer: %v", err)
+	}
+
+	if _, err := os.Stat(testLayerDir); err != nil {
+		t.Fatalf("Test layer folder does not exist: %v", err)
+	}
+
+	provider := testSpaceAllocatorProvider{}
+
+	layerManager, err = layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, testStorage)
+	if err != nil {
+		t.Fatalf("Can't create layer manager: %v", err)
+	}
+
+	layerManager.SetSpaceAllocator(&provider)
+
+	if _, err := os.Stat(testLayerDir); err == nil {
+		t.Error("Test layer folder should be deleted")
+	}
+
+	layerFile, digest, fileInfo, err = createLayer(path.Join(tmpDir, "layerdir2"), sizeLayerContent)
+	if err != nil {
+		t.Fatalf("Can't create layer: %v", err)
 	}
 
 	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest2, AosVersion: 1},
-		layerFile2, fileInfo2); err != nil {
-		t.Fatalf("Can't install layer: %s", err)
+		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest, AosVersion: 1},
+		layerFile, fileInfo); err != nil {
+		t.Fatalf("Can't install layer: %v", err)
 	}
 
-	list, err := layerManager.GetLayersInfo()
+	layer, err := layerManager.GetLayerInfoByDigest(digest)
 	if err != nil {
-		t.Fatalf("Can't get layer list: %s", err)
+		t.Fatalf("Can't get layer: %v", err)
 	}
 
-	if len(list) != 2 {
-		t.Error("Count of layers should be 2")
+	if err = os.RemoveAll(layer.Path); err != nil {
+		t.Fatalf("Can't remove layer path: %v", err)
 	}
 
-	if err = layerManager.CheckLayersConsistency(); err != nil {
-		t.Errorf("Error checking layer consistency: %s", err)
-	}
-
-	layer2, err := layerStorage.GetLayerInfoByDigest(digest2)
+	layerManager, err = layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, testStorage)
 	if err != nil {
-		t.Errorf("Can't get layer path: %s", err)
+		t.Fatalf("Can't create layer manager: %v", err)
 	}
 
-	if err = os.RemoveAll(layer2.Path); err != nil {
-		t.Errorf("Can't remove dir: %s", err)
+	layerManager.SetSpaceAllocator(&provider)
+
+	if _, err = layerManager.GetLayerInfoByDigest(digest); err == nil {
+		t.Fatal("Should be error: layer doesn't exist")
+	}
+}
+
+func TestRemoteDownloadLayer(t *testing.T) {
+	spaceAllocator := &testSpaceAllocatorProvider{
+		availableSize: 1 * 1024,
+		allocatedSize: 51200,
 	}
 
-	if err = layerManager.CheckLayersConsistency(); err == nil {
-		t.Error("Consistency check error is expected")
+	layerManager, err := layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, newTestLayerStorage())
+	if err != nil {
+		t.Fatalf("Can't create layer manager: %v", err)
+	}
+
+	layerManager.SetSpaceAllocator(spaceAllocator)
+
+	sizeLayerContent := int64(10 * 1024)
+
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"), sizeLayerContent)
+	if err != nil {
+		t.Fatalf("Can't create layer: %v", err)
+	}
+
+	fileServerDir, err := ioutil.TempDir("", "layers_fileserver")
+	if err != nil {
+		t.Fatalf("Error create temporary dir: %v", err)
+	}
+
+	defer os.RemoveAll(fileServerDir)
+
+	urlVal, err := url.Parse(layerFile)
+	if err != nil {
+		t.Fatalf("Can't parse url: %v", err)
+	}
+
+	if err = os.Rename(path.Join(urlVal.Path), path.Join(fileServerDir, "downloadImage")); err != nil {
+		t.Fatalf("Can't rename directory: %v", err)
+	}
+
+	server := &http.Server{Addr: ":9000", Handler: http.FileServer(http.Dir(fileServerDir))}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Errorf("Can't serve http server: %v", err)
+		}
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	defer server.Close()
+
+	layermanager.GetAvailableSize = spaceAllocator.getAvailableSize
+
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+		"http://:9000/downloadImage", fileInfo); err != nil {
+		t.Fatalf("Can't install layer: %v", err)
+	}
+}
+
+func TestAllocateSpace(t *testing.T) {
+	spaceAllocator := &testSpaceAllocatorProvider{
+		availableSize: 1 * 1024,
+		allocatedSize: 51200,
+	}
+
+	layerManager, err := layermanager.New(
+		&config.Config{
+			WorkingDir: tmpDir,
+			LayersDir:  path.Join(tmpDir, "layers"),
+		}, newTestLayerStorage())
+	if err != nil {
+		t.Fatalf("Can't create layer manager: %v", err)
+	}
+
+	layerManager.SetSpaceAllocator(spaceAllocator)
+
+	sizeLayerContent := int64(10 * 1024)
+
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"), sizeLayerContent)
+	if err != nil {
+		t.Fatalf("Can't create layer: %v", err)
+	}
+
+	layermanager.GetAvailableSize = spaceAllocator.getAvailableSize
+
+	if err = layerManager.InstallLayer(
+		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+		layerFile, fileInfo); err != nil {
+		t.Fatalf("Can't install layer: %v", err)
+	}
+
+	size, err := layerManager.UninstallLayer(digest)
+	if err != nil {
+		t.Fatalf("Can't uninstall layer: %v", err)
+	}
+
+	if size != sizeLayerContent {
+		t.Fatalf("Unexpected uninstall layer size: %v", size)
+	}
+}
+
+func TestAllocateMemoryFailed(t *testing.T) {
+	type testData struct {
+		spaceAllocator *testSpaceAllocatorProvider
+	}
+
+	data := []testData{
+		{
+			spaceAllocator: &testSpaceAllocatorProvider{
+				availableSize: 1 * 1024,
+				allocatedSize: 2048,
+			},
+		},
+		{
+			spaceAllocator: &testSpaceAllocatorProvider{
+				availableSize:      1 * 1024,
+				allocatedSize:      51200,
+				secondAllocateFail: true,
+			},
+		},
+	}
+
+	sizeLayerContent := int64(10 * 1024)
+
+	layerFile, digest, fileInfo, err := createLayer(path.Join(tmpDir, "layerdir1"), sizeLayerContent)
+	if err != nil {
+		t.Fatalf("Can't create layer: %v", err)
+	}
+
+	for _, testCase := range data {
+		layerManager, err := layermanager.New(
+			&config.Config{
+				WorkingDir: tmpDir,
+				LayersDir:  path.Join(tmpDir, "layers"),
+			}, newTestLayerStorage())
+		if err != nil {
+			t.Fatalf("Can't create layer manager: %v", err)
+		}
+
+		layerManager.SetSpaceAllocator(testCase.spaceAllocator)
+
+		if err = layerManager.InstallLayer(
+			layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
+			layerFile, fileInfo); err == nil {
+			t.Fatal("Layer should not be installed")
+		}
+
+		list, err := layerManager.GetLayersInfo()
+		if err != nil {
+			t.Errorf("Can't get layer list: %v", err)
+		}
+
+		if len(list) != 0 {
+			t.Error("Count of layers should be 0")
+		}
+
+		if _, err := layerManager.UninstallLayer(digest); err == nil {
+			t.Fatal("Should be error, layer not installed")
+		}
+
+		if _, err := layerManager.GetLayerInfoByDigest(digest); err == nil {
+			t.Fatal("Should be error, layer not installed")
+		}
 	}
 }
 
@@ -205,9 +465,13 @@ func (infoProvider *testLayerStorage) AddLayer(layerInfo layermanager.LayerInfo)
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
+	if infoProvider.addLayerFail {
+		return aoserrors.New("can't add layer")
+	}
+
 	for _, layer := range infoProvider.layers {
 		if layer.Digest == layerInfo.Digest {
-			return aoserrors.New("Layer exist")
+			return aoserrors.New("layer exist")
 		}
 	}
 
@@ -235,13 +499,18 @@ func (infoProvider *testLayerStorage) GetLayersInfo() (layersList []layermanager
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
+	if infoProvider.getLayerFail {
+		return nil, aoserrors.New("can't get layers info")
+	}
+
 	layersList = infoProvider.layers
 
 	return layersList, nil
 }
 
 func (infoProvider *testLayerStorage) GetLayerInfoByDigest(
-	digest string) (layerInfo layermanager.LayerInfo, err error) {
+	digest string,
+) (layerInfo layermanager.LayerInfo, err error) {
 	infoProvider.Lock()
 	defer infoProvider.Unlock()
 
@@ -252,6 +521,26 @@ func (infoProvider *testLayerStorage) GetLayerInfoByDigest(
 	}
 
 	return layerInfo, aoserrors.New("layer not found")
+}
+
+func (servicemanager *testSpaceAllocatorProvider) AllocateLayersSpace(
+	extraSpace int64,
+) (allocatedLayersSize int64, err error) {
+	if servicemanager.numberAllocateRequest++; servicemanager.numberAllocateRequest == 2 {
+		if servicemanager.secondAllocateFail {
+			return 0, aoserrors.New("can't allocate memory")
+		}
+	}
+
+	var availableSize int64
+
+	availableSize += servicemanager.allocatedSize
+
+	if availableSize < extraSpace {
+		return 0, aoserrors.New("can't allocate memory")
+	}
+
+	return availableSize, nil
 }
 
 /***********************************************************************************************************************
@@ -270,7 +559,9 @@ func cleanup() {
 	os.RemoveAll(tmpDir)
 }
 
-func createLayer(dir string) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
+func createLayer(
+	dir string, sizeLayerContent int64,
+) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
@@ -281,12 +572,16 @@ func createLayer(dir string) (layerFile string, digest string, fileInfo image.Fi
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
 
-	data := []byte("this is layer data in layer " + dir)
-
-	if err := ioutil.WriteFile(path.Join(tmpLayerFolder, "layer.txt"), data, 0o600); err != nil {
+	file, err := os.Create(path.Join(tmpLayerFolder, "layer.txt"))
+	if err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
+
 	defer os.RemoveAll(tmpLayerFolder)
+
+	if err := file.Truncate(sizeLayerContent); err != nil {
+		return "", "", fileInfo, aoserrors.Wrap(err)
+	}
 
 	tarFile := path.Join(dir, "layer.tar")
 
@@ -295,7 +590,7 @@ func createLayer(dir string) (layerFile string, digest string, fileInfo image.Fi
 	}
 	defer os.Remove(tarFile)
 
-	file, err := os.Open(tarFile)
+	file, err = os.Open(tarFile)
 	if err != nil {
 		return "", "", fileInfo, aoserrors.Wrap(err)
 	}
@@ -314,6 +609,7 @@ func createLayer(dir string) (layerFile string, digest string, fileInfo image.Fi
 	layerDescriptor := imagespec.Descriptor{
 		MediaType: "application/vnd.aos.image.layer.v1.tar+gzip",
 		Digest:    layerDigest,
+		Size:      sizeLayerContent,
 	}
 
 	dataJSON, err := json.Marshal(layerDescriptor)
@@ -359,4 +655,8 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	}
 
 	return retDigest, nil
+}
+
+func (servicemanager *testSpaceAllocatorProvider) getAvailableSize(dir string) (availableSize int64, err error) {
+	return servicemanager.availableSize, nil
 }
