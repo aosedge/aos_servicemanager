@@ -94,6 +94,7 @@ type ServiceProvider interface {
 	ValidateService(service servicemanager.ServiceInfo) error
 	ApplyService(service servicemanager.ServiceInfo) error
 	RevertService(service servicemanager.ServiceInfo) error
+	UseService(serviceID string, aosVersion uint64) error
 }
 
 // LayerProvider layer provider.

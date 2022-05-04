@@ -21,6 +21,7 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
@@ -65,6 +66,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 		}
 
 		launcher.currentServices[instance.ServiceID] = &service
+
+		if err := launcher.serviceProvider.UseService(
+			service.ServiceInfo.ServiceID, service.ServiceInfo.AosVersion); err != nil {
+			log.WithField("serviceID", service.ServiceInfo.ServiceID).Warnf("Can't use service: %v", err)
+		}
 	}
 }
 
