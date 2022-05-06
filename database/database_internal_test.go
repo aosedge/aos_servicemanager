@@ -581,6 +581,19 @@ func TestInstances(t *testing.T) {
 		t.Error("Incorrect instance by ID result")
 	}
 
+	ident, version, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance info: %v", err)
+	}
+
+	if ident != testInstanceInfo.InstanceIdent {
+		t.Error("Incorrect instance ident")
+	}
+
+	if version != testInstanceInfo.AosVersion {
+		t.Error("Incorrect aos version")
+	}
+
 	if _, err := db.GetInstanceByID("testInstanceID"); !errors.Is(err, launcher.ErrNotExist) {
 		t.Errorf("Should be error: %v", launcher.ErrNotExist)
 	}
