@@ -344,6 +344,18 @@ func (db *Database) GetInstanceByID(instanceID string) (instance launcher.Instan
 	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
 }
 
+// GetInstanceInfoByID returns instance ident and service aos version by instanceID.
+func (db *Database) GetInstanceInfoByID(
+	instanceID string,
+) (ident cloudprotocol.InstanceIdent, aosVersion uint64, err error) {
+	instance, err := db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
+	if err != nil {
+		return ident, 0, err
+	}
+
+	return instance.InstanceIdent, instance.AosVersion, nil
+}
+
 // GetAllInstances returns all instance.
 func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
 	return db.getInstancesFromQuery("SELECT * FROM instances")
