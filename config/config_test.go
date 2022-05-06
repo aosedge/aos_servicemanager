@@ -69,7 +69,7 @@ func createConfigFile() (err error) {
 		"maxPartSize": 1024,
 		"maxPartCount": 10
 	},
-	"alerts": {		
+	"journalAlerts": {		
 		"filter": ["(test)", "(regexp)"],
 		"serviceAlertPriority": 7,
 		"systemAlertPriority": 5
@@ -310,16 +310,16 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	filter := []string{"(test)", "(regexp)"}
 
-	if !reflect.DeepEqual(config.Alerts.Filter, filter) {
-		t.Errorf("Wrong filter value: %v", config.Alerts.Filter)
+	if !reflect.DeepEqual(config.JournalAlerts.Filter, filter) {
+		t.Errorf("Wrong filter value: %v", config.JournalAlerts.Filter)
 	}
 
-	if config.Alerts.ServiceAlertPriority != 7 {
-		t.Errorf("Wrong service alert priority: %d", config.Alerts.ServiceAlertPriority)
+	if config.JournalAlerts.ServiceAlertPriority != 7 {
+		t.Errorf("Wrong service alert priority: %d", config.JournalAlerts.ServiceAlertPriority)
 	}
 
-	if config.Alerts.SystemAlertPriority != 5 {
-		t.Errorf("Wrong system alert priority: %d", config.Alerts.SystemAlertPriority)
+	if config.JournalAlerts.SystemAlertPriority != 5 {
+		t.Errorf("Wrong system alert priority: %d", config.JournalAlerts.SystemAlertPriority)
 	}
 }
 
