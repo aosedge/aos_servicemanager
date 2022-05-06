@@ -26,6 +26,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aoscloud/aos_common/journalalerts"
 	"github.com/aoscloud/aos_common/resourcemonitor"
 	log "github.com/sirupsen/logrus"
 )
@@ -49,14 +50,6 @@ const (
 type Logging struct {
 	MaxPartSize  uint64 `json:"maxPartSize"`
 	MaxPartCount uint64 `json:"maxPartCount"`
-}
-
-// Alerts configuration for alerts.
-type Alerts struct {
-	Disabled             bool     `json:"disabled"`
-	Filter               []string `json:"filter"`
-	ServiceAlertPriority int      `json:"serviceAlertPriority"`
-	SystemAlertPriority  int      `json:"systemAlertPriority"`
 }
 
 // Migration struct represents path for db migration.
@@ -84,7 +77,7 @@ type Config struct {
 	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
 	Monitoring                resourcemonitor.Config `json:"monitoring"`
 	Logging                   Logging                `json:"logging"`
-	Alerts                    Alerts                 `json:"alerts"`
+	JournalAlerts             journalalerts.Config   `json:"journalAlerts,omitempty"`
 	HostBinds                 []string               `json:"hostBinds"`
 	Hosts                     []aostypes.Host        `json:"hosts,omitempty"`
 	Migration                 Migration              `json:"migration"`
@@ -112,7 +105,7 @@ func New(fileName string) (config *Config, err error) {
 			MaxPartSize:  524288, // nolint:gomnd
 			MaxPartCount: 20,     // nolint:gomnd
 		},
-		Alerts: Alerts{
+		JournalAlerts: journalalerts.Config{
 			SystemAlertPriority:  defaultSystemAlertPriority,
 			ServiceAlertPriority: defaultServiceAlertPriority,
 		},
@@ -162,16 +155,16 @@ func New(fileName string) (config *Config, err error) {
 		config.Migration.MergedMigrationPath = path.Join(config.WorkingDir, "mergedMigration")
 	}
 
-	if config.Alerts.ServiceAlertPriority > maxAlertPriorityLevel ||
-		config.Alerts.ServiceAlertPriority < minAlertPriorityLevel {
+	if config.JournalAlerts.ServiceAlertPriority > maxAlertPriorityLevel ||
+		config.JournalAlerts.ServiceAlertPriority < minAlertPriorityLevel {
 		log.Warnf("Default value %d for service alert priority is assigned", defaultServiceAlertPriority)
-		config.Alerts.ServiceAlertPriority = defaultServiceAlertPriority
+		config.JournalAlerts.ServiceAlertPriority = defaultServiceAlertPriority
 	}
 
-	if config.Alerts.SystemAlertPriority > maxAlertPriorityLevel ||
-		config.Alerts.SystemAlertPriority < minAlertPriorityLevel {
+	if config.JournalAlerts.SystemAlertPriority > maxAlertPriorityLevel ||
+		config.JournalAlerts.SystemAlertPriority < minAlertPriorityLevel {
 		log.Warnf("Default value %d for system alert priority is assigned", defaultSystemAlertPriority)
-		config.Alerts.SystemAlertPriority = defaultSystemAlertPriority
+		config.JournalAlerts.SystemAlertPriority = defaultSystemAlertPriority
 	}
 
 	return config, nil
