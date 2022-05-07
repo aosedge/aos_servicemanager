@@ -33,7 +33,6 @@ import (
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/platform"
 	"github.com/fsnotify/fsnotify"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -55,7 +54,7 @@ const (
 // These global variables are used to be able to mocking the functionality in tests.
 // nolint:gochecknoglobals
 var (
-	SetUserFSQuota     = platform.SetUserFSQuota
+	SetUserFSQuota     = fs.SetUserFSQuota
 	StateChangeTimeout = 1 * time.Second
 )
 
