@@ -35,6 +35,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/monitoring"
 	"github.com/aoscloud/aos_common/utils/action"
 	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/google/uuid"
@@ -44,7 +45,6 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
-	"github.com/aoscloud/aos_servicemanager/monitoring"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
