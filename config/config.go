@@ -26,6 +26,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aoscloud/aos_common/resourcemonitor"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -43,14 +44,6 @@ const (
 /*******************************************************************************
  * Types
  ******************************************************************************/
-
-// Monitoring configuration for system monitoring.
-type Monitoring struct {
-	Disabled   bool              `json:"disabled"`
-	SendPeriod aostypes.Duration `json:"sendPeriod"`
-	PollPeriod aostypes.Duration `json:"pollPeriod"`
-	aostypes.ServiceAlertRules
-}
 
 // Logging configuration for system and service logging.
 type Logging struct {
@@ -92,15 +85,15 @@ type Config struct {
 	LayersDir          string `json:"layersDir"`
 	DownloadDir        string `json:"downloadDir"`
 
-	BoardConfigFile           string            `json:"boardConfigFile"`
-	DefaultServiceTTLDays     uint64            `json:"defaultServiceTtlDays"`
-	ServiceHealthCheckTimeout aostypes.Duration `json:"serviceHealthCheckTimeout"`
-	Monitoring                Monitoring        `json:"monitoring"`
-	Logging                   Logging           `json:"logging"`
-	Alerts                    Alerts            `json:"alerts"`
-	HostBinds                 []string          `json:"hostBinds"`
-	Hosts                     []Host            `json:"hosts,omitempty"`
-	Migration                 Migration         `json:"migration"`
+	BoardConfigFile           string                 `json:"boardConfigFile"`
+	DefaultServiceTTLDays     uint64                 `json:"defaultServiceTtlDays"`
+	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
+	Monitoring                resourcemonitor.Config `json:"monitoring"`
+	Logging                   Logging                `json:"logging"`
+	Alerts                    Alerts                 `json:"alerts"`
+	HostBinds                 []string               `json:"hostBinds"`
+	Hosts                     []Host                 `json:"hosts,omitempty"`
+	Migration                 Migration              `json:"migration"`
 }
 
 /*******************************************************************************
@@ -117,7 +110,7 @@ func New(fileName string) (config *Config, err error) {
 	config = &Config{
 		DefaultServiceTTLDays:     30,                                            // nolint:gomnd
 		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, // nolint:gomnd
-		Monitoring: Monitoring{
+		Monitoring: resourcemonitor.Config{
 			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
 			PollPeriod: aostypes.Duration{Duration: 10 * time.Second},
 		},
@@ -133,6 +126,14 @@ func New(fileName string) (config *Config, err error) {
 
 	if err = json.Unmarshal(raw, &config); err != nil {
 		return config, aoserrors.Wrap(err)
+	}
+
+	if config.Monitoring.WorkingDir == "" {
+		config.Monitoring.WorkingDir = config.WorkingDir
+	}
+
+	if config.Monitoring.StorageDir == "" {
+		config.Monitoring.WorkingDir = config.StorageDir
 	}
 
 	if config.CertStorage == "" {
