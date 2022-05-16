@@ -192,13 +192,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	// Create alerts
-	if sm.alerts, err = alerts.New(cfg, sm.db, sm.db); err != nil {
-		if errors.Is(err, alerts.ErrDisabled) {
-			log.Warn(err)
-		} else {
-			return sm, aoserrors.Wrap(err)
-		}
+	if sm.alerts, err = alerts.New(); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.alerts); err != nil {
+		return sm, aoserrors.Wrap(err)
 	}
 
 	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
@@ -285,8 +284,8 @@ func (sm *serviceManager) close() {
 		sm.network.Close()
 	}
 
-	if sm.alerts != nil {
-		sm.alerts.Close()
+	if sm.journalAlerts != nil {
+		sm.journalAlerts.Close()
 	}
 
 	if sm.iam != nil {
