@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+  pull_request:
+    branches:
+      - develop
+
 jobs:
   ws_check:
     runs-on: [self-hosted, linux, x64]
