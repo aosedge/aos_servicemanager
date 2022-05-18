@@ -235,7 +235,7 @@ func (db *Database) GetOverrideEnvVars() (vars []cloudprotocol.EnvVarsInstanceIn
 		return vars, aoserrors.Wrap(err)
 	}
 
-	return vars, err
+	return vars, nil
 }
 
 // SetOverrideEnvVars updates override env vars.
@@ -422,7 +422,7 @@ func (db *Database) AddStorageStateInfo(instanceID string, info storagestate.Sto
 		instanceID, info.StorageQuota, info.StateQuota, info.StateChecksum)
 }
 
-// SetStorageStateQuotasByID sets state storage info by instance ID
+// SetStorageStateQuotasByID sets state storage info by instance ID.
 func (db *Database) SetStorageStateQuotasByID(instanceID string, storageQuota, stateQuota uint64) (err error) {
 	if err = db.executeQuery("UPDATE storagestate SET storageQuota = ?, stateQuota =?  WHERE instanceID = ?",
 		storageQuota, stateQuota, instanceID); errors.Is(err, errNotExist) {
