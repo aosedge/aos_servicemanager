@@ -35,7 +35,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_common/monitoring"
+	"github.com/aoscloud/aos_common/resourcemonitor"
 	"github.com/aoscloud/aos_common/utils/action"
 	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/google/uuid"
