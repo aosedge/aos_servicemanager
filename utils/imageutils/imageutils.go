@@ -52,25 +52,6 @@ func UnpackTarImage(source, destination string) (err error) {
 	return aoserrors.Wrap(unTarFromFile(source, destination))
 }
 
-// CopyFile copies file content.
-func CopyFile(source, destination string) (err error) {
-	sourceFile, err := os.Open(source)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer sourceFile.Close()
-
-	desFile, err := os.Create(destination)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer desFile.Close()
-
-	_, err = io.Copy(desFile, sourceFile)
-
-	return aoserrors.Wrap(err)
-}
-
 func GetUncompressedTarContentSize(path string) (size int64, err error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -118,7 +99,6 @@ func GetUncompressedTarContentSize(path string) (size int64, err error) {
 
 		case tar.TypeReg:
 			size += header.Size
-
 		}
 	}
 }
