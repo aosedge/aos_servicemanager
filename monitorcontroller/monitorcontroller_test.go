@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_common/monitoring"
-	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/monitorcontroller"
 	log "github.com/sirupsen/logrus"
 )
@@ -60,11 +58,7 @@ func TestMain(m *testing.M) {
 func TestSendMonitorData(t *testing.T) {
 	duration := 100 * time.Millisecond
 
-	controller, err := monitorcontroller.New(&config.Config{
-		Monitoring: monitoring.Monitoring{
-			MaxOfflineMessages: 25,
-		},
-	})
+	controller, err := monitorcontroller.New()
 	if err != nil {
 		t.Fatalf("Can't create monitoring controller: %v", err)
 	}

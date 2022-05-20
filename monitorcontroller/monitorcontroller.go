@@ -19,7 +19,6 @@ package monitorcontroller
 
 import (
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_servicemanager/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,7 +38,7 @@ type MonitorController struct {
 }
 
 // New creates new monitoringcontroller instance.
-func New(config *config.Config) (monitor *MonitorController, err error) {
+func New() (monitor *MonitorController, err error) {
 	monitor = &MonitorController{
 		monitoringChannel: make(chan cloudprotocol.MonitoringData, monitoringChannelSize),
 	}
