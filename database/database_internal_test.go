@@ -142,6 +142,7 @@ func TestAddGetService(t *testing.T) {
 	}
 
 	service.AosVersion = 2
+
 	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestActivateService(t *testing.T) {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	if err := db.ActivateService(service); err != nil {
+	if err := db.ActivateService(service.ServiceID, service.AosVersion); err != nil {
 		t.Errorf("Can't activate service: %s", err)
 	}
 
