@@ -149,9 +149,9 @@ func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.
 }
 
 // ActivateService sets isActive to true for the service.
-func (db *Database) ActivateService(service servicemanager.ServiceInfo) (err error) {
+func (db *Database) ActivateService(serviceID string, aosVersion uint64) (err error) {
 	if err = db.executeQuery("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?",
-		service.ServiceID, service.AosVersion); errors.Is(err, errNotExist) {
+		serviceID, aosVersion); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(servicemanager.ErrNotExist)
 	}
 
