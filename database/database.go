@@ -99,9 +99,9 @@ func (db *Database) SetOperationVersion(version uint64) error {
 
 // AddService adds new service.
 func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
-	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?)",
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
-		service.GID, service.ManifestDigest, service.IsActive)
+		service.GID, service.ManifestDigest, service.IsActive, service.Timestamp)
 }
 
 // RemoveService removes existing service.
@@ -125,7 +125,7 @@ func (db *Database) GetService(serviceID string) (service servicemanager.Service
 
 	err = stmt.QueryRow(serviceID, serviceID).Scan(
 		&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive)
+		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive, &service.Timestamp)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return service, servicemanager.ErrNotExist
@@ -156,6 +156,16 @@ func (db *Database) ActivateService(service servicemanager.ServiceInfo) (err err
 	}
 
 	return err
+}
+
+// SetServiceTimestamp sets timestamp for the service.
+func (db *Database) SetServiceTimestamp(serviceID string, aosVersion uint64, timestamp time.Time) error {
+	if err := db.executeQuery("UPDATE services SET timestamp = ? WHERE id = ? AND aosVersion = ?",
+		timestamp, serviceID, aosVersion); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(servicemanager.ErrNotExist)
+	}
+
+	return nil
 }
 
 // SetTrafficMonitorData stores traffic monitor data.
@@ -572,6 +582,7 @@ func (db *Database) createServiceTable() (err error) {
 															   gid INTEGER,
 															   manifestDigest BLOB,
 															   isActive INTEGER,
+															   timestamp TIMESTAMP,
 															   PRIMARY KEY(id, aosVersion))`)
 
 	return aoserrors.Wrap(err)
@@ -749,7 +760,7 @@ func (db *Database) getServicesFromQuery(
 
 		if err = rows.Scan(
 			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive); err != nil {
+			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive, &service.Timestamp); err != nil {
 			return services, aoserrors.Wrap(err)
 		}
 

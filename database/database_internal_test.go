@@ -240,6 +240,37 @@ func TestActivateService(t *testing.T) {
 	}
 }
 
+func TestSetTimestampService(t *testing.T) {
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceTimestamp", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
+	}
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	serviceFromDB, err := db.GetService("serviceTimestamp")
+	if err != nil {
+		t.Errorf("Can't get service: %v", err)
+	}
+
+	service.Timestamp = time.Now().UTC()
+
+	if err = db.SetServiceTimestamp(service.ServiceID, service.AosVersion, service.Timestamp); err != nil {
+		t.Errorf("Can't set timestamp service: %v", err)
+	}
+
+	serviceFromDB, err = db.GetService("serviceTimestamp")
+	if err != nil {
+		t.Errorf("Can't get service: %v", err)
+	}
+
+	if serviceFromDB.Timestamp != service.Timestamp {
+		t.Error("Wrong service timestamp")
+	}
+}
+
 func TestTrafficMonitor(t *testing.T) {
 	setTime := time.Now()
 	setValue := uint64(100)
