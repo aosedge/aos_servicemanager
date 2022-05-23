@@ -14,7 +14,7 @@ Aos Service Manager (SM) is a part of Aos system which resides on the device sid
 * configure and monitor Aos services and system resource usage;
 * provide persistent storage and state handling for Aos services.
 
-See architecture [document](doc/architecture.md) for more details.
+See architecture [document](https://docs.aoscloud.io/bin/view/Home/Architecture/Aos%20Core/Service%20Manager%20%28SM%29/) for more details.
 
 # Build
 
@@ -59,7 +59,7 @@ SM is configured through a configuration file. The file `aos_servicemanager.cfg`
 ```
 ./aos_servicemanager -c aos_servicemanager.cfg
 ```
-The configuration file has JSON format described [here] (doc/config.md). Example configuration file could be found in `misc/config/aos_servicemanager.cfg`
+The configuration file has JSON format described [here] (https://docs.aoscloud.io/bin/view/Home/Architecture/General/Data%20formats/Core%20component%20configurations/Service%20Manager%20configuration/). Example configuration file could be found in `misc/config/aos_servicemanager.cfg`
 
 To increase log level use option -v:
 ```
