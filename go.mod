@@ -23,7 +23,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.9
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2
-	github.com/opencontainers/runc v1.0.3
+	github.com/opencontainers/runc v1.1.2
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pkg/errors v0.9.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
@@ -34,7 +34,7 @@ require (
 	github.com/vishvananda/netns v0.0.0-20211101163701-50045581ed74
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
-	golang.org/x/sys v0.0.0-20210816074244-15123e1e1f71
+	golang.org/x/sys v0.0.0-20211116061358-0a5406a5449c
 	google.golang.org/grpc v1.41.0
 	google.golang.org/protobuf v1.27.1
 )
