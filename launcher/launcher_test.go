@@ -2465,6 +2465,21 @@ func (provider *testServiceProvider) RevertService(service servicemanager.Servic
 	return nil
 }
 
+func (provider *testServiceProvider) UseService(serviceID string, aosVersion uint64) error {
+	provider.Lock()
+	defer provider.Unlock()
+
+	service, ok := provider.services[serviceID]
+	if !ok {
+		return servicemanager.ErrNotExist
+	}
+
+	service.Timestamp = time.Now().UTC()
+	provider.services[serviceID] = service
+
+	return nil
+}
+
 func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance, active bool) error {
 	provider.services = make(map[string]serviceInfo)
 
