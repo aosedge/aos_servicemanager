@@ -253,7 +253,11 @@ func TestSetTimestampService(t *testing.T) {
 
 	serviceFromDB, err := db.GetService("serviceTimestamp")
 	if err != nil {
-		t.Errorf("Can't get service: %v", err)
+		t.Fatalf("Can't get service: %v", err)
+	}
+
+	if serviceFromDB.ServiceID != "serviceTimestamp" {
+		t.Errorf("Incorrect service ID: %v", serviceFromDB.ServiceID)
 	}
 
 	service.Timestamp = time.Now().UTC()
