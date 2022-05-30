@@ -122,7 +122,7 @@ type testStorageStateProvider struct {
 
 type testInstanceMonitor struct {
 	sync.Mutex
-	instances map[string]monitoring.MonitorParams
+	instances map[string]resourcemonitor.ResourceMonitorParams
 }
 
 type testMounter struct {
@@ -1305,7 +1305,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance monitor should be stated")
 	}
 
-	if !reflect.DeepEqual(monitorPrams, monitoring.MonitorParams{
+	if !reflect.DeepEqual(monitorPrams, resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
 		UID:           instance.UID,
 		GID:           testInstaces[0].serviceGID,
@@ -2897,10 +2897,12 @@ func (provider *testStorageStateProvider) StateChangedChannel() <-chan storagest
  **********************************************************************************************************************/
 
 func newTestInstanceMonitor() *testInstanceMonitor {
-	return &testInstanceMonitor{instances: make(map[string]monitoring.MonitorParams)}
+	return &testInstanceMonitor{instances: make(map[string]resourcemonitor.ResourceMonitorParams)}
 }
 
-func (monitor *testInstanceMonitor) StartInstanceMonitor(instanceID string, params monitoring.MonitorParams) error {
+func (monitor *testInstanceMonitor) StartInstanceMonitor(
+	instanceID string, params resourcemonitor.ResourceMonitorParams,
+) error {
 	monitor.Lock()
 	defer monitor.Unlock()
 

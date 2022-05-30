@@ -146,7 +146,7 @@ type StorageStateProvider interface {
 
 // InstanceMonitor provides API to monitor instance parameters.
 type InstanceMonitor interface {
-	StartInstanceMonitor(instanceID string, params monitoring.MonitorParams) error
+	StartInstanceMonitor(instanceID string, params resourcemonitor.ResourceMonitorParams) error
 	StopInstanceMonitor(instanceID string) error
 }
 
@@ -1137,7 +1137,7 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	}
 
 	if err := launcher.instanceMonitor.StartInstanceMonitor(
-		instance.InstanceID, monitoring.MonitorParams{
+		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
 			InstanceIdent: instance.InstanceIdent,
 			UID:           instance.UID,
 			GID:           instance.service.GID,
