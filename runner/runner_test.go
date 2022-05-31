@@ -46,7 +46,7 @@ StartLimitBurst=1
 [Service]
 Type=simple
 Restart=always
-ExecStart=/bin/sh /var/aos/runtime/%i/service.sh
+ExecStart=/bin/sh /run/aos/runtime/%i/service.sh
 
 PIDFile=/run/aos/runtime/%i/.pid
 SuccessExitStatus=SIGKILL
