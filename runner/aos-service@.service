@@ -9,7 +9,7 @@ Type=forking
 Restart=always
 RestartSec=1
 ExecStartPre=/usr/bin/runc delete -f %i
-ExecStart=/usrt/bin/runc run -d --pid-file /run/aos/runtime/%i/.pid -b /run/aos/runtime/%i %i
+ExecStart=/usr/bin/runc run -d --pid-file /run/aos/runtime/%i/.pid -b /run/aos/runtime/%i %i
 
 ExecStop=/usr/bin/runc kill %i SIGKILL
 ExecStopPost=/usr/bin/runc delete -f %i
