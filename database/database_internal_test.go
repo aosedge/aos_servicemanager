@@ -714,7 +714,7 @@ func TestEnvVars(t *testing.T) {
 		t.Error("Returned env vars should be empty")
 	}
 
-	curentTime := time.Now().Local()
+	curentTime := time.Now().UTC()
 
 	testEnvVars := []cloudprotocol.EnvVarsInstanceInfo{
 		{
