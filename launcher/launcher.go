@@ -343,6 +343,10 @@ func (launcher *Launcher) SubjectsChanged(subjects []string) error {
 	launcher.Lock()
 	defer launcher.Unlock()
 
+	if subjects == nil {
+		subjects = make([]string, 0)
+	}
+
 	if isSubjectsEqual(launcher.currentSubjects, subjects) {
 		return nil
 	}
