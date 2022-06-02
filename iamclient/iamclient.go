@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/aoscloud/aos_servicemanager/config"
 )
@@ -69,7 +70,9 @@ type Client struct {
  **********************************************************************************************************************/
 
 // New creates new IAM client.
-func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecure bool) (client *Client, err error) {
+func New(
+	config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecureConn bool,
+) (client *Client, err error) {
 	log.Debug("Connecting to IAM...")
 
 	client = &Client{
@@ -86,10 +89,10 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	securePublicOpt := grpc.WithInsecure()
-	secureProtectedOpt := grpc.WithInsecure()
+	securePublicOpt := grpc.WithTransportCredentials(insecure.NewCredentials())
+	secureProtectedOpt := grpc.WithTransportCredentials(insecure.NewCredentials())
 
-	if !insecure {
+	if !insecureConn {
 		tlsConfig, err := cryptcoxontext.GetClientTLSConfig()
 		if err != nil {
 			return client, aoserrors.Wrap(err)
@@ -105,7 +108,7 @@ func New(config *config.Config, cryptcoxontext *cryptutils.CryptoContext, insecu
 
 	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.publicConnection)
 
-	if !insecure {
+	if !insecureConn {
 		certURL, keyURL, err := client.GetCertKeyURL(config.CertStorage)
 		if err != nil {
 			return client, err
