@@ -59,6 +59,7 @@ func init() {
 const (
 	errorAddServiceID = "errorAddServiceID"
 	errorGetServicID  = "errorGetServicID"
+	blobsFolder       = "blobs"
 )
 
 /***********************************************************************************************************************
@@ -533,7 +534,7 @@ func TestAllocateMemoryInstallService(t *testing.T) {
 	}
 
 	layerProvider := &testLayerProvider{
-		availableSize:  15 * 1024,
+		availableSize:  19 * 1024,
 		allocationSize: 20 * 1024,
 	}
 
@@ -813,12 +814,12 @@ func prepareService(testContent string) (outputURL string, fileInfo image.FileIn
 		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
-	aosSrvConfigDigest, err := generateAndSaveDigest(imageDir, []byte("{}"))
+	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, blobsFolder), []byte("{}"))
 	if err != nil {
 		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
 
-	imgSpecDigestDigest, err := generateAndSaveDigest(imageDir, []byte("{}"))
+	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, blobsFolder), []byte("{}"))
 	if err != nil {
 		return outputURL, fileInfo, aoserrors.Wrap(err)
 	}
@@ -853,11 +854,12 @@ func prepareService(testContent string) (outputURL string, fileInfo image.FileIn
 }
 
 func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error) {
-	if err := os.MkdirAll(imgFolder, 0o755); err != nil {
+	blobsDir := path.Join(imgFolder, blobsFolder)
+	if err := os.MkdirAll(blobsDir, 0o755); err != nil {
 		return digest, aoserrors.Wrap(err)
 	}
 
-	tarFile := path.Join(imgFolder, "_temp.tar.gz")
+	tarFile := path.Join(blobsDir, "_temp.tar.gz")
 
 	if output, err := exec.Command("tar", "-C", rootfs, "-czf", tarFile, "./").CombinedOutput(); err != nil {
 		return digest, aoserrors.Errorf("error: %s, code: %s", string(output), err)
@@ -875,7 +877,7 @@ func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error)
 		return digest, aoserrors.Wrap(err)
 	}
 
-	digest, err = generateAndSaveDigest(imgFolder, byteValue)
+	digest, err = generateAndSaveDigest(blobsDir, byteValue)
 	if err != nil {
 		return digest, aoserrors.Wrap(err)
 	}
