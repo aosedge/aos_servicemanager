@@ -42,6 +42,8 @@ const manifestFileName = "manifest.json"
 
 const buffSize = 1024 * 1024
 
+const blobsFolder = "blobs"
+
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
@@ -88,7 +90,7 @@ func validateUnpackedImage(installDir string) (err error) {
 
 	// validate service rootfs layer
 	rootfsPath := path.Join(
-		installDir, string(manifest.Layers[0].Digest.Algorithm()), manifest.Layers[0].Digest.Hex())
+		installDir, blobsFolder, string(manifest.Layers[0].Digest.Algorithm()), manifest.Layers[0].Digest.Hex())
 
 	fi, err := os.Stat(rootfsPath)
 	if err != nil {
@@ -144,7 +146,7 @@ func validateDigest(installDir string, digest digest.Digest) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	file, err := os.Open(path.Join(installDir, string(digest.Algorithm()), digest.Hex()))
+	file, err := os.Open(path.Join(installDir, blobsFolder, string(digest.Algorithm()), digest.Hex()))
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -181,11 +183,11 @@ func getImageParts(installDir string) (parts ImageParts, err error) {
 		return parts, aoserrors.Wrap(err)
 	}
 
-	parts.ImageConfigPath = path.Join(installDir, string(manifest.Config.Digest.Algorithm()),
+	parts.ImageConfigPath = path.Join(installDir, blobsFolder, string(manifest.Config.Digest.Algorithm()),
 		manifest.Config.Digest.Hex())
 
 	if manifest.AosService != nil {
-		parts.ServiceConfigPath = path.Join(installDir, string(manifest.AosService.Digest.Algorithm()),
+		parts.ServiceConfigPath = path.Join(installDir, blobsFolder, string(manifest.AosService.Digest.Algorithm()),
 			manifest.AosService.Digest.Hex())
 	}
 
@@ -196,7 +198,7 @@ func getImageParts(installDir string) (parts ImageParts, err error) {
 
 	rootFSDigest := manifest.Layers[0].Digest
 	parts.ServiceSize = manifest.Layers[0].Size
-	parts.ServiceFSPath = path.Join(installDir, string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
+	parts.ServiceFSPath = path.Join(installDir, blobsFolder, string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
 	parts.LayersDigest = getLayersFromManifest(manifest)
 
 	return parts, nil
