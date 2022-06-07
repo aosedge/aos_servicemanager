@@ -234,7 +234,7 @@ func (storageState *StorageState) Setup(
 
 		stateChecksum = storageStateInfo.StateChecksum
 	} else {
-		if err = os.Remove(path.Join(storageState.stateDir, fmt.Sprintf(stateFileFormat, instanceID))); err != nil {
+		if err := os.RemoveAll(path.Join(storageState.stateDir, fmt.Sprintf(stateFileFormat, instanceID))); err != nil {
 			return "", "", nil, aoserrors.Wrap(err)
 		}
 	}
