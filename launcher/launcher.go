@@ -922,7 +922,7 @@ func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []aos
 func (launcher *Launcher) setupNetwork(instance *instanceInfo) (err error) {
 	networkFilesDir := filepath.Join(instance.runtimeDir, instanceMountPointsDir)
 
-	if err = os.MkdirAll(networkFilesDir, 0o755); err != nil {
+	if err = os.MkdirAll(filepath.Join(networkFilesDir, "etc"), 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
