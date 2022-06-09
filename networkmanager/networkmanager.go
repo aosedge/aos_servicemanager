@@ -321,7 +321,7 @@ func (manager *NetworkManager) RemoveInstanceFromNetwork(instanceID, networkID s
 	log.WithFields(log.Fields{"instanceID": instanceID}).Debug("Remove instance from network")
 
 	if !manager.isInstanceInNetwork(instanceID, networkID) {
-		return aoserrors.Errorf("Instance %s is not in network", instanceID)
+		return nil
 	}
 
 	if manager.trafficMonitoring != nil {

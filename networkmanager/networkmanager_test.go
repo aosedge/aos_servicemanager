@@ -892,8 +892,8 @@ func TestAddNetworkFail(t *testing.T) {
 		t.Fatalf("Can't remove instance from network: %s", err)
 	}
 
-	if err := manager.RemoveInstanceFromNetwork("instance0", "network0"); err == nil {
-		t.Error("Should be an error: instance is not in network")
+	if err := manager.RemoveInstanceFromNetwork("instance0", "network0"); err != nil {
+		t.Fatalf("Can't remove instance from network: %v", err)
 	}
 
 	if _, _, err := manager.GetSystemTraffic(); err == nil {
