@@ -36,7 +36,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 )
 
 /***********************************************************************************************************************
@@ -282,7 +281,7 @@ func (layermanager *LayerManager) doInstallLayer(
 		layermanager.deallocateSpace(size)
 	}()
 
-	if err = imageutils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
+	if err = image.UnpackTarImage(layerPath, layerStorageDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -427,7 +426,7 @@ func (layermanager *LayerManager) extractPackageByURL(
 	}
 
 	if layermanager.isExtractSamePartition {
-		size, err := imageutils.GetUncompressedTarContentSize(sourceFile)
+		size, err := image.GetUncompressedTarContentSize(sourceFile)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -437,7 +436,7 @@ func (layermanager *LayerManager) extractPackageByURL(
 		}
 	}
 
-	if err = imageutils.UnpackTarImage(sourceFile, extractDir); err != nil {
+	if err = image.UnpackTarImage(sourceFile, extractDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

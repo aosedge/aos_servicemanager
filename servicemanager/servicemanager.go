@@ -39,7 +39,6 @@ import (
 	"golang.org/x/mod/sumdb/dirhash"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
 	"github.com/aoscloud/aos_servicemanager/utils/uidgidpool"
 )
 
@@ -503,7 +502,7 @@ func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (rootFSDig
 	tmpRootFS := path.Join(imagePath, tmpRootFSDir)
 
 	// unpack rootfs layer
-	if err = imageutils.UnpackTarImage(imageParts.ServiceFSPath, tmpRootFS); err != nil {
+	if err = image.UnpackTarImage(imageParts.ServiceFSPath, tmpRootFS); err != nil {
 		return "", aoserrors.Wrap(err)
 	}
 
@@ -636,7 +635,7 @@ func (sm *ServiceManager) extractPackageByURL(
 		return 0, aoserrors.Wrap(err)
 	}
 
-	size, err := imageutils.GetUncompressedTarContentSize(sourceFile)
+	size, err := image.GetUncompressedTarContentSize(sourceFile)
 	if err != nil {
 		return 0, aoserrors.Wrap(err)
 	}
@@ -645,7 +644,7 @@ func (sm *ServiceManager) extractPackageByURL(
 		return 0, aoserrors.Wrap(err)
 	}
 
-	if err = imageutils.UnpackTarImage(sourceFile, extractDir); err != nil {
+	if err = image.UnpackTarImage(sourceFile, extractDir); err != nil {
 		return size, aoserrors.Wrap(err)
 	}
 
