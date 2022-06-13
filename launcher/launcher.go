@@ -695,7 +695,8 @@ stopLoop:
 	for _, currentInstance := range launcher.currentInstances {
 		for _, instance := range runInstances {
 			if instance.InstanceID == currentInstance.InstanceID && currentInstance.service != nil &&
-				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion {
+				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion &&
+				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive {
 				continue stopLoop
 			}
 		}
