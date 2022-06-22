@@ -115,7 +115,7 @@ func TestStartStopService(t *testing.T) {
 		t.Fatalf("Can't create service binary: %s", err)
 	}
 
-	status := runnerInstance.StartInstance("id1", runtimeDir, runner.StartInstanceParams{StartInterval: 2 * time.Second})
+	status := runnerInstance.StartInstance("id1", runtimeDir, runner.RunParameters{StartInterval: 2 * time.Second})
 	if status.Err != nil {
 		t.Errorf("Can't start service: %s", status.Err)
 	}
@@ -125,7 +125,7 @@ func TestStartStopService(t *testing.T) {
 	}
 
 	// test no service binary
-	status = runnerInstance.StartInstance("someID", runtimeDir, runner.StartInstanceParams{StartInterval: 2 * time.Second})
+	status = runnerInstance.StartInstance("someID", runtimeDir, runner.RunParameters{StartInterval: 2 * time.Second})
 	if status.Err == nil {
 		t.Error("Should be error can't start service instance")
 	}
