@@ -2591,7 +2591,7 @@ func newTestRunner(startFunc func(instanceID string) runner.InstanceStatus,
 }
 
 func (instanceRunner *testRunner) StartInstance(
-	instanceID, runtimeDir string, params runner.StartInstanceParams,
+	instanceID, runtimeDir string, params runner.RunParameters,
 ) runner.InstanceStatus {
 	instanceRunner.Lock()
 	defer instanceRunner.Unlock()

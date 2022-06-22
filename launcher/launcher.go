@@ -105,7 +105,7 @@ type LayerProvider interface {
 
 // InstanceRunner interface to start/stop service instances.
 type InstanceRunner interface {
-	StartInstance(instanceID, runtimeDir string, params runner.StartInstanceParams) runner.InstanceStatus
+	StartInstance(instanceID, runtimeDir string, params runner.RunParameters) runner.InstanceStatus
 	StopInstance(instanceID string) error
 	InstanceStatusChannel() <-chan []runner.InstanceStatus
 }
@@ -1161,7 +1161,7 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	}
 
 	runStatus := launcher.instanceRunner.StartInstance(
-		instance.InstanceID, instance.runtimeDir, runner.StartInstanceParams{})
+		instance.InstanceID, instance.runtimeDir, runner.RunParameters{})
 
 	// Update current status if it is not updated by runner status channel. Instance runner status goes asynchronously
 	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this
