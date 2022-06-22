@@ -41,7 +41,7 @@ const (
 	startTimeoutMultiplier = 2
 )
 
-const systemdUnitNameTamplate = "aos-service@%s.service"
+const systemdUnitNameTemplate = "aos-service@%s.service"
 
 const (
 	errNotLoaded = "not loaded"
@@ -116,7 +116,7 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params StartI
 	status.InstanceID = instanceID
 	status.State = cloudprotocol.InstanceStateFailed
 
-	unitName := fmt.Sprintf(systemdUnitNameTamplate, instanceID)
+	unitName := fmt.Sprintf(systemdUnitNameTemplate, instanceID)
 
 	unitStatusChannel := make(chan dbus.UnitStatus, 1)
 
@@ -166,11 +166,11 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params StartI
 
 // StopInstance stops service instance.
 func (runner *Runner) StopInstance(instanceID string) (err error) {
-	unitName := fmt.Sprintf(systemdUnitNameTamplate, instanceID)
+	unitName := fmt.Sprintf(systemdUnitNameTemplate, instanceID)
 
 	runner.Lock()
 
-	delete(runner.runningUnits, fmt.Sprintf(systemdUnitNameTamplate, instanceID))
+	delete(runner.runningUnits, fmt.Sprintf(systemdUnitNameTemplate, instanceID))
 
 	runner.Unlock()
 
