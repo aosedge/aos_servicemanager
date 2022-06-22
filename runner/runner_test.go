@@ -55,14 +55,19 @@ SuccessExitStatus=SIGKILL
 WantedBy=multi-user.target
 `
 
-const serviceContent = `
-#!/bin/bash
+const serviceContent = `#!/bin/bash
 echo "HELLO!!!!"
 sleep 10
 `
 const serviceFileName = "service.sh"
 
 const runtimeDir = "/run/aos/runtime"
+
+/***********************************************************************************************************************
+ * Consts
+ **********************************************************************************************************************/
+
+var systemd *dbus.Conn
 
 /***********************************************************************************************************************
  * Init
@@ -84,12 +89,14 @@ func init() {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
+		log.Fatalf("Error setting up: %v", err)
 	}
 
 	ret := m.Run()
 
-	cleanup()
+	if err := cleanup(); err != nil {
+		log.Errorf("Can't cleaning up: %v", err)
+	}
 
 	os.Exit(ret)
 }
@@ -188,12 +195,10 @@ func setup() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	systemd, err := dbus.NewSystemConnectionContext(context.Background())
+	systemd, err = dbus.NewSystemConnectionContext(context.Background())
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
-
-	defer systemd.Close()
 
 	if _, err = systemd.LinkUnitFilesContext(context.Background(), []string{serviceFile}, true, true); err != nil {
 		return aoserrors.Wrap(err)
@@ -206,6 +211,17 @@ func setup() (err error) {
 	return nil
 }
 
-func cleanup() {
-	os.RemoveAll(runtimeDir)
+func cleanup() (err error) {
+	if _, disableErr := systemd.DisableUnitFilesContext(
+		context.Background(), []string{"aos-service@.service"}, true); disableErr != nil && err == nil {
+		err = aoserrors.Wrap(disableErr)
+	}
+
+	systemd.Close()
+
+	if removeErr := os.RemoveAll(runtimeDir); removeErr != nil && err == nil {
+		err = aoserrors.Wrap(removeErr)
+	}
+
+	return err
 }
