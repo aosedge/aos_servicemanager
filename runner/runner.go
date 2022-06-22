@@ -52,8 +52,8 @@ const (
   Types
  **********************************************************************************************************************/
 
-// StartInstanceParams start instance parameters.
-type StartInstanceParams struct {
+// RunParameters run instance parameters.
+type RunParameters struct {
 	StartInterval   time.Duration
 	StartBurst      uint
 	RestartInterval time.Duration
@@ -112,7 +112,7 @@ func (runner *Runner) InstanceStatusChannel() <-chan []InstanceStatus {
 }
 
 // StartInstance starts service instance as systemd unit.
-func (runner *Runner) StartInstance(instanceID, runtimeDir string, params StartInstanceParams) (status InstanceStatus) {
+func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunParameters) (status InstanceStatus) {
 	status.InstanceID = instanceID
 	status.State = cloudprotocol.InstanceStateFailed
 
@@ -245,7 +245,7 @@ func (runner *Runner) monitorUnitStates() {
 	}
 }
 
-func (runner *Runner) getStartingState(unitStatusChannel <-chan dbus.UnitStatus, params StartInstanceParams) string {
+func (runner *Runner) getStartingState(unitStatusChannel <-chan dbus.UnitStatus, params RunParameters) string {
 	if params.StartInterval == 0 {
 		params.StartInterval = defaultStartTimeout * time.Second
 	}
