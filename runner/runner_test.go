@@ -59,6 +59,8 @@ exit 1
 `
 const serviceFileName = "service.sh"
 
+const waitStatusTimeout = 20 * time.Second
+
 /***********************************************************************************************************************
  * Vars
  **********************************************************************************************************************/
@@ -143,10 +145,12 @@ func TestStartStopService(t *testing.T) {
 		t.Error("State should be failed")
 	}
 
-	serviceStatusesChannel := runnerInstance.InstanceStatusChannel()
-
 	// wait for service failed
-	failStatus := <-serviceStatusesChannel
+
+	failStatus, err := waitForStatus(runnerInstance.InstanceStatusChannel())
+	if err != nil {
+		t.Fatalf("Wait for status error: %v", err)
+	}
 
 	if len(failStatus) != 1 {
 		t.Error("Count of updated statuses should be 1")
@@ -160,8 +164,12 @@ func TestStartStopService(t *testing.T) {
 		t.Errorf("Incorrect service state: %s", failStatus[0].State)
 	}
 
-	// wait for service failed
-	activeStatus := <-serviceStatusesChannel
+	// wait for service active
+
+	activeStatus, err := waitForStatus(runnerInstance.InstanceStatusChannel())
+	if err != nil {
+		t.Fatalf("Wait for status error: %v", err)
+	}
 
 	if activeStatus[0].InstanceID != "id1" {
 		t.Error("Incorrect instance id in status")
@@ -227,4 +235,14 @@ func cleanup() (err error) {
 	}
 
 	return err
+}
+
+func waitForStatus(channel <-chan []runner.InstanceStatus) ([]runner.InstanceStatus, error) {
+	select {
+	case status := <-channel:
+		return status, nil
+
+	case <-time.After(waitStatusTimeout):
+		return nil, aoserrors.New("wait timeout")
+	}
 }
