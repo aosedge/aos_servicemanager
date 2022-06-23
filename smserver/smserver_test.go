@@ -259,7 +259,7 @@ func TestInstanceMessages(t *testing.T) {
 	expectedRequest[0].InstanceFilter.SubjectID = nil
 	expectedStatus.EnvVarsStatus[0].Instance.SubjectId = ""
 
-	envVarStatus, err := smServer.OverrideEnvVars(context.Background(), sendEnvVars)
+	envVarStatus, err := client.pbclient.OverrideEnvVars(context.Background(), sendEnvVars)
 	if err != nil {
 		t.Fatalf("Can't override env vars: %s", err)
 	}
@@ -309,7 +309,7 @@ func TestInstanceMessages(t *testing.T) {
 		}
 	}
 
-	if _, err := smServer.RunInstances(context.Background(), runRequest); err != nil {
+	if _, err := client.pbclient.RunInstances(context.Background(), runRequest); err != nil {
 		t.Fatalf("Can't run instances")
 	}
 
@@ -401,7 +401,7 @@ func TestServicesMessages(t *testing.T) {
 			ServiceId: "testService" + strconv.Itoa(i), AosVersion: uint64(i),
 		}
 
-		if _, err := smServer.InstallService(context.Background(), &installRequest); err != nil {
+		if _, err := client.pbclient.InstallService(context.Background(), &installRequest); err != nil {
 			t.Fatalf("Can't install service: %s", err)
 		}
 
@@ -412,7 +412,7 @@ func TestServicesMessages(t *testing.T) {
 		expectedServiceStatuses.Services = append(expectedServiceStatuses.Services, &expectedStatus)
 	}
 
-	serviceStatuses, err := smServer.GetServicesStatus(context.Background(), &emptypb.Empty{})
+	serviceStatuses, err := client.pbclient.GetServicesStatus(context.Background(), &emptypb.Empty{})
 	if err != nil {
 		t.Errorf("Can't get service statuses: %s", err)
 	}
@@ -423,7 +423,7 @@ func TestServicesMessages(t *testing.T) {
 
 	expectedServiceID := "someID"
 
-	if _, err := smServer.RemoveService(
+	if _, err := client.pbclient.RemoveService(
 		context.Background(), &pb.RemoveServiceRequest{ServiceId: expectedServiceID}); err != nil {
 		t.Fatalf("Can't remove service: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestLayerMessages(t *testing.T) {
 			Digest: "digest" + strconv.Itoa(i),
 		}
 
-		if _, err := smServer.InstallLayer(context.Background(), &installRequest); err != nil {
+		if _, err := client.pbclient.InstallLayer(context.Background(), &installRequest); err != nil {
 			t.Fatalf("Can't install layer")
 		}
 
@@ -492,7 +492,7 @@ func TestLayerMessages(t *testing.T) {
 		expectedLayerStatuses.Layers = append(expectedLayerStatuses.Layers, &expectedStatus)
 	}
 
-	layerStatuses, err := smServer.GetLayersStatus(context.Background(), &emptypb.Empty{})
+	layerStatuses, err := client.pbclient.GetLayersStatus(context.Background(), &emptypb.Empty{})
 	if err != nil {
 		t.Errorf("Can't get layer statuses: %s", err)
 	}
@@ -906,7 +906,7 @@ func TestInstanceStateProcessing(t *testing.T) {
 		Checksum:      checkSumStr, Result: "result", Reason: "OK",
 	}
 
-	if _, err := smServer.InstanceStateAcceptance(context.Background(),
+	if _, err := client.pbclient.InstanceStateAcceptance(context.Background(),
 		&pb.StateAcceptance{
 			Instance:      &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2},
 			StateChecksum: checkSumStr, Result: "result", Reason: "OK",
@@ -942,7 +942,7 @@ func TestInstanceStateProcessing(t *testing.T) {
 		Checksum:      checkSumStr, State: stateStr,
 	}
 
-	if _, err := smServer.SetInstanceState(context.Background(), &pb.InstanceState{
+	if _, err := client.pbclient.SetInstanceState(context.Background(), &pb.InstanceState{
 		Instance:      &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 2},
 		StateChecksum: checkSumStr,
 		State:         []byte(stateStr),
@@ -1004,7 +1004,7 @@ func TestLogsNotification(t *testing.T) {
 		},
 	}
 
-	if _, err := smServer.GetSystemLog(context.Background(), &pb.SystemLogRequest{LogId: "systemlog"}); err != nil {
+	if _, err := client.pbclient.GetSystemLog(context.Background(), &pb.SystemLogRequest{LogId: "systemlog"}); err != nil {
 		t.Fatalf("Can't get system log: %s", err)
 	}
 
@@ -1025,7 +1025,7 @@ func TestLogsNotification(t *testing.T) {
 	}
 
 	for i := range instanceLogRequests {
-		if _, err := smServer.GetInstanceLog(context.Background(), &instanceLogRequests[i]); err != nil {
+		if _, err := client.pbclient.GetInstanceLog(context.Background(), &instanceLogRequests[i]); err != nil {
 			t.Fatalf("Can't get instance log: %s", err)
 		}
 
@@ -1034,7 +1034,7 @@ func TestLogsNotification(t *testing.T) {
 		}
 	}
 
-	if _, err := smServer.GetInstanceCrashLog(context.Background(),
+	if _, err := client.pbclient.GetInstanceCrashLog(context.Background(),
 		&pb.InstanceLogRequest{LogId: "serviceCrashLog", Instance: &pb.InstanceIdent{ServiceId: "id3"}}); err != nil {
 		t.Fatalf("Can't get instance crash log: %s", err)
 	}
