@@ -20,6 +20,8 @@ package runner
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -37,16 +39,25 @@ import (
 const unitStatusChannelSize = 10
 
 const (
-	defaultStartTimeout    = 30
-	startTimeoutMultiplier = 2
+	defaultStartInterval   = 1 * time.Second
+	defaultStartBurst      = 3
+	defaultRestartInterval = 100 * time.Millisecond
+	startTimeoutMultiplier = 1.2
 )
 
 const systemdUnitNameTemplate = "aos-service@%s.service"
 
 const (
-	errNotLoaded = "not loaded"
-	jobStateDone = "done"
+	errNotLoaded  = "not loaded"
+	jobStatusDone = "done"
 )
+
+const (
+	systemdDropInsDir  = "/run/systemd/system"
+	parametersFileName = "parameters.conf"
+)
+
+const statusPollPeriod = 1 * time.Second
 
 /***********************************************************************************************************************
   Types
@@ -137,12 +148,28 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 			delete(runner.runningUnits, unitName)
 
 			if status.Err == nil {
-				status.Err = aoserrors.Errorf("can't start service instance id %s", status.InstanceID)
+				status.Err = aoserrors.Errorf("instance failed")
 			}
 		}
 
 		runner.Unlock()
 	}()
+
+	if params.StartInterval == 0 {
+		params.StartInterval = defaultStartInterval
+	}
+
+	if params.StartBurst == 0 {
+		params.StartBurst = defaultStartBurst
+	}
+
+	if params.RestartInterval == 0 {
+		params.RestartInterval = defaultRestartInterval
+	}
+
+	if status.Err = runner.setRunParameters(unitName, params); status.Err != nil {
+		return status
+	}
 
 	channel := make(chan string)
 
@@ -151,11 +178,11 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 		return status
 	}
 
-	jobState := <-channel
+	jobStatus := <-channel
 
-	log.WithFields(log.Fields{"name": unitName, "job state": jobState}).Debug("Start service")
+	log.WithFields(log.Fields{"name": unitName, "jobStatus": jobStatus}).Debug("Start service")
 
-	if jobState != jobStateDone {
+	if jobStatus != jobStatusDone {
 		return status
 	}
 
@@ -176,21 +203,29 @@ func (runner *Runner) StopInstance(instanceID string) (err error) {
 
 	channel := make(chan string)
 
-	if _, err := runner.systemd.StopUnitContext(context.Background(), unitName, "replace", channel); err != nil {
-		if strings.Contains(err.Error(), errNotLoaded) {
+	if _, stopErr := runner.systemd.StopUnitContext(
+		context.Background(), unitName, "replace", channel); stopErr != nil {
+		if strings.Contains(stopErr.Error(), errNotLoaded) {
 			log.WithField("id", instanceID).Warn("Service not loaded")
-
-			return nil
+		} else if err == nil {
+			err = aoserrors.Wrap(stopErr)
 		}
+	} else {
+		jobStatus := <-channel
 
-		return aoserrors.Wrap(err)
+		log.WithFields(log.Fields{"id": instanceID, "jobStatus": jobStatus}).Debug("Stop service")
+
+		if jobStatus != jobStatusDone && err == nil {
+			err = aoserrors.Errorf("job status %s", jobStatus)
+		}
 	}
 
-	status := <-channel
+	if removeErr := runner.removeRunParameters(
+		fmt.Sprintf(systemdUnitNameTemplate, instanceID)); removeErr != nil && err != nil {
+		err = removeErr
+	}
 
-	log.WithFields(log.Fields{"id": instanceID, "status": status}).Debug("Stop service")
-
-	return nil
+	return err
 }
 
 /***********************************************************************************************************************
@@ -199,7 +234,7 @@ func (runner *Runner) StopInstance(instanceID string) (err error) {
 
 func (runner *Runner) monitorUnitStates() {
 	statusChan, errChan := runner.systemd.SubscribeUnitsCustom(
-		time.Second, 0, isUnitStatusChanged, runner.isUnitUnderMonitoring)
+		statusPollPeriod, 0, isUnitStatusChanged, runner.isUnitUnderMonitoring)
 
 	for {
 		select {
@@ -248,10 +283,6 @@ func (runner *Runner) monitorUnitStates() {
 func (runner *Runner) getStartingState(
 	unitName string, unitStatusChannel <-chan dbus.UnitStatus, params RunParameters,
 ) string {
-	if params.StartInterval == 0 {
-		params.StartInterval = defaultStartTimeout * time.Second
-	}
-
 	var currentState string
 
 	statuses, err := runner.systemd.ListUnitsByNamesContext(context.Background(), []string{unitName})
@@ -268,7 +299,7 @@ func (runner *Runner) getStartingState(
 
 			currentState = unitStatus.ActiveState
 
-		case <-time.After(startTimeoutMultiplier * params.StartInterval):
+		case <-time.After(time.Duration(startTimeoutMultiplier * float32(params.StartInterval))):
 			if currentState != cloudprotocol.InstanceStateActive {
 				return cloudprotocol.InstanceStateFailed
 			}
@@ -313,4 +344,41 @@ func isUnitStatusChanged(u1, u2 *dbus.UnitStatus) bool {
 		u1.LoadState != u2.LoadState ||
 		u1.ActiveState != u2.ActiveState ||
 		u1.SubState != u2.SubState
+}
+
+func (runner *Runner) setRunParameters(unitName string, params RunParameters) error {
+	const parametersFormat = `[Unit]
+StartLimitIntervalSec=%s
+StartLimitBurst=%d
+
+[Service]
+RestartSec=%s
+`
+
+	if params.StartInterval < 1*time.Microsecond || params.RestartInterval < 1*time.Microsecond {
+		return aoserrors.New("invalid parameters")
+	}
+
+	parametersDir := filepath.Join(systemdDropInsDir, unitName+".d")
+
+	if err := os.MkdirAll(parametersDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(parametersDir, parametersFileName),
+		[]byte(fmt.Sprintf(parametersFormat, params.StartInterval, params.StartBurst, params.RestartInterval)),
+		0o600); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (runner *Runner) removeRunParameters(unitName string) error {
+	if err := os.RemoveAll(filepath.Join(systemdDropInsDir, unitName+".d")); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }

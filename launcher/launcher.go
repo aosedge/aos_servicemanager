@@ -1161,7 +1161,11 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	}
 
 	runStatus := launcher.instanceRunner.StartInstance(
-		instance.InstanceID, instance.runtimeDir, runner.RunParameters{})
+		instance.InstanceID, instance.runtimeDir, runner.RunParameters{
+			StartInterval:   instance.service.serviceConfig.RunParameters.StartInterval.Duration,
+			StartBurst:      instance.service.serviceConfig.RunParameters.StartBurst,
+			RestartInterval: instance.service.serviceConfig.RunParameters.RestartInterval.Duration,
+		})
 
 	// Update current status if it is not updated by runner status channel. Instance runner status goes asynchronously
 	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this

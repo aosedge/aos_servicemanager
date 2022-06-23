@@ -40,8 +40,6 @@ import (
 
 const serviceTemplate = `[Unit]
 Description=AOS Service
-StartLimitIntervalSec=2
-StartLimitBurst=1
 
 [Service]
 Type=simple
@@ -60,6 +58,8 @@ exit 1
 const serviceFileName = "service.sh"
 
 const waitStatusTimeout = 20 * time.Second
+
+const aosServiceTemplate = "aos-service@%s.service"
 
 /***********************************************************************************************************************
  * Vars
@@ -112,23 +112,19 @@ func TestMain(m *testing.M) {
 func TestStartStopService(t *testing.T) {
 	runnerInstance, err := runner.New()
 	if err != nil {
-		t.Fatalf("Can't create runner: %s", err)
+		t.Fatalf("Can't create runner: %v", err)
 	}
 	defer runnerInstance.Close()
 
-	serviceDir := path.Join(tmpDir, "id1")
-
-	if err = os.MkdirAll(serviceDir, 0o755); err != nil {
-		t.Fatalf("Can't create service dir: %s", err)
+	serviceDir, err := createService("id1")
+	if err != nil {
+		t.Fatalf("Can't create service: %v", err)
 	}
 
-	if err = ioutil.WriteFile(path.Join(serviceDir, serviceFileName), []byte(serviceContent), 0o600); err != nil {
-		t.Fatalf("Can't create service binary: %s", err)
-	}
-
-	status := runnerInstance.StartInstance("id1", serviceDir, runner.RunParameters{StartInterval: 2 * time.Second})
+	status := runnerInstance.StartInstance("id1", serviceDir,
+		runner.RunParameters{StartInterval: 2 * time.Second, StartBurst: 1, RestartInterval: 3 * time.Second})
 	if status.Err != nil {
-		t.Errorf("Can't start service: %s", status.Err)
+		t.Errorf("Can't start service: %v", status.Err)
 	}
 
 	if status.State != cloudprotocol.InstanceStateActive {
@@ -136,7 +132,8 @@ func TestStartStopService(t *testing.T) {
 	}
 
 	// test no service binary
-	status = runnerInstance.StartInstance("someID", serviceDir, runner.RunParameters{StartInterval: 2 * time.Second})
+	status = runnerInstance.StartInstance("someID", serviceDir,
+		runner.RunParameters{StartInterval: 2 * time.Second, StartBurst: 1, RestartInterval: 3 * time.Second})
 	if status.Err == nil {
 		t.Error("Should be error can't start service instance")
 	}
@@ -181,12 +178,93 @@ func TestStartStopService(t *testing.T) {
 
 	// stop instance
 	if err := runnerInstance.StopInstance("id1"); err != nil {
-		t.Errorf("Can't stop service: %s", err)
+		t.Errorf("Can't stop service: %v", err)
 	}
 
 	// test service not loaded
 	if err := runnerInstance.StopInstance("someID"); err != nil {
-		t.Errorf("Can't stop service: %s", err)
+		t.Errorf("Can't stop service: %v", err)
+	}
+}
+
+func TestRunParameters(t *testing.T) {
+	runnerInstance, err := runner.New()
+	if err != nil {
+		t.Fatalf("Can't create runner: %v", err)
+	}
+	defer runnerInstance.Close()
+
+	serviceDir, err := createService("id1")
+	if err != nil {
+		t.Fatalf("Can't create service: %v", err)
+	}
+
+	// Check default run parameters
+
+	status := runnerInstance.StartInstance("id1", serviceDir, runner.RunParameters{})
+	if status.Err != nil {
+		t.Errorf("Can't start service: %v", status.Err)
+	}
+
+	defaultParameters := runner.RunParameters{
+		StartInterval:   1 * time.Second,
+		StartBurst:      3,
+		RestartInterval: 100 * time.Millisecond,
+	}
+
+	runParameters, err := getRunParameters("id1")
+	if err != nil {
+		t.Fatalf("Can't get run parameters: %v", err)
+	}
+
+	if runParameters != defaultParameters {
+		t.Errorf("Wrong run parameters: %v", runParameters)
+	}
+
+	if err := runnerInstance.StopInstance("id1"); err != nil {
+		t.Errorf("Can't stop service: %v", err)
+	}
+
+	// Check other run parameters
+
+	testData := []runner.RunParameters{
+		{StartInterval: 5 * time.Second, StartBurst: 5, RestartInterval: 1 * time.Second},
+		{StartInterval: 500 * time.Millisecond, StartBurst: 1, RestartInterval: 2 * time.Hour},
+		{StartInterval: 1500 * time.Microsecond, StartBurst: 2, RestartInterval: 50 * time.Millisecond},
+	}
+
+	for _, testParams := range testData {
+		status := runnerInstance.StartInstance("id1", serviceDir, testParams)
+		if status.Err != nil {
+			t.Errorf("Can't start service: %v", status.Err)
+		}
+
+		if runParameters, err = getRunParameters("id1"); err != nil {
+			t.Fatalf("Can't get run parameters: %v", err)
+		}
+
+		if runParameters != testParams {
+			t.Errorf("Wrong run parameters: %v", runParameters)
+		}
+
+		if err := runnerInstance.StopInstance("id1"); err != nil {
+			t.Errorf("Can't stop service: %v", err)
+		}
+	}
+
+	// Check invalid parameters
+
+	status = runnerInstance.StartInstance("id1", serviceDir, runner.RunParameters{
+		StartInterval:   1 * time.Nanosecond,
+		RestartInterval: 1 * time.Nanosecond,
+	})
+
+	if status.Err == nil {
+		t.Error("Error expected")
+	}
+
+	if status.State != cloudprotocol.InstanceStateFailed {
+		t.Error("Failed status expected")
 	}
 }
 
@@ -200,7 +278,7 @@ func setup() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	serviceFile := path.Join(tmpDir, "aos-service@.service")
+	serviceFile := path.Join(tmpDir, fmt.Sprintf(aosServiceTemplate, ""))
 
 	if err = ioutil.WriteFile(serviceFile, []byte(fmt.Sprintf(serviceTemplate, tmpDir)), 0o600); err != nil {
 		return aoserrors.Wrap(err)
@@ -224,7 +302,7 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	if _, disableErr := systemd.DisableUnitFilesContext(
-		context.Background(), []string{"aos-service@.service"}, true); disableErr != nil && err == nil {
+		context.Background(), []string{fmt.Sprintf(aosServiceTemplate, "")}, true); disableErr != nil && err == nil {
 		err = aoserrors.Wrap(disableErr)
 	}
 
@@ -245,4 +323,46 @@ func waitForStatus(channel <-chan []runner.InstanceStatus) ([]runner.InstanceSta
 	case <-time.After(waitStatusTimeout):
 		return nil, aoserrors.New("wait timeout")
 	}
+}
+
+func createService(id string) (serviceDir string, err error) {
+	serviceDir = path.Join(tmpDir, id)
+
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	if err := ioutil.WriteFile(path.Join(serviceDir, serviceFileName), []byte(serviceContent), 0o600); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	return serviceDir, nil
+}
+
+func getRunParameters(id string) (runner.RunParameters, error) {
+	properties, err := systemd.GetAllPropertiesContext(context.Background(), fmt.Sprintf(aosServiceTemplate, id))
+	if err != nil {
+		return runner.RunParameters{}, aoserrors.Wrap(err)
+	}
+
+	startInterval, ok := properties["StartLimitIntervalUSec"].(uint64)
+	if !ok {
+		return runner.RunParameters{}, aoserrors.New("invalid start interval type")
+	}
+
+	startBurst, ok := properties["StartLimitBurst"].(uint32)
+	if !ok {
+		return runner.RunParameters{}, aoserrors.New("invalid start burst type")
+	}
+
+	restartInterval, ok := properties["RestartUSec"].(uint64)
+	if !ok {
+		return runner.RunParameters{}, aoserrors.New("invalid restart interval type")
+	}
+
+	return runner.RunParameters{
+		StartInterval:   time.Duration(startInterval) * time.Microsecond,
+		StartBurst:      uint(startBurst),
+		RestartInterval: time.Duration(restartInterval) * time.Microsecond,
+	}, nil
 }
