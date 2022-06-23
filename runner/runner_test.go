@@ -19,6 +19,7 @@ package runner_test
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -39,29 +40,30 @@ import (
 
 const serviceTemplate = `[Unit]
 Description=AOS Service
-After=network.target
 StartLimitIntervalSec=2
 StartLimitBurst=1
 
 [Service]
 Type=simple
 Restart=always
-ExecStart=/bin/sh /run/aos/runtime/%i/service.sh
-
-PIDFile=/run/aos/runtime/%i/.pid
-SuccessExitStatus=SIGKILL
+ExecStart=/bin/sh %s/%%i/service.sh %%i
 
 [Install]
 WantedBy=multi-user.target
 `
 
 const serviceContent = `#!/bin/bash
-echo "HELLO!!!!"
+echo "Hello from: $1"
 sleep 10
+exit 1
 `
 const serviceFileName = "service.sh"
 
-const runtimeDir = "/run/aos/runtime"
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var tmpDir string
 
 /***********************************************************************************************************************
  * Consts
@@ -112,7 +114,7 @@ func TestStartStopService(t *testing.T) {
 	}
 	defer runnerInstance.Close()
 
-	serviceDir := path.Join(runtimeDir, "id1")
+	serviceDir := path.Join(tmpDir, "id1")
 
 	if err = os.MkdirAll(serviceDir, 0o755); err != nil {
 		t.Fatalf("Can't create service dir: %s", err)
@@ -122,7 +124,7 @@ func TestStartStopService(t *testing.T) {
 		t.Fatalf("Can't create service binary: %s", err)
 	}
 
-	status := runnerInstance.StartInstance("id1", runtimeDir, runner.RunParameters{StartInterval: 2 * time.Second})
+	status := runnerInstance.StartInstance("id1", serviceDir, runner.RunParameters{StartInterval: 2 * time.Second})
 	if status.Err != nil {
 		t.Errorf("Can't start service: %s", status.Err)
 	}
@@ -132,7 +134,7 @@ func TestStartStopService(t *testing.T) {
 	}
 
 	// test no service binary
-	status = runnerInstance.StartInstance("someID", runtimeDir, runner.RunParameters{StartInterval: 2 * time.Second})
+	status = runnerInstance.StartInstance("someID", serviceDir, runner.RunParameters{StartInterval: 2 * time.Second})
 	if status.Err == nil {
 		t.Error("Should be error can't start service instance")
 	}
@@ -185,13 +187,14 @@ func TestStartStopService(t *testing.T) {
  **********************************************************************************************************************/
 
 func setup() (err error) {
-	if err = os.MkdirAll(runtimeDir, 0o755); err != nil {
+	tmpDir, err = ioutil.TempDir("", "aos_")
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	serviceFile := path.Join(runtimeDir, "aos-service@.service")
+	serviceFile := path.Join(tmpDir, "aos-service@.service")
 
-	if err = ioutil.WriteFile(serviceFile, []byte(serviceTemplate), 0o600); err != nil {
+	if err = ioutil.WriteFile(serviceFile, []byte(fmt.Sprintf(serviceTemplate, tmpDir)), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -219,7 +222,7 @@ func cleanup() (err error) {
 
 	systemd.Close()
 
-	if removeErr := os.RemoveAll(runtimeDir); removeErr != nil && err == nil {
+	if removeErr := os.RemoveAll(tmpDir); removeErr != nil && err == nil {
 		err = aoserrors.Wrap(removeErr)
 	}
 
