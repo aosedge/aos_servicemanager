@@ -159,7 +159,7 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 		return status
 	}
 
-	status.State = runner.getStartingState(unitStatusChannel, params)
+	status.State = runner.getStartingState(unitName, unitStatusChannel, params)
 
 	return status
 }
@@ -245,12 +245,19 @@ func (runner *Runner) monitorUnitStates() {
 	}
 }
 
-func (runner *Runner) getStartingState(unitStatusChannel <-chan dbus.UnitStatus, params RunParameters) string {
+func (runner *Runner) getStartingState(
+	unitName string, unitStatusChannel <-chan dbus.UnitStatus, params RunParameters,
+) string {
 	if params.StartInterval == 0 {
 		params.StartInterval = defaultStartTimeout * time.Second
 	}
 
 	var currentState string
+
+	statuses, err := runner.systemd.ListUnitsByNamesContext(context.Background(), []string{unitName})
+	if err == nil && len(statuses) > 0 {
+		currentState = statuses[0].ActiveState
+	}
 
 	for {
 		select {
