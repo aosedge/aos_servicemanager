@@ -1,13 +1,10 @@
 [Unit]
 Description=AOS Service
 After=network.target
-StartLimitIntervalSec=30
-StartLimitBurst=3
 
 [Service]
 Type=forking
 Restart=always
-RestartSec=1
 ExecStartPre=/usr/bin/runc delete -f %i
 ExecStart=/usr/bin/runc run -d --pid-file /run/aos/runtime/%i/.pid -b /run/aos/runtime/%i %i
 
