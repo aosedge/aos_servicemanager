@@ -78,6 +78,8 @@ type testStateHandler struct {
 type testLayerManager struct {
 	currentInstallRequests testLayerInstallRequest
 	layers                 []layermanager.LayerInfo
+	removeDigest           string
+	restoreDigest          string
 }
 
 type testClient struct {
@@ -497,6 +499,26 @@ func TestLayerMessages(t *testing.T) {
 
 	if !proto.Equal(layerStatuses, expectedLayerStatuses) {
 		t.Errorf("Incorrect layer statuses")
+	}
+
+	const expectedDigest = "some_digest"
+
+	if _, err := client.pbclient.RemoveLayer(
+		context.Background(), &pb.RemoveLayerRequest{Digest: expectedDigest}); err != nil {
+		t.Fatalf("Can't remove layer: %v", err)
+	}
+
+	if testLayerManager.removeDigest != expectedDigest {
+		t.Error("Incorrect remove layer digest")
+	}
+
+	if _, err := client.pbclient.RestoreLayer(
+		context.Background(), &pb.RestoreLayerRequest{Digest: expectedDigest}); err != nil {
+		t.Fatalf("Can't restore layer: %v", err)
+	}
+
+	if testLayerManager.restoreDigest != expectedDigest {
+		t.Error("Incorrect restore layer digest")
 	}
 }
 
@@ -1150,6 +1172,18 @@ func (layerMgr *testLayerManager) InstallLayer(
 		Digest: installInfo.Digest, LayerID: installInfo.LayerID, AosVersion: installInfo.AosVersion,
 		VendorVersion: installInfo.VendorVersion, Description: installInfo.Description,
 	})
+
+	return nil
+}
+
+func (layerMgr *testLayerManager) RemoveLayer(digest string) error {
+	layerMgr.removeDigest = digest
+
+	return nil
+}
+
+func (layerMgr *testLayerManager) RestoreLayer(digest string) error {
+	layerMgr.restoreDigest = digest
 
 	return nil
 }

@@ -81,6 +81,8 @@ type StateHandler interface {
 type LayerProvider interface {
 	GetLayersInfo() (info []layermanager.LayerInfo, err error)
 	InstallLayer(installInfo layermanager.LayerInfo, layerURL string, fileInfo image.FileInfo) error
+	RemoveLayer(digest string) error
+	RestoreLayer(digest string) error
 }
 
 // AlertsProvider alert data provider interface.
@@ -357,6 +359,16 @@ func (server *SMServer) InstallLayer(ctx context.Context, layer *pb.InstallLayer
 	fileInfo := image.FileInfo{Sha256: layer.Sha256, Sha512: layer.Sha512, Size: layer.Size}
 
 	return &emptypb.Empty{}, aoserrors.Wrap(server.layerProvider.InstallLayer(installInfo, layer.Url, fileInfo))
+}
+
+// RemoveLayer removes the layer.
+func (server *SMServer) RemoveLayer(ctx context.Context, layer *pb.RemoveLayerRequest) (*empty.Empty, error) {
+	return &emptypb.Empty{}, aoserrors.Wrap(server.layerProvider.RemoveLayer(layer.Digest))
+}
+
+// RestoreLayer restores the layer.
+func (server *SMServer) RestoreLayer(ctx context.Context, layer *pb.RestoreLayerRequest) (*empty.Empty, error) {
+	return &emptypb.Empty{}, aoserrors.Wrap(server.layerProvider.RestoreLayer(layer.Digest))
 }
 
 // GetLayersStatus gets installed layer info.
