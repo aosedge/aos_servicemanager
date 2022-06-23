@@ -79,6 +79,12 @@ type serviceQuotas struct {
 	DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
 }
 
+type runParameters struct {
+	StartInterval   aostypes.Duration `json:"startInterval,omitempty"`
+	StartBurst      uint              `json:"startBurst,omitempty"`
+	RestartInterval aostypes.Duration `json:"restartInterval,omitempty"`
+}
+
 type serviceConfig struct {
 	Created            time.Time                    `json:"created"`
 	Author             string                       `json:"author"`
@@ -91,6 +97,7 @@ type serviceConfig struct {
 	Resources          []string                     `json:"resources,omitempty"`
 	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
 	AlertRules         *aostypes.ServiceAlertRules  `json:"alertRules,omitempty"`
+	RunParameters      runParameters                `json:"runParameters,omitempty"`
 }
 
 type runtimeSpec struct {
