@@ -69,6 +69,8 @@ const (
 	statesDir         = "states"
 )
 
+var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TERM=xterm"}
+
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
@@ -1092,7 +1094,7 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 
 	// Check env vars
-
+	envVars = append(envVars, defaultEnvVars...)
 	envVars = append(envVars, testInstaces[0].imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
 	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
@@ -1864,6 +1866,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			}
 
 			expectedEnvVars := append(getAosEnvVars(instanceInfo), checkInstance.envVars...)
+			expectedEnvVars = append(expectedEnvVars, defaultEnvVars...)
 
 			if !compareArrays(len(expectedEnvVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
 				return expectedEnvVars[index1] == runtimeSpec.Process.Env[index2]

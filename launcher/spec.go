@@ -572,7 +572,6 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	}
 
 	spec.ociSpec.Process.Args = nil
-	spec.ociSpec.Process.Env = nil
 	spec.ociSpec.Process.Terminal = false
 
 	spec.setRootfs(filepath.Join(instance.runtimeDir, instanceRootFS))
