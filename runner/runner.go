@@ -365,10 +365,10 @@ RestartSec=%s
 		return aoserrors.Wrap(err)
 	}
 
-	if err := os.WriteFile(
+	if err := os.WriteFile( // nolint:gosec // To fix systemd warning, file parameters.conf should be 644
 		filepath.Join(parametersDir, parametersFileName),
 		[]byte(fmt.Sprintf(parametersFormat, params.StartInterval, params.StartBurst, params.RestartInterval)),
-		0o600); err != nil {
+		0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
