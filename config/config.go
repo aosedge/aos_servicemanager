@@ -69,11 +69,15 @@ type Config struct {
 	StorageDir         string `json:"storageDir"`
 	StateDir           string `json:"stateDir"`
 	ServicesDir        string `json:"servicesDir"`
+	ServicesPartLimit  uint   `json:"servicesPartLimit"`
 	LayersDir          string `json:"layersDir"`
+	LayersPartLimit    uint   `json:"layersPartLimit"`
 	DownloadDir        string `json:"downloadDir"`
+	ExtractDir         string `json:"extractDir"`
 
 	BoardConfigFile           string                 `json:"boardConfigFile"`
 	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
+	LayerTTLDays              uint64                 `json:"layerTtlDays"`
 	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
 	Monitoring                resourcemonitor.Config `json:"monitoring"`
 	Logging                   Logging                `json:"logging"`
@@ -96,6 +100,7 @@ func New(fileName string) (config *Config, err error) {
 
 	config = &Config{
 		ServiceTTLDays:            30,                                            // nolint:gomnd
+		LayerTTLDays:              30,                                            // nolint:gomnd
 		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, // nolint:gomnd
 		Monitoring: resourcemonitor.Config{
 			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
@@ -141,6 +146,10 @@ func New(fileName string) (config *Config, err error) {
 
 	if config.DownloadDir == "" {
 		config.DownloadDir = path.Join(config.WorkingDir, "download")
+	}
+
+	if config.ExtractDir == "" {
+		config.ExtractDir = path.Join(config.WorkingDir, "extract")
 	}
 
 	if config.BoardConfigFile == "" {
