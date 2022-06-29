@@ -26,14 +26,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
+	"github.com/aoscloud/aos_common/spaceallocator"
 	"github.com/aoscloud/aos_common/utils/action"
-	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/mod/sumdb/dirhash"
@@ -63,30 +63,26 @@ type ServiceStorage interface {
 	RemoveService(ServiceInfo) error
 	ActivateService(serviceID string, aosVersion uint64) error
 	SetServiceTimestamp(serviceID string, aosVersion uint64, timestamp time.Time) error
+	SetServiceCached(serviceID string, cached bool) error
 }
 
 // LayerProvider layer provider.
 type LayerProvider interface {
-	UninstallLayer(digest string) (deallocatedSize int64, err error)
+	UseLayer(digest string) error
 }
-
-type byServiceTTL []ServiceInfo
 
 // ServiceManager instance.
 type ServiceManager struct {
 	sync.Mutex
-	servicesDir             string
-	downloadDir             string
-	serviceTTLDays          uint64
-	pendingRemove           []ServiceInfo
-	availableSize           int64
-	numTryAllocateSpace     uint64
-	actionHandler           *action.Handler
-	gidPool                 *uidgidpool.IdentifierPool
-	serviceInfoProvider     ServiceStorage
-	layerProvider           LayerProvider
-	isDownloadSamePartition bool
-	isLayersSamePartition   bool
+	servicesDir         string
+	downloadDir         string
+	serviceTTLDays      uint64
+	actionHandler       *action.Handler
+	gidPool             *uidgidpool.IdentifierPool
+	serviceInfoProvider ServiceStorage
+	layerProvider       LayerProvider
+	serviceAllocator    spaceallocator.Allocator
+	downloadAllocator   spaceallocator.Allocator
 }
 
 // ServiceInfo service information.
@@ -100,6 +96,8 @@ type ServiceInfo struct {
 	ManifestDigest  []byte
 	Timestamp       time.Time
 	IsActive        bool
+	Cached          bool
+	Size            uint64
 }
 
 /***********************************************************************************************************************
@@ -111,23 +109,11 @@ var (
 	ErrNotExist = errors.New("service not exist")
 	// ErrVersionMismatch new service version <= existing one.
 	ErrVersionMismatch = errors.New("version mismatch")
-	ErrNotEnoughMemory = errors.New("not enough memory")
 )
 
-// GetAvailableSize used to be able to mocking the functionality in tests.
-var GetAvailableSize = fs.GetAvailableSize // nolint:gochecknoglobals
-
-/***********************************************************************************************************************
- * Sort instance priority
- **********************************************************************************************************************/
-
-func (services byServiceTTL) Len() int { return len(services) }
-
-func (services byServiceTTL) Less(i, j int) bool {
-	return services[i].Timestamp.Before(services[j].Timestamp)
-}
-
-func (services byServiceTTL) Swap(i, j int) { services[i], services[j] = services[j], services[i] }
+// NewSpaceAllocator space allocator constructor.
+// nolint:gochecknoglobals // used for unit test mock
+var NewSpaceAllocator = spaceallocator.New
 
 /***********************************************************************************************************************
  * Public
@@ -135,7 +121,7 @@ func (services byServiceTTL) Swap(i, j int) { services[i], services[j] = service
 
 // New creates new service manager object.
 func New(
-	config *config.Config, layerProvider LayerProvider, serviceInfoProvider ServiceStorage,
+	config *config.Config, serviceInfoProvider ServiceStorage, layerProvider LayerProvider,
 ) (sm *ServiceManager, err error) {
 	sm = &ServiceManager{
 		servicesDir:         config.ServicesDir,
@@ -151,6 +137,23 @@ func New(
 		return nil, aoserrors.Wrap(err)
 	}
 
+	if err := os.RemoveAll(sm.downloadDir); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if err := os.MkdirAll(sm.downloadDir, 0o755); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if sm.serviceAllocator, err = NewSpaceAllocator(
+		sm.servicesDir, config.ServicesPartLimit, sm.removeOutdatedService); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if sm.downloadAllocator, err = NewSpaceAllocator(sm.downloadDir, 0, nil); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
 	services, err := sm.serviceInfoProvider.GetAllServices()
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -158,7 +161,19 @@ func New(
 
 	for _, service := range services {
 		if err = sm.gidPool.AddID(service.GID); err != nil {
-			log.Errorf("Can't add service GID to pool: %s", err)
+			log.Errorf("Can't add service GID to pool: %v", err)
+		}
+
+		if service.Cached {
+			size, err := sm.getServiceSize(service.ServiceID)
+			if err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
+
+			if err = sm.serviceAllocator.AddOutdatedItem(
+				service.ServiceID, size, service.Timestamp); err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
 		}
 	}
 
@@ -166,30 +181,17 @@ func New(
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if err := os.RemoveAll(sm.downloadDir); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	serviceMountPoint, err := fs.GetMountPoint(sm.servicesDir)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	layersMountPoint, err := fs.GetMountPoint(config.LayersDir)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	sm.isLayersSamePartition = serviceMountPoint == layersMountPoint
-
-	downloadMountPoint, err := fs.GetMountPoint(config.DownloadDir)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	sm.isDownloadSamePartition = serviceMountPoint == downloadMountPoint
-
 	return sm, nil
+}
+
+func (sm *ServiceManager) Close() {
+	if err := sm.serviceAllocator.Close(); err != nil {
+		log.Errorf("Can't close service allocator: %v", err)
+	}
+
+	if err := sm.downloadAllocator.Close(); err != nil {
+		log.Errorf("Can't close download allocator: %v", err)
+	}
 }
 
 // InstallService install service to the system.
@@ -203,6 +205,14 @@ func (sm *ServiceManager) InstallService(
 	)
 }
 
+func (sm *ServiceManager) RestoreService(serviceID string) error {
+	return <-sm.actionHandler.Execute(serviceID,
+		func(id string) error {
+			return sm.doRestoreService(serviceID)
+		},
+	)
+}
+
 // RemoveService removes service from the system.
 func (sm *ServiceManager) RemoveService(serviceID string) (err error) {
 	return <-sm.actionHandler.Execute(serviceID,
@@ -212,25 +222,9 @@ func (sm *ServiceManager) RemoveService(serviceID string) (err error) {
 	)
 }
 
-// AllocateLayersSpace allocate space by removing outdated services.
-func (sm *ServiceManager) AllocateLayersSpace(extraSpace int64) (allocatedLayersSize int64, err error) {
-	if _, allocatedLayersSize, err = sm.removePendingServices(0, extraSpace); err != nil {
-		return 0, err
-	}
-
-	return allocatedLayersSize, nil
-}
-
 // GetAllServicesStatus gets all services status.
 func (sm *ServiceManager) GetAllServicesStatus() ([]ServiceInfo, error) {
-	sm.Lock()
-
-	sm.pendingRemove = nil
-
-	sm.Unlock()
-
 	services, err := sm.serviceInfoProvider.GetAllServices()
-
 	return services, aoserrors.Wrap(err)
 }
 
@@ -265,7 +259,27 @@ func (sm *ServiceManager) RevertService(service ServiceInfo) (retErr error) {
 
 // UseService sets last use of service.
 func (sm *ServiceManager) UseService(serviceID string, aosVersion uint64) error {
-	return aoserrors.Wrap(sm.serviceInfoProvider.SetServiceTimestamp(serviceID, aosVersion, time.Now().UTC()))
+	if err := sm.serviceInfoProvider.SetServiceTimestamp(serviceID, aosVersion, time.Now().UTC()); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	serviceInfo, err := sm.serviceInfoProvider.GetService(serviceID)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	manifest, err := getImageManifest(serviceInfo.ImagePath)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, digest := range getLayersFromManifest(manifest) {
+		if err := sm.layerProvider.UseLayer(digest); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
 }
 
 func (sm *ServiceManager) ValidateService(service ServiceInfo) error {
@@ -285,7 +299,30 @@ func (sm *ServiceManager) ValidateService(service ServiceInfo) error {
  * Private
  **********************************************************************************************************************/
 
+func (sm *ServiceManager) doRestoreService(serviceID string) error {
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Restore service")
+
+	service, err := sm.serviceInfoProvider.GetService(serviceID)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if !service.Cached {
+		log.Warningf("Service %v not cached", serviceID)
+
+		return nil
+	}
+
+	if err = sm.setServiceCached(service, false); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
 func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL string, fileInfo image.FileInfo) error {
+	log.WithFields(log.Fields{"serviceID": newService.ServiceID}).Debug("Install service")
+
 	serviceFromStorage, err := sm.serviceInfoProvider.GetService(newService.ServiceID)
 	if err != nil && !errors.Is(err, ErrNotExist) {
 		return aoserrors.Wrap(err)
@@ -301,27 +338,27 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		}
 	}
 
-	log.WithFields(log.Fields{"serviceID": newService.ServiceID}).Debug("Install service")
+	var spacePackage, spaceService spaceallocator.Space
 
-	newService.ImagePath, err = ioutil.TempDir(sm.servicesDir, "")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	serviceSize, err := sm.extractPackageByURL(newService.ImagePath, sm.downloadDir, imageURL, fileInfo)
+	newService.ImagePath, newService.Size, spacePackage, err = sm.extractPackageByURL(imageURL, fileInfo)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	defer func() {
-		var size int64
-
 		if err != nil {
-			size = serviceSize
-			_ = os.RemoveAll(newService.ImagePath)
+			releaseAllocatedSpace(newService.ImagePath, spaceService, spacePackage)
+
+			log.WithFields(log.Fields{
+				"id":         newService.ServiceID,
+				"aosVersion": newService.AosVersion,
+				"imagePath":  newService.ImagePath,
+			}).Errorf("Can't install service: %v", err)
+
+			return
 		}
 
-		sm.deallocateSpace(size)
+		acceptAllocatedSpace(spaceService, spacePackage)
 	}()
 
 	if err = validateUnpackedImage(newService.ImagePath); err != nil {
@@ -337,10 +374,13 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		}
 	}
 
-	rootFSDigest, err := sm.prepareServiceFS(newService.ImagePath, newService.GID)
+	serviceSize, space, rootFSDigest, err := sm.prepareServiceFS(newService.ImagePath, newService.GID)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	spaceService = space
+	newService.Size += uint64(serviceSize)
 
 	if err = updateRootFSDigestInManifest(newService.ImagePath, rootFSDigest); err != nil {
 		return aoserrors.Wrap(err)
@@ -351,9 +391,21 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		return aoserrors.Wrap(err)
 	}
 
+	if isServiceExist {
+		if err = sm.removeObsoleteServiceVersions(serviceFromStorage); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
 	if err = sm.serviceInfoProvider.AddService(newService); err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	log.WithFields(log.Fields{
+		"id":         newService.ServiceID,
+		"aosVersion": newService.AosVersion,
+		"imagePath":  newService.ImagePath,
+	}).Info("Service successfully installed")
 
 	return nil
 }
@@ -369,10 +421,8 @@ func (sm *ServiceManager) doApplyService(service ServiceInfo) (err error) {
 			continue
 		}
 
-		_, _, err := sm.removeService(oldService)
-		if err != nil {
-			log.Errorf("Can't remove old service: %s", err)
-			continue
+		if err = sm.removeService(oldService); err != nil {
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -384,127 +434,158 @@ func (sm *ServiceManager) doApplyService(service ServiceInfo) (err error) {
 }
 
 func (sm *ServiceManager) doRevertService(service ServiceInfo) error {
-	if _, _, err := sm.removeService(service); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (sm *ServiceManager) removePendingServices(
-	extraServiceSpace int64, extraLayerSpace int64,
-) (deallocatedServicesSize, deallocatedLayersSize int64, err error) {
-	for deallocatedServicesSize < extraServiceSpace || deallocatedLayersSize < extraLayerSpace {
-		if len(sm.pendingRemove) == 0 {
-			return 0, 0, ErrNotEnoughMemory
-		}
-
-		freedServiceSize, freedLayersSize, err := sm.removeService(sm.pendingRemove[0])
-		if err != nil {
-			return 0, 0, err
-		}
-
-		deallocatedServicesSize += freedServiceSize
-		deallocatedLayersSize += freedLayersSize
-
-		if sm.isLayersSamePartition {
-			deallocatedServicesSize += freedLayersSize
-			deallocatedLayersSize += freedServiceSize
-		}
-
-		sm.pendingRemove = sm.pendingRemove[1:]
-	}
-
-	return deallocatedServicesSize, deallocatedLayersSize, nil
+	return sm.removeService(service)
 }
 
 func (sm *ServiceManager) doRemoveService(serviceID string) error {
-	service, err := sm.serviceInfoProvider.GetService(serviceID)
+	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service")
+
+	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
-		if _, _, err := sm.removeService(service); err != nil {
-			return err
+	var serviceSize uint64
+
+	for i, service := range services {
+		if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
+			if err = sm.removeService(service); err != nil {
+				return err
+			}
+
+			services = append(services[:i], services[i+1:]...)
+
+			continue
 		}
-	} else {
-		sm.Lock()
 
-		sm.pendingRemove = append(sm.pendingRemove, service)
-		sort.Sort(byServiceTTL(sm.pendingRemove))
+		serviceSize += service.Size
+	}
 
-		sm.Unlock()
+	if serviceSize > 0 {
+		if err = sm.setServiceCached(ServiceInfo{
+			ServiceID: serviceID,
+			Timestamp: services[len(services)-1].Timestamp,
+			Size:      serviceSize,
+		}, true); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil
 }
 
-func (sm *ServiceManager) removeService(service ServiceInfo) (freedServiceSize, freedLayersSize int64, err error) {
-	imageParts, err := getImageParts(service.ImagePath)
+func (sm *ServiceManager) removeOutdatedService(serviceID string) error {
+	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
 	if err != nil {
-		return 0, 0, aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
-	servicesInfo, err := sm.serviceInfoProvider.GetAllServices()
-	if err != nil {
-		return 0, 0, aoserrors.Wrap(err)
-	}
-
-layersLoop:
-	for _, digest := range imageParts.LayersDigest {
-		for _, serviceInfo := range servicesInfo {
-			if serviceInfo.ServiceID == service.ServiceID && serviceInfo.AosVersion == service.AosVersion {
-				continue
-			}
-
-			serviceImageParts, err := getImageParts(serviceInfo.ImagePath)
-			if err != nil {
-				return 0, 0, aoserrors.Wrap(err)
-			}
-
-			for _, compareDigest := range serviceImageParts.LayersDigest {
-				if digest == compareDigest {
-					continue layersLoop
-				}
-			}
+	for _, service := range services {
+		if err := os.RemoveAll(service.ImagePath); err != nil {
+			return aoserrors.Wrap(err)
 		}
 
-		size, err := sm.layerProvider.UninstallLayer(digest)
-		if err != nil {
-			return 0, 0, aoserrors.Wrap(err)
+		if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
+			return aoserrors.Wrap(err)
 		}
-
-		freedLayersSize += size
 	}
 
-	freedServiceSize = imageParts.ServiceSize
-
-	if err := os.RemoveAll(service.ImagePath); err != nil {
-		return 0, 0, aoserrors.Wrap(err)
-	}
-
-	if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
-		return 0, 0, aoserrors.Wrap(err)
-	}
-
-	return freedServiceSize, freedLayersSize, nil
+	return nil
 }
 
-func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (rootFSDigest digest.Digest, err error) {
+func (sm *ServiceManager) removeObsoleteServiceVersions(service ServiceInfo) error {
+	services, err := sm.serviceInfoProvider.GetAllServiceVersions(service.ServiceID)
+	if err != nil && !errors.Is(err, ErrNotExist) {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, storageService := range services {
+		if service.AosVersion != storageService.AosVersion {
+			if err = sm.removeService(service); err != nil {
+				return err
+			}
+		}
+	}
+
+	if service.Cached {
+		if err = sm.setServiceCached(service, false); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func (sm *ServiceManager) setServiceCached(service ServiceInfo, cached bool) error {
+	if err := sm.serviceInfoProvider.SetServiceCached(service.ServiceID, cached); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if cached {
+		if err := sm.serviceAllocator.AddOutdatedItem(
+			service.ServiceID, service.Size, service.Timestamp); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		return nil
+	}
+
+	sm.serviceAllocator.RestoreOutdatedItem(service.ServiceID)
+
+	return nil
+}
+
+func (sm *ServiceManager) removeService(service ServiceInfo) error {
+	if err := os.RemoveAll(service.ImagePath); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if service.Cached {
+		sm.serviceAllocator.RestoreOutdatedItem(service.ServiceID)
+	}
+
+	sm.serviceAllocator.FreeSpace(service.Size)
+
+	if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"serviceID": service.ServiceID}).Info("Service successfully removed")
+
+	return nil
+}
+
+func (sm *ServiceManager) prepareServiceFS(
+	imagePath string, gid int,
+) (serviceSize int64, space spaceallocator.Space, rootFSDigest digest.Digest, err error) {
 	imageParts, err := getImageParts(imagePath)
 	if err != nil {
-		return "", aoserrors.Wrap(err)
+		return 0, nil, "", aoserrors.Wrap(err)
+	}
+
+	if serviceSize, err = image.GetUncompressedTarContentSize(imageParts.ServiceFSPath); err != nil {
+		return 0, nil, "", aoserrors.Wrap(err)
+	}
+
+	if space, err = sm.serviceAllocator.AllocateSpace(uint64(serviceSize)); err != nil {
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
 
 	originRootFSPath := imageParts.ServiceFSPath
 
-	tmpRootFS := path.Join(imagePath, tmpRootFSDir)
+	tmpRootFS := filepath.Join(imagePath, tmpRootFSDir)
 
 	// unpack rootfs layer
 	if err = image.UnpackTarImage(imageParts.ServiceFSPath, tmpRootFS); err != nil {
-		return "", aoserrors.Wrap(err)
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
+
+	serviceFSArchiveSize, err := getFileSize(imageParts.ServiceFSPath)
+	if err != nil {
+		return 0, nil, "", aoserrors.Wrap(err)
+	}
+
+	sm.serviceAllocator.FreeSpace(serviceFSArchiveSize)
 
 	if err = os.RemoveAll(imageParts.ServiceFSPath); err != nil {
 		log.Errorf("Can't remove temp file: %s", err)
@@ -521,23 +602,23 @@ func (sm *ServiceManager) prepareServiceFS(imagePath string, gid int) (rootFSDig
 
 		return nil
 	}); err != nil {
-		return "", aoserrors.Wrap(err)
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
 
 	rootFSHash, err := dirhash.HashDir(tmpRootFS, tmpRootFS, dirDigest)
 	if err != nil {
-		return "", aoserrors.Wrap(err)
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
 
 	if rootFSDigest, err = digest.Parse(rootFSHash); err != nil {
-		return "", aoserrors.Wrap(err)
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
 
-	if err = os.Rename(tmpRootFS, path.Join(path.Dir(originRootFSPath), rootFSDigest.Hex())); err != nil {
-		return "", aoserrors.Wrap(err)
+	if err = os.Rename(tmpRootFS, filepath.Join(path.Dir(originRootFSPath), rootFSDigest.Hex())); err != nil {
+		return 0, nil, "", aoserrors.Wrap(err)
 	}
 
-	return rootFSDigest, nil
+	return serviceSize, space, rootFSDigest, nil
 }
 
 func (sm *ServiceManager) removeDamagedServiceFolders(services []ServiceInfo) error {
@@ -559,7 +640,7 @@ func (sm *ServiceManager) removeDamagedServiceFolders(services []ServiceInfo) er
 
 filesLoop:
 	for _, file := range files {
-		fullPath := path.Join(sm.servicesDir, file.Name())
+		fullPath := filepath.Join(sm.servicesDir, file.Name())
 
 		for _, service := range services {
 			if fullPath == service.ImagePath {
@@ -577,53 +658,30 @@ filesLoop:
 	return nil
 }
 
-func (sm *ServiceManager) tryAllocateSpace(requiredSize int64) (err error) {
-	sm.Lock()
-	defer sm.Unlock()
-
-	if sm.numTryAllocateSpace == 0 {
-		if sm.availableSize, err = GetAvailableSize(sm.servicesDir); err != nil {
-			sm.Unlock()
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if sm.availableSize < requiredSize {
-		freedServicesSize, _, err := sm.removePendingServices(requiredSize-sm.availableSize, 0)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		sm.availableSize += freedServicesSize
-	}
-
-	sm.availableSize -= requiredSize
-	sm.numTryAllocateSpace++
-
-	return nil
-}
-
 func (sm *ServiceManager) extractPackageByURL(
-	extractDir, downloadDir, packageURL string, fileInfo image.FileInfo,
-) (serviceSize int64, err error) {
+	packageURL string, fileInfo image.FileInfo,
+) (imagePath string, serviceSize uint64, space spaceallocator.Space, err error) {
 	urlVal, err := url.Parse(packageURL)
 	if err != nil {
-		return 0, aoserrors.Wrap(err)
+		return "", 0, nil, aoserrors.Wrap(err)
 	}
 
 	var sourceFile string
 
 	if urlVal.Scheme != "file" {
-		if sm.isDownloadSamePartition {
-			if err = sm.tryAllocateSpace(int64(fileInfo.Size)); err != nil {
-				return 0, aoserrors.Wrap(err)
-			}
-
-			defer sm.deallocateSpace(int64(fileInfo.Size))
+		space, err := sm.downloadAllocator.AllocateSpace(fileInfo.Size)
+		if err != nil {
+			return "", 0, nil, aoserrors.Wrap(err)
 		}
 
-		if sourceFile, err = image.Download(context.Background(), downloadDir, packageURL); err != nil {
-			return 0, aoserrors.Wrap(err)
+		defer func() {
+			if err := space.Release(); err != nil {
+				log.Errorf("Can't release memory: %v", err)
+			}
+		}()
+
+		if sourceFile, err = image.Download(context.Background(), sm.downloadDir, packageURL); err != nil {
+			return "", 0, nil, aoserrors.Wrap(err)
 		}
 
 		defer os.RemoveAll(sourceFile)
@@ -632,29 +690,81 @@ func (sm *ServiceManager) extractPackageByURL(
 	}
 
 	if err = image.CheckFileInfo(context.Background(), sourceFile, fileInfo); err != nil {
-		return 0, aoserrors.Wrap(err)
+		return "", 0, nil, aoserrors.Wrap(err)
 	}
 
 	size, err := image.GetUncompressedTarContentSize(sourceFile)
 	if err != nil {
+		return "", 0, nil, aoserrors.Wrap(err)
+	}
+
+	if space, err = sm.serviceAllocator.AllocateSpace(uint64(size)); err != nil {
+		return "", 0, nil, aoserrors.Wrap(err)
+	}
+
+	imagePath, err = ioutil.TempDir(sm.servicesDir, "")
+	if err != nil {
+		return "", 0, nil, aoserrors.Wrap(err)
+	}
+
+	if err = image.UnpackTarImage(sourceFile, imagePath); err != nil {
+		return "", 0, nil, aoserrors.Wrap(err)
+	}
+
+	return imagePath, uint64(size), space, nil
+}
+
+func (sm *ServiceManager) getServiceSize(serviceID string) (size uint64, err error) {
+	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
+	if err != nil {
 		return 0, aoserrors.Wrap(err)
 	}
 
-	if err = sm.tryAllocateSpace(size); err != nil {
-		return 0, aoserrors.Wrap(err)
-	}
-
-	if err = image.UnpackTarImage(sourceFile, extractDir); err != nil {
-		return size, aoserrors.Wrap(err)
+	for _, service := range services {
+		size += service.Size
 	}
 
 	return size, nil
 }
 
-func (sm *ServiceManager) deallocateSpace(size int64) {
-	sm.Lock()
-	defer sm.Unlock()
+func acceptAllocatedSpace(spaceService spaceallocator.Space, spacePackage spaceallocator.Space) {
+	if err := spacePackage.Accept(); err != nil {
+		log.Errorf("Can't accept memory: %v", err)
+	}
 
-	sm.availableSize += size
-	sm.numTryAllocateSpace--
+	if err := spaceService.Accept(); err != nil {
+		log.Errorf("Can't accept memory: %v", err)
+	}
+}
+
+func releaseAllocatedSpace(
+	imagePath string, spaceService spaceallocator.Space, spacePackage spaceallocator.Space,
+) {
+	if err := os.RemoveAll(imagePath); err != nil {
+		log.Errorf("Can't remove service image: %v", err)
+	}
+
+	if err := spacePackage.Release(); err != nil {
+		log.Errorf("Can't release memory: %v", err)
+	}
+
+	if spaceService != nil {
+		if err := spaceService.Release(); err != nil {
+			log.Errorf("Can't release memory: %v", err)
+		}
+	}
+}
+
+func getFileSize(fileName string) (size uint64, err error) {
+	var stat syscall.Stat_t
+
+	if err = syscall.Stat(fileName, &stat); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+
+		return 0, aoserrors.Wrap(err)
+	}
+
+	return uint64(stat.Size), nil
 }

@@ -53,7 +53,6 @@ type ImageParts struct {
 	ServiceConfigPath string
 	ServiceFSPath     string
 	LayersDigest      []string
-	ServiceSize       int64
 }
 
 type serviceManifest struct {
@@ -197,7 +196,6 @@ func getImageParts(installDir string) (parts ImageParts, err error) {
 	}
 
 	rootFSDigest := manifest.Layers[0].Digest
-	parts.ServiceSize = manifest.Layers[0].Size
 	parts.ServiceFSPath = path.Join(installDir, blobsFolder, string(rootFSDigest.Algorithm()), rootFSDigest.Hex())
 	parts.LayersDigest = getLayersFromManifest(manifest)
 
