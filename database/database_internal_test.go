@@ -102,7 +102,15 @@ func TestAddGetService(t *testing.T) {
 	// AddService
 	service := servicemanager.ServiceInfo{
 		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false,
+		GID: 5001, IsActive: false, Size: 30,
+	}
+
+	if _, err := db.GetService(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Error("Should be error get service")
+	}
+
+	if _, err := db.GetAllServiceVersions(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Error("Should be error get service")
 	}
 
 	if err := db.AddService(service); err != nil {
@@ -121,7 +129,7 @@ func TestAddGetService(t *testing.T) {
 
 	service2 := servicemanager.ServiceInfo{
 		ServiceID: "service2", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false,
+		GID: 5001, IsActive: false, Size: 80,
 	}
 
 	if err := db.AddService(service2); err != nil {
@@ -156,12 +164,59 @@ func TestAddGetService(t *testing.T) {
 		t.Errorf("incorrect count of services %d", len(services))
 	}
 
-	if services, err = db.GetAllServices(); err != nil {
-		t.Errorf("Can't get all services: %s", err)
+	services, err = db.GetAllServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
 	}
 
-	if len(services) != 3 {
-		t.Errorf("Incorrect count of all services %d", len(services))
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %v", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service.AosVersion = 3
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Unexpected service count: %v", len(services))
+	}
+
+	services, err = db.GetAllServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %v", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service2.AosVersion = 5
+
+	if err := db.AddService(service2); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %d", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
 	}
 
 	// Clear DB
@@ -238,6 +293,91 @@ func TestActivateService(t *testing.T) {
 
 	if serviceFromDB.IsActive != true {
 		t.Error("Wrong active value")
+	}
+}
+
+func TestCachedService(t *testing.T) {
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceCached", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: true, Cached: false,
+	}
+
+	expectedServices := []servicemanager.ServiceInfo{service}
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err := db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	expectedServices[0].Cached = true
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	service.AosVersion = 2
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	expectedServices = append(expectedServices, service)
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	expectedServices[1].Cached = true
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	if err := db.SetServiceCached(service.ServiceID, false); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	expectedServices[0].Cached = false
+	expectedServices[1].Cached = false
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
 	}
 }
 
@@ -401,48 +541,110 @@ func TestMultiThread(t *testing.T) {
 func TestLayers(t *testing.T) {
 	layer1 := layermanager.LayerInfo{
 		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1", VendorVersion: "1.0",
-		Description: "some layer 1", AosVersion: 1,
+		Description: "some layer 1", AosVersion: 1, Size: 40,
 	}
+
 	if err := db.AddLayer(layer1); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
+	savedLayer, err := db.GetLayerInfoByDigest("sha256:1")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if !reflect.DeepEqual(savedLayer, layer1) {
+		t.Error("service1 doesn't match stored one")
+	}
+
 	layer2 := layermanager.LayerInfo{
 		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1", VendorVersion: "2.0",
-		Description: "some layer 2", AosVersion: 2,
+		Description: "some layer 2", AosVersion: 2, Size: 50,
 	}
+
 	if err := db.AddLayer(layer2); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if !reflect.DeepEqual(savedLayer, layer2) {
+		t.Error("service1 doesn't match stored one")
+	}
+
 	layer3 := layermanager.LayerInfo{
 		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1", VendorVersion: "1.0",
-		Description: "some layer 3", AosVersion: 3,
+		Description: "some layer 3", AosVersion: 3, Size: 60,
 	}
+
 	if err := db.AddLayer(layer3); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	savedLayer, err := db.GetLayerInfoByDigest("sha256:2")
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:3")
 	if err != nil {
 		t.Errorf("Can't get layer path %s", err)
 	}
 
-	if savedLayer.Path != layer2.Path {
-		t.Errorf("Path form db %s != path2", savedLayer.Path)
-	}
-
-	layerInfo, err := db.GetLayerInfoByDigest("sha256:3")
-	if err != nil {
-		t.Errorf("Can't get layer ino by digest path %s", err)
-	}
-
-	if layerInfo.LayerID != layer3.LayerID {
-		t.Error("Incorrect layerID ", layerInfo.LayerID)
+	if !reflect.DeepEqual(savedLayer, layer3) {
+		t.Error("service1 doesn't match stored one")
 	}
 
 	if _, err := db.GetLayerInfoByDigest("sha256:12345"); err == nil {
 		t.Errorf("Should be error: entry does not exist")
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path %s", err)
+	}
+
+	if savedLayer.Cached {
+		t.Error("Should not be cached")
+	}
+
+	if err = db.SetLayerCached("sha256:2", true); err != nil {
+		t.Errorf("Can't set cached layer: %v", err)
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if !savedLayer.Cached {
+		t.Error("Should be cached")
+	}
+
+	if err = db.SetLayerCached("sha256:2", false); err != nil {
+		t.Errorf("Can't set cached layer: %v", err)
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if savedLayer.Cached {
+		t.Error("Should not be cached")
+	}
+
+	layerTimestamp := time.Now().UTC()
+
+	if err := db.SetLayerTimestamp("sha256:2", layerTimestamp); err != nil {
+		t.Errorf("Can't set layer timestamp: %v", err)
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer info: %v", err)
+	}
+
+	if savedLayer.Timestamp != layerTimestamp {
+		t.Error("Unexpected layer timestamp")
 	}
 
 	if err := db.DeleteLayerByDigest(layer2.Digest); err != nil {
