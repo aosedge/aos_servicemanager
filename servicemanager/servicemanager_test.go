@@ -27,13 +27,16 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/image"
+	"github.com/aoscloud/aos_common/spaceallocator"
+	"github.com/aoscloud/aos_common/utils/fs"
 	"github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
@@ -57,9 +60,12 @@ func init() {
  **********************************************************************************************************************/
 
 const (
-	errorAddServiceID = "errorAddServiceID"
-	errorGetServicID  = "errorGetServicID"
-	blobsFolder       = "blobs"
+	kilobyte           = uint64(1 << 10)
+	megabyte           = uint64(1 << 20)
+	errorAddServiceID  = "errorAddServiceID"
+	errorGetServicID   = "errorGetServicID"
+	blobsFolder        = "blobs"
+	defaultServiceSize = int64(2 * kilobyte)
 )
 
 /***********************************************************************************************************************
@@ -67,19 +73,44 @@ const (
  **********************************************************************************************************************/
 
 type testServiceStorage struct {
-	Services []servicemanager.ServiceInfo
+	cachedServiceError     bool
+	getAllError            bool
+	getServiceVersionError bool
+	Services               []servicemanager.ServiceInfo
 }
 
 type testLayerProvider struct {
-	availableSize  int64
-	allocationSize int64
+	digests []string
+}
+
+type testAllocator struct {
+	sync.Mutex
+
+	totalSize     uint64
+	allocatedSize uint64
+	partLimit     uint
+	remover       spaceallocator.ItemRemover
+	outdatedItems []testOutdatedItem
+}
+
+type testSpace struct {
+	allocator *testAllocator
+	size      uint64
+}
+
+type testOutdatedItem struct {
+	id   string
+	size uint64
 }
 
 /***********************************************************************************************************************
  * Vars
  **********************************************************************************************************************/
 
-var tmpDir string
+var (
+	tmpDir           string
+	serviceAllocator = &testAllocator{}
+)
 
 /***********************************************************************************************************************
  * Init
@@ -124,13 +155,16 @@ func TestInstallService(t *testing.T) {
 	}
 
 	config := &config.Config{
-		WorkingDir:  tmpDir,
-		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:   path.Join(tmpDir, "layers"),
-		DownloadDir: path.Join(tmpDir, "downloads"),
+		ServicesDir: filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:   filepath.Join(tmpDir, "layers"),
+		DownloadDir: filepath.Join(tmpDir, "downloads"),
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %s", err)
 	}
@@ -138,7 +172,7 @@ func TestInstallService(t *testing.T) {
 	// install services
 	serviceID := "testService0"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -166,7 +200,7 @@ func TestInstallService(t *testing.T) {
 
 	serviceID = "testIDRemoteService"
 
-	if serviceURL, fileInfo, err = prepareService("SomeContnet"); err != nil {
+	if serviceURL, fileInfo, _, err = prepareService("SomeContnet", defaultServiceSize); err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
@@ -175,7 +209,7 @@ func TestInstallService(t *testing.T) {
 		t.Fatalf("Can't parse url: %s", err)
 	}
 
-	_ = os.Rename(path.Join(urlVal.Path), path.Join(fileServerDir, "downloadImage"))
+	_ = os.Rename(urlVal.Path, filepath.Join(fileServerDir, "downloadImage"))
 
 	server := &http.Server{Addr: ":9000", Handler: http.FileServer(http.Dir(fileServerDir))}
 
@@ -194,12 +228,12 @@ func TestInstallService(t *testing.T) {
 		t.Errorf("Can't install service from remote domain: %s", err)
 	}
 
-	os.RemoveAll(path.Join(fileServerDir, "downloadImage"))
+	os.RemoveAll(filepath.Join(fileServerDir, "downloadImage"))
 
 	// test version missmatch
 	serviceID = "testID1"
 
-	if serviceURL, fileInfo, err = prepareService("SomeContnet"); err != nil {
+	if serviceURL, fileInfo, _, err = prepareService("SomeContnet", defaultServiceSize); err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
@@ -220,7 +254,7 @@ func TestInstallService(t *testing.T) {
 	// check incorrect check sum
 	serviceID = "testID2"
 
-	if serviceURL, fileInfo, err = prepareService("SomeContnet"); err != nil {
+	if serviceURL, fileInfo, _, err = prepareService("SomeContnet", defaultServiceSize); err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
@@ -232,7 +266,7 @@ func TestInstallService(t *testing.T) {
 	}
 
 	// untar error
-	notTarFile := path.Join(tmpDir, "notTar")
+	notTarFile := filepath.Join(tmpDir, "notTar")
 
 	if err := ioutil.WriteFile(notTarFile, []byte("testContent"), 0o600); err != nil {
 		t.Errorf("Can't create file: %s", err)
@@ -262,7 +296,7 @@ func TestInstallService(t *testing.T) {
 	os.RemoveAll(serviceURL)
 
 	// test get service error
-	if serviceURL, fileInfo, err = prepareService("SomeContnet"); err != nil {
+	if serviceURL, fileInfo, _, err = prepareService("SomeContent", defaultServiceSize); err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
 
@@ -284,13 +318,16 @@ func TestImageParts(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:  tmpDir,
-		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:   path.Join(tmpDir, "layers"),
-		DownloadDir: path.Join(tmpDir, "downloads"),
+		ServicesDir: filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:   filepath.Join(tmpDir, "layers"),
+		DownloadDir: filepath.Join(tmpDir, "downloads"),
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %s", err)
 	}
@@ -298,7 +335,7 @@ func TestImageParts(t *testing.T) {
 	// install services
 	serviceID := "testService0"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -308,11 +345,6 @@ func TestImageParts(t *testing.T) {
 		t.Errorf("Can't install service: %s", err)
 	}
 
-	serviceInfo, err := sm.GetServiceInfo(serviceID)
-	if err != nil {
-		t.Errorf("Can't get service info: %s", err)
-	}
-
 	services, err := sm.GetAllServicesStatus()
 	if err != nil {
 		t.Errorf("Can't get all services: %s", err)
@@ -320,6 +352,11 @@ func TestImageParts(t *testing.T) {
 
 	if !reflect.DeepEqual(services, serviceStorage.Services) {
 		t.Error("Incorrect services")
+	}
+
+	serviceInfo, err := sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Errorf("Can't get service info: %v", err)
 	}
 
 	imageParts, err := sm.GetImageParts(serviceInfo)
@@ -348,13 +385,16 @@ func TestApplyService(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:  tmpDir,
-		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:   path.Join(tmpDir, "layers"),
-		DownloadDir: path.Join(tmpDir, "downloads"),
+		ServicesDir: filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:   filepath.Join(tmpDir, "layers"),
+		DownloadDir: filepath.Join(tmpDir, "downloads"),
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %s", err)
 	}
@@ -362,7 +402,7 @@ func TestApplyService(t *testing.T) {
 	// install services
 	serviceID := "testServiceApplyID"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -407,20 +447,23 @@ func TestRevertService(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:  tmpDir,
-		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:   path.Join(tmpDir, "layers"),
-		DownloadDir: path.Join(tmpDir, "downloads"),
+		ServicesDir: filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:   filepath.Join(tmpDir, "layers"),
+		DownloadDir: filepath.Join(tmpDir, "downloads"),
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %s", err)
 	}
 
 	serviceID := "testRevertID"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -448,20 +491,23 @@ func TestValidateService(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:  tmpDir,
-		ServicesDir: path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:   path.Join(tmpDir, "layers"),
-		DownloadDir: path.Join(tmpDir, "downloads"),
+		ServicesDir: filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:   filepath.Join(tmpDir, "layers"),
+		DownloadDir: filepath.Join(tmpDir, "downloads"),
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %s", err)
 	}
 
 	serviceID := "testServiceValidate"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -485,21 +531,24 @@ func TestRemoveService(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:     tmpDir,
-		ServicesDir:    path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:      path.Join(tmpDir, "layers"),
-		DownloadDir:    path.Join(tmpDir, "downloads"),
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:      filepath.Join(tmpDir, "layers"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
 		ServiceTTLDays: 0,
 	}
 
-	sm, err := servicemanager.New(config, &testLayerProvider{}, serviceStorage)
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %v", err)
 	}
 
 	serviceID := "testRemoveService"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, _, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %v", err)
 	}
@@ -522,35 +571,33 @@ func TestRemoveService(t *testing.T) {
 	}
 }
 
-func TestAllocateMemoryInstallService(t *testing.T) {
+func TestRestoreService(t *testing.T) {
 	serviceStorage := &testServiceStorage{}
 
 	config := &config.Config{
-		WorkingDir:     tmpDir,
-		ServicesDir:    path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:      path.Join(tmpDir, "layers"),
-		DownloadDir:    path.Join(tmpDir, "downloads"),
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		LayersDir:      filepath.Join(tmpDir, "layers"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
 		ServiceTTLDays: 2,
 	}
 
-	layerProvider := &testLayerProvider{
-		availableSize:  19 * 1024,
-		allocationSize: 20 * 1024,
-	}
+	layerProvider := &testLayerProvider{}
 
-	servicemanager.GetAvailableSize = layerProvider.getAvailableSize
+	serviceAllocator = &testAllocator{}
 
-	sm, err := servicemanager.New(config, layerProvider, serviceStorage)
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %v", err)
 	}
 
-	serviceID := "testAllocateMemory"
+	serviceID := "testRestoreService"
 
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL, fileInfo, layerDigest, err := prepareService("Service content", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %v", err)
 	}
+
+	layerProvider.digests = layerDigest
 
 	serviceInfo := servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1}
 
@@ -558,113 +605,121 @@ func TestAllocateMemoryInstallService(t *testing.T) {
 		t.Fatalf("Can't install service: %v", err)
 	}
 
-	if err := sm.ApplyService(serviceInfo); err != nil {
-		t.Fatalf("Can't apply service: %v", err)
+	if err = sm.RestoreService(serviceInfo.ServiceID); err != nil {
+		t.Fatalf("Can't restore service: %v", err)
 	}
 
 	if err := sm.UseService(serviceInfo.ServiceID, serviceInfo.AosVersion); err != nil {
 		t.Fatalf("Can't set use service: %v", err)
 	}
 
-	if err = sm.RemoveService(serviceID); err != nil {
-		t.Fatalf("Can't remove service: %v", err)
-	}
-
-	serviceInfo, err = sm.GetServiceInfo(serviceID)
+	service, err := sm.GetServiceInfo(serviceID)
 	if err != nil {
 		t.Fatalf("Can't get service info: %v", err)
 	}
 
-	if serviceInfo.AosVersion != 1 {
-		t.Errorf("Unexpected aos version: %v", serviceInfo.AosVersion)
+	if service.Cached {
+		t.Error("Service should not be cached")
 	}
 
-	serviceIDNew := "testService4"
+	serviceStorage.cachedServiceError = true
 
-	serviceInfo = servicemanager.ServiceInfo{ServiceID: serviceIDNew, AosVersion: 1}
+	if err = sm.RemoveService(serviceID); err == nil {
+		t.Fatal("Should be error to set cached service")
+	}
 
-	layerProvider.availableSize -= 14 * 1024
+	serviceStorage.cachedServiceError = false
+
+	if err = sm.RemoveService(serviceID); err != nil {
+		t.Fatalf("Can't remove service: %v", err)
+	}
+
+	if err = sm.InstallService(serviceInfo, serviceURL, fileInfo); err == nil {
+		t.Fatal("Should be error service cashed")
+	}
+
+	service, err = sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if !service.Cached {
+		t.Error("Service should be cached")
+	}
+
+	serviceStorage.cachedServiceError = true
+
+	if err = sm.RestoreService(serviceInfo.ServiceID); err == nil {
+		t.Fatal("Should be error to set cached service")
+	}
+
+	serviceStorage.cachedServiceError = false
+
+	if err = sm.RestoreService(serviceInfo.ServiceID); err != nil {
+		t.Fatalf("Can't remove service: %v", err)
+	}
+
+	service, err = sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if service.Cached {
+		t.Error("Service should not be cached")
+	}
+}
+
+func TestAllocateMemoryInstallService(t *testing.T) {
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
+		ServiceTTLDays: 2,
+	}
+
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{
+		totalSize: 1 * megabyte,
+	}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
+	if err != nil {
+		t.Fatalf("Can't create SM: %v", err)
+	}
+
+	serviceSize := int64(512 * kilobyte)
+
+	serviceURL, fileInfo, layersDigest, err := prepareService("Service content", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	layerProvider.digests = layersDigest
+
+	serviceID := "memoryService"
+	serviceInfo := servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1}
 
 	if err = sm.InstallService(serviceInfo, serviceURL, fileInfo); err != nil {
 		t.Fatalf("Can't install service: %v", err)
 	}
 
-	if _, err = sm.GetServiceInfo(serviceID); err == nil {
-		t.Fatal("Should be error service doesn't exist")
-	}
-}
+	serviceSize = int64(512 * kilobyte)
 
-func TestAllocateMemoryFailed(t *testing.T) {
-	serviceStorage := &testServiceStorage{}
-
-	config := &config.Config{
-		WorkingDir:     tmpDir,
-		ServicesDir:    path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:      path.Join(tmpDir, "layers"),
-		DownloadDir:    path.Join(tmpDir, "downloads"),
-		ServiceTTLDays: 2,
-	}
-
-	layerProvider := &testLayerProvider{
-		availableSize: 2 * 1024,
-	}
-
-	servicemanager.GetAvailableSize = layerProvider.getAvailableSize
-
-	sm, err := servicemanager.New(config, layerProvider, serviceStorage)
-	if err != nil {
-		t.Fatalf("Can't create SM: %v", err)
-	}
-
-	serviceID := "testService3"
-
-	serviceURL, fileInfo, err := prepareService("Service content")
+	serviceURL1, fileInfo1, _, err := prepareService("Service content1", serviceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %v", err)
 	}
 
-	if err = sm.InstallService(
-		servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1}, serviceURL, fileInfo); err == nil {
-		t.Fatal("Service should not be installed not enough memory")
-	}
-}
+	serviceID1 := "memoryService2"
+	serviceInfo1 := servicemanager.ServiceInfo{ServiceID: serviceID1, AosVersion: 1}
 
-func TestTryAllocateMemory(t *testing.T) {
-	serviceStorage := &testServiceStorage{}
-
-	config := &config.Config{
-		WorkingDir:     tmpDir,
-		ServicesDir:    path.Join(tmpDir, "servicemanager", "services"),
-		LayersDir:      path.Join(tmpDir, "layers"),
-		DownloadDir:    path.Join(tmpDir, "downloads"),
-		ServiceTTLDays: 2,
+	if err = sm.InstallService(serviceInfo1, serviceURL1, fileInfo1); err == nil {
+		t.Fatalf("Should be error install service")
 	}
 
-	layerProvider := &testLayerProvider{
-		availableSize:  20 * 1024,
-		allocationSize: 20 * 1024,
-	}
-
-	servicemanager.GetAvailableSize = layerProvider.getAvailableSize
-
-	sm, err := servicemanager.New(config, layerProvider, serviceStorage)
-	if err != nil {
-		t.Fatalf("Can't create SM: %v", err)
-	}
-
-	serviceID := "testService3"
-
-	serviceURL, fileInfo, err := prepareService("Service content")
-	if err != nil {
-		t.Fatalf("Can't prepare test service: %v", err)
-	}
-
-	serviceInfo := servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1}
-	if err = sm.InstallService(serviceInfo, serviceURL, fileInfo); err != nil {
-		t.Errorf("Can't install service: %v", err)
-	}
-
-	if err := sm.UseService(serviceInfo.ServiceID, serviceInfo.AosVersion); err != nil {
+	if err = sm.UseService(serviceInfo.ServiceID, serviceInfo.AosVersion); err != nil {
 		t.Fatalf("Can't set use service: %v", err)
 	}
 
@@ -672,19 +727,277 @@ func TestTryAllocateMemory(t *testing.T) {
 		t.Fatalf("Can't remove service: %v", err)
 	}
 
-	requiredSize := int64(30 * 1024)
+	if serviceInfo, err = sm.GetServiceInfo(serviceID); err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
 
-	deallocatedSize, err := sm.AllocateLayersSpace(requiredSize - layerProvider.availableSize)
+	if !serviceInfo.Cached {
+		t.Error("Service should be cached")
+	}
+
+	if err = sm.InstallService(serviceInfo1, serviceURL1, fileInfo1); err != nil {
+		t.Fatalf("Should be error install service")
+	}
+
+	if serviceInfo, err = sm.GetServiceInfo(serviceID); err == nil {
+		t.Fatal("Service should not be exist")
+	}
+}
+
+func TestCachedServiceOnStart(t *testing.T) {
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
+		ServiceTTLDays: 2,
+	}
+
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{
+		totalSize: 1 * megabyte,
+	}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
-		t.Fatalf("Can't allocate memory: %v", err)
+		t.Fatalf("Can't create SM: %v", err)
 	}
 
-	if layerProvider.availableSize+deallocatedSize < requiredSize {
-		t.Fatalf("Incorrect deallocation size: %v", layerProvider.availableSize)
+	serviceSize := int64(512 * kilobyte)
+
+	serviceURL1, fileInfo1, layersDigest1, err := prepareService("Service content", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
 	}
 
-	if _, err = sm.AllocateLayersSpace(requiredSize - layerProvider.availableSize); err == nil {
-		t.Fatalf("Should be error outdated service doesn't exists: %v", err)
+	layerProvider.digests = layersDigest1
+
+	serviceID1 := "cachedStart1"
+	serviceInfo1 := servicemanager.ServiceInfo{ServiceID: serviceID1, AosVersion: 1}
+
+	if err = sm.InstallService(serviceInfo1, serviceURL1, fileInfo1); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+
+	if err = sm.UseService(serviceID1, 1); err != nil {
+		t.Fatalf("Can't set use service: %v", err)
+	}
+
+	serviceSize = int64(256 * kilobyte)
+
+	serviceURL2, fileInfo2, _, err := prepareService("Service content2", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	serviceID2 := "cachedStart2"
+	serviceInfo2 := servicemanager.ServiceInfo{ServiceID: serviceID2, AosVersion: 1}
+
+	if err = sm.InstallService(serviceInfo2, serviceURL2, fileInfo2); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+
+	serviceSize = int64(300 * kilobyte)
+
+	serviceURL3, fileInfo3, _, err := prepareService("Service content3", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	serviceID3 := "cachedStart3"
+	serviceInfo3 := servicemanager.ServiceInfo{ServiceID: serviceID3, AosVersion: 1}
+
+	if err = sm.InstallService(serviceInfo3, serviceURL3, fileInfo3); err == nil {
+		t.Fatalf("Should be install error")
+	}
+
+	if err = sm.RemoveService(serviceID1); err != nil {
+		t.Fatalf("Can't remove service: %v", err)
+	}
+
+	sm.Close()
+
+	sm1, err := servicemanager.New(config, serviceStorage, layerProvider)
+	if err != nil {
+		t.Fatalf("Can't create SM: %v", err)
+	}
+
+	serviceInfo, err := sm1.GetServiceInfo(serviceID1)
+	if err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if !serviceInfo.Cached {
+		t.Fatal("Service should be cached")
+	}
+
+	if err = sm1.InstallService(serviceInfo3, serviceURL3, fileInfo3); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+}
+
+func TestFailCreateAllocator(t *testing.T) {
+	serviceAllocator = &testAllocator{
+		partLimit: 100,
+	}
+
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		ServicesDir:       filepath.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir:       filepath.Join(tmpDir, "downloads"),
+		ServicesPartLimit: 110,
+	}
+
+	layerProvider := &testLayerProvider{}
+
+	if _, err := servicemanager.New(config, serviceStorage, layerProvider); err == nil {
+		t.Fatal("Should be error creating allocator")
+	}
+}
+
+func TestRemoveServiceVersionOnInstall(t *testing.T) {
+	serviceStorage := &testServiceStorage{}
+
+	config := &config.Config{
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
+		ServiceTTLDays: 2,
+	}
+
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
+	if err != nil {
+		t.Fatalf("Can't create SM: %v", err)
+	}
+
+	serviceSize := int64(200 * kilobyte)
+
+	serviceURL1, fileInfo1, layersDigest, err := prepareService("Service content", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	layerProvider.digests = layersDigest
+
+	serviceID1 := "cachedStart1"
+	serviceInfo1 := servicemanager.ServiceInfo{ServiceID: serviceID1, AosVersion: 1}
+
+	if err = sm.InstallService(serviceInfo1, serviceURL1, fileInfo1); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+
+	if err = sm.UseService(serviceID1, 1); err != nil {
+		t.Fatalf("Can't set use service: %v", err)
+	}
+
+	if err = sm.RemoveService(serviceID1); err != nil {
+		t.Fatalf("Can't remove service: %v", err)
+	}
+
+	serviceSize = int64(212 * kilobyte)
+
+	serviceURL2, fileInfo2, _, err := prepareService("Service content", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	serviceInfo1 = servicemanager.ServiceInfo{ServiceID: serviceID1, AosVersion: 2}
+
+	if err = sm.InstallService(serviceInfo1, serviceURL2, fileInfo2); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+
+	services, err := serviceStorage.GetAllServiceVersions(serviceID1)
+	if err != nil {
+		t.Fatalf("Can't get services version: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Error("Unexpected services size")
+	}
+
+	serviceSize = int64(212 * kilobyte)
+
+	serviceURL3, fileInfo3, _, err := prepareService("Service content", serviceSize)
+	if err != nil {
+		t.Fatalf("Can't prepare test service: %v", err)
+	}
+
+	serviceInfo1 = servicemanager.ServiceInfo{ServiceID: serviceID1, AosVersion: 3}
+
+	if err = sm.InstallService(serviceInfo1, serviceURL3, fileInfo3); err != nil {
+		t.Fatalf("Can't install service: %v", err)
+	}
+
+	services, err = serviceStorage.GetAllServiceVersions(serviceID1)
+	if err != nil {
+		t.Fatalf("Can't get services version: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Error("Unexpected services size")
+	}
+}
+
+func TestFailedServiceStorage(t *testing.T) {
+	serviceStorage := &testServiceStorage{
+		getAllError: true,
+	}
+
+	config := &config.Config{
+		ServicesDir:    filepath.Join(tmpDir, "servicemanager", "services"),
+		DownloadDir:    filepath.Join(tmpDir, "downloads"),
+		ServiceTTLDays: 2,
+	}
+
+	layerProvider := &testLayerProvider{}
+
+	serviceAllocator = &testAllocator{}
+
+	if _, err := servicemanager.New(config, serviceStorage, layerProvider); err == nil {
+		t.Fatal("Should be error: creating servicemanager")
+	}
+
+	serviceStorage = &testServiceStorage{
+		getServiceVersionError: true,
+	}
+
+	serviceID := "serviceFail"
+	serviceInfo := servicemanager.ServiceInfo{ServiceID: serviceID, AosVersion: 1, Cached: true}
+	serviceStorage.Services = append(serviceStorage.Services, serviceInfo)
+
+	if _, err := servicemanager.New(config, serviceStorage, layerProvider); err == nil {
+		t.Fatal("Should be error: creating servicemanager")
+	}
+
+	serviceStorage = &testServiceStorage{}
+
+	serviceAllocator = &testAllocator{}
+
+	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
+	if err != nil {
+		t.Fatalf("Can't create SM: %v", err)
+	}
+
+	if err := sm.ApplyService(serviceInfo); err == nil {
+		t.Fatal("Should be error: apply service")
+	}
+
+	if err := sm.RevertService(servicemanager.ServiceInfo{ServiceID: "unknown", Cached: true}); err == nil {
+		t.Fatal("Should be error: revert service")
+	}
+
+	if err := sm.RemoveService("unknown"); err == nil {
+		t.Fatal("Should be error: remove service")
+	}
+
+	if err := sm.UseService("unknown", 1); err == nil {
+		t.Fatal("Should be error: set use service")
 	}
 }
 
@@ -692,22 +1005,135 @@ func TestTryAllocateMemory(t *testing.T) {
 * Interfaces
 ***********************************************************************************************************************/
 
+func newSpaceAllocator(
+	path string, partLimit uint, remover spaceallocator.ItemRemover,
+) (spaceallocator.Allocator, error) {
+	if serviceAllocator.partLimit < partLimit {
+		return nil, aoserrors.New("can't create space allocator")
+	}
+
+	if remover != nil {
+		serviceAllocator.remover = remover
+	}
+
+	return serviceAllocator, nil
+}
+
+func (allocator *testAllocator) AllocateSpace(size uint64) (spaceallocator.Space, error) {
+	allocator.Lock()
+	defer allocator.Unlock()
+
+	if allocator.totalSize != 0 && allocator.allocatedSize+size > allocator.totalSize {
+		for allocator.allocatedSize+size > allocator.totalSize {
+			if len(allocator.outdatedItems) == 0 {
+				return nil, spaceallocator.ErrNoSpace
+			}
+
+			if err := allocator.remover(allocator.outdatedItems[0].id); err != nil {
+				return nil, err
+			}
+
+			if allocator.outdatedItems[0].size < allocator.allocatedSize {
+				allocator.allocatedSize -= allocator.outdatedItems[0].size
+			} else {
+				allocator.allocatedSize = 0
+			}
+
+			allocator.outdatedItems = allocator.outdatedItems[1:]
+		}
+	}
+
+	allocator.allocatedSize += size
+
+	return &testSpace{allocator: allocator, size: size}, nil
+}
+
+func (allocator *testAllocator) FreeSpace(size uint64) {
+	allocator.Lock()
+	defer allocator.Unlock()
+
+	if size > allocator.allocatedSize {
+		allocator.allocatedSize = 0
+	} else {
+		allocator.allocatedSize -= size
+	}
+}
+
+func (allocator *testAllocator) AddOutdatedItem(id string, size uint64, timestamp time.Time) error {
+	allocator.outdatedItems = append(allocator.outdatedItems, testOutdatedItem{id: id, size: size})
+
+	return nil
+}
+
+func (allocator *testAllocator) RestoreOutdatedItem(id string) {
+	for i, item := range allocator.outdatedItems {
+		if item.id == id {
+			allocator.outdatedItems = append(allocator.outdatedItems[:i], allocator.outdatedItems[i+1:]...)
+
+			break
+		}
+	}
+}
+
+func (allocator *testAllocator) Close() error {
+	return nil
+}
+
+func (space *testSpace) Accept() error {
+	return nil
+}
+
+func (space *testSpace) Release() error {
+	space.allocator.FreeSpace(space.size)
+
+	return nil
+}
+
 func (storage *testServiceStorage) GetService(serviceID string) (service servicemanager.ServiceInfo, err error) {
 	if serviceID == errorGetServicID {
 		return service, aoserrors.New("can't get service")
 	}
 
-	for _, service = range storage.Services {
-		if service.ServiceID == serviceID {
-			return service, nil
+	for _, storeService := range storage.Services {
+		if storeService.ServiceID == serviceID && service.AosVersion < storeService.AosVersion {
+			service = storeService
 		}
 	}
 
-	return service, servicemanager.ErrNotExist
+	if service.ServiceID != serviceID {
+		return service, servicemanager.ErrNotExist
+	}
+
+	return service, nil
 }
 
 func (storage *testServiceStorage) GetAllServices() (services []servicemanager.ServiceInfo, err error) {
-	return storage.Services, err
+	if storage.getAllError {
+		return nil, aoserrors.New("can't get services")
+	}
+
+StoreServiceLoop:
+	for _, storeService := range storage.Services {
+		var serviceExists bool
+
+		for i, service := range services {
+			if service.ServiceID == storeService.ServiceID {
+				if service.AosVersion < storeService.AosVersion {
+					services[i] = storeService
+
+					continue StoreServiceLoop
+				}
+
+				serviceExists = true
+			}
+		}
+
+		if !serviceExists {
+			services = append(services, storeService)
+		}
+	}
+
+	return services, nil
 }
 
 func (storage *testServiceStorage) AddService(service servicemanager.ServiceInfo) (err error) {
@@ -721,10 +1147,18 @@ func (storage *testServiceStorage) AddService(service servicemanager.ServiceInfo
 }
 
 func (storage *testServiceStorage) GetAllServiceVersions(id string) (result []servicemanager.ServiceInfo, err error) {
+	if storage.getServiceVersionError {
+		return nil, servicemanager.ErrNotExist
+	}
+
 	for _, outService := range storage.Services {
 		if outService.ServiceID == id {
 			result = append(result, outService)
 		}
+	}
+
+	if len(result) == 0 {
+		return nil, servicemanager.ErrNotExist
 	}
 
 	return result, nil
@@ -767,8 +1201,30 @@ func (storage *testServiceStorage) SetServiceTimestamp(serviceID string, aosVers
 	return servicemanager.ErrNotExist
 }
 
-func (layer *testLayerProvider) UninstallLayer(digest string) (deallocateSize int64, err error) {
-	return layer.allocationSize, nil
+func (storage *testServiceStorage) SetServiceCached(serviceID string, cached bool) error {
+	if storage.cachedServiceError {
+		return aoserrors.New("can't get cached service")
+	}
+
+	for i, serviceInfo := range storage.Services {
+		if serviceInfo.ServiceID == serviceID {
+			storage.Services[i].Cached = cached
+
+			return nil
+		}
+	}
+
+	return servicemanager.ErrNotExist
+}
+
+func (layerProvider *testLayerProvider) UseLayer(digest string) error {
+	for _, dgst := range layerProvider.digests {
+		if dgst == digest {
+			return nil
+		}
+	}
+
+	return aoserrors.New("can't find digest")
 }
 
 /***********************************************************************************************************************
@@ -780,6 +1236,8 @@ func setup() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
+	servicemanager.NewSpaceAllocator = newSpaceAllocator
+
 	return nil
 }
 
@@ -787,79 +1245,91 @@ func cleanup() {
 	os.RemoveAll(tmpDir)
 }
 
-func (layer *testLayerProvider) getAvailableSize(dir string) (availableSize int64, err error) {
-	return layer.availableSize, nil
-}
-
-func prepareService(testContent string) (outputURL string, fileInfo image.FileInfo, err error) {
+func prepareService(
+	testContent string, servicelayerSize int64,
+) (outputURL string, fileInfo image.FileInfo, layersDigest []string, err error) {
 	imageDir, err := ioutil.TempDir("", "aos_")
 	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
 	defer os.RemoveAll(imageDir)
 
 	// create dir
-	if err := os.MkdirAll(path.Join(imageDir, "rootfs", "home"), 0o755); err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+	if err := os.MkdirAll(filepath.Join(imageDir, "rootfs", "home"), 0o755); err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
-	if err := ioutil.WriteFile(path.Join(imageDir, "rootfs", "home", "service.py"),
-		[]byte(testContent), 0o600); err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
-	}
-
-	fsDigest, err := generateFsLayer(imageDir, path.Join(imageDir, "rootfs"))
+	file, err := os.Create(filepath.Join(imageDir, "rootfs", "home", "service.py"))
 	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
-	aosSrvConfigDigest, err := generateAndSaveDigest(path.Join(imageDir, blobsFolder), []byte("{}"))
-	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+	if err := file.Truncate(servicelayerSize); err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
-	imgSpecDigestDigest, err := generateAndSaveDigest(path.Join(imageDir, blobsFolder), []byte("{}"))
+	rootFsPath := filepath.Join(imageDir, "rootfs")
+
+	serviceSize, err := fs.GetDirSize(rootFsPath)
 	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
+	}
+
+	fsDigest, err := generateFsLayer(imageDir, rootFsPath)
+	if err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
+	}
+
+	aosSrvConfigDigest, err := generateAndSaveDigest(filepath.Join(imageDir, blobsFolder), []byte("{}"))
+	if err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
+	}
+
+	imgSpecDigestDigest, err := generateAndSaveDigest(filepath.Join(imageDir, blobsFolder), []byte("{}"))
+	if err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
 	imgAosLayerDigest, err := generateAndSaveDigest(imageDir, []byte("{}"))
 	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
+	layersDigest = append(layersDigest, string(imgAosLayerDigest))
+
 	if err := genarateImageManfest(
-		imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest, []digest.Digest{imgAosLayerDigest}); err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest,
+		serviceSize, []digest.Digest{imgAosLayerDigest}); err != nil {
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
 	imageFile, err := ioutil.TempFile("", "aos_")
 	if err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
 	outputURL = imageFile.Name()
 	imageFile.Close()
 
 	if err = packImage(imageDir, outputURL); err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
 	if fileInfo, err = image.CreateFileInfo(context.Background(), outputURL); err != nil {
-		return outputURL, fileInfo, aoserrors.Wrap(err)
+		return outputURL, fileInfo, layersDigest, aoserrors.Wrap(err)
 	}
 
-	return "file://" + outputURL, fileInfo, nil
+	return "file://" + outputURL, fileInfo, layersDigest, nil
 }
 
 func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error) {
-	blobsDir := path.Join(imgFolder, blobsFolder)
+	blobsDir := filepath.Join(imgFolder, blobsFolder)
 	if err := os.MkdirAll(blobsDir, 0o755); err != nil {
 		return digest, aoserrors.Wrap(err)
 	}
 
-	tarFile := path.Join(blobsDir, "_temp.tar.gz")
+	tarFile := filepath.Join(blobsDir, "_temp.tar.gz")
 
 	if output, err := exec.Command("tar", "-C", rootfs, "-czf", tarFile, "./").CombinedOutput(); err != nil {
 		return digest, aoserrors.Errorf("error: %s, code: %s", string(output), err)
@@ -888,7 +1358,7 @@ func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error)
 }
 
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
-	fullPath := path.Join(folder, "sha256")
+	fullPath := filepath.Join(folder, "sha256")
 	if err := os.MkdirAll(fullPath, 0o755); err != nil {
 		return retDigest, aoserrors.Wrap(err)
 	}
@@ -897,7 +1367,7 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	h.Write(data)
 	retDigest = digest.NewDigest("sha256", h)
 
-	file, err := os.Create(path.Join(fullPath, retDigest.Hex()))
+	file, err := os.Create(filepath.Join(fullPath, retDigest.Hex()))
 	if err != nil {
 		return retDigest, aoserrors.Wrap(err)
 	}
@@ -912,7 +1382,7 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 }
 
 func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest,
-	srvLayers []digest.Digest,
+	rootfsLayerSize int64, srvLayers []digest.Digest,
 ) (err error) {
 	type serviceManifest struct {
 		imagespec.Manifest
@@ -937,6 +1407,7 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 	layerDescriptor := imagespec.Descriptor{
 		MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 		Digest:    *rootfsLayer,
+		Size:      rootfsLayerSize,
 	}
 
 	manifest.Layers = append(manifest.Layers, layerDescriptor)
@@ -955,7 +1426,7 @@ func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLaye
 		return aoserrors.Wrap(err)
 	}
 
-	jsonFile, err := os.Create(path.Join(folderPath, "manifest.json"))
+	jsonFile, err := os.Create(filepath.Join(folderPath, "manifest.json"))
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
