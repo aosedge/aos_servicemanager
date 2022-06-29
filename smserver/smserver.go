@@ -58,6 +58,7 @@ type ServiceManager interface {
 	InstallService(
 		newService servicemanager.ServiceInfo, imageURL string, fileInfo image.FileInfo) error
 	RemoveService(serviceID string) error
+	RestoreService(serviceID string) error
 	GetAllServicesStatus() ([]servicemanager.ServiceInfo, error)
 }
 
@@ -254,6 +255,11 @@ func (server *SMServer) RemoveService(ctx context.Context, req *pb.RemoveService
 	return &emptypb.Empty{}, aoserrors.Wrap(server.serviceManager.RemoveService(req.ServiceId))
 }
 
+// RestoreService restores Aos service.
+func (server *SMServer) RestoreService(ctx context.Context, req *pb.RestoreServiceRequest) (*empty.Empty, error) {
+	return &emptypb.Empty{}, aoserrors.Wrap(server.serviceManager.RestoreService(req.ServiceId))
+}
+
 // GetServicesStatus gets installed services info.
 func (server *SMServer) GetServicesStatus(context.Context, *empty.Empty) (*pb.ServicesStatus, error) {
 	statuses, err := server.serviceManager.GetAllServicesStatus()
@@ -265,7 +271,7 @@ func (server *SMServer) GetServicesStatus(context.Context, *empty.Empty) (*pb.Se
 
 	for i, serviceStatus := range statuses {
 		services.Services[i] = &pb.ServiceStatus{
-			ServiceId: serviceStatus.ServiceID, AosVersion: serviceStatus.AosVersion,
+			ServiceId: serviceStatus.ServiceID, AosVersion: serviceStatus.AosVersion, Cached: serviceStatus.Cached,
 		}
 	}
 
@@ -383,7 +389,7 @@ func (server *SMServer) GetLayersStatus(context.Context, *empty.Empty) (*pb.Laye
 	for i, layerInfo := range info {
 		layers.Layers[i] = &pb.LayerStatus{
 			LayerId: layerInfo.LayerID, AosVersion: layerInfo.AosVersion, VendorVersion: layerInfo.VendorVersion,
-			Digest: layerInfo.Digest,
+			Digest: layerInfo.Digest, Cached: layerInfo.Cached,
 		}
 	}
 
