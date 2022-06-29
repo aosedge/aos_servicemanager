@@ -44,12 +44,15 @@ func createConfigFile() (err error) {
 	"storageDir" : "/var/aos/storage",
 	"stateDir" : "/var/aos/state",
 	"servicesDir": "/var/aos/servicemanager/services",
+	"servicesPartLimit": 10,
 	"layersDir": "/var/aos/srvlib",
+	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
+	"extractDir": "/var/aos/servicemanager/extract",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8089",
 	"iamPublicServer" : "localhost:8090",
-	"serviceTTLDays" : 30,
+	"layerTtlDays" : 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
 		"sendPeriod": "5m",
@@ -231,6 +234,17 @@ func TestGetDownloadDir(t *testing.T) {
 	}
 }
 
+func TestGetExtractDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.ExtractDir != "/var/aos/servicemanager/extract" {
+		t.Errorf("Wrong extract dir value: %v", config.ExtractDir)
+	}
+}
+
 func TestGetIAMServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
@@ -261,6 +275,17 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 
 	if config.ServiceTTLDays != 30 {
 		t.Errorf("Wrong default service TTL value: %d", config.ServiceTTLDays)
+	}
+}
+
+func TestGetLayersTTL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.LayerTTLDays != 40 {
+		t.Errorf("Wrong LayerTTLDays value: %v", config.LayerTTLDays)
 	}
 }
 
@@ -389,5 +414,20 @@ func TestServiceHealthCheckTimeout(t *testing.T) {
 
 	if config.ServiceHealthCheckTimeout.Duration != 10*time.Second {
 		t.Errorf("Wrong ServiceHealthCheckTimeout value: %s", config.ServiceHealthCheckTimeout.String())
+	}
+}
+
+func TestPartLimit(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.ServicesPartLimit != 10 {
+		t.Errorf("Wrong ServicesPartLimit value: %v", config.ServicesPartLimit)
+	}
+
+	if config.LayersPartLimit != 20 {
+		t.Errorf("Wrong LayersPartLimit value: %v", config.LayersPartLimit)
 	}
 }
