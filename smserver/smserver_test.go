@@ -65,7 +65,6 @@ type testLauncher struct {
 type testServiceManager struct {
 	currentInstallRequests testServiceInstallRequest
 	services               []servicemanager.ServiceInfo
-	currentRemoveService   string
 }
 
 type testStateHandler struct {
@@ -398,7 +397,7 @@ func TestServicesMessages(t *testing.T) {
 		}
 
 		expectedStatus := pb.ServiceStatus{
-			ServiceId: "testService" + strconv.Itoa(i), AosVersion: uint64(i),
+			ServiceId: "testService" + strconv.Itoa(i), AosVersion: uint64(i), Cached: false,
 		}
 
 		if _, err := client.pbclient.InstallService(context.Background(), &installRequest); err != nil {
@@ -421,15 +420,38 @@ func TestServicesMessages(t *testing.T) {
 		t.Errorf("Incorrect service statuses")
 	}
 
-	expectedServiceID := "someID"
+	expectedServiceID := "testService0"
 
 	if _, err := client.pbclient.RemoveService(
 		context.Background(), &pb.RemoveServiceRequest{ServiceId: expectedServiceID}); err != nil {
 		t.Fatalf("Can't remove service: %v", err)
 	}
 
-	if expectedServiceID != testServiceManager.currentRemoveService {
-		t.Error("Incorrect service id in remove request")
+	serviceStatuses, err = client.pbclient.GetServicesStatus(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get service statuses: %v", err)
+	}
+
+	expectedServiceStatuses.Services[0].Cached = true
+
+	if !proto.Equal(serviceStatuses, expectedServiceStatuses) {
+		t.Errorf("Incorrect service statuses")
+	}
+
+	if _, err := client.pbclient.RestoreService(
+		context.Background(), &pb.RestoreServiceRequest{ServiceId: expectedServiceID}); err != nil {
+		t.Fatalf("Can't restore service: %v", err)
+	}
+
+	serviceStatuses, err = client.pbclient.GetServicesStatus(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Errorf("Can't get service statuses: %s", err)
+	}
+
+	expectedServiceStatuses.Services[0].Cached = false
+
+	if !proto.Equal(serviceStatuses, expectedServiceStatuses) {
+		t.Errorf("Incorrect service statuses")
 	}
 }
 
@@ -1147,13 +1169,43 @@ func (serviceMgr *testServiceManager) InstallService(
 }
 
 func (serviceMgr *testServiceManager) RemoveService(serviceID string) error {
-	serviceMgr.currentRemoveService = serviceID
+	var found bool
 
-	return nil
+	for i, service := range serviceMgr.services {
+		if service.ServiceID == serviceID {
+			serviceMgr.services[i].Cached = true
+
+			found = true
+		}
+	}
+
+	if found {
+		return nil
+	}
+
+	return aoserrors.New("service not exist")
 }
 
 func (serviceMgr *testServiceManager) GetAllServicesStatus() ([]servicemanager.ServiceInfo, error) {
 	return serviceMgr.services, nil
+}
+
+func (serviceMgr *testServiceManager) RestoreService(serviceID string) error {
+	var found bool
+
+	for i, service := range serviceMgr.services {
+		if service.ServiceID == serviceID {
+			serviceMgr.services[i].Cached = false
+
+			found = true
+		}
+	}
+
+	if found {
+		return nil
+	}
+
+	return aoserrors.New("service not exist")
 }
 
 func (layerMgr *testLayerManager) GetLayersInfo() ([]layermanager.LayerInfo, error) {
