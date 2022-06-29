@@ -178,11 +178,9 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.serviceMgr, err = servicemanager.New(cfg, sm.layerMgr, sm.db); err != nil {
+	if sm.serviceMgr, err = servicemanager.New(cfg, sm.db, sm.layerMgr); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
-
-	sm.layerMgr.SetSpaceAllocator(sm.serviceMgr)
 
 	if sm.cryptoContext, err = cryptutils.NewCryptoContext(cfg.CACert); err != nil {
 		return sm, aoserrors.Wrap(err)
@@ -258,6 +256,14 @@ func (sm *serviceManager) handleChannels(ctx context.Context) {
 func (sm *serviceManager) close() {
 	if sm.smServer != nil {
 		sm.smServer.Close()
+	}
+
+	if sm.serviceMgr != nil {
+		sm.serviceMgr.Close()
+	}
+
+	if sm.layerMgr != nil {
+		sm.layerMgr.Close()
 	}
 
 	if sm.logging != nil {
