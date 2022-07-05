@@ -105,6 +105,12 @@ type bridgeNetConf struct {
 	IPAM             allocator.IPAMConfig `json:"ipam"`
 }
 
+type firewallNetConf struct {
+	Type string `json:"type"`
+
+	Backend string `json:"backend"`
+}
+
 type bandwidthNetConf struct {
 	Type         string `json:"type,omitempty"`
 	IngressRate  uint64 `json:"ingressRate,omitempty"`
@@ -792,8 +798,23 @@ func prepareRuntimeConfig(serviceID, spID, hostname string, aliases []string) (r
 	return runtimeConfig, nil
 }
 
+func getFORWARD() (config json.RawMessage, err error) {
+	// firewallNetConf
+	firewall := &firewallNetConf{
+		Type:    "firewall",
+		Backend: "iptables",
+	}
+
+	if config, err = json.Marshal(firewall); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return config, nil
+}
+
 func prepareNetworkConfigList(networkDir, serviceID, spID string, subnetwork *net.IPNet,
-	params *NetworkParams) (cniNetworkConfig *cni.NetworkConfigList, err error) {
+	params *NetworkParams,
+) (cniNetworkConfig *cni.NetworkConfigList, err error) {
 	networkConfig := cniNetwork{Name: spID, CNIVersion: cniVersion}
 
 	// Bridge
@@ -805,7 +826,16 @@ func prepareNetworkConfigList(networkDir, serviceID, spID string, subnetwork *ne
 
 	networkConfig.Plugins = append(networkConfig.Plugins, bridgeConfig)
 
+	iptables, err := getFORWARD()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	networkConfig.Plugins = append(networkConfig.Plugins, iptables)
+
 	// Firewall
+
+	log.Info("Add aos firewall plugin")
 
 	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
 		firefallConfig, err := getFirewallPluginConfig(serviceID, params.ExposedPorts, params.AllowedConnections)

@@ -243,9 +243,10 @@ func TestHostName(t *testing.T) {
 
 func TestExposedPortAndAllowedConnection(t *testing.T) {
 	t.Cleanup(func() {
-		_ = killOCIContainer("serviceServer")
-		_ = manager.DeleteNetwork("networkSP1")
-		_ = manager.DeleteNetwork("networkSP2")
+		killOCIContainer("serviceServer")
+		manager.DeleteNetwork("networkSP1")
+		manager.DeleteNetwork("networkSP2")
+		_ = manager.DeleteNetwork("network0")
 	})
 
 	serverPort := "9000"
@@ -286,6 +287,22 @@ func TestExposedPortAndAllowedConnection(t *testing.T) {
 	}
 
 	if err := runOCIContainer(containerClientPath, "serviceClient"); err != nil {
+		t.Errorf("Error: %s", err)
+	}
+
+	containerPath := path.Join(tmpDir, "servicenm1")
+
+	if err := createOCIContainer(containerPath, "servicenm1", []string{"ping", "google.com", "-c10", "-w15"}); err != nil {
+		t.Fatalf("Can't create service container: %s", err)
+	}
+
+	if err := manager.AddServiceToNetwork("servicenm1", "network0", networkmanager.NetworkParams{
+		ResolvConfFilePath: path.Join(containerPath, "etc", "resolv.conf"),
+	}); err != nil {
+		t.Fatalf("Can't add service to network: %s", err)
+	}
+
+	if err := runOCIContainer(containerPath, "servicenm1"); err != nil {
 		t.Errorf("Error: %s", err)
 	}
 }
@@ -453,8 +470,13 @@ func setup() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		return aoserrors.Wrap(err)
+	if err = os.MkdirAll(tmpDir, 0o755); err != nil {
+		return err
+	}
+
+	out, err := exec.Command("iptables", "-P", "FORWARD", "DROP").CombinedOutput()
+	if err != nil {
+		return aoserrors.New(string(out))
 	}
 
 	if manager, err = networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil); err != nil {
@@ -473,6 +495,11 @@ func cleanup() {
 
 	if err := os.RemoveAll(tmpDir); err != nil {
 		log.Errorf("Can't remove tmp dir: %s", err)
+	}
+
+	out, err := exec.Command("iptables", "-P", "FORWARD", "ACCEPT").CombinedOutput()
+	if err != nil {
+		log.Errorf(string(out))
 	}
 }
 
@@ -498,7 +525,7 @@ if __name__ == '__main__':
 	s = MyServer()
 	s.start()`
 
-	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "httpserver.py"), []byte(httpServerContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(imagePath, "rootfs", "httpserver.py"), []byte(httpServerContent), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -510,7 +537,7 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		return aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0755); err != nil {
+	if err = os.MkdirAll(path.Join(imagePath, "rootfs"), 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -569,7 +596,7 @@ func createOCIContainer(imagePath string, containerID string, args []string) (er
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0644); err != nil {
+	if err = ioutil.WriteFile(path.Join(imagePath, "config.json"), specJSON, 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -596,7 +623,7 @@ func killOCIContainer(containerID string) (err error) {
 
 func addHostResolvFiles(pathToContainer string) (err error) {
 	etcPath := path.Join(pathToContainer, "etc")
-	if err = os.MkdirAll(etcPath, 0755); err != nil {
+	if err = os.MkdirAll(etcPath, 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
