@@ -192,7 +192,7 @@ func TestBaseNetwork(t *testing.T) {
 	}
 	defer manager.Close()
 
-	plugins := createPlugins([]string{createBridgePlugin(tmpDir + `/`), createDNSPlugin()})
+	plugins := createPlugins([]string{createBridgePlugin(tmpDir + `/`), createFirewallPlugin(), createDNSPlugin()})
 
 	if _, err := manager.GetInstanceIP("instance0", "network0"); err == nil {
 		t.Error("Instance IP must not be present")
@@ -293,7 +293,8 @@ func TestFirewallPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("900", "900"),
+				createAosFirewallPlugin("900", "900"),
+				createFirewallPlugin(),
 				createDNSPlugin(),
 			}),
 		},
@@ -304,7 +305,8 @@ func TestFirewallPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("800", "800"),
+				createAosFirewallPlugin("800", "800"),
+				createFirewallPlugin(),
 				createDNSPlugin(),
 			}),
 		},
@@ -349,6 +351,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
+				createFirewallPlugin(),
 				createBandwithPlugin(1200000, 1200000),
 				createDNSPlugin(),
 			}),
@@ -360,6 +363,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
+				createFirewallPlugin(),
 				createBandwithPlugin(400000, 300000),
 				createDNSPlugin(),
 			}),
@@ -979,6 +983,10 @@ func readFromFile(path string) (content string, err error) {
 	return removeSpaces(string(b)), nil
 }
 
+func createFirewallPlugin() string {
+	return `{"type":"firewall","backend":"iptables"}`
+}
+
 func createBridgePlugin(dataDir string) string {
 	str := removeSpaces(fmt.Sprintf(`{
 		"type": "bridge",
@@ -1013,7 +1021,7 @@ func createBandwithPlugin(in, out int) string {
 		`{"type":"bandwidth","ingressRate":%d,"ingressBurst":12800,"egressRate":%d,"egressBurst":12800}`, in, out)
 }
 
-func createFirewallPlugin(inPort, outPort string) string {
+func createAosFirewallPlugin(inPort, outPort string) string {
 	str := removeSpaces(fmt.Sprintf(`{
 		"type": "aos-firewall",
 		"uuid": "instance0",
