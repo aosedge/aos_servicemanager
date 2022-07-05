@@ -125,6 +125,11 @@ type bandwidthNetConf struct {
 	EgressBurst  uint64 `json:"egressBurst,omitempty"`
 }
 
+type firewallNetConf struct {
+	Type    string `json:"type"`
+	Backend string `json:"backend"`
+}
+
 type aosFirewallNetConf struct {
 	Type                   string               `json:"type"`
 	UUID                   string               `json:"uuid"`
@@ -788,7 +793,7 @@ func getBridgePluginConfig(networkDir, networkID string, subnetwork *net.IPNet) 
 	return config, nil
 }
 
-func getFirewallPluginConfig(instanceID string, exposedPorts, allowedConnections []string) (
+func getAosFirewallPluginConfig(instanceID string, exposedPorts, allowedConnections []string) (
 	config json.RawMessage, err error,
 ) {
 	aosFirewall := &aosFirewallNetConf{
@@ -874,6 +879,19 @@ func getDNSPluginConfig(networkID string) (config json.RawMessage, err error) {
 	return config, nil
 }
 
+func getFirewallPluginConfig() (config json.RawMessage, err error) {
+	firewall := &firewallNetConf{
+		Type:    "firewall",
+		Backend: "iptables",
+	}
+
+	if config, err = json.Marshal(firewall); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return config, nil
+}
+
 func getRuntimeNetConfig(instanceID, networkID string) (
 	networkingConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf,
 ) {
@@ -908,13 +926,20 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, subnetwo
 	// Firewall
 
 	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
-		firefallConfig, err := getFirewallPluginConfig(instanceID, params.ExposedPorts, params.AllowedConnections)
+		aosFirewallConfig, err := getAosFirewallPluginConfig(instanceID, params.ExposedPorts, params.AllowedConnections)
 		if err != nil {
 			return nil, aoserrors.Wrap(err)
 		}
 
-		networkConfig.Plugins = append(networkConfig.Plugins, firefallConfig)
+		networkConfig.Plugins = append(networkConfig.Plugins, aosFirewallConfig)
 	}
+
+	firewallConfig, err := getFirewallPluginConfig()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	networkConfig.Plugins = append(networkConfig.Plugins, firewallConfig)
 
 	// Bandwidth
 
