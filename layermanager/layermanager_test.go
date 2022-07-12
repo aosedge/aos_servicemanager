@@ -138,11 +138,14 @@ func TestInstallRemoveLayer(t *testing.T) {
 		}
 	}()
 
+	layermanager.RemoveCachedLayersPeriod = 1 * time.Second
+
 	layerManager, err := layermanager.New(
 		&config.Config{
-			LayersDir:   layersDir,
-			ExtractDir:  filepath.Join(tmpDir, "extract"),
-			DownloadDir: filepath.Join(tmpDir, "download"),
+			LayersDir:    layersDir,
+			ExtractDir:   filepath.Join(tmpDir, "extract"),
+			DownloadDir:  filepath.Join(tmpDir, "download"),
+			LayerTTLDays: 0,
 		}, testLayerStorage)
 	if err != nil {
 		t.Fatalf("Can't create layer manager: %s", err)
@@ -212,6 +215,17 @@ func TestInstallRemoveLayer(t *testing.T) {
 	if err = layerManager.RemoveLayer(digest); err != nil {
 		t.Fatalf("Can't remove layer: %v", err)
 	}
+
+	layerInfo, err = layerManager.GetLayerInfoByDigest(digest)
+	if err != nil {
+		t.Fatalf("Can't get layer info: %v", err)
+	}
+
+	if !layerInfo.Cached {
+		t.Error("Layer should be cached")
+	}
+
+	time.Sleep(2 * time.Second)
 
 	if _, err = layerManager.GetLayerInfoByDigest(digest); err == nil {
 		t.Fatal("Layer should not be exist")
