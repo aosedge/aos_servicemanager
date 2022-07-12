@@ -33,7 +33,6 @@ import (
 	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/spaceallocator"
 	"github.com/aoscloud/aos_common/utils/action"
-	"github.com/aoscloud/aos_common/utils/fs"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 
@@ -55,10 +54,6 @@ const maxConcurrentActions = 10
  **********************************************************************************************************************/
 
 var ErrNotExist = errors.New("layer does not exist")
-
-// GetAvailableSize global variable is used to be able to mocking the functionality in tests.
-// nolint:gochecknoglobals
-var GetAvailableSize = fs.GetAvailableSize
 
 // NewSpaceAllocator space allocator constructor.
 // nolint:gochecknoglobals // used for unit test mock
