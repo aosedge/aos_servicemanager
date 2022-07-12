@@ -541,6 +541,8 @@ func TestRemoveService(t *testing.T) {
 
 	serviceAllocator = &testAllocator{}
 
+	servicemanager.RemoveCachedServicesPeriod = 1 * time.Second
+
 	sm, err := servicemanager.New(config, serviceStorage, layerProvider)
 	if err != nil {
 		t.Fatalf("Can't create SM: %v", err)
@@ -563,8 +565,19 @@ func TestRemoveService(t *testing.T) {
 	}
 
 	if err = sm.RemoveService(serviceID); err != nil {
-		t.Errorf("Can't remove service: %v", err)
+		t.Fatalf("Can't remove service: %v", err)
 	}
+
+	serviceInfo, err = sm.GetServiceInfo(serviceID)
+	if err != nil {
+		t.Fatalf("Can't get service info: %v", err)
+	}
+
+	if !serviceInfo.Cached {
+		t.Error("Service should be cached")
+	}
+
+	time.Sleep(2 * time.Second)
 
 	if _, err = sm.GetServiceInfo(serviceID); err == nil {
 		t.Error("Should be error service doesn't exist")
@@ -1107,7 +1120,7 @@ func (storage *testServiceStorage) GetService(serviceID string) (service service
 	return service, nil
 }
 
-func (storage *testServiceStorage) GetAllServices() (services []servicemanager.ServiceInfo, err error) {
+func (storage *testServiceStorage) GetLatestVersionServices() (services []servicemanager.ServiceInfo, err error) {
 	if storage.getAllError {
 		return nil, aoserrors.New("can't get services")
 	}
@@ -1130,6 +1143,16 @@ StoreServiceLoop:
 
 		if !serviceExists {
 			services = append(services, storeService)
+		}
+	}
+
+	return services, nil
+}
+
+func (storage *testServiceStorage) GetCachedServices() (services []servicemanager.ServiceInfo, err error) {
+	for _, service := range storage.Services {
+		if service.Cached {
+			services = append(services, service)
 		}
 	}
 
