@@ -167,7 +167,7 @@ func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerM
 	}
 
 	if err := layermanager.removeDamagedLayerFolders(); err != nil {
-		return nil, aoserrors.Wrap(err)
+		log.Errorf("Can't remove damaged layer folders: %v", err)
 	}
 
 	if err := layermanager.setOutdatedLayers(); err != nil {
@@ -175,7 +175,7 @@ func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerM
 	}
 
 	if err := layermanager.removeOutdatedLayers(); err != nil {
-		log.Errorf("Can't remove cached layers: %v", err)
+		log.Errorf("Can't remove outdated layers: %v", err)
 	}
 
 	go layermanager.validateTTLs()
@@ -416,7 +416,7 @@ func (layermanager *LayerManager) validateTTLs() {
 		select {
 		case <-removeTicker.C:
 			if err := layermanager.removeOutdatedLayers(); err != nil {
-				log.Errorf("Can't remove cached layers: %v", err)
+				log.Errorf("Can't remove outdated layers: %v", err)
 			}
 
 		case <-layermanager.validateTTLStopChannel:
