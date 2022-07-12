@@ -164,7 +164,7 @@ func TestAddGetService(t *testing.T) {
 		t.Errorf("incorrect count of services %d", len(services))
 	}
 
-	services, err = db.GetAllServices()
+	services, err = db.GetLatestVersionServices()
 	if err != nil {
 		t.Errorf("Can't get services: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestAddGetService(t *testing.T) {
 		t.Errorf("Unexpected service count: %v", len(services))
 	}
 
-	services, err = db.GetAllServices()
+	services, err = db.GetLatestVersionServices()
 	if err != nil {
 		t.Errorf("Can't get services: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestAddGetService(t *testing.T) {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	services, err = db.GetAllServices()
+	services, err = db.GetLatestVersionServices()
 	if err != nil {
 		t.Errorf("Can't get services: %v", err)
 	}
@@ -321,9 +321,9 @@ func TestCachedService(t *testing.T) {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	services, err = db.GetAllServiceVersions("serviceCached")
+	services, err = db.GetCachedServices()
 	if err != nil {
-		t.Errorf("Can't get all service versions: %v", err)
+		t.Errorf("Can't get all cached services: %v", err)
 	}
 
 	expectedServices[0].Cached = true
@@ -353,9 +353,9 @@ func TestCachedService(t *testing.T) {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	services, err = db.GetAllServiceVersions("serviceCached")
+	services, err = db.GetCachedServices()
 	if err != nil {
-		t.Errorf("Can't get all service versions: %v", err)
+		t.Errorf("Can't get cached services: %v", err)
 	}
 
 	expectedServices[1].Cached = true
@@ -368,16 +368,13 @@ func TestCachedService(t *testing.T) {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	services, err = db.GetAllServiceVersions("serviceCached")
+	services, err = db.GetCachedServices()
 	if err != nil {
-		t.Errorf("Can't get all service versions: %v", err)
+		t.Errorf("Can't get cached services: %v", err)
 	}
 
-	expectedServices[0].Cached = false
-	expectedServices[1].Cached = false
-
-	if !reflect.DeepEqual(expectedServices, services) {
-		t.Error("Unexpected services")
+	if len(services) != 0 {
+		t.Errorf("Incorrect count of cached services: %d", len(services))
 	}
 }
 

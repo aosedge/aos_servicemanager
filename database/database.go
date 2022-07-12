@@ -139,10 +139,15 @@ func (db *Database) GetService(serviceID string) (service servicemanager.Service
 	return service, aoserrors.Wrap(err)
 }
 
-// GetAllServices returns all services.
-func (db *Database) GetAllServices() (services []servicemanager.ServiceInfo, err error) {
+// GetLatestVersionServices returns all latest version services.
+func (db *Database) GetLatestVersionServices() (services []servicemanager.ServiceInfo, err error) {
 	return db.getServicesFromQuery(`SELECT * FROM services WHERE(id, aosVersion)
 									IN (SELECT id, MAX(aosVersion) FROM services GROUP BY id)`)
+}
+
+// GetCachedServices returns all cached services.
+func (db *Database) GetCachedServices() (services []servicemanager.ServiceInfo, err error) {
+	return db.getServicesFromQuery(`SELECT * FROM services WHERE cached = 1`)
 }
 
 // GetAllServiceVersions returns all service versions.
