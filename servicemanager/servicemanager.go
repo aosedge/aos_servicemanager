@@ -186,11 +186,11 @@ func New(
 	}
 
 	if err := sm.removeDamagedServiceFolders(services); err != nil {
-		return nil, aoserrors.Wrap(err)
+		log.Errorf("Can't remove damaged service folders: %v", err)
 	}
 
 	if err := sm.removeOutdatedServices(); err != nil {
-		log.Errorf("Can't remove cached services: %v", err)
+		log.Errorf("Can't remove outdated services: %v", err)
 	}
 
 	go sm.validateTTLs()
@@ -488,7 +488,7 @@ func (sm *ServiceManager) validateTTLs() {
 		select {
 		case <-removeTicker.C:
 			if err := sm.removeOutdatedServices(); err != nil {
-				log.Errorf("Can't remove cached services: %v", err)
+				log.Errorf("Can't remove outdated services: %v", err)
 			}
 
 		case <-sm.validateTTLStopChannel:
