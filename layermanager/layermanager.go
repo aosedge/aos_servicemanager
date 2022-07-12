@@ -64,6 +64,10 @@ var GetAvailableSize = fs.GetAvailableSize
 // nolint:gochecknoglobals // used for unit test mock
 var NewSpaceAllocator = spaceallocator.New
 
+// RemoveCachedLayersPeriod global variable is used to be able to mocking the layers TTL functionality in test.
+// nolint:gochecknoglobals // used for unit test mock
+var RemoveCachedLayersPeriod = 24 * time.Hour
+
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
@@ -76,15 +80,16 @@ type SpaceAllocator interface {
 // LayerManager instance.
 type LayerManager struct {
 	sync.Mutex
-	layerStorage      LayerStorage
-	layersDir         string
-	extractDir        string
-	downloadDir       string
-	actionHandler     *action.Handler
-	layerTTLDays      uint64
-	layerAllocator    spaceallocator.Allocator
-	downloadAllocator spaceallocator.Allocator
-	extractAllocator  spaceallocator.Allocator
+	layerStorage           LayerStorage
+	layersDir              string
+	extractDir             string
+	downloadDir            string
+	actionHandler          *action.Handler
+	layerTTLDays           uint64
+	layerAllocator         spaceallocator.Allocator
+	downloadAllocator      spaceallocator.Allocator
+	extractAllocator       spaceallocator.Allocator
+	validateTTLStopChannel chan struct{}
 }
 
 // LayerStorage provides API to add, remove or access layer information.
@@ -117,12 +122,13 @@ type LayerInfo struct {
 // New creates new layer manager instance.
 func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{
-		layersDir:     config.LayersDir,
-		layerStorage:  layerStorage,
-		extractDir:    config.ExtractDir,
-		downloadDir:   config.DownloadDir,
-		actionHandler: action.New(maxConcurrentActions),
-		layerTTLDays:  config.LayerTTLDays,
+		layersDir:              config.LayersDir,
+		layerStorage:           layerStorage,
+		extractDir:             config.ExtractDir,
+		downloadDir:            config.DownloadDir,
+		actionHandler:          action.New(maxConcurrentActions),
+		layerTTLDays:           config.LayerTTLDays,
+		validateTTLStopChannel: make(chan struct{}),
 	}
 
 	if err := os.RemoveAll(layermanager.downloadDir); err != nil {
@@ -168,6 +174,12 @@ func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerM
 		return nil, aoserrors.Wrap(err)
 	}
 
+	if err := layermanager.removeOutdatedLayers(); err != nil {
+		log.Errorf("Can't remove cached layers: %v", err)
+	}
+
+	go layermanager.validateTTLs()
+
 	return layermanager, nil
 }
 
@@ -184,6 +196,8 @@ func (layermanager *LayerManager) Close() {
 	if err := layermanager.extractAllocator.Close(); err != nil {
 		log.Errorf("Can't close extract allocator: %v", err)
 	}
+
+	close(layermanager.validateTTLStopChannel)
 }
 
 // GetLayersInfo provides list of already installed fs layers.
@@ -362,20 +376,6 @@ func (layermanager *LayerManager) doRemoveLayer(digest string) error {
 		return aoserrors.Wrap(err)
 	}
 
-	if layer.Timestamp.Add(time.Hour * 24 * time.Duration(layermanager.layerTTLDays)).Before(time.Now()) {
-		if err = layermanager.removeLayer(layer.Digest); err != nil {
-			return err
-		}
-
-		if layer.Cached {
-			layermanager.layerAllocator.RestoreOutdatedItem(layer.Digest)
-		}
-
-		layermanager.layerAllocator.FreeSpace(layer.Size)
-
-		return nil
-	}
-
 	if layer.Cached {
 		log.Warningf("Layer %v already cached", digest)
 
@@ -404,6 +404,50 @@ func (layermanager *LayerManager) setLayerCached(layer LayerInfo, cached bool) e
 	}
 
 	layermanager.layerAllocator.RestoreOutdatedItem(layer.Digest)
+
+	return nil
+}
+
+func (layermanager *LayerManager) validateTTLs() {
+	removeTicker := time.NewTicker(RemoveCachedLayersPeriod)
+	defer removeTicker.Stop()
+
+	for {
+		select {
+		case <-removeTicker.C:
+			if err := layermanager.removeOutdatedLayers(); err != nil {
+				log.Errorf("Can't remove cached layers: %v", err)
+			}
+
+		case <-layermanager.validateTTLStopChannel:
+			return
+		}
+	}
+}
+
+func (layermanager *LayerManager) removeOutdatedLayers() error {
+	layers, err := layermanager.layerStorage.GetLayersInfo()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, layer := range layers {
+		if layer.Cached &&
+			layer.Timestamp.Add(time.Hour*24*time.Duration(layermanager.layerTTLDays)).Before(time.Now()) {
+			if err := <-layermanager.actionHandler.Execute(layer.Digest,
+				func(digest string) error {
+					if err := layermanager.removeLayer(digest); err != nil {
+						return err
+					}
+
+					layermanager.layerAllocator.RestoreOutdatedItem(digest)
+
+					return nil
+				}); err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
