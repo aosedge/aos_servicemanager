@@ -46,9 +46,10 @@ import (
  * Consts
  **********************************************************************************************************************/
 
-const maxConcurrentActions = 10
-
-const tmpRootFSDir = "tmprootfs"
+const (
+	maxConcurrentActions = 10
+	tmpRootFSDir         = "tmprootfs"
+)
 
 /***********************************************************************************************************************
  * Types
@@ -57,7 +58,8 @@ const tmpRootFSDir = "tmprootfs"
 // ServiceStorage provides API to create, remove or access services DB.
 type ServiceStorage interface {
 	GetService(serviceID string) (ServiceInfo, error)
-	GetAllServices() ([]ServiceInfo, error)
+	GetLatestVersionServices() ([]ServiceInfo, error)
+	GetCachedServices() ([]ServiceInfo, error)
 	AddService(ServiceInfo) error
 	GetAllServiceVersions(serviceID string) ([]ServiceInfo, error)
 	RemoveService(ServiceInfo) error
@@ -74,15 +76,16 @@ type LayerProvider interface {
 // ServiceManager instance.
 type ServiceManager struct {
 	sync.Mutex
-	servicesDir         string
-	downloadDir         string
-	serviceTTLDays      uint64
-	actionHandler       *action.Handler
-	gidPool             *uidgidpool.IdentifierPool
-	serviceInfoProvider ServiceStorage
-	layerProvider       LayerProvider
-	serviceAllocator    spaceallocator.Allocator
-	downloadAllocator   spaceallocator.Allocator
+	servicesDir            string
+	downloadDir            string
+	serviceTTLDays         uint64
+	actionHandler          *action.Handler
+	gidPool                *uidgidpool.IdentifierPool
+	serviceInfoProvider    ServiceStorage
+	layerProvider          LayerProvider
+	serviceAllocator       spaceallocator.Allocator
+	downloadAllocator      spaceallocator.Allocator
+	validateTTLStopChannel chan struct{}
 }
 
 // ServiceInfo service information.
@@ -115,6 +118,10 @@ var (
 // nolint:gochecknoglobals // used for unit test mock
 var NewSpaceAllocator = spaceallocator.New
 
+// RemoveCachedServicesPeriod global variable is used to be able to mocking the services TTL functionality in test.
+// nolint:gochecknoglobals // used for unit test mock
+var RemoveCachedServicesPeriod = 24 * time.Hour
+
 /***********************************************************************************************************************
  * Public
  **********************************************************************************************************************/
@@ -124,13 +131,14 @@ func New(
 	config *config.Config, serviceInfoProvider ServiceStorage, layerProvider LayerProvider,
 ) (sm *ServiceManager, err error) {
 	sm = &ServiceManager{
-		servicesDir:         config.ServicesDir,
-		downloadDir:         config.DownloadDir,
-		serviceTTLDays:      config.ServiceTTLDays,
-		actionHandler:       action.New(maxConcurrentActions),
-		gidPool:             uidgidpool.NewGroupIDPool(),
-		serviceInfoProvider: serviceInfoProvider,
-		layerProvider:       layerProvider,
+		servicesDir:            config.ServicesDir,
+		downloadDir:            config.DownloadDir,
+		serviceTTLDays:         config.ServiceTTLDays,
+		actionHandler:          action.New(maxConcurrentActions),
+		gidPool:                uidgidpool.NewGroupIDPool(),
+		serviceInfoProvider:    serviceInfoProvider,
+		layerProvider:          layerProvider,
+		validateTTLStopChannel: make(chan struct{}),
 	}
 
 	if err = os.MkdirAll(sm.servicesDir, 0o755); err != nil {
@@ -154,7 +162,7 @@ func New(
 		return nil, aoserrors.Wrap(err)
 	}
 
-	services, err := sm.serviceInfoProvider.GetAllServices()
+	services, err := sm.serviceInfoProvider.GetLatestVersionServices()
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -181,6 +189,12 @@ func New(
 		return nil, aoserrors.Wrap(err)
 	}
 
+	if err := sm.removeOutdatedServices(); err != nil {
+		log.Errorf("Can't remove cached services: %v", err)
+	}
+
+	go sm.validateTTLs()
+
 	return sm, nil
 }
 
@@ -192,6 +206,8 @@ func (sm *ServiceManager) Close() {
 	if err := sm.downloadAllocator.Close(); err != nil {
 		log.Errorf("Can't close download allocator: %v", err)
 	}
+
+	close(sm.validateTTLStopChannel)
 }
 
 // InstallService install service to the system.
@@ -224,7 +240,7 @@ func (sm *ServiceManager) RemoveService(serviceID string) (err error) {
 
 // GetAllServicesStatus gets all services status.
 func (sm *ServiceManager) GetAllServicesStatus() ([]ServiceInfo, error) {
-	services, err := sm.serviceInfoProvider.GetAllServices()
+	services, err := sm.serviceInfoProvider.GetLatestVersionServices()
 	return services, aoserrors.Wrap(err)
 }
 
@@ -447,17 +463,7 @@ func (sm *ServiceManager) doRemoveService(serviceID string) error {
 
 	var serviceSize uint64
 
-	for i, service := range services {
-		if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
-			if err = sm.removeService(service); err != nil {
-				return err
-			}
-
-			services = append(services[:i], services[i+1:]...)
-
-			continue
-		}
-
+	for _, service := range services {
 		serviceSize += service.Size
 	}
 
@@ -468,6 +474,43 @@ func (sm *ServiceManager) doRemoveService(serviceID string) error {
 			Size:      serviceSize,
 		}, true); err != nil {
 			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func (sm *ServiceManager) validateTTLs() {
+	removeTicker := time.NewTicker(RemoveCachedServicesPeriod)
+	defer removeTicker.Stop()
+
+	for {
+		select {
+		case <-removeTicker.C:
+			if err := sm.removeOutdatedServices(); err != nil {
+				log.Errorf("Can't remove cached services: %v", err)
+			}
+
+		case <-sm.validateTTLStopChannel:
+			return
+		}
+	}
+}
+
+func (sm *ServiceManager) removeOutdatedServices() error {
+	services, err := sm.serviceInfoProvider.GetCachedServices()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, service := range services {
+		if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
+			if err := <-sm.actionHandler.Execute(service.ServiceID,
+				func(id string) error {
+					return sm.removeService(service)
+				}); err != nil {
+				return err
+			}
 		}
 	}
 
