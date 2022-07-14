@@ -786,8 +786,14 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		err = releaseErr
 	}
 
-	if unmountErr := UnmountFunc(filepath.Join(instance.runtimeDir, instanceRootFS)); unmountErr != nil && err == nil {
-		err = aoserrors.Wrap(unmountErr)
+	mountPoint := filepath.Join(instance.runtimeDir, instanceRootFS)
+
+	if _, errStat := os.Stat(mountPoint); errStat == nil {
+		if unmountErr := UnmountFunc(mountPoint); unmountErr != nil && err == nil {
+			err = aoserrors.Wrap(unmountErr)
+		}
+	} else if !os.IsNotExist(errStat) && err == nil {
+		err = aoserrors.Wrap(errStat)
 	}
 
 	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
