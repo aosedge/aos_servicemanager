@@ -126,6 +126,10 @@ func cleanup(cfg *config.Config, dbFile string) {
 	if err := os.RemoveAll(dbFile); err != nil {
 		log.Errorf("Can't cleanup database: %s", err)
 	}
+
+	if err := os.RemoveAll(cfg.BoardConfigFile); err != nil {
+		log.Errorf("Can't remove board config file: %v", err)
+	}
 }
 
 // nolint
