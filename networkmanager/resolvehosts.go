@@ -59,7 +59,8 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0o600); err != nil {
+	// nolint:gosec // To fix application to access the host file, the file permissions must be 644
+	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -77,7 +78,8 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0o600); err != nil {
+	// nolint:gosec // To fix application to access the resolve file, the file permissions must be 644
+	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
