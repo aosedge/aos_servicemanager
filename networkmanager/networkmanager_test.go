@@ -192,7 +192,10 @@ func TestBaseNetwork(t *testing.T) {
 	}
 	defer manager.Close()
 
-	plugins := createPlugins([]string{createBridgePlugin(tmpDir + `/`), createDNSPlugin()})
+	plugins := createPlugins([]string{
+		createBridgePlugin(tmpDir + `/`),
+		createFirewallPlugin("", ""), createDNSPlugin(),
+	})
 
 	if _, err := manager.GetInstanceIP("instance0", "network0"); err == nil {
 		t.Error("Instance IP must not be present")
@@ -349,6 +352,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
+				createFirewallPlugin("", ""),
 				createBandwithPlugin(1200000, 1200000),
 				createDNSPlugin(),
 			}),
@@ -360,6 +364,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
+				createFirewallPlugin("", ""),
 				createBandwithPlugin(400000, 300000),
 				createDNSPlugin(),
 			}),
@@ -1014,23 +1019,21 @@ func createBandwithPlugin(in, out int) string {
 }
 
 func createFirewallPlugin(inPort, outPort string) string {
-	str := removeSpaces(fmt.Sprintf(`{
+	str := removeSpaces(`{
 		"type": "aos-firewall",
 		"uuid": "instance0",
 		"iptablesAdminChainName": "INSTANCE_instance0",
-		"allowPublicConnections": true,
-		"inputAccess": [{
-			"port": "%s",
-			"protocol": "tcp"
-		}],
-		"outputAccess": [{
-			"uuid": "instance0",
-			"port": "%s",
-			"protocol": "tcp"
-		}]
-	}`, inPort, outPort))
+		"allowPublicConnections": true`)
 
-	return str
+	if inPort != "" {
+		str += fmt.Sprintf(`,"inputAccess":[{"port":"%s","protocol":"tcp"}]`, inPort)
+	}
+
+	if outPort != "" {
+		str += fmt.Sprintf(`,"outputAccess":[{"uuid":"instance0","port":"%s","protocol":"tcp"}]`, outPort)
+	}
+
+	return str + "}"
 }
 
 func getIPAddressRange(subnetwork *net.IPNet) (ipLowNetRange net.IP, ipHighNetRange net.IP) {
