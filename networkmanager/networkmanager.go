@@ -907,14 +907,12 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, subnetwo
 
 	// Firewall
 
-	if len(params.AllowedConnections) > 0 || len(params.ExposedPorts) > 0 {
-		firefallConfig, err := getFirewallPluginConfig(instanceID, params.ExposedPorts, params.AllowedConnections)
-		if err != nil {
-			return nil, aoserrors.Wrap(err)
-		}
-
-		networkConfig.Plugins = append(networkConfig.Plugins, firefallConfig)
+	firewallConfig, err := getFirewallPluginConfig(instanceID, params.ExposedPorts, params.AllowedConnections)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
 	}
+
+	networkConfig.Plugins = append(networkConfig.Plugins, firewallConfig)
 
 	// Bandwidth
 
