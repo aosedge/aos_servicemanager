@@ -19,7 +19,6 @@ package database
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -32,25 +31,28 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Variables
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 var (
 	tmpDir string
 	db     *Database
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Init
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -62,9 +64,9 @@ func init() {
 	log.SetOutput(os.Stdout)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Main
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestMain(m *testing.M) {
 	var err error
@@ -92,72 +94,129 @@ func TestMain(m *testing.M) {
 	os.Exit(ret)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Tests
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func TestAddService(t *testing.T) {
+func TestAddGetService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, ServiceProvider: "sp1", Path: "to/service1",
-		UnitName: "service1.service", UID: 5001, GID: 5001, State: 0, StartAt: time.Now().UTC(),
-		AlertRules: "", Description: "",
+	service := servicemanager.ServiceInfo{
+		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false, Size: 30,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if _, err := db.GetService(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Error("Should be error get service")
+	}
+
+	if _, err := db.GetAllServiceVersions(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Error("Should be error get service")
+	}
+
+	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
 	// GetService
-	service, err := db.GetService("service1")
+	serviceFromDB, err := db.GetService("service1")
 	if err != nil {
 		t.Errorf("Can't get service: %s", err)
 	}
 
-	if !reflect.DeepEqual(service, service1) {
+	if !reflect.DeepEqual(serviceFromDB, service) {
 		t.Error("service1 doesn't match stored one")
 	}
 
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestUpdateService(t *testing.T) {
-	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	service2 := servicemanager.ServiceInfo{
+		ServiceID: "service2", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false, Size: 80,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	service1 = launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/new_service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	if err := db.AddService(service2); err == nil {
+		t.Error("Should be error can't add service")
 	}
 
-	// UpdateService
-	err = db.UpdateService(service1)
+	serviceFromDB, err = db.GetService("service2")
 	if err != nil {
-		t.Errorf("Can't update service: %s", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	// GetService
-	service, err := db.GetService("service1")
+	if !reflect.DeepEqual(serviceFromDB, service2) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service.AosVersion = 2
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err := db.GetAllServiceVersions("service1")
 	if err != nil {
-		t.Errorf("Can't get service: %s", err)
+		t.Errorf("Can't get all service versions: %s", err)
 	}
 
-	if !reflect.DeepEqual(service, service1) {
-		t.Errorf("service1 doesn't match updated one: %v", service)
+	if len(services) != 2 {
+		t.Errorf("incorrect count of services %d", len(services))
+	}
+
+	services, err = db.GetLatestVersionServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %v", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service.AosVersion = 3
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Unexpected service count: %v", len(services))
+	}
+
+	services, err = db.GetLatestVersionServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %v", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	service2.AosVersion = 5
+
+	if err := db.AddService(service2); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetLatestVersionServices()
+	if err != nil {
+		t.Errorf("Can't get services: %v", err)
+	}
+
+	if len(services) != 2 {
+		t.Errorf("Incorrect count of services: %d", len(services))
+	}
+
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
+		t.Error("service1 doesn't match stored one")
 	}
 
 	// Clear DB
@@ -171,510 +230,186 @@ func TestNotExistService(t *testing.T) {
 	_, err := db.GetService("service3")
 	if err == nil {
 		t.Error("Error in non existed service")
-	} else if !errors.Is(err, ErrNotExist) {
+	} else if !errors.Is(err, servicemanager.ErrNotExist) {
 		t.Errorf("Can't get service: %s", err)
-	}
-}
-
-func TestSetServiceState(t *testing.T) {
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// SetServiceState
-	err = db.SetServiceState("service1", 1)
-	if err != nil {
-		t.Errorf("Can't set service state: %s", err)
-	}
-
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if service.State != 1 {
-		t.Errorf("Service state mismatch")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestSetServiceStartTime(t *testing.T) {
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	time := time.Date(2018, 1, 1, 15, 35, 49, 0, time.UTC)
-	// SetServiceState
-	err = db.SetServiceStartTime("service1", time)
-	if err != nil {
-		t.Errorf("Can't set service state: %s", err)
-	}
-
-	service, err := db.GetService("service1")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if service.StartAt != time {
-		t.Errorf("Service start time mismatch")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
 	}
 }
 
 func TestRemoveService(t *testing.T) {
 	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
+	service := servicemanager.ServiceInfo{
+		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
 	}
 
-	err := db.AddService(service1)
-	if err != nil {
+	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %s", err)
 	}
 
-	// RemoveService
-	if err = db.RemoveService("service1"); err != nil {
-		t.Errorf("Can't remove service: %s", err)
-	}
-
-	if _, err = db.GetService("service1"); err == nil {
-		t.Errorf("Error deleting service")
-	}
-}
-
-func TestGetServices(t *testing.T) {
-	// Add service 1
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service 2
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err = db.AddService(service2)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// GetServices
-	services, err := db.GetServices()
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if len(services) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range services {
-		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
-			t.Error("Error getting services")
-		}
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestGetServiceProviderServices(t *testing.T) {
-	// Add service 1
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service1); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service 2
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service 3
-	service3 := launcher.Service{
-		ID: "service3", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service3", UnitName: "service3.service", UID: 5003, GID: 5003, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service3); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service 4
-	service4 := launcher.Service{
-		ID: "service4", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp2",
-		Path: "to/service4", UnitName: "service4.service", UID: 5004, GID: 5004, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service4); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Get sp1 services
-	servicesSp1, err := db.GetServiceProviderServices("sp1")
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if len(servicesSp1) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range servicesSp1 {
-		if !reflect.DeepEqual(service, service1) && !reflect.DeepEqual(service, service2) {
-			t.Error("Error getting services")
-		}
-	}
-
-	// Get sp2 services
-	servicesSp2, err := db.GetServiceProviderServices("sp2")
-	if err != nil {
-		t.Errorf("Can't get services: %s", err)
-	}
-
-	if len(servicesSp2) != 2 {
-		t.Error("Wrong service count")
-	}
-
-	for _, service := range servicesSp2 {
-		if !reflect.DeepEqual(service, service3) && !reflect.DeepEqual(service, service4) {
-			t.Error("Error getting services")
-		}
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestAddUsersService(t *testing.T) {
-	// Add services
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service1); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	service2 := launcher.Service{
-		ID: "service2", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service2", UnitName: "service2.service", UID: 5002, GID: 5002, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// Add service to users
-	if err := db.AddServiceToUsers([]string{"user1"}, "service1"); err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	if err := db.AddServiceToUsers([]string{"user2"}, "service2"); err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Check user1
-	services, err := db.GetUsersServices([]string{"user1"})
-	if err != nil {
-		t.Errorf("Can't get users services: %s", err)
-	}
-
-	if len(services) != 1 {
-		t.Error("Wrong service count")
-	}
-
-	if services[0].ID != "service1" {
-		t.Errorf("Wrong service id: %s", services[0].ID)
-	}
-
-	// Check user2
-	services, err = db.GetUsersServices([]string{"user2"})
-	if err != nil {
-		t.Errorf("Can't get users services: %s", err)
-	}
-
-	if len(services) != 1 {
-		t.Error("Wrong service count")
-	}
-
-	if services[0].ID != "service2" {
-		t.Errorf("Wrong service id: %s", services[0].ID)
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
-	}
-}
-
-func TestAddSameUsersService(t *testing.T) {
-	// Add service
-	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
-	}
-
-	// Add service
-	err = db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
-	if err == nil {
-		t.Error("Error adding same users service")
-	}
-
-	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
-	}
-}
-
-func TestNotExistUsersServices(t *testing.T) {
 	// GetService
-	_, err := db.GetUsersService([]string{"user2", "user3"}, "service18")
-	if err != nil && !errors.Is(err, ErrNotExist) {
-		t.Fatalf("Can't check if service in users: %s", err)
-	}
-
-	if err == nil {
-		t.Errorf("Error users service: %s", err)
-	}
-}
-
-func TestRemoveUsersService(t *testing.T) {
-	// Add service
-	err := db.AddServiceToUsers([]string{"user0", "user1"}, "service1")
+	serviceFromDB, err := db.GetService("service1")
 	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
+		t.Errorf("Can't get service: %s", err)
 	}
 
-	// Remove service
-	err = db.RemoveServiceFromUsers([]string{"user0", "user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't remove users service: %s", err)
+	if !reflect.DeepEqual(serviceFromDB, service) {
+		t.Error("service1 doesn't match stored one")
 	}
 
-	_, err = db.GetUsersService([]string{"user0", "user1"}, "service1")
-	if err != nil && !errors.Is(err, ErrNotExist) {
-		t.Fatalf("Can't check if service in users: %s", err)
+	if err := db.RemoveService(service); err != nil {
+		t.Errorf("Can't delete service: %s", err)
 	}
 
-	if err == nil {
-		t.Errorf("Error users service: %s", err)
-	}
-}
-
-func TestAddUsersList(t *testing.T) {
-	numUsers := 5
-	numServices := 3
-
-	for i := 0; i < numUsers; i++ {
-		users := []string{fmt.Sprintf("user%d", i)}
-		for j := 0; j < numServices; j++ {
-			err := db.AddServiceToUsers(users, fmt.Sprintf("service%d", j))
-			if err != nil {
-				t.Errorf("Can't add users service: %s", err)
-			}
-		}
-	}
-
-	// Check users list
-	usersList, err := db.getUsersList()
-	if err != nil {
-		t.Fatalf("Can't get users list: %s", err)
-	}
-
-	if len(usersList) != numUsers {
-		t.Fatal("Wrong users count")
-	}
-
-	for _, users := range usersList {
-		ok := false
-
-		for i := 0; i < numUsers; i++ {
-			if users[0] == fmt.Sprintf("user%d", i) {
-				ok = true
-
-				break
-			}
-		}
-
-		if !ok {
-			t.Errorf("Invalid users: %s", users)
-		}
-	}
-
-	for j := 0; j < numServices; j++ {
-		serviceID := fmt.Sprintf("service%d", j)
-
-		usersServices, err := db.GetUsersServicesByServiceID(serviceID)
-		if err != nil {
-			t.Errorf("Can't get users services: %s", err)
-		}
-
-		for _, userService := range usersServices {
-			if userService.ServiceID != serviceID {
-				t.Errorf("Invalid serviceID: %s", userService.ServiceID)
-			}
-
-			ok := false
-
-			for i := 0; i < numUsers; i++ {
-				if userService.Users[0] == fmt.Sprintf("user%d", i) {
-					ok = true
-
-					break
-				}
-			}
-
-			if !ok {
-				t.Errorf("Invalid users: %s", userService.Users)
-			}
-		}
-
-		err = db.RemoveServiceFromAllUsers(serviceID)
-		if err != nil {
-			t.Errorf("Can't delete users: %s", err)
-		}
-	}
-
-	usersList, err = db.getUsersList()
-	if err != nil {
-		t.Fatalf("Can't get users list: %s", err)
-	}
-
-	if len(usersList) != 0 {
-		t.Fatal("Wrong users count")
+	if _, err := db.GetService("service1"); err == nil {
+		t.Errorf("Should be error: service does not exist ")
 	}
 
 	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
+	if err = db.removeAllServices(); err != nil {
+		t.Errorf("Can't remove all services: %s", err)
 	}
 }
 
-func TestUsersStorage(t *testing.T) {
-	// Add users service
-	err := db.AddServiceToUsers([]string{"user1"}, "service1")
+func TestActivateService(t *testing.T) {
+	// AddService
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceActivate", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
+	}
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %s", err)
+	}
+
+	if err := db.ActivateService(service.ServiceID, service.AosVersion); err != nil {
+		t.Errorf("Can't activate service: %s", err)
+	}
+
+	// GetService
+	serviceFromDB, err := db.GetService("serviceActivate")
 	if err != nil {
-		t.Errorf("Can't add users service: %s", err)
+		t.Errorf("Can't get service: %s", err)
 	}
 
-	// Check default values
-	usersService, err := db.GetUsersService([]string{"user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't get users service: %s", err)
-	}
-
-	if usersService.StorageFolder != "" || len(usersService.StateChecksum) != 0 {
-		t.Error("Wrong users service value")
-	}
-
-	if err = db.SetUsersStorageFolder([]string{"user1"}, "service1", "stateFolder1"); err != nil {
-		t.Errorf("Can't set users storage folder: %s", err)
-	}
-
-	if err = db.SetUsersStateChecksum([]string{"user1"}, "service1", []byte{0, 1, 2, 3, 4, 5}); err != nil {
-		t.Errorf("Can't set users state checksum: %s", err)
-	}
-
-	usersService, err = db.GetUsersService([]string{"user1"}, "service1")
-	if err != nil {
-		t.Errorf("Can't get users service: %s", err)
-	}
-
-	if usersService.StorageFolder != "stateFolder1" ||
-		!reflect.DeepEqual(usersService.StateChecksum, []byte{0, 1, 2, 3, 4, 5}) {
-		t.Error("Wrong users service value")
-	}
-
-	// Clear DB
-	if err = db.removeAllUsers(); err != nil {
-		t.Errorf("Can't remove all users: %s", err)
+	if serviceFromDB.IsActive != true {
+		t.Error("Wrong active value")
 	}
 }
 
-func TestOverideEnvVars(t *testing.T) {
-	// Add users service
-	if err := db.AddServiceToUsers([]string{"subject1"}, "service1"); err != nil {
-		t.Errorf("Can't add subject service: %s", err)
+func TestCachedService(t *testing.T) {
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceCached", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: true, Cached: false,
 	}
 
-	ttl := time.Now().UTC()
+	expectedServices := []servicemanager.ServiceInfo{service}
 
-	envVars := []*pb.EnvVarInfo{}
-	envVars = append(envVars, &pb.EnvVarInfo{VarId: "some", Variable: "log=10", Ttl: timestamppb.New(ttl)})
-
-	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service2", envVars); err != nil {
-		if !errors.Is(err, ErrNotExist) {
-			t.Errorf("Should be error: %s", ErrNotExist)
-		}
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
 	}
 
-	if err := db.UpdateOverrideEnvVars([]string{"subject1"}, "service1", envVars); err != nil {
-		t.Errorf("Can't update override env vars: %s", err)
-	}
-
-	allVars, err := db.GetAllOverrideEnvVars()
+	services, err := db.GetAllServiceVersions("serviceCached")
 	if err != nil {
-		t.Errorf("Can't get all env vars: %s", err)
+		t.Errorf("Can't get all service versions: %v", err)
 	}
 
-	if len(allVars) != 1 {
-		t.Error("Count of all env vars should be 1")
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
 	}
 
-	if reflect.DeepEqual(allVars[0].Vars, envVars) == false {
-		t.Error("Incorrect env vars in get all override env vars request")
+	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetCachedServices()
+	if err != nil {
+		t.Errorf("Can't get all cached services: %v", err)
+	}
+
+	expectedServices[0].Cached = true
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	service.AosVersion = 2
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetAllServiceVersions("serviceCached")
+	if err != nil {
+		t.Errorf("Can't get all service versions: %v", err)
+	}
+
+	expectedServices = append(expectedServices, service)
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetCachedServices()
+	if err != nil {
+		t.Errorf("Can't get cached services: %v", err)
+	}
+
+	expectedServices[1].Cached = true
+
+	if !reflect.DeepEqual(expectedServices, services) {
+		t.Error("Unexpected services")
+	}
+
+	if err := db.SetServiceCached(service.ServiceID, false); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	services, err = db.GetCachedServices()
+	if err != nil {
+		t.Errorf("Can't get cached services: %v", err)
+	}
+
+	if len(services) != 0 {
+		t.Errorf("Incorrect count of cached services: %d", len(services))
+	}
+}
+
+func TestSetTimestampService(t *testing.T) {
+	service := servicemanager.ServiceInfo{
+		ServiceID: "serviceTimestamp", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
+		GID: 5001, IsActive: false,
+	}
+
+	if err := db.AddService(service); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	serviceFromDB, err := db.GetService("serviceTimestamp")
+	if err != nil {
+		t.Fatalf("Can't get service: %v", err)
+	}
+
+	if serviceFromDB.ServiceID != "serviceTimestamp" {
+		t.Errorf("Incorrect service ID: %v", serviceFromDB.ServiceID)
+	}
+
+	service.Timestamp = time.Now().UTC()
+
+	if err = db.SetServiceTimestamp(service.ServiceID, service.AosVersion, service.Timestamp); err != nil {
+		t.Errorf("Can't set timestamp service: %v", err)
+	}
+
+	serviceFromDB, err = db.GetService("serviceTimestamp")
+	if err != nil {
+		t.Errorf("Can't get service: %v", err)
+	}
+
+	if serviceFromDB.Timestamp != service.Timestamp {
+		t.Error("Wrong service timestamp")
 	}
 }
 
@@ -743,35 +478,6 @@ func TestCursor(t *testing.T) {
 	}
 }
 
-func TestGetServiceByUnitName(t *testing.T) {
-	// AddService
-	service1 := launcher.Service{
-		ID: "service1", AosVersion: 1, VendorVersion: "", ServiceProvider: "sp1",
-		Path: "to/service1", UnitName: "service1.service", UID: 5001, GID: 5001, State: 0,
-		StartAt: time.Now().UTC(), AlertRules: "", Description: "",
-	}
-
-	err := db.AddService(service1)
-	if err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	// GetService
-	service, err := db.GetServiceByUnitName("service1.service")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if !reflect.DeepEqual(service, service1) {
-		t.Error("service1 doesn't match stored one")
-	}
-
-	// Clear DB
-	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
 func TestMultiThread(t *testing.T) {
 	const numIterations = 1000
 
@@ -830,45 +536,115 @@ func TestMultiThread(t *testing.T) {
 }
 
 func TestLayers(t *testing.T) {
-	if err := db.AddLayer("sha256:1", "id1", "path1", "1", "1.0", "some layer 1", 1); err != nil {
+	layer1 := layermanager.LayerInfo{
+		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1", VendorVersion: "1.0",
+		Description: "some layer 1", AosVersion: 1, Size: 40,
+	}
+
+	if err := db.AddLayer(layer1); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:2", "id2", "path2", "1", "2.0", "some layer 2", 2); err != nil {
+	savedLayer, err := db.GetLayerInfoByDigest("sha256:1")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if !reflect.DeepEqual(savedLayer, layer1) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	layer2 := layermanager.LayerInfo{
+		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1", VendorVersion: "2.0",
+		Description: "some layer 2", AosVersion: 2, Size: 50,
+	}
+
+	if err := db.AddLayer(layer2); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	if err := db.AddLayer("sha256:3", "id3", "path3", "1", "1.0", "some layer 3", 3); err != nil {
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if !reflect.DeepEqual(savedLayer, layer2) {
+		t.Error("service1 doesn't match stored one")
+	}
+
+	layer3 := layermanager.LayerInfo{
+		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1", VendorVersion: "1.0",
+		Description: "some layer 3", AosVersion: 3, Size: 60,
+	}
+
+	if err := db.AddLayer(layer3); err != nil {
 		t.Errorf("Can't add layer %s", err)
 	}
 
-	path, err := db.GetLayerPathByDigest("sha256:2")
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:3")
 	if err != nil {
 		t.Errorf("Can't get layer path %s", err)
 	}
 
-	if path != "path2" {
-		t.Errorf("Path form db %s != path2", path)
+	if !reflect.DeepEqual(savedLayer, layer3) {
+		t.Error("service1 doesn't match stored one")
 	}
 
-	layerInfo, err := db.GetLayerInfoByDigest("sha256:3")
+	if _, err := db.GetLayerInfoByDigest("sha256:12345"); err == nil {
+		t.Errorf("Should be error: entry does not exist")
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
 	if err != nil {
-		t.Errorf("Can't get layer ino by digest path %s", err)
+		t.Errorf("Can't get layer path %s", err)
 	}
 
-	if layerInfo.LayerId != "id3" {
-		t.Error("Incorrect layerID ", layerInfo.LayerId)
+	if savedLayer.Cached {
+		t.Error("Should not be cached")
 	}
 
-	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
-		t.Errorf("Should be error: entry does not exist")
+	if err = db.SetLayerCached("sha256:2", true); err != nil {
+		t.Errorf("Can't set cached layer: %v", err)
 	}
 
-	if _, err := db.GetLayerPathByDigest("sha256:12345"); err == nil {
-		t.Errorf("Should be error: entry does not exist")
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
 	}
 
-	if err := db.DeleteLayerByDigest("sha256:2"); err != nil {
+	if !savedLayer.Cached {
+		t.Error("Should be cached")
+	}
+
+	if err = db.SetLayerCached("sha256:2", false); err != nil {
+		t.Errorf("Can't set cached layer: %v", err)
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer path: %v", err)
+	}
+
+	if savedLayer.Cached {
+		t.Error("Should not be cached")
+	}
+
+	layerTimestamp := time.Now().UTC()
+
+	if err := db.SetLayerTimestamp("sha256:2", layerTimestamp); err != nil {
+		t.Errorf("Can't set layer timestamp: %v", err)
+	}
+
+	savedLayer, err = db.GetLayerInfoByDigest("sha256:2")
+	if err != nil {
+		t.Errorf("Can't get layer info: %v", err)
+	}
+
+	if savedLayer.Timestamp != layerTimestamp {
+		t.Error("Unexpected layer timestamp")
+	}
+
+	if err := db.DeleteLayerByDigest(layer2.Digest); err != nil {
 		t.Errorf("Can't delete layer %s", err)
 	}
 
@@ -883,6 +659,368 @@ func TestLayers(t *testing.T) {
 
 	if layers[0].AosVersion != 1 {
 		t.Errorf("Layer AosVersion should be 1")
+	}
+}
+
+func TestInstances(t *testing.T) {
+	const (
+		testServiceID = "testService"
+		testSubjectID = "testSubject"
+	)
+
+	var subjectInstances, serviceInstances, running, allInstances []launcher.InstanceInfo
+
+	for i := 0; i < 5; i++ {
+		subjectInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+			ServiceID: "someServiceID" + strconv.Itoa(i),
+			SubjectID: testSubjectID, Instance: uint64(i),
+		}, AosVersion: uint64(i), UnitSubject: true, UID: i + 100, InstanceID: uuid.New().String()}
+
+		if i%2 == 0 {
+			subjectInstance.Running = true
+			running = append(running, subjectInstance)
+		}
+
+		if err := db.AddInstance(subjectInstance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+
+		subjectInstances = append(subjectInstances, subjectInstance)
+		allInstances = append(allInstances, subjectInstance)
+
+		serviceInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+			ServiceID: testServiceID,
+			SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
+		}, AosVersion: uint64(i + 20), UnitSubject: true, UID: i + 200, InstanceID: uuid.New().String()}
+
+		if i%2 == 0 {
+			serviceInstance.Running = true
+			running = append(running, serviceInstance)
+		}
+
+		if err := db.AddInstance(serviceInstance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+
+		serviceInstances = append(serviceInstances, serviceInstance)
+		allInstances = append(allInstances, serviceInstance)
+	}
+
+	// Test get all instances
+	allResults, err := db.GetAllInstances()
+	if err != nil {
+		t.Fatalf("Can't get all instances from DB %v", err)
+	}
+
+	if !reflect.DeepEqual(allResults, allInstances) {
+		t.Error("Incorrect get all instances result")
+	}
+
+	// Test get running instances
+	runningResult, err := db.GetRunningInstances()
+	if err != nil {
+		t.Fatalf("Can't get running instances from DB %v", err)
+	}
+
+	if !reflect.DeepEqual(runningResult, running) {
+		t.Error("Incorrect running instances result")
+	}
+
+	// Test get all instances by service ID
+	serviceInstancesResult, err := db.GetServiceInstances(testServiceID)
+	if err != nil {
+		t.Fatalf("Can't get instances by serviceID %v", err)
+	}
+
+	if !reflect.DeepEqual(serviceInstancesResult, serviceInstances) {
+		t.Error("Incorrect instances by serviceID result")
+	}
+
+	// Test get unavailable instances
+	serviceInstancesResult, err = db.GetServiceInstances("notAvailableServiceID")
+	if err != nil {
+		t.Fatalf("Can't get instances by serviceID %v", err)
+	}
+
+	if len(serviceInstancesResult) != 0 {
+		t.Error("incorrect count of instances")
+	}
+
+	// Test get all instances by subject ID
+	subjectInstancesResult, err := db.GetSubjectInstances(testSubjectID)
+	if err != nil {
+		t.Fatalf("Can't get instances by subjectID %v", err)
+	}
+
+	if !reflect.DeepEqual(subjectInstancesResult, subjectInstances) {
+		t.Error("Incorrect instances by subjectID result")
+	}
+
+	// Negative test: add the same instance should be failed
+	testInstanceInfo := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+		ServiceID: testServiceID,
+		SubjectID: testSubjectID, Instance: 42,
+	}, AosVersion: 42, UnitSubject: true, UID: 42, InstanceID: uuid.New().String()}
+
+	if err := db.AddInstance(testInstanceInfo); err != nil {
+		t.Fatalf("Can't add instance to DB %v", err)
+	}
+
+	if err := db.AddInstance(testInstanceInfo); err == nil {
+		t.Error("Should be error can't add instace")
+	}
+
+	// Test update instance
+	instanceResult, err := db.GetInstanceByID(testInstanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance by ID %v", err)
+	}
+
+	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
+		t.Error("Incorrect instance by ID result")
+	}
+
+	ident, version, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance info: %v", err)
+	}
+
+	if ident != testInstanceInfo.InstanceIdent {
+		t.Error("Incorrect instance ident")
+	}
+
+	if version != testInstanceInfo.AosVersion {
+		t.Error("Incorrect aos version")
+	}
+
+	if _, err := db.GetInstanceByID("testInstanceID"); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	testInstanceInfo.Running = true
+
+	if err := db.UpdateInstance(testInstanceInfo); err != nil {
+		t.Fatalf("Can't update instance %v", err)
+	}
+
+	// Negative test: update unavailable instance should be failed
+	if err := db.UpdateInstance(
+		launcher.InstanceInfo{InstanceID: "unavailbale"}); !errors.Is(err, launcher.ErrNotExist) {
+		t.Error("Should be error: instance not exist")
+	}
+
+	// Test get all instances identifier
+	testInstanceIdent := cloudprotocol.InstanceIdent{ServiceID: testServiceID, SubjectID: testSubjectID, Instance: 42}
+
+	if instanceResult, err = db.GetInstanceByIdent(testInstanceIdent); err != nil {
+		t.Fatalf("Can't get instance by identifier %v", err)
+	}
+
+	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
+		t.Error("Incorrect instance by identifier result")
+	}
+
+	// Negative test get all instances identifier by unavailable identifier
+	testInstanceIdent.Instance = 10500
+
+	if _, err = db.GetInstanceByIdent(testInstanceIdent); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	// Test remove instance
+	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
+		t.Errorf("Can't remove instance: %v", err)
+	}
+
+	if _, err := db.GetInstanceByID(testInstanceInfo.InstanceID); !errors.Is(err, launcher.ErrNotExist) {
+		t.Errorf("Should be error: %v", launcher.ErrNotExist)
+	}
+
+	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
+		t.Errorf("Can't remove instance: %v", err)
+	}
+}
+
+func TestInstancesID(t *testing.T) {
+	addedInstance := []launcher.InstanceInfo{
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
+			InstanceID:    "TestSevrID_TestSubID_0",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
+			InstanceID:    "TestSevrID_TestSubID_1",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
+			InstanceID:    "TestSevrID_TestSubID1_0",
+		},
+		{
+			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
+			InstanceID:    "TestSevrID2_TestSubID_0",
+		},
+	}
+
+	for _, instance := range addedInstance {
+		if err := db.AddInstance(instance); err != nil {
+			t.Fatalf("Can't add instance to DB %v", err)
+		}
+	}
+
+	type testData struct {
+		filter      cloudprotocol.InstanceFilter
+		expectedIds []string
+	}
+
+	data := []testData{
+		{
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "TestSubID", 0),
+			expectedIds: []string{"TestSevrID_TestSubID_0"},
+		},
+		{
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "TestSubID", -1),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1"},
+		},
+		{
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "", 0),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID1_0"},
+		},
+		{
+			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "", -1),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1", "TestSevrID_TestSubID1_0"},
+		},
+	}
+
+	for _, value := range data {
+		ids, err := db.GetInstanceIDs(value.filter)
+		if err != nil {
+			t.Fatalf("Can't get instance ids from DB: %v", err)
+		}
+
+		if !reflect.DeepEqual(ids, value.expectedIds) {
+			t.Error("Incorrect instance ids")
+		}
+	}
+}
+
+func TestEnvVars(t *testing.T) {
+	vars, err := db.GetOverrideEnvVars()
+	if err != nil {
+		t.Fatalf("Can't get empty env vars: %v", err)
+	}
+
+	if len(vars) != 0 {
+		t.Error("Returned env vars should be empty")
+	}
+
+	curentTime := time.Now().UTC()
+
+	testEnvVars := []cloudprotocol.EnvVarsInstanceInfo{
+		{
+			InstanceFilter: cloudprotocol.NewInstanceFilter("id1", "s1", int64(1)),
+			EnvVars: []cloudprotocol.EnvVarInfo{
+				{ID: "varId1", Variable: "variable 1"},
+				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			},
+		},
+		{
+			InstanceFilter: cloudprotocol.NewInstanceFilter("id2", "", -1),
+			EnvVars: []cloudprotocol.EnvVarInfo{
+				{ID: "varId1", Variable: "variable 1"},
+				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			},
+		},
+	}
+
+	if err = db.SetOverrideEnvVars(testEnvVars); err != nil {
+		t.Fatalf("Can't set env vars: %v", err)
+	}
+
+	if vars, err = db.GetOverrideEnvVars(); err != nil {
+		t.Fatalf("Can't get env vars: %v", err)
+	}
+
+	if !reflect.DeepEqual(testEnvVars, vars) {
+		t.Errorf("Incorrect env vars from database")
+	}
+}
+
+func TestStorageState(t *testing.T) {
+	var (
+		testID          = "testInstanceID"
+		newCheckSum     = []byte("newCheckSum")
+		newStorageQuota = uint64(88888)
+		newStateQuota   = uint64(99999)
+	)
+
+	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be entry does not exist")
+	}
+
+	testStateStorageInfo := storagestate.StorageStateInstanceInfo{
+		StorageQuota: 12345, StateQuota: 54321,
+		StateChecksum: []byte("checksum1"),
+	}
+
+	if err := db.AddStorageStateInfo(testID, testStateStorageInfo); err != nil {
+		t.Fatalf("Can't add state storage info: %v", err)
+	}
+
+	info, err := db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("State storage info from database doesn't match expected one")
+	}
+
+	if err := db.SetStateChecksumByID("noID", newCheckSum); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be entry does not exist")
+	}
+
+	if err := db.SetStateChecksumByID(testID, newCheckSum); err != nil {
+		t.Fatalf("Can't update checksum: %v", err)
+	}
+
+	testStateStorageInfo.StateChecksum = newCheckSum
+
+	info, err = db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("Update state storage info from database doesn't match expected one")
+	}
+
+	if err := db.SetStorageStateQuotasByID(
+		"noID", newStorageQuota, newStateQuota); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be: entry does not exist")
+	}
+
+	if err := db.SetStorageStateQuotasByID(testID, newStorageQuota, newStateQuota); err != nil {
+		t.Fatalf("Can't update state and storage quotas: %v", err)
+	}
+
+	testStateStorageInfo.StateQuota = newStateQuota
+	testStateStorageInfo.StorageQuota = newStorageQuota
+
+	info, err = db.GetStorageStateInfoByID(testID)
+	if err != nil {
+		t.Fatalf("Can't get state storage info: %v", err)
+	}
+
+	if !reflect.DeepEqual(info, testStateStorageInfo) {
+		t.Error("Update state storage info from database doesn't match expected one")
+	}
+
+	if err := db.RemoveStorageStateInfoByID(testID); err != nil {
+		t.Fatalf("Can't remove state storage info: %v", err)
+	}
+
+	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
+		t.Errorf("Should be: entry does not exist")
 	}
 }
 
@@ -929,36 +1067,9 @@ func TestMigrationToV1(t *testing.T) {
 	db.Close()
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
-
-func (db *Database) getUsersList() (usersList [][]string, err error) {
-	rows, err := db.sql.Query("SELECT DISTINCT users FROM users")
-	if err != nil {
-		return usersList, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	usersList = make([][]string, 0)
-
-	for rows.Next() {
-		var usersJSON []byte
-		if err := rows.Scan(&usersJSON); err != nil {
-			return usersList, aoserrors.Wrap(err)
-		}
-
-		var users []string
-
-		if err = json.Unmarshal(usersJSON, &users); err != nil {
-			return usersList, aoserrors.Wrap(err)
-		}
-
-		usersList = append(usersList, users)
-	}
-
-	return usersList, aoserrors.Wrap(rows.Err())
-}
+ **********************************************************************************************************************/
 
 func createDatabaseV0(name string) (err error) {
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
@@ -1056,7 +1167,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 		}
 
 		if count == 0 {
-			return ErrNotExist
+			return errNotExist
 		}
 	}
 
@@ -1072,7 +1183,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	}
 
 	if !servicesRows.Next() {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	count = 0
@@ -1081,7 +1192,7 @@ func isDatabaseVer1(sqlite *sql.DB) (err error) {
 	}
 
 	if count == 0 {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	return nil
@@ -1106,7 +1217,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 		}
 
 		if count != 0 {
-			return ErrNotExist
+			return errNotExist
 		}
 	}
 
@@ -1122,7 +1233,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	if !servicesRows.Next() {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	count = 0
@@ -1131,7 +1242,7 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	if count != 0 {
-		return ErrNotExist
+		return errNotExist
 	}
 
 	return nil

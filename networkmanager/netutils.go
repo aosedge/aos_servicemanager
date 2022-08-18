@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"syscall"
 
@@ -60,7 +61,7 @@ func checkRouteOverlaps(toCheck *net.IPNet, networks []netlink.Route) (overlapsI
 func removeBridgeInterface(spID string) (err error) {
 	br, err := netlink.LinkByName(bridgePrefix + spID)
 	if err != nil {
-		return nil
+		return nil // nolint:nilerr
 	}
 
 	if err = netlink.LinkSetDown(br); err != nil {
@@ -135,6 +136,9 @@ func checkExistNetInterface(name string) (ipNet *net.IPNet, err error) {
 				_, ipSubnet, _ := net.ParseCIDR(v.String())
 				return ipSubnet, nil
 			}
+
+		default:
+			return nil, aoserrors.Errorf("unsupported key type: %v", reflect.TypeOf(v))
 		}
 	}
 

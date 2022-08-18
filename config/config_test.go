@@ -18,7 +18,6 @@
 package config_test
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"log"
 	"os"
@@ -32,9 +31,9 @@ import (
 	"github.com/aoscloud/aos_servicemanager/config"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func createConfigFile() (err error) {
 	configContent := `{
@@ -43,22 +42,28 @@ func createConfigFile() (err error) {
 	"workingDir" : "workingDir",
 	"certStorage": "sm",
 	"storageDir" : "/var/aos/storage",
+	"stateDir" : "/var/aos/state",
+	"servicesDir": "/var/aos/servicemanager/services",
+	"servicesPartLimit": 10,
 	"layersDir": "/var/aos/srvlib",
+	"layersPartLimit": 20,
+	"downloadDir": "/var/aos/servicemanager/download",
+	"extractDir": "/var/aos/servicemanager/extract",
 	"boardConfigFile" : "/var/aos/aos_board.cfg",
 	"iamServer" : "localhost:8089",
 	"iamPublicServer" : "localhost:8090",
-	"defaultServiceTTLDays" : 30,
+	"layerTtlDays" : 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
-		"sendPeriod": "00:05:00",
-		"pollPeriod": "00:00:01",		
+		"sendPeriod": "5m",
+		"pollPeriod": "1s",
 		"ram": {
-			"minTimeout": "00:00:10",
+			"minTimeout": "10s",
 			"minThreshold": 10,
 			"maxThreshold": 150
 		},
 		"outTraffic": {
-			"minTimeout": "00:00:20",
+			"minTimeout": "20s",
 			"minThreshold": 10,
 			"maxThreshold": 150
 		}
@@ -67,7 +72,7 @@ func createConfigFile() (err error) {
 		"maxPartSize": 1024,
 		"maxPartCount": 10
 	},
-	"alerts": {		
+	"journalAlerts": {		
 		"filter": ["(test)", "(regexp)"],
 		"serviceAlertPriority": 7,
 		"systemAlertPriority": 5
@@ -88,7 +93,7 @@ func createConfigFile() (err error) {
 	}
 }`
 
-	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join("tmp", "aos_servicemanager.cfg"), []byte(configContent), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -115,9 +120,9 @@ func cleanup() (err error) {
 	return nil
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Main
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
@@ -133,9 +138,9 @@ func TestMain(m *testing.M) {
 	os.Exit(ret)
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Tests
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 func TestGetCrypt(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
@@ -179,6 +184,10 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 	if config.StorageDir != "/var/aos/storage" {
 		t.Errorf("Wrong storageDir value: %s", config.StorageDir)
 	}
+
+	if config.StateDir != "/var/aos/state" {
+		t.Errorf("Wrong stateDir value: %s", config.StateDir)
+	}
 }
 
 func TestGetBoardConfigFile(t *testing.T) {
@@ -188,7 +197,7 @@ func TestGetBoardConfigFile(t *testing.T) {
 	}
 
 	if config.BoardConfigFile != "/var/aos/aos_board.cfg" {
-		t.Errorf("Wrong storageDir value: %s", config.BoardConfigFile)
+		t.Errorf("Wrong board config value: %s", config.BoardConfigFile)
 	}
 }
 
@@ -199,7 +208,40 @@ func TestGetLayersDir(t *testing.T) {
 	}
 
 	if config.LayersDir != "/var/aos/srvlib" {
-		t.Errorf("Wrong storageDir value: %s", config.LayersDir)
+		t.Errorf("Wrong layers dir value: %s", config.LayersDir)
+	}
+}
+
+func TestGetServicesDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.ServicesDir != "/var/aos/servicemanager/services" {
+		t.Errorf("Wrong services dir value: %s", config.ServicesDir)
+	}
+}
+
+func TestGetDownloadDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %s", err)
+	}
+
+	if config.DownloadDir != "/var/aos/servicemanager/download" {
+		t.Errorf("Wrong download dir value: %s", config.DownloadDir)
+	}
+}
+
+func TestGetExtractDir(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.ExtractDir != "/var/aos/servicemanager/extract" {
+		t.Errorf("Wrong extract dir value: %v", config.ExtractDir)
 	}
 }
 
@@ -231,21 +273,19 @@ func TestGetDefaultServiceTTL(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.DefaultServiceTTLDays != 30 {
-		t.Errorf("Wrong default service TTL value: %d", config.DefaultServiceTTLDays)
+	if config.ServiceTTLDays != 30 {
+		t.Errorf("Wrong default service TTL value: %d", config.ServiceTTLDays)
 	}
 }
 
-func TestDurationMarshal(t *testing.T) {
-	d := config.Duration{Duration: 32 * time.Second}
-
-	result, err := json.Marshal(d)
+func TestGetLayersTTL(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
-		t.Errorf("Can't marshal: %s", err)
+		t.Fatalf("Error opening config file: %v", err)
 	}
 
-	if string(result) != `"00:00:32"` {
-		t.Errorf("Wrong value: %s", result)
+	if config.LayerTTLDays != 40 {
+		t.Errorf("Wrong LayerTTLDays value: %v", config.LayerTTLDays)
 	}
 }
 
@@ -268,7 +308,7 @@ func TestGetMonitoringConfig(t *testing.T) {
 	}
 
 	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
+		t.Errorf("Wrong value: %s", config.Monitoring.OutTraffic.MinTimeout.Duration)
 	}
 }
 
@@ -295,16 +335,16 @@ func TestGetAlertsConfig(t *testing.T) {
 
 	filter := []string{"(test)", "(regexp)"}
 
-	if !reflect.DeepEqual(config.Alerts.Filter, filter) {
-		t.Errorf("Wrong filter value: %v", config.Alerts.Filter)
+	if !reflect.DeepEqual(config.JournalAlerts.Filter, filter) {
+		t.Errorf("Wrong filter value: %v", config.JournalAlerts.Filter)
 	}
 
-	if config.Alerts.ServiceAlertPriority != 7 {
-		t.Errorf("Wrong service alert priority: %d", config.Alerts.ServiceAlertPriority)
+	if config.JournalAlerts.ServiceAlertPriority != 7 {
+		t.Errorf("Wrong service alert priority: %d", config.JournalAlerts.ServiceAlertPriority)
 	}
 
-	if config.Alerts.SystemAlertPriority != 5 {
-		t.Errorf("Wrong system alert priority: %d", config.Alerts.SystemAlertPriority)
+	if config.JournalAlerts.SystemAlertPriority != 5 {
+		t.Errorf("Wrong system alert priority: %d", config.JournalAlerts.SystemAlertPriority)
 	}
 }
 
@@ -374,5 +414,20 @@ func TestServiceHealthCheckTimeout(t *testing.T) {
 
 	if config.ServiceHealthCheckTimeout.Duration != 10*time.Second {
 		t.Errorf("Wrong ServiceHealthCheckTimeout value: %s", config.ServiceHealthCheckTimeout.String())
+	}
+}
+
+func TestPartLimit(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.ServicesPartLimit != 10 {
+		t.Errorf("Wrong ServicesPartLimit value: %v", config.ServicesPartLimit)
+	}
+
+	if config.LayersPartLimit != 20 {
+		t.Errorf("Wrong LayersPartLimit value: %v", config.LayersPartLimit)
 	}
 }

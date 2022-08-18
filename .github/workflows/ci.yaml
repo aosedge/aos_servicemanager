@@ -4,32 +4,42 @@ on:
   push:
     branches:
       - main
+      - develop
+      - feature_*
   pull_request:
     branches:
       - main
       - develop
+      - feature_*
 
 jobs:
   tests:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
 
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.18.2
+
       - name: Build
-        run: go build
+        run: |
+          sudo apt update --fix-missing
+          sudo apt install -y libsystemd-dev
+          go build
 
       - name: Test
         run: |
           sudo iptables -P FORWARD ACCEPT 
-          sudo env "PATH=$PATH" go test ./... -p=1 -failfast -v -coverprofile=coverage.out -covermode=atomic
+          sudo env "PATH=$PATH" go test $(go list ./... | grep -v "/runner") -p=1 -failfast -v -coverprofile=coverage.out -covermode=atomic
           sudo chmod 666 coverage.out
 
       - name: Code coverage
         run: bash <(curl -s https://codecov.io/bash)
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v2
+        uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.43.0
-          skip-go-installation: true
+          version: v1.47.3

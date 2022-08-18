@@ -25,24 +25,24 @@ import (
 	"io/ioutil"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-
-	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_common/aostypes"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-var defaultContent = []config.Host{
+// nolint:gochecknoglobals
+var defaultContent = []aostypes.Host{
 	{IP: "127.0.0.1", Hostname: "localhost"},
 	{IP: "::1", Hostname: "localhost ip6-localhost ip6-loopback"},
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []config.Host) (err error) {
+func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []aostypes.Host) (err error) {
 	content := bytes.NewBuffer(nil)
 
 	if err = writeHosts(content, defaultContent); err != nil {
@@ -55,11 +55,12 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		ownHosts = ownHosts + " " + hostname
 	}
 
-	if err = writeHosts(content, append([]config.Host{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
+	if err = writeHosts(content, append([]aostypes.Host{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0644); err != nil {
+	// nolint:gosec // To fix application to access the host file, the file permissions must be 644
+	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -77,14 +78,15 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0644); err != nil {
+	// nolint:gosec // To fix application to access the resolve file, the file permissions must be 644
+	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func writeHosts(w io.Writer, hosts []config.Host) (err error) {
+func writeHosts(w io.Writer, hosts []aostypes.Host) (err error) {
 	for _, host := range hosts {
 		if _, err = fmt.Fprintf(w, "%s\t%s\n", host.IP, host.Hostname); err != nil {
 			return aoserrors.Wrap(err)

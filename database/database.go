@@ -27,17 +27,21 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/migration"
-	_ "github.com/mattn/go-sqlite3" //ignore lint
+	_ "github.com/mattn/go-sqlite3" // ignore lint
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 const (
 	busyTimeout = 60000
@@ -45,30 +49,30 @@ const (
 	syncMode    = "NORMAL"
 )
 
-const dbVersion = 5
+const dbVersion = 6
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Vars
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// ErrNotExist is returned when requested entry not exist in DB.
-var ErrNotExist = errors.New("entry does not exist")
+// errNotExist is returned when requested entry not exist in DB.
+var errNotExist = errors.New("entry does not exist")
 
 // ErrMigrationFailed is returned if migration was failed and db returned to the previous state.
 var ErrMigrationFailed = errors.New("database migration failed")
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // Database structure with database information.
 type Database struct {
 	sql *sql.DB
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
 // New creates new database handle.
 func New(name string, migrationPath string, mergedMigrationPath string) (db *Database, err error) {
@@ -81,115 +85,51 @@ func New(name string, migrationPath string, mergedMigrationPath string) (db *Dat
 
 // GetOperationVersion returns operation version.
 func (db *Database) GetOperationVersion() (version uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT operationVersion FROM config")
-	if err != nil {
-		return version, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&version)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return version, ErrNotExist
-		}
-
-		return version, aoserrors.Wrap(err)
+	if err = db.getDataFromQuery("SELECT operationVersion FROM config", &version); err != nil {
+		return version, err
 	}
 
 	return version, nil
 }
 
 // SetOperationVersion sets operation version.
-func (db *Database) SetOperationVersion(version uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET operationVersion = ?", version)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
+func (db *Database) SetOperationVersion(version uint64) error {
+	return db.executeQuery("UPDATE config SET operationVersion = ?", version)
 }
 
 // AddService adds new service.
-func (db *Database) AddService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(service.ID, service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.StartAt,
-		service.AlertRules, service.VendorVersion, service.Description, service.ManifestDigest)
-
-	return aoserrors.Wrap(err)
-}
-
-// UpdateService updates service.
-func (db *Database) UpdateService(service launcher.Service) (err error) {
-	stmt, err := db.sql.Prepare(`UPDATE services
-								 SET aosVersion = ?, serviceProvider = ?, path = ?, unit = ?, uid = ?, gid = ?,
-								 state = ?, startat = ?, alertRules = ?, vendorVersion = ?,
-								 description = ?, manifestDigest = ? WHERE id = ?`)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(service.AosVersion, service.ServiceProvider, service.Path, service.UnitName,
-		service.UID, service.GID, service.State, service.StartAt, service.AlertRules,
-		service.VendorVersion, service.Description, service.ManifestDigest, service.ID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
+func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
+		service.GID, service.ManifestDigest, service.IsActive, service.Cached, service.Timestamp, service.Size)
 }
 
 // RemoveService removes existing service.
-func (db *Database) RemoveService(serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM services WHERE id = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
+func (db *Database) RemoveService(service servicemanager.ServiceInfo) (err error) {
+	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND aosVersion = ?",
+		service.ServiceID, service.AosVersion); errors.Is(err, errNotExist) {
+		return nil
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(serviceID)
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // GetService returns service by service ID.
-func (db *Database) GetService(serviceID string) (service launcher.Service, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE id = ?")
+func (db *Database) GetService(serviceID string) (service servicemanager.ServiceInfo, err error) {
+	stmt, err := db.sql.Prepare(
+		"SELECT * FROM services WHERE aosVersion = (SELECT MAX(aosVersion) FROM services WHERE id = ?) AND id = ?")
 	if err != nil {
 		return service, aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(serviceID).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State,
-		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
+	err = stmt.QueryRow(serviceID, serviceID).Scan(
+		&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive,
+		&service.Cached, &service.Timestamp, &service.Size)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return service, ErrNotExist
+		return service, servicemanager.ErrNotExist
 	}
 
 	if err != nil {
@@ -199,433 +139,84 @@ func (db *Database) GetService(serviceID string) (service launcher.Service, err 
 	return service, aoserrors.Wrap(err)
 }
 
-// GetServices returns all services.
-func (db *Database) GetServices() (services []launcher.Service, err error) {
-	rows, err := db.sql.Query("SELECT * FROM services")
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service launcher.Service
-
-		if err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description,
-			&service.ManifestDigest); err != nil {
-			return services, aoserrors.Wrap(err)
-		}
-
-		services = append(services, service)
-	}
-
-	return services, aoserrors.Wrap(rows.Err())
+// GetLatestVersionServices returns all latest version services.
+func (db *Database) GetLatestVersionServices() (services []servicemanager.ServiceInfo, err error) {
+	return db.getServicesFromQuery(`SELECT * FROM services WHERE(id, aosVersion)
+									IN (SELECT id, MAX(aosVersion) FROM services GROUP BY id)`)
 }
 
-// GetServiceProviderServices returns all services belong to specified service provider.
-func (db *Database) GetServiceProviderServices(serviceProvider string) (services []launcher.Service, err error) {
-	rows, err := db.sql.Query("SELECT * FROM services WHERE serviceProvider = ?", serviceProvider)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service launcher.Service
-
-		if err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description,
-			&service.ManifestDigest); err != nil {
-			return services, aoserrors.Wrap(err)
-		}
-
-		services = append(services, service)
-	}
-
-	return services, aoserrors.Wrap(rows.Err())
+// GetCachedServices returns all cached services.
+func (db *Database) GetCachedServices() (services []servicemanager.ServiceInfo, err error) {
+	return db.getServicesFromQuery(`SELECT * FROM services WHERE cached = 1`)
 }
 
-// GetServiceByUnitName returns service by systemd unit name.
-func (db *Database) GetServiceByUnitName(unitName string) (service launcher.Service, err error) {
-	stmt, err := db.sql.Prepare("SELECT * FROM services WHERE unit = ?")
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(unitName).Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-		&service.UnitName, &service.UID, &service.GID, &service.State,
-		&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
-	if err != nil && errors.Is(err, sql.ErrNoRows) {
-		return service, ErrNotExist
+// GetAllServiceVersions returns all service versions.
+func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
+	if services, err = db.getServicesFromQuery(
+		"SELECT * FROM services WHERE id = ? ORDER BY aosVersion", id); err != nil {
+		return nil, err
 	}
 
-	if err != nil {
-		return service, aoserrors.Wrap(err)
+	if len(services) == 0 {
+		return nil, servicemanager.ErrNotExist
 	}
 
-	return service, aoserrors.Wrap(err)
+	return services, nil
 }
 
-// SetServiceState sets service state.
-func (db *Database) SetServiceState(serviceID string, state launcher.ServiceState) (err error) {
-	stmt, err := db.sql.Prepare("UPDATE services SET state = ? WHERE id = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(state, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
+// ActivateService sets isActive to true for the service.
+func (db *Database) ActivateService(serviceID string, aosVersion uint64) (err error) {
+	if err = db.executeQuery("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?",
+		serviceID, aosVersion); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(servicemanager.ErrNotExist)
 	}
 
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
-// SetServiceStartTime sets service start time.
-func (db *Database) SetServiceStartTime(serviceID string, time time.Time) (err error) {
-	stmt, err := db.sql.Prepare("UPDATE services SET startat = ? WHERE id = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(time, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
+// SetServiceCached sets cached status for the service.
+func (db *Database) SetServiceCached(serviceID string, cached bool) (err error) {
+	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ?",
+		cached, serviceID); errors.Is(err, errNotExist) {
+		return servicemanager.ErrNotExist
 	}
 
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
-// AddServiceToUsers adds service ID to users.
-func (db *Database) AddServiceToUsers(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO users values(?, ?, ?, ?, ?)")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	_, err = stmt.Exec(usersJSON, serviceID, "", []byte{}, "")
-
-	return aoserrors.Wrap(err)
-}
-
-// RemoveServiceFromUsers removes service ID from users.
-func (db *Database) RemoveServiceFromUsers(users []string, serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM users WHERE users = ? AND serviceid = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	_, err = stmt.Exec(usersJSON, serviceID)
-
-	return aoserrors.Wrap(err)
-}
-
-// SetUsersStorageFolder sets users storage folder.
-func (db *Database) SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET storageFolder = ? WHERE users = ? AND serviceid = ?",
-		storageFolder, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
+// SetServiceTimestamp sets timestamp for the service.
+func (db *Database) SetServiceTimestamp(serviceID string, aosVersion uint64, timestamp time.Time) error {
+	if err := db.executeQuery("UPDATE services SET timestamp = ? WHERE id = ? AND aosVersion = ?",
+		timestamp, serviceID, aosVersion); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(servicemanager.ErrNotExist)
 	}
 
 	return nil
-}
-
-// SetUsersStateChecksum sets users state checksum.
-func (db *Database) SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET stateCheckSum = ? WHERE users = ? AND serviceid = ?",
-		checksum, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetUsersService returns users service.
-func (db *Database) GetUsersService(users []string, serviceID string) (usersService launcher.UsersService, err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-
-	rows, err := db.sql.Query("SELECT storageFolder, stateCheckSum FROM users WHERE users = ? AND serviceid = ?",
-		usersJSON, serviceID)
-	if err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return usersService, aoserrors.Wrap(rows.Err())
-	}
-
-	if !rows.Next() {
-		return usersService, ErrNotExist
-	}
-
-	if err = rows.Scan(&usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-		return usersService, aoserrors.Wrap(err)
-	}
-
-	usersService.Users = users
-	usersService.ServiceID = serviceID
-
-	return usersService, nil
-}
-
-// GetUsersServicesByServiceID returns users services by service ID.
-func (db *Database) GetUsersServicesByServiceID(serviceID string) (usersServices []launcher.UsersService, err error) {
-	rows, err := db.sql.Query("SELECT users, storageFolder, stateCheckSum FROM users WHERE serviceid = ?", serviceID)
-	if err != nil {
-		return usersServices, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		usersService := launcher.UsersService{ServiceID: serviceID}
-		usersJSON := []byte{}
-
-		if err = rows.Scan(&usersJSON, &usersService.StorageFolder, &usersService.StateChecksum); err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		if err = json.Unmarshal(usersJSON, &usersService.Users); err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		usersServices = append(usersServices, usersService)
-	}
-
-	return usersServices, aoserrors.Wrap(rows.Err())
-}
-
-// GetUsersServices returns list of users services.
-func (db *Database) GetUsersServices(users []string) (usersServices []launcher.Service, err error) {
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	rows, err := db.sql.Query("SELECT * FROM services WHERE id IN (SELECT serviceid FROM users WHERE users = ?)",
-		usersJSON)
-	if err != nil {
-		return usersServices, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var service launcher.Service
-
-		err = rows.Scan(&service.ID, &service.AosVersion, &service.ServiceProvider, &service.Path,
-			&service.UnitName, &service.UID, &service.GID, &service.State,
-			&service.StartAt, &service.AlertRules, &service.VendorVersion, &service.Description, &service.ManifestDigest)
-		if err != nil {
-			return usersServices, aoserrors.Wrap(err)
-		}
-
-		usersServices = append(usersServices, service)
-	}
-
-	return usersServices, aoserrors.Wrap(rows.Err())
-}
-
-// RemoveServiceFromAllUsers removes service from all users.
-func (db *Database) RemoveServiceFromAllUsers(serviceID string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM users WHERE serviceid = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(serviceID)
-
-	return aoserrors.Wrap(err)
-}
-
-// UpdateOverrideEnvVars add/update/remove overrides env vars.
-func (db *Database) UpdateOverrideEnvVars(users []string, serviceID string, vars []*pb.EnvVarInfo) (err error) {
-	// TODO: Currunt version support only one user. Should be re-implemented
-	usersJSON, err := json.Marshal(users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	varsText := ""
-
-	if len(vars) > 0 {
-		varsJSON, err := json.Marshal(vars)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		varsText = string(varsJSON)
-	}
-
-	result, err := db.sql.Exec("UPDATE users SET overrideEnvVars = ? WHERE users = ? AND serviceid = ?",
-		varsText, usersJSON, serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
-}
-
-// GetAllOverrideEnvVars returns list of env vars for services.
-func (db *Database) GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error) {
-	rows, err := db.sql.Query("SELECT users, serviceid, overrideEnvVars FROM users")
-	if err != nil {
-		return vars, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return vars, aoserrors.Wrap(rows.Err())
-	}
-
-	for rows.Next() {
-		varsText := ""
-		usersText := ""
-		users := []string{}
-
-		var envVar pb.OverrideEnvVar
-
-		err = rows.Scan(&usersText, &envVar.ServiceId, &varsText)
-		if err != nil {
-			return vars, aoserrors.Wrap(err)
-		}
-
-		if err = json.Unmarshal([]byte(usersText), &users); err != nil {
-			return vars, aoserrors.Wrap(err)
-		}
-
-		if len(users) < 1 {
-			return vars, aoserrors.Wrap(ErrNotExist)
-		}
-
-		envVar.SubjectId = users[0] // TODO: currently support only one user
-
-		if varsText != "" {
-			if err = json.Unmarshal([]byte(varsText), &envVar.Vars); err != nil {
-				return vars, aoserrors.Wrap(err)
-			}
-		}
-
-		vars = append(vars, envVar) // nolint
-	}
-
-	return vars, nil
 }
 
 // SetTrafficMonitorData stores traffic monitor data.
 func (db *Database) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error) {
-	result, err := db.sql.Exec("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?", timestamp, value, chain)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		if _, err = db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)",
-			chain, timestamp, value); err != nil {
+	if err = db.executeQuery("UPDATE trafficmonitor SET time = ?, value = ? where chain = ?",
+		timestamp, value, chain); errors.Is(err, errNotExist) {
+		if _, err := db.sql.Exec("INSERT INTO trafficmonitor VALUES(?, ?, ?)", chain, timestamp, value); err != nil {
 			return aoserrors.Wrap(err)
 		}
+
+		return nil
 	}
 
-	return nil
+	return err
 }
 
 // GetTrafficMonitorData stores traffic monitor data.
 func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
-	stmt, err := db.sql.Prepare("SELECT time, value FROM trafficmonitor WHERE chain = ?")
-	if err != nil {
-		return timestamp, value, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT time, value FROM trafficmonitor WHERE chain = \"%s\"", chain),
+		&timestamp, &value); err != nil {
+		if errors.Is(err, errNotExist) {
+			return timestamp, value, networkmanager.ErrEntryNotExist
+		}
 
-	err = stmt.QueryRow(chain).Scan(&timestamp, &value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return timestamp, value, ErrNotExist
-	}
-
-	if err != nil {
-		return timestamp, value, aoserrors.Wrap(err)
+		return timestamp, value, err
 	}
 
 	return timestamp, value, nil
@@ -633,144 +224,262 @@ func (db *Database) GetTrafficMonitorData(chain string) (timestamp time.Time, va
 
 // RemoveTrafficMonitorData removes existing traffic monitor entry.
 func (db *Database) RemoveTrafficMonitorData(chain string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM trafficmonitor WHERE chain = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
+	if err = db.executeQuery("DELETE FROM trafficmonitor WHERE chain = ?", chain); errors.Is(err, errNotExist) {
+		return nil
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(chain)
-
-	return aoserrors.Wrap(err)
+	return err
 }
 
 // SetJournalCursor stores system logger cursor.
-func (db *Database) SetJournalCursor(cursor string) (err error) {
-	result, err := db.sql.Exec("UPDATE config SET cursor = ?", cursor)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if count == 0 {
-		return ErrNotExist
-	}
-
-	return nil
+func (db *Database) SetJournalCursor(cursor string) error {
+	return db.executeQuery("UPDATE config SET cursor = ?", cursor)
 }
 
 // GetJournalCursor retrieves logger cursor.
 func (db *Database) GetJournalCursor() (cursor string, err error) {
-	stmt, err := db.sql.Prepare("SELECT cursor FROM config")
-	if err != nil {
-		return cursor, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow().Scan(&cursor)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return cursor, ErrNotExist
-		}
-
-		return cursor, aoserrors.Wrap(err)
+	if err = db.getDataFromQuery("SELECT cursor FROM config", &cursor); err != nil {
+		return cursor, err
 	}
 
 	return cursor, nil
 }
 
-// AddLayer add layer to layers table.
-func (db *Database) AddLayer(digest, layerID, path, osVersion, vendorVersion, description string,
-	aosVersion uint64) (err error) {
-	stmt, err := db.sql.Prepare("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?)")
+// GetOverrideEnvVars returns override env vars.
+func (db *Database) GetOverrideEnvVars() (vars []cloudprotocol.EnvVarsInstanceInfo, err error) {
+	var textEnvVars string
+
+	if err = db.getDataFromQuery("SELECT envvars FROM config", &textEnvVars); err != nil {
+		return vars, err
+	}
+
+	if textEnvVars == "" {
+		return vars, nil
+	}
+
+	if err = json.Unmarshal([]byte(textEnvVars), &vars); err != nil {
+		return vars, aoserrors.Wrap(err)
+	}
+
+	return vars, nil
+}
+
+// SetOverrideEnvVars updates override env vars.
+func (db *Database) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error {
+	rowVars, err := json.Marshal(envVarsInfo)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
-	defer stmt.Close()
 
-	_, err = stmt.Exec(digest, layerID, path, osVersion, vendorVersion, description, aosVersion)
+	return db.executeQuery("UPDATE config SET envvars = ?", string(rowVars))
+}
 
-	return aoserrors.Wrap(err)
+// AddLayer add layer to layers table.
+func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
+	return db.executeQuery("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		layer.Digest, layer.LayerID, layer.Path, layer.OSVersion, layer.VendorVersion,
+		layer.Description, layer.AosVersion, layer.Timestamp, layer.Cached, layer.Size)
 }
 
 // DeleteLayerByDigest remove layer from DB by digest.
 func (db *Database) DeleteLayerByDigest(digest string) (err error) {
-	stmt, err := db.sql.Prepare("DELETE FROM layers WHERE digest = ?")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(digest)
-
-	return aoserrors.Wrap(err)
-}
-
-// GetLayerPathByDigest return layer installation path by digest.
-func (db *Database) GetLayerPathByDigest(digest string) (path string, err error) {
-	stmt, err := db.sql.Prepare("SELECT path FROM layers WHERE digest = ?")
-	if err != nil {
-		return path, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(digest).Scan(&path)
-	if errors.Is(err, sql.ErrNoRows) {
-		return path, ErrNotExist
+	if err = db.executeQuery("DELETE FROM layers WHERE digest = ?", digest); errors.Is(err, errNotExist) {
+		return nil
 	}
 
-	if err != nil {
-		return path, aoserrors.Wrap(err)
-	}
-
-	return path, nil
+	return err
 }
 
 // GetLayersInfo get all installed layers.
-func (db *Database) GetLayersInfo() (layersList []*pb.LayerStatus, err error) {
-	rows, err := db.sql.Query("SELECT digest, layerId, aosVersion FROM layers ")
-	if err != nil {
-		return layersList, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		layer := pb.LayerStatus{}
-
-		if err = rows.Scan(&layer.Digest, &layer.LayerId, &layer.AosVersion); err != nil {
-			return layersList, aoserrors.Wrap(err)
-		}
-
-		layersList = append(layersList, &layer)
-	}
-
-	return layersList, aoserrors.Wrap(rows.Err())
+func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
+	return db.getLayersFromQuery("SELECT * FROM layers")
 }
 
 // GetLayerInfoByDigest returns layers information by layer digest.
-func (db *Database) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	stmt, err := db.sql.Prepare("SELECT layerId, aosVersion FROM layers WHERE digest = ?")
+func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.LayerInfo, err error) {
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM layers WHERE digest = \"%s\"", digest),
+		&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+		&layer.VendorVersion, &layer.Description,
+		&layer.AosVersion, &layer.Timestamp, &layer.Cached, &layer.Size); err != nil {
+		if errors.Is(err, errNotExist) {
+			return layer, layermanager.ErrNotExist
+		}
+
+		return layer, err
+	}
+
+	return layer, nil
+}
+
+// SetLayerTimestamp sets timestamp for the layer.
+func (db *Database) SetLayerTimestamp(digest string, timestamp time.Time) error {
+	if err := db.executeQuery("UPDATE layers SET timestamp = ? WHERE digest = ?",
+		timestamp, digest); errors.Is(err, errNotExist) {
+		return layermanager.ErrNotExist
+	}
+
+	return nil
+}
+
+// SetLayerCached sets cached status for the layer.
+func (db *Database) SetLayerCached(digest string, cached bool) (err error) {
+	if err = db.executeQuery("UPDATE layers SET cached = ? WHERE digest = ?",
+		cached, digest); errors.Is(err, errNotExist) {
+		return layermanager.ErrNotExist
+	}
+
+	return err
+}
+
+// AddInstance adds instance information to db.
+func (db *Database) AddInstance(instance launcher.InstanceInfo) error {
+	return db.executeQuery("INSERT INTO instances values(?, ?, ?, ?, ?, ?, ?, ?)",
+		instance.InstanceID, instance.ServiceID, instance.SubjectID, instance.Instance,
+		instance.AosVersion, instance.UnitSubject, instance.Running, instance.UID)
+}
+
+// UpdateInstance updates instance information in db.
+func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
+	if err = db.executeQuery(
+		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, aosVersion = ?, unitSubject = ?, running = ?,
+		 uid = ? WHERE instanceID = ?`,
+		instance.ServiceID, instance.SubjectID, instance.Instance, instance.AosVersion, instance.UnitSubject,
+		instance.Running, instance.UID, instance.InstanceID); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(launcher.ErrNotExist)
+	}
+
+	return err
+}
+
+// RemoveInstance removes instance information from db.
+func (db *Database) RemoveInstance(instanceID string) (err error) {
+	if err = db.executeQuery(
+		"DELETE FROM instances WHERE instanceID = ?", instanceID); errors.Is(err, errNotExist) {
+		return nil
+	}
+
+	return err
+}
+
+// GetInstanceByIdent returns instance information by serviceID + subjectID + instance.
+func (db *Database) GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (
+	instance launcher.InstanceInfo, err error,
+) {
+	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE serviceID = ? AND subjectID = ? AND instance = ?",
+		instanceIdent.ServiceID, instanceIdent.SubjectID, instanceIdent.Instance)
+}
+
+// GetInstanceByID returns instance information by instanceID.
+func (db *Database) GetInstanceByID(instanceID string) (instance launcher.InstanceInfo, err error) {
+	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
+}
+
+// GetInstanceInfoByID returns instance ident and service aos version by instanceID.
+func (db *Database) GetInstanceInfoByID(
+	instanceID string,
+) (ident cloudprotocol.InstanceIdent, aosVersion uint64, err error) {
+	instance, err := db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
 	if err != nil {
-		return layer, aoserrors.Wrap(err) // nolint
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(digest).Scan(&layer.LayerId, &layer.AosVersion)
-	if errors.Is(err, sql.ErrNoRows) {
-		return layer, ErrNotExist // nolint
+		return ident, 0, err
 	}
 
+	return instance.InstanceIdent, instance.AosVersion, nil
+}
+
+// GetAllInstances returns all instance.
+func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances")
+}
+
+// GetRunningInstances returns all running instances.
+func (db *Database) GetRunningInstances() (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE running = 1")
+}
+
+// GetSubjectInstances returns instances by subject ID.
+func (db *Database) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE subjectID = ?", subjectID)
+}
+
+// GetServiceInstances returns instances by service ID.
+func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.InstanceInfo, err error) {
+	return db.getInstancesFromQuery("SELECT * FROM instances WHERE serviceID = ?", serviceID)
+}
+
+// GetInstanceIDs returns instance ids by filter.
+func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instances []string, err error) {
+	var subjectFiler, instanceFiler string
+
+	if filter.SubjectID != nil {
+		subjectFiler = fmt.Sprintf(" AND subjectID = \"%s\"", *filter.SubjectID)
+	}
+
+	if filter.Instance != nil {
+		instanceFiler = fmt.Sprintf(" AND instance = %d", *filter.Instance)
+	}
+
+	serviceInstances, err := db.getInstancesFromQuery(
+		fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
+			filter.ServiceID, subjectFiler, instanceFiler))
 	if err != nil {
-		return layer, aoserrors.Wrap(err) // nolint
+		return instances, aoserrors.Wrap(err)
 	}
 
-	layer.Digest = digest
+	for _, value := range serviceInstances {
+		instances = append(instances, value.InstanceID)
+	}
 
-	return layer, nil // nolint
+	return instances, nil
+}
+
+// GetStorageStateInfoByID returns storage and state info by instance ID.
+func (db *Database) GetStorageStateInfoByID(instanceID string) (info storagestate.StorageStateInstanceInfo, err error) {
+	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM storagestate WHERE instanceID = \"%s\"", instanceID),
+		&instanceID, &info.StorageQuota, &info.StateQuota, &info.StateChecksum); err != nil {
+		if errors.Is(err, errNotExist) {
+			return info, storagestate.ErrNotExist
+		}
+
+		return info, err
+	}
+
+	return info, nil
+}
+
+// AddStorageStateInfo adds storage and state info with instance ID.
+func (db *Database) AddStorageStateInfo(instanceID string, info storagestate.StorageStateInstanceInfo) error {
+	return db.executeQuery("INSERT INTO storagestate values(?, ?, ?, ?)",
+		instanceID, info.StorageQuota, info.StateQuota, info.StateChecksum)
+}
+
+// SetStorageStateQuotasByID sets state storage info by instance ID.
+func (db *Database) SetStorageStateQuotasByID(instanceID string, storageQuota, stateQuota uint64) (err error) {
+	if err = db.executeQuery("UPDATE storagestate SET storageQuota = ?, stateQuota =?  WHERE instanceID = ?",
+		storageQuota, stateQuota, instanceID); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(storagestate.ErrNotExist)
+	}
+
+	return err
+}
+
+// SetStateChecksumByID updates state checksum by instance ID.
+func (db *Database) SetStateChecksumByID(instanceID string, checksum []byte) (err error) {
+	if err = db.executeQuery("UPDATE storagestate SET stateChecksum = ? WHERE instanceID = ?",
+		checksum, instanceID); errors.Is(err, errNotExist) {
+		return aoserrors.Wrap(storagestate.ErrNotExist)
+	}
+
+	return err
+}
+
+// RemoveStorageStateInfoByID removes storage and state info by instance ID.
+func (db *Database) RemoveStorageStateInfoByID(instanceID string) (err error) {
+	if err = db.executeQuery(
+		"DELETE FROM storagestate WHERE instanceID = ?", instanceID); errors.Is(err, errNotExist) {
+		return nil
+	}
+
+	return err
 }
 
 // Close closes database.
@@ -778,32 +487,31 @@ func (db *Database) Close() {
 	db.sql.Close()
 }
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Private
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (db *Database,
-	err error) {
+func newDatabase(name string, migrationPath string, mergedMigrationPath string, version uint) (*Database, error) {
 	log.WithField("name", name).Debug("Open database")
 
 	// Check and create db path
-	if _, err = os.Stat(filepath.Dir(name)); err != nil {
+	if _, err := os.Stat(filepath.Dir(name)); err != nil {
 		if !os.IsNotExist(err) {
-			return db, aoserrors.Wrap(err)
+			return nil, aoserrors.Wrap(err)
 		}
 
-		if err = os.MkdirAll(filepath.Dir(name), 0755); err != nil {
-			return db, aoserrors.Wrap(err)
+		if err = os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 
 	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
 		name, busyTimeout, journalMode, syncMode))
 	if err != nil {
-		return db, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
 
-	db = &Database{sqlite}
+	db := &Database{sqlite}
 
 	defer func() {
 		if err != nil {
@@ -843,16 +551,20 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 		return db, aoserrors.Wrap(err)
 	}
 
-	if err := db.createUsersTable(); err != nil {
-		return db, aoserrors.Wrap(err)
-	}
-
 	if err := db.createTrafficMonitorTable(); err != nil {
 		return db, aoserrors.Wrap(err)
 	}
 
 	if err := db.createLayersTable(); err != nil {
 		return db, aoserrors.Wrap(err)
+	}
+
+	if err := db.createInstancesTable(); err != nil {
+		return db, err
+	}
+
+	if err := db.createStorageStateTable(); err != nil {
+		return db, err
 	}
 
 	return db, nil
@@ -885,14 +597,16 @@ func (db *Database) createConfigTable() (err error) {
 	if _, err = db.sql.Exec(
 		`CREATE TABLE config (
 			operationVersion INTEGER,
-			cursor TEXT)`); err != nil {
+			cursor TEXT,
+			envvars TEXT)`); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	if _, err = db.sql.Exec(
 		`INSERT INTO config (
 			operationVersion,
-			cursor) values(?, ?)`, launcher.OperationVersion, ""); err != nil {
+			cursor,
+			envvars) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -902,32 +616,18 @@ func (db *Database) createConfigTable() (err error) {
 func (db *Database) createServiceTable() (err error) {
 	log.Info("Create service table")
 
-	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL PRIMARY KEY,
-															   aosVersion INTEGER,															   
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL ,
+															   aosVersion INTEGER,
 															   serviceProvider TEXT,
-															   path TEXT,
-															   unit TEXT,
-															   uid INTEGER,
-															   gid INTEGER,															   
-															   state INTEGER,															   
-															   startat TIMESTAMP,															   
-															   alertRules TEXT,															   														   
-															   vendorVersion TEXT,
 															   description TEXT,
-															   manifestDigest BLOB)`)
-
-	return aoserrors.Wrap(err)
-}
-
-func (db *Database) createUsersTable() (err error) {
-	log.Info("Create users table")
-
-	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS users (users TEXT NOT NULL,
-															serviceid TEXT NOT NULL,
-															storageFolder TEXT,
-															stateCheckSum BLOB,
-															overrideEnvVars TEXT,
-															PRIMARY KEY(users, serviceid))`)
+															   imagePath TEXT,
+															   gid INTEGER,
+															   manifestDigest BLOB,
+															   isActive INTEGER,
+															   cached INTEGER,
+															   timestamp TIMESTAMP,
+															   size INTEGER,
+															   PRIMARY KEY(id, aosVersion))`)
 
 	return aoserrors.Wrap(err)
 }
@@ -951,7 +651,36 @@ func (db *Database) createLayersTable() (err error) {
 															 osVersion TEXT,
 															 vendorVersion TEXT,
 															 description TEXT,
-															 aosVersion INTEGER)`)
+															 aosVersion INTEGER,
+															 timestamp TIMESTAMP,
+															 cached INTEGER,
+															 size INTEGER)`)
+
+	return aoserrors.Wrap(err)
+}
+
+func (db *Database) createInstancesTable() (err error) {
+	log.Info("Create instances table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS instances (instanceID TEXT NOT NULL PRIMARY KEY,
+																serviceID TEXT,
+																subjectID TEXT,
+																instance INTEGER,
+																aosVersion INTEGER,
+																unitSubject TEXT,
+																running INTEGER,
+																uid INTEGER)`)
+
+	return aoserrors.Wrap(err)
+}
+
+func (db *Database) createStorageStateTable() (err error) {
+	log.Info("Create storagestate table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS storagestate (instanceID TEXT NOT NULL PRIMARY KEY,
+																   storageQuota INTEGER,
+																   stateQuota INTEGER,
+																   stateChecksum BLOB)`)
 
 	return aoserrors.Wrap(err)
 }
@@ -962,14 +691,158 @@ func (db *Database) removeAllServices() (err error) {
 	return aoserrors.Wrap(err)
 }
 
-func (db *Database) removeAllUsers() (err error) {
-	_, err = db.sql.Exec("DELETE FROM users")
-
-	return aoserrors.Wrap(err)
-}
-
 func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
 	return aoserrors.Wrap(err)
+}
+
+func (db *Database) executeQuery(query string, args ...interface{}) error {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(args...)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count == 0 {
+		return aoserrors.Wrap(errNotExist)
+	}
+
+	return nil
+}
+
+func (db *Database) getInstanceInfoFromQuery(
+	query string, args ...interface{},
+) (instance launcher.InstanceInfo, err error) {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return instance, aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	if err := stmt.QueryRow(args...).Scan(
+		&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
+		&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return instance, aoserrors.Wrap(launcher.ErrNotExist)
+		}
+
+		return instance, aoserrors.Wrap(err)
+	}
+
+	return instance, nil
+}
+
+func (db *Database) getInstancesFromQuery(
+	query string, args ...interface{},
+) (instances []launcher.InstanceInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return instances, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var instance launcher.InstanceInfo
+
+		if err = rows.Scan(
+			&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
+			&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+			return instances, aoserrors.Wrap(err)
+		}
+
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
+func (db *Database) getDataFromQuery(query string, result ...interface{}) error {
+	stmt, err := db.sql.Prepare(query)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	if err = stmt.QueryRow().Scan(result...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errNotExist
+		}
+
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (db *Database) getServicesFromQuery(
+	query string, args ...interface{},
+) (services []servicemanager.ServiceInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return services, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var service servicemanager.ServiceInfo
+
+		if err = rows.Scan(
+			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive,
+			&service.Cached, &service.Timestamp, &service.Size); err != nil {
+			return services, aoserrors.Wrap(err)
+		}
+
+		services = append(services, service)
+	}
+
+	return services, nil
+}
+
+func (db *Database) getLayersFromQuery(
+	query string, args ...interface{},
+) (layers []layermanager.LayerInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return layers, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var layer layermanager.LayerInfo
+
+		if err = rows.Scan(
+			&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+			&layer.VendorVersion, &layer.Description, &layer.AosVersion, &layer.Timestamp, &layer.Cached, &layer.Size,
+		); err != nil {
+			return layers, aoserrors.Wrap(err)
+		}
+
+		layers = append(layers, layer)
+	}
+
+	return layers, nil
 }

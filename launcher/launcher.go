@@ -15,21 +15,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package launcher provides set of API to controls services lifecycle
 package launcher
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
+	"errors"
 	"io/ioutil"
-	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,470 +34,581 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
-	"github.com/aoscloud/aos_common/image"
-	"github.com/coreos/go-systemd/v22/dbus"
-	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/resourcemonitor"
+	"github.com/aoscloud/aos_common/utils/action"
+	"github.com/aoscloud/aos_common/utils/fs"
+	"github.com/google/uuid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/monitoring"
+	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/networkmanager"
-	"github.com/aoscloud/aos_servicemanager/platform"
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
-	"github.com/aoscloud/aos_servicemanager/utils/action"
-	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
+	"github.com/aoscloud/aos_servicemanager/runner"
+	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aoscloud/aos_servicemanager/storagestate"
+	"github.com/aoscloud/aos_servicemanager/utils/uidgidpool"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
+
+const maxParallelInstanceActions = 32
+
+const (
+	hostFSWiteoutsDir      = "hostfs/whiteouts"
+	runtimeConfigFile      = "config.json"
+	instanceRootFS         = "rootfs"
+	instanceMountPointsDir = "mounts"
+	instanceStateFile      = "/state.dat"
+	upperDirName           = "upperdir"
+	workDirName            = "workdir"
+)
+
+/***********************************************************************************************************************
+ * Types
+ **********************************************************************************************************************/
+
+// Storage storage interface.
+type Storage interface {
+	AddInstance(instance InstanceInfo) error
+	UpdateInstance(instance InstanceInfo) error
+	RemoveInstance(instanceID string) error
+	GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error)
+	GetInstanceByID(instanceID string) (InstanceInfo, error)
+	GetAllInstances() ([]InstanceInfo, error)
+	GetRunningInstances() ([]InstanceInfo, error)
+	GetSubjectInstances(subjectID string) ([]InstanceInfo, error)
+	GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error)
+	SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error
+}
+
+// ServiceProvider service provider.
+type ServiceProvider interface {
+	GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error)
+	GetImageParts(service servicemanager.ServiceInfo) (servicemanager.ImageParts, error)
+	ValidateService(service servicemanager.ServiceInfo) error
+	ApplyService(service servicemanager.ServiceInfo) error
+	RevertService(service servicemanager.ServiceInfo) error
+	UseService(serviceID string, aosVersion uint64) error
+}
+
+// LayerProvider layer provider.
+type LayerProvider interface {
+	GetLayerInfoByDigest(digest string) (layermanager.LayerInfo, error)
+}
+
+// InstanceRunner interface to start/stop service instances.
+type InstanceRunner interface {
+	StartInstance(instanceID, runtimeDir string, params runner.RunParameters) runner.InstanceStatus
+	StopInstance(instanceID string) error
+	InstanceStatusChannel() <-chan []runner.InstanceStatus
+}
+
+// ResourceManager provides API to validate, request and release resources.
+type ResourceManager interface {
+	GetDeviceInfo(device string) (aostypes.DeviceInfo, error)
+	GetResourceInfo(resource string) (aostypes.ResourceInfo, error)
+	AllocateDevice(device, instanceID string) error
+	ReleaseDevice(device, instanceID string) error
+	ReleaseDevices(instanceID string) error
+	GetDeviceInstances(name string) (instanceIDs []string, err error)
+}
+
+// NetworkManager provides network access.
+type NetworkManager interface {
+	GetNetnsPath(instanceID string) string
+	AddInstanceToNetwork(instanceID, networkID string, params networkmanager.NetworkParams) error
+	RemoveInstanceFromNetwork(instanceID, networkID string) error
+}
+
+// InstanceRegistrar provides API to register/unregister instance.
+type InstanceRegistrar interface {
+	RegisterInstance(
+		instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+	) (secret string, err error)
+	UnregisterInstance(instance cloudprotocol.InstanceIdent) error
+}
+
+// StorageStateProvider provides API for instance storage/state.
+type StorageStateProvider interface {
+	Setup(
+		instanceID string, params storagestate.SetupParams,
+	) (storagePath, statePath string, stateChecksum []byte, err error)
+	Cleanup(instanceID string) error
+	Remove(instanceID string) error
+	StateChangedChannel() <-chan storagestate.StateChangedInfo
+}
+
+// InstanceMonitor provides API to monitor instance parameters.
+type InstanceMonitor interface {
+	StartInstanceMonitor(instanceID string, params resourcemonitor.ResourceMonitorParams) error
+	StopInstanceMonitor(instanceID string) error
+}
+
+// AlertSender provides interface to send alerts.
+type AlertSender interface {
+	SendAlert(alert cloudprotocol.AlertItem)
+}
+
+// InstanceInfo instance information.
+type InstanceInfo struct {
+	cloudprotocol.InstanceIdent
+	AosVersion  uint64
+	InstanceID  string
+	UnitSubject bool
+	Running     bool
+	UID         int
+}
+
+// RuntimeStatus runtime status info.
+type RuntimeStatus struct {
+	RunStatus    *RunInstancesStatus
+	UpdateStatus *UpdateInstancesStatus
+}
+
+// RunInstancesStatus run instances status.
+type RunInstancesStatus struct {
+	UnitSubjects  []string
+	Instances     []cloudprotocol.InstanceStatus
+	ErrorServices []cloudprotocol.ServiceStatus
+}
+
+// UpdateInstancesStatus update instances status.
+type UpdateInstancesStatus struct {
+	Instances []cloudprotocol.InstanceStatus
+}
+
+// Launcher launcher instance.
+type Launcher struct {
+	sync.Mutex
+
+	storage              Storage
+	serviceProvider      ServiceProvider
+	layerProvider        LayerProvider
+	instanceRunner       InstanceRunner
+	resourceManager      ResourceManager
+	networkManager       NetworkManager
+	instanceRegistrar    InstanceRegistrar
+	storageStateProvider StorageStateProvider
+	instanceMonitor      InstanceMonitor
+	alertSender          AlertSender
+
+	config                 *config.Config
+	currentSubjects        []string
+	runtimeStatusChannel   chan RuntimeStatus
+	cancelFunction         context.CancelFunc
+	actionHandler          *action.Handler
+	runMutex               sync.Mutex
+	runInstancesInProgress bool
+	currentInstances       map[string]*instanceInfo
+	currentServices        map[string]*serviceInfo
+	errorServices          []cloudprotocol.ServiceStatus
+	uidPool                *uidgidpool.IdentifierPool
+	currentEnvVars         []cloudprotocol.EnvVarsInstanceInfo
+}
+
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
 
 // OperationVersion defines current operation version
 // IMPORTANT: if new functionality doesn't allow existing services to work
 // properly, this value should be increased. It will force to remove all
 // services and their storages before first start.
-const OperationVersion = 7
+const OperationVersion = 8
 
-// Service state
-const (
-	stateInit = iota
-	stateRunning
-	stateStopped
+// Mount, unmount instance FS functions.
+// nolint:gochecknoglobals
+var (
+	MountFunc   = fs.OverlayMount
+	UnmountFunc = fs.Umount
 )
 
-const (
-	serviceDir = "services" // services directory
-
-	aosSecretEnv = "SERVICE_SECRET"
-
-	ociRuntimeConfigFile = "config.json"
-	ociImageConfigFile   = "image.json"
-	aosServiceConfigFile = "service.json"
+var (
+	// ErrNotExist not exist instance error.
+	ErrNotExist = errors.New("instance not exist")
+	// ErrNoRuntimeStatus no current runtime status error.
+	ErrNoRuntimeStatus = errors.New("no runtime status")
 )
 
-const (
-	stateChannelSize = 32
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
+
+// nolint:gochecknoglobals // used to be overridden in unit tests
+var (
+	// RuntimeDir specifies directory where instance runtime spec is stored.
+	RuntimeDir = "/run/aos/runtime"
+	// CheckTLLsPeriod specified period different TTL timers are checked with.
+	CheckTLLsPeriod = 1 * time.Hour
 )
 
-const serviceTemplate = `# This is template file used to launch AOS services
-# Known variables:
-# * ${ID}            - service id
-# * ${SERVICEPATH}   - path to service dir
-# * ${RUNNER}        - path to runner
-[Unit]
-Description=AOS Service
-After=network.target
-StartLimitIntervalSec=30
-StartLimitBurst=3
-
-
-[Service]
-Type=forking
-Restart=always
-RestartSec=1
-ExecStartPre=${RUNNER} delete -f ${ID}
-ExecStart=${RUNNER} run -d --pid-file ${SERVICEPATH}/.pid -b ${SERVICEPATH} ${ID}
-
-ExecStop=${RUNNER} kill ${ID} SIGKILL
-ExecStopPost=${RUNNER} delete -f ${ID}
-PIDFile=${SERVICEPATH}/.pid
-SuccessExitStatus=SIGKILL
-
-[Install]
-WantedBy=multi-user.target
-`
-
-const serviceTemplateFile = "template.service"
-
-const (
-	unitStatusFailed = "failed"
-	unitStatusActive = "active"
-)
-
-const downloadDirName = "download"
-
-const (
-	hostfsWiteoutsDir = "hostfs/whiteouts"
-)
-
-const (
-	serviceMergedDir      = "merged"
-	serviceRootfsDir      = "rootfs"
-	serviceMountPointsDir = "mounts"
-)
-
-const defaultServiceProvider = "default"
-
-const errNotLoaded = "not loaded"
-
-const (
-	ttlValidatePeriod = 1 * time.Minute
-	ttlRemoveServices = 24 * time.Hour
-)
-
-/*******************************************************************************
- * Vars
- ******************************************************************************/
-
-var defaultHostfsBinds = []string{"bin", "sbin", "lib", "lib64", "usr"}
-
-/*******************************************************************************
- * Types
- ******************************************************************************/
-
-// Launcher instance
-type Launcher struct {
-	// ServiceStateChannel used to notify about new service state
-	ServiceStateChannel chan *pb.SMNotifications
-
-	serviceProvider  ServiceProvider
-	monitor          ServiceMonitor
-	network          NetworkProvider
-	serviceRegistrar ServiceRegistrar
-	devicemanager    DeviceManagement
-	systemd          *dbus.Conn
-	config           *config.Config
-	layerProvider    layerProvider
-
-	envVarsProvider *envVarsProvider
-	ttlStopChannel  chan bool
-
-	actionHandler  *action.Handler
-	storageHandler *storageHandler
-	idsPool        *identifierPool
-
-	ttlTicker         *time.Ticker
-	ttlRemoveServices *time.Ticker
-
-	downloadDir string
-
-	users []string
-
-	services map[string]string
-
-	serviceTemplate string
-	runnerPath      string
-
-	usersMutex sync.RWMutex
-
-	sync.Mutex
-}
-
-// Service describes service structure
-type Service struct {
-	ID              string       // service id
-	AosVersion      uint64       // service aosVersion
-	VendorVersion   string       // service vendorVersion
-	ServiceProvider string       // service provider
-	Path            string       // path to service bundle
-	UnitName        string       // systemd unit name
-	UID             uint32       // service userID
-	GID             uint32       // service gid
-	State           ServiceState // service state
-	StartAt         time.Time    // time at which service was started
-	AlertRules      string       // alert rules in json format
-	Description     string       // service description
-	ManifestDigest  []byte       // sha256 of service manifest
-}
-
-// UsersService describes users service structure
-type UsersService struct {
-	Users         []string // user claims
-	ServiceID     string   // service id
-	StorageFolder string   // service storage folder
-	StateChecksum []byte   // service state checksum
-}
-
-// ServiceProvider provides API to create, remove or access services DB
-type ServiceProvider interface {
-	AddService(service Service) (err error)
-	UpdateService(service Service) (err error)
-	RemoveService(serviceID string) (err error)
-	GetService(serviceID string) (service Service, err error)
-	GetServices() (services []Service, err error)
-	GetServiceProviderServices(serviceProvider string) (services []Service, err error)
-	GetServiceByUnitName(unitName string) (service Service, err error)
-	SetServiceState(serviceID string, state ServiceState) (err error)
-	SetServiceStartTime(serviceID string, time time.Time) (err error)
-	AddServiceToUsers(users []string, serviceID string) (err error)
-	RemoveServiceFromUsers(users []string, serviceID string) (err error)
-	GetUsersServices(users []string) (services []Service, err error)
-	RemoveServiceFromAllUsers(serviceID string) (err error)
-	GetUsersService(users []string, serviceID string) (userService UsersService, err error)
-	GetUsersServicesByServiceID(serviceID string) (userServices []UsersService, err error)
-	SetUsersStorageFolder(users []string, serviceID string, storageFolder string) (err error)
-	SetUsersStateChecksum(users []string, serviceID string, checksum []byte) (err error)
-	GetAllOverrideEnvVars() (vars []pb.OverrideEnvVar, err error)
-	UpdateOverrideEnvVars(subjects []string, serviceID string, vars []*pb.EnvVarInfo) (err error)
-}
-
-// ServiceRegistrar provides API to register/unregister service
-type ServiceRegistrar interface {
-	RegisterService(serviceID string, permissions map[string]map[string]string) (secret string, err error)
-	UnregisterService(serviceID string) (err error)
-}
-
-// ServiceMonitor provides API to start/stop service monitoring
-type ServiceMonitor interface {
-	StartMonitorService(serviceID string, monitoringConfig monitoring.ServiceMonitoringConfig) (err error)
-	StopMonitorService(serviceID string) (err error)
-}
-
-// NetworkProvider provides network interface
-type NetworkProvider interface {
-	AddServiceToNetwork(serviceID, spID string, params networkmanager.NetworkParams) (err error)
-	RemoveServiceFromNetwork(serviceID, spID string) (err error)
-	IsServiceInNetwork(serviceID, spID string) (err error)
-	GetServiceIP(serviceID, spID string) (ip string, err error)
-	DeleteNetwork(spID string) (err error)
-}
-
-// DeviceManagement provides API to validate, request and release devices
-type DeviceManagement interface {
-	RequestDeviceResourceByName(name string) (deviceResource resourcemanager.DeviceResource, err error)
-	RequestDevice(device string, serviceID string) (err error)
-	ReleaseDevice(device string, serviceID string) (err error)
-	RequestBoardResourceByName(name string) (boardResource resourcemanager.BoardResource, err error)
-}
-
-// ServiceState service state
-type ServiceState int
-
-type layerProvider interface {
-	GetLayerPathByDigest(layerDigest string) (layerPath string, err error)
-	UninstallLayer(digest string) (err error)
-	GetLayersInfo() (info []*pb.LayerStatus, err error)
-	GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error)
-}
-
-/*******************************************************************************
+/***********************************************************************************************************************
  * Public
- ******************************************************************************/
+ **********************************************************************************************************************/
 
-// New creates new launcher object
-func New(config *config.Config, serviceProvider ServiceProvider,
-	layerProvider layerProvider, monitor ServiceMonitor, network NetworkProvider, devicemanager DeviceManagement,
-	serviceRegistrar ServiceRegistrar) (launcher *Launcher, err error) {
-	log.WithField("runner", config.Runner).Debug("New launcher")
+// New creates new launcher object.
+func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, layerProvider LayerProvider,
+	instanceRunner InstanceRunner, resourceManager ResourceManager, networkManager NetworkManager,
+	instanceRegistrar InstanceRegistrar, storageStateProvider StorageStateProvider, instanceMonitor InstanceMonitor,
+	alertSender AlertSender,
+) (launcher *Launcher, err error) {
+	log.Debug("New launcher")
 
 	launcher = &Launcher{
-		config:           config,
-		serviceProvider:  serviceProvider,
-		layerProvider:    layerProvider,
-		monitor:          monitor,
-		network:          network,
-		devicemanager:    devicemanager,
-		services:         make(map[string]string),
-		serviceRegistrar: serviceRegistrar,
-		idsPool:          &identifierPool{},
-		downloadDir:      path.Join(config.WorkingDir, downloadDirName),
+		storage: storage, serviceProvider: serviceProvider, layerProvider: layerProvider,
+		instanceRunner: instanceRunner, resourceManager: resourceManager, networkManager: networkManager,
+		instanceRegistrar: instanceRegistrar, storageStateProvider: storageStateProvider,
+		instanceMonitor: instanceMonitor, alertSender: alertSender,
+
+		config:               config,
+		actionHandler:        action.New(maxParallelInstanceActions),
+		runtimeStatusChannel: make(chan RuntimeStatus, 1),
+		uidPool:              uidgidpool.NewUserIDPool(),
 	}
 
-	launcher.ServiceStateChannel = make(chan *pb.SMNotifications, stateChannelSize)
+	launcher.fillUIDPool()
 
-	launcher.ttlStopChannel = make(chan bool, 1)
+	ctx, cancelFunction := context.WithCancel(context.Background())
 
-	if launcher.actionHandler, err = action.New(); err != nil {
+	launcher.cancelFunction = cancelFunction
+
+	go launcher.handleChannels(ctx)
+
+	if err = launcher.prepareHostFSDir(); err != nil {
+		return nil, err
+	}
+
+	if err = os.MkdirAll(RuntimeDir, 0o755); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if launcher.storageHandler, err = newStorageHandler(config.StorageDir, serviceProvider,
-		launcher.ServiceStateChannel); err != nil {
-		return nil, aoserrors.Wrap(err)
+	if launcher.currentEnvVars, err = launcher.storage.GetOverrideEnvVars(); err != nil {
+		log.Errorf("Can't get current env vars: %v", err)
 	}
 
-	// Check and create service dir
-	dir := path.Join(config.WorkingDir, serviceDir)
-	if _, err = os.Stat(dir); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, aoserrors.Wrap(err)
-		}
-		if err = os.MkdirAll(dir, 0755); err != nil {
-			return nil, aoserrors.Wrap(err)
-		}
+	// Stop all running instances in case some of them still running on SM start. It could be if SM crashes, etc.
+	if err = launcher.stopRunningInstances(); err != nil {
+		log.Errorf("Stop running instances error: %v", err)
 	}
 
-	// Create systemd connection
-	launcher.systemd, err = dbus.NewSystemConnectionContext(context.Background())
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
+	if err = launcher.removeOutdatedInstances(); err != nil {
+		log.Errorf("Can't remove outdated instances: %v", err)
 	}
-
-	// Get systemd service template
-	launcher.serviceTemplate, err = getSystemdServiceTemplate(config.WorkingDir)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	// Retrieve runner abs path
-	launcher.runnerPath, err = exec.LookPath(config.Runner)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	if launcher.envVarsProvider, err = createEnvVarsProvider(launcher.serviceProvider); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	if err = launcher.prepareHostfsDir(); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	// Create storage dir
-	if err = os.MkdirAll(launcher.config.StorageDir, 0755); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	for _, service := range services {
-		if err = launcher.idsPool.add(service.UID, service.GID); err != nil {
-			log.Errorf("Can't add service UID/GID to pool: %s", err)
-		}
-	}
-
-	if err = launcher.addServicesToSystemd(); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	os.RemoveAll(launcher.downloadDir)
 
 	return launcher, nil
 }
 
-// Close closes launcher
-func (launcher *Launcher) Close() {
+// Close closes launcher.
+func (launcher *Launcher) Close() (err error) {
+	launcher.Lock()
+	defer launcher.Unlock()
+
 	log.Debug("Close launcher")
 
-	launcher.stopCurrentUserServices()
+	launcher.cancelFunction()
+	launcher.stopCurrentInstances()
 
-	launcher.systemd.Close()
+	if removeErr := os.RemoveAll(RuntimeDir); removeErr != nil && err == nil {
+		err = aoserrors.Wrap(removeErr)
+	}
 
-	launcher.storageHandler.Close()
-
-	close(launcher.ttlStopChannel)
+	return err
 }
 
-// GetServiceVersion returns installed version of requested service
-func (launcher *Launcher) GetServiceVersion(id string) (version uint64, err error) {
-	log.WithField("id", id).Debug("Get service version")
+// SendCurrentRuntimeStatus forces launcher to send current runtime status.
+func (launcher *Launcher) SendCurrentRuntimeStatus() error {
+	launcher.Lock()
+	defer launcher.Unlock()
 
-	service, err := launcher.serviceProvider.GetService(id)
-	if err != nil {
-		return version, aoserrors.Wrap(err)
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	// Send current run status only if it is available
+	if launcher.currentInstances == nil {
+		return ErrNoRuntimeStatus
 	}
 
-	version = service.AosVersion
-
-	return version, nil
-}
-
-// InstallService installs and runs service
-func (launcher *Launcher) InstallService(serviceInfo *pb.InstallServiceRequest) (status *pb.ServiceStatus, err error) {
-	log.WithFields(log.Fields{
-		"id":         serviceInfo.GetServiceId(),
-		"aosVersion": serviceInfo.GetAosVersion(),
-	}).Info("Install service")
-
-	status = &pb.ServiceStatus{
-		ServiceId:     serviceInfo.GetServiceId(),
-		AosVersion:    serviceInfo.GetAosVersion(),
-		VendorVersion: serviceInfo.GetVendorVersion(),
-	}
-
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{
-				"id":         serviceInfo.GetServiceId(),
-				"aosVersion": serviceInfo.GetAosVersion(),
-			}).Errorf("Can't install service: %s", err)
-		}
-	}()
-
-	launcher.usersMutex.RLock()
-	defer launcher.usersMutex.RUnlock()
-
-	if !isUsersEqual(launcher.users, serviceInfo.Users.Users) {
-		return status, aoserrors.New("users missmatch")
-	}
-
-	if err = launcher.installService(serviceInfo); err != nil {
-		return status, aoserrors.Wrap(err)
-	}
-
-	userService, err := launcher.serviceProvider.GetUsersService(launcher.users, serviceInfo.GetServiceId())
-	if err != nil {
-		return status, aoserrors.Wrap(err)
-	}
-
-	status.StateChecksum = hex.EncodeToString(userService.StateChecksum)
-
-	log.WithFields(log.Fields{
-		"id":         serviceInfo.GetServiceId(),
-		"aosVersion": serviceInfo.GetAosVersion(),
-	}).Info("Service successfully installed")
-
-	return status, nil
-}
-
-// UninstallService stops and removes service
-func (launcher *Launcher) UninstallService(removeReq *pb.RemoveServiceRequest) (err error) {
-	id := removeReq.GetServiceId()
-
-	log.WithFields(log.Fields{"id": id}).Debug("Uninstall service")
-
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{"id": id}).Errorf("Can't uninstall service: %s", err)
-		}
-	}()
-
-	if !isUsersEqual(launcher.users, removeReq.Users.Users) {
-		return aoserrors.New("users missmatch")
-	}
-
-	service, err := launcher.serviceProvider.GetService(id)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	launcher.usersMutex.RLock()
-	defer launcher.usersMutex.RUnlock()
-
-	if err = launcher.uninstallService(service, removeReq.GetUsers().Users); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	log.WithFields(log.Fields{"id": id}).Info("Service successfully uninstalled")
+	launcher.sendRunInstancesStatuses()
 
 	return nil
 }
 
-// CheckServicesConsistency checks if service folders exist
-func (launcher *Launcher) CheckServicesConsistency() (err error) {
-	// Check for storage folder
-	if _, err = os.Stat(launcher.config.StorageDir); err != nil {
-		log.Error("Can't find storagedir")
-		return aoserrors.Wrap(err)
+// SubjectsChanged notifies launcher that subjects are changed.
+func (launcher *Launcher) SubjectsChanged(subjects []string) error {
+	launcher.Lock()
+	defer launcher.Unlock()
+
+	if subjects == nil {
+		subjects = make([]string, 0)
 	}
 
-	services, err := launcher.serviceProvider.GetServices()
+	if isSubjectsEqual(launcher.currentSubjects, subjects) {
+		return nil
+	}
+
+	log.WithField("subjects", subjects).Info("Subjects changed")
+
+	launcher.currentSubjects = subjects
+
+	runInstances, err := launcher.storage.GetRunningInstances()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, service := range services {
-		if err := launcher.isServiceValid(service); err != nil {
-			log.WithField("id", service.ID).Errorf("Service is invalid: %s", err.Error())
+	// Remove unit subjects instances
+	i := 0
 
-			// try to remove only corrupted service
-			if err := launcher.removeService(service); err != nil {
+	for _, instance := range runInstances {
+		if !instance.UnitSubject {
+			runInstances[i] = instance
+			i++
+		}
+	}
+
+	runInstances = runInstances[:i]
+
+	for _, subject := range subjects {
+		subjectInstances, err := launcher.storage.GetSubjectInstances(subject)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		runInstances = append(runInstances, subjectInstances...)
+	}
+
+	if err := launcher.updateRunningFlags(runInstances); err != nil {
+		return err
+	}
+
+	launcher.runInstances(runInstances)
+
+	return nil
+}
+
+// RunInstances runs desired services instances.
+func (launcher *Launcher) RunInstances(instances []cloudprotocol.InstanceInfo) error {
+	launcher.Lock()
+	defer launcher.Unlock()
+
+	log.Debug("Run instances")
+
+	var runInstances []InstanceInfo
+
+	// Convert cloudprotocol InstanceInfo to internal InstanceInfo
+	for _, item := range instances {
+		for i := uint64(0); i < item.NumInstances; i++ {
+			// Get instance from current map. If not available, get it from storage. Otherwise, generate new instance.
+			instanceIdent := cloudprotocol.InstanceIdent{
+				ServiceID: item.ServiceID,
+				SubjectID: item.SubjectID,
+				Instance:  i,
+			}
+
+			instance, err := launcher.getCurrentInstance(instanceIdent)
+			if err != nil {
+				if instance, err = launcher.storage.GetInstanceByIdent(instanceIdent); err != nil {
+					if instance, err = launcher.createNewInstance(instanceIdent); err != nil {
+						return err
+					}
+				}
+			}
+
+			instance.Running = true
+
+			if err := launcher.storage.UpdateInstance(instance); err != nil {
+				return aoserrors.Wrap(err)
+			}
+
+			runInstances = append(runInstances, instance)
+		}
+	}
+
+	if err := launcher.updateRunningFlags(runInstances); err != nil {
+		return err
+	}
+
+	launcher.runInstances(runInstances)
+
+	return nil
+}
+
+// RestartInstances restarts all running instances.
+func (launcher *Launcher) RestartInstances() error {
+	launcher.Lock()
+	defer launcher.Unlock()
+
+	launcher.stopCurrentInstances()
+
+	runInstances := make([]InstanceInfo, 0, len(launcher.currentInstances))
+
+	for _, instance := range launcher.currentInstances {
+		runInstances = append(runInstances, instance.InstanceInfo)
+	}
+
+	launcher.runInstances(runInstances)
+
+	return nil
+}
+
+// OverrideEnvVars overrides service instance environment variables.
+func (launcher *Launcher) OverrideEnvVars(
+	envVarsInfo []cloudprotocol.EnvVarsInstanceInfo,
+) ([]cloudprotocol.EnvVarsInstanceStatus, error) {
+	launcher.Lock()
+	defer launcher.Unlock()
+
+	envVarsStatus := launcher.setEnvVars(envVarsInfo)
+
+	launcher.updateInstancesEnvVars()
+
+	return envVarsStatus, nil
+}
+
+// RuntimeStatusChannel returns runtime status channel.
+func (launcher *Launcher) RuntimeStatusChannel() <-chan RuntimeStatus {
+	return launcher.runtimeStatusChannel
+}
+
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
+
+func (launcher *Launcher) fillUIDPool() {
+	instances, err := launcher.storage.GetAllInstances()
+	if err != nil {
+		log.Errorf("Can't fill UID pool: %v", err)
+	}
+
+	for _, instance := range instances {
+		if err = launcher.uidPool.AddID(instance.UID); err != nil {
+			log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Errorf("Can't add UID to pool: %v", err)
+		}
+	}
+}
+
+func (launcher *Launcher) handleChannels(ctx context.Context) {
+	for {
+		select {
+		case instances := <-launcher.instanceRunner.InstanceStatusChannel():
+			launcher.updateInstancesStatuses(instances)
+
+		case stateChangedInfo := <-launcher.storageStateProvider.StateChangedChannel():
+			launcher.updateInstanceState(stateChangedInfo)
+
+		case <-time.After(CheckTLLsPeriod):
+			launcher.Lock()
+			launcher.updateInstancesEnvVars()
+			launcher.Unlock()
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (launcher *Launcher) updateInstancesStatuses(instances []runner.InstanceStatus) {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	updateInstancesStatus := &UpdateInstancesStatus{Instances: make([]cloudprotocol.InstanceStatus, 0, len(instances))}
+
+	for _, instanceStatus := range instances {
+		currentInstance, ok := launcher.currentInstances[instanceStatus.InstanceID]
+		if !ok {
+			log.WithField("instanceID", instanceStatus.InstanceID).Warn("Not running instance status received")
+			continue
+		}
+
+		if currentInstance.runStatus.State != instanceStatus.State {
+			currentInstance.setRunStatus(instanceStatus)
+
+			if !launcher.runInstancesInProgress {
+				updateInstancesStatus.Instances = append(updateInstancesStatus.Instances,
+					currentInstance.getCloudStatus())
+			}
+		}
+	}
+
+	if len(updateInstancesStatus.Instances) > 0 {
+		launcher.runtimeStatusChannel <- RuntimeStatus{UpdateStatus: updateInstancesStatus}
+	}
+}
+
+func (launcher *Launcher) updateInstanceState(stateChangedIngo storagestate.StateChangedInfo) {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	instance, ok := launcher.currentInstances[stateChangedIngo.InstanceID]
+	if !ok {
+		log.WithField("instanceID", stateChangedIngo.InstanceID).Errorf("Unknown instance state changed")
+
+		return
+	}
+
+	if !bytes.Equal(stateChangedIngo.Checksum, instance.stateChecksum) {
+		log.WithFields(log.Fields{
+			"instanceID": stateChangedIngo.InstanceID,
+			"checksum":   hex.EncodeToString(stateChangedIngo.Checksum),
+		}).Debugf("Instance state changed")
+
+		instance.stateChecksum = stateChangedIngo.Checksum
+	}
+}
+
+func (launcher *Launcher) createNewInstance(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error) {
+	instance := InstanceInfo{
+		InstanceIdent: instanceIdent,
+		InstanceID:    uuid.New().String(),
+		UnitSubject:   launcher.isCurrentSubject(instanceIdent.SubjectID),
+	}
+
+	uid, err := launcher.uidPool.GetFreeID()
+	if err != nil {
+		return instance, aoserrors.Wrap(err)
+	}
+
+	instance.UID = uid
+
+	if err := launcher.storage.AddInstance(instance); err != nil {
+		return instance, aoserrors.Wrap(err)
+	}
+
+	return instance, nil
+}
+
+func (launcher *Launcher) updateRunningFlags(runInstances []InstanceInfo) error {
+	// Clear running flag for not running instances
+	currentRunInstances, err := launcher.storage.GetRunningInstances()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+currentLoop:
+	for _, currentInstance := range currentRunInstances {
+		for _, runInstance := range runInstances {
+			if currentInstance.InstanceIdent == runInstance.InstanceIdent {
+				continue currentLoop
+			}
+		}
+
+		currentInstance.Running = false
+
+		if err := launcher.storage.UpdateInstance(currentInstance); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	// Set running flag for running instances
+	for _, runInstance := range runInstances {
+		if !runInstance.Running {
+			runInstance.Running = true
+
+			if err := launcher.storage.UpdateInstance(runInstance); err != nil {
 				return aoserrors.Wrap(err)
 			}
 		}
@@ -509,486 +617,644 @@ func (launcher *Launcher) CheckServicesConsistency() (err error) {
 	return nil
 }
 
-// GetServicesInfo returns information about all installed services
-func (launcher *Launcher) GetServicesInfo() (info []*pb.ServiceStatus, err error) {
-	log.Debug("Get services info")
+func (launcher *Launcher) runInstances(runInstances []InstanceInfo) {
+	defer func() {
+		launcher.runMutex.Lock()
+		defer launcher.runMutex.Unlock()
 
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return info, aoserrors.Wrap(err)
+		launcher.runInstancesInProgress = false
+		launcher.sendRunInstancesStatuses()
+	}()
+
+	launcher.runMutex.Lock()
+
+	launcher.runInstancesInProgress = true
+
+	if launcher.currentInstances == nil {
+		launcher.currentInstances = make(map[string]*instanceInfo)
 	}
 
-	info = make([]*pb.ServiceStatus, len(services))
+	launcher.cacheCurrentServices(runInstances)
 
-	for i, service := range services {
-		info[i] = &pb.ServiceStatus{ServiceId: service.ID, AosVersion: service.AosVersion}
-	}
+	stopInstances := launcher.getStopInstances(runInstances)
+	startInstances := launcher.getStartInstances(runInstances)
 
-	return info, nil
+	launcher.runMutex.Unlock()
+
+	launcher.stopInstances(stopInstances)
+	launcher.startInstances(startInstances)
+
+	launcher.checkNewServices()
 }
 
-func (launcher *Launcher) GetServicesLayersInfoByUsers(users []string) (servicesInfo []*pb.ServiceStatus,
-	layersInfo []*pb.LayerStatus, err error) {
-	log.Debug("Get services and layers info by users")
+func (launcher *Launcher) checkNewServices() {
+	launcher.errorServices = nil
 
-	services, err := launcher.serviceProvider.GetUsersServices(users)
-	if err != nil {
-		return servicesInfo, layersInfo, aoserrors.Wrap(err)
+serviceLoop:
+	for _, service := range launcher.currentServices {
+		if service.IsActive {
+			continue
+		}
+
+		for _, instance := range launcher.currentInstances {
+			if instance.ServiceID == service.ServiceID &&
+				instance.runStatus.State == cloudprotocol.InstanceStateActive {
+				log.WithFields(log.Fields{"serviceID": service.ServiceID}).Debug("Apply new service")
+
+				if err := launcher.serviceProvider.ApplyService(service.ServiceInfo); err != nil {
+					log.WithField("serviceID", service.ServiceID).Errorf("Can't apply service: %v", err)
+
+					launcher.errorServices = append(launcher.errorServices,
+						service.cloudStatus(cloudprotocol.ErrorStatus, err))
+				}
+
+				continue serviceLoop
+			}
+		}
+
+		log.WithFields(log.Fields{"serviceID": service.ServiceID}).Warn("Revert new service")
+
+		if err := launcher.serviceProvider.RevertService(service.ServiceInfo); err != nil {
+			log.WithField("serviceID", service.ServiceID).Errorf("Can't revert service: %v", err)
+
+			launcher.errorServices = append(launcher.errorServices,
+				service.cloudStatus(cloudprotocol.ErrorStatus, err))
+
+			continue
+		}
+
+		launcher.errorServices = append(launcher.errorServices,
+			service.cloudStatus(cloudprotocol.ErrorStatus, aoserrors.New("can't start any instances")))
+	}
+}
+
+func (launcher *Launcher) getStopInstances(runInstances []InstanceInfo) []*instanceInfo {
+	var stopInstances []*instanceInfo
+
+stopLoop:
+	for _, currentInstance := range launcher.currentInstances {
+		for _, instance := range runInstances {
+			if instance.InstanceID == currentInstance.InstanceID && currentInstance.service != nil &&
+				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion &&
+				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive {
+				continue stopLoop
+			}
+		}
+
+		delete(launcher.currentInstances, currentInstance.InstanceID)
+		stopInstances = append(stopInstances, currentInstance)
 	}
 
-	servicesInfo = make([]*pb.ServiceStatus, len(services))
+	return stopInstances
+}
 
-	for i, service := range services {
-		servicesInfo[i] = &pb.ServiceStatus{ServiceId: service.ID, AosVersion: service.AosVersion}
-
-		userService, err := launcher.serviceProvider.GetUsersService(users, service.ID)
-		if err != nil {
-			return servicesInfo, layersInfo, aoserrors.Wrap(err)
+func (launcher *Launcher) stopInstances(instances []*instanceInfo) {
+	for _, instance := range instances {
+		if instance.isStarted {
+			launcher.doStopAction(instance)
 		}
+	}
 
-		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-		if err != nil {
-			return servicesInfo, layersInfo, aoserrors.Wrap(err)
-		}
+	launcher.actionHandler.Wait()
+}
 
-		if aosConfig.GetStateLimit() != 0 {
-			servicesInfo[i].StateChecksum = hex.EncodeToString(userService.StateChecksum)
-		}
+func (launcher *Launcher) doStopAction(instance *instanceInfo) {
+	launcher.actionHandler.Execute(instance.InstanceID, func(instanceID string) (err error) {
+		defer func() {
+			if err != nil {
+				log.WithFields(
+					instanceIdentLogFields(instance.InstanceIdent, nil),
+				).Errorf("Can't stop instance: %v", err)
 
-		layersDigest, err := getServiceLayers(service.Path)
-		if err != nil {
-			return servicesInfo, layersInfo, aoserrors.Wrap(err)
-		}
-
-	layersLoop:
-		for _, layerDigest := range layersDigest {
-			for _, layer := range layersInfo {
-				if layer.Digest == layerDigest {
-					continue layersLoop
-				}
+				return
 			}
 
-			layerInfo, err := launcher.layerProvider.GetLayerInfoByDigest(layerDigest)
-			if err != nil {
-				log.Warnf("Can't get layer info by digest %s", layerDigest)
+			log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Info("Instance successfully stopped")
+		}()
+
+		if stopErr := launcher.stopInstance(instance); stopErr != nil && err == nil {
+			err = stopErr
+		}
+
+		return err
+	})
+}
+
+func (launcher *Launcher) releaseRuntime(instance *instanceInfo) (err error) {
+	if instance.service.serviceConfig.Permissions != nil {
+		if registerErr := launcher.instanceRegistrar.UnregisterInstance(
+			instance.InstanceIdent); registerErr != nil && err == nil {
+			err = aoserrors.Wrap(registerErr)
+		}
+	}
+
+	if networkErr := launcher.networkManager.RemoveInstanceFromNetwork(
+		instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
+		err = aoserrors.Wrap(networkErr)
+	}
+
+	if deviceErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); deviceErr != nil && err == nil {
+		err = aoserrors.Wrap(deviceErr)
+	}
+
+	if storageStateErr := launcher.storageStateProvider.Cleanup(
+		instance.InstanceID); storageStateErr != nil && err == nil {
+		err = aoserrors.Wrap(storageStateErr)
+	}
+
+	return err
+}
+
+func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Stop instance")
+
+	if !instance.isStarted {
+		return aoserrors.New("instance already stopped")
+	}
+
+	instance.isStarted = false
+
+	if instance.service == nil {
+		return err
+	}
+
+	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil && err == nil {
+		err = aoserrors.Wrap(runnerErr)
+	}
+
+	if releaseErr := launcher.releaseRuntime(instance); releaseErr != nil && err == nil {
+		err = releaseErr
+	}
+
+	mountPoint := filepath.Join(instance.runtimeDir, instanceRootFS)
+
+	if _, errStat := os.Stat(mountPoint); errStat == nil {
+		if unmountErr := UnmountFunc(mountPoint); unmountErr != nil && err == nil {
+			err = aoserrors.Wrap(unmountErr)
+		}
+	} else if !os.IsNotExist(errStat) && err == nil {
+		err = aoserrors.Wrap(errStat)
+	}
+
+	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
+		err = aoserrors.Wrap(removeErr)
+	}
+
+	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
+		instance.InstanceID); monitorErr != nil && err == nil {
+		err = aoserrors.Wrap(monitorErr)
+	}
+
+	return err
+}
+
+func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*instanceInfo {
+	var startInstances []*instanceInfo // nolint:prealloc // size of startInstances is not determined
+
+	for _, instance := range runInstances {
+		startInstance, ok := launcher.currentInstances[instance.InstanceID]
+		if ok && startInstance.isStarted {
+			continue
+		}
+
+		if !ok {
+			startInstance = &instanceInfo{
+				InstanceInfo: instance,
+				runtimeDir:   filepath.Join(RuntimeDir, instance.InstanceID),
+			}
+
+			launcher.currentInstances[instance.InstanceID] = startInstance
+		}
+
+		service, err := launcher.getCurrentServiceInfo(instance.ServiceID)
+		if err != nil {
+			launcher.instanceFailed(startInstance, err)
+
+			continue
+		}
+
+		if startInstance.AosVersion != service.AosVersion {
+			startInstance.AosVersion = service.AosVersion
+
+			if err = launcher.storage.UpdateInstance(startInstance.InstanceInfo); err != nil {
+				launcher.instanceFailed(startInstance, err)
+
 				continue
 			}
-
-			layersInfo = append(layersInfo, &layerInfo)
 		}
+
+		startInstance.service = service
+		startInstances = append(startInstances, startInstance)
 	}
 
-	return servicesInfo, layersInfo, nil
+	return startInstances
 }
 
-// SetUsers sets users for services
-func (launcher *Launcher) SetUsers(users []string) (err error) {
-	log.WithFields(log.Fields{"new": users, "old": launcher.users}).Debug("Set users")
+func (launcher *Launcher) startInstances(instances []*instanceInfo) {
+	sort.Sort(byPriority(instances))
 
-	if isUsersEqual(launcher.users, users) {
+	var conflictInstances []*instanceInfo
+
+	// Allocate devices
+
+	i := 0
+
+	for _, instance := range instances {
+		currentConflictInstances, err := launcher.allocateDevices(instance)
+		if err != nil {
+			launcher.instanceFailed(instance, err)
+
+			continue
+		}
+
+		instances[i] = instance
+		i++
+
+		conflictInstances = appendInstances(conflictInstances, currentConflictInstances...)
+	}
+
+	instances = instances[:i]
+
+	for _, instance := range conflictInstances {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Debug("Release instance due to device conflicts")
+
+		launcher.doStopAction(instance)
+	}
+
+	launcher.actionHandler.Wait()
+
+	for _, instance := range conflictInstances {
+		launcher.instanceFailed(instance, aoserrors.Wrap(resourcemanager.ErrNoAvailableDevice))
+	}
+
+	// Start instances
+	for _, instance := range instances {
+		launcher.doStartAction(instance)
+	}
+
+	launcher.actionHandler.Wait()
+}
+
+func (launcher *Launcher) doStartAction(instance *instanceInfo) {
+	launcher.actionHandler.Execute(instance.InstanceID, func(instanceID string) (err error) {
+		defer func() {
+			if err != nil {
+				launcher.instanceFailed(instance, err)
+			}
+		}()
+
+		if err = launcher.startInstance(instance); err != nil {
+			return err
+		}
+
 		return nil
-	}
-
-	launcher.usersMutex.Lock()
-	defer launcher.usersMutex.Unlock()
-
-	launcher.stopCurrentUserServices()
-
-	launcher.users = users
-
-	launcher.startCurrentUserServices()
-
-	if err = launcher.cleanCache(); err != nil {
-		log.Errorf("Error cleaning cache: %s", err)
-	}
-
-	go launcher.validateTTLs()
-
-	return nil
+	})
 }
 
-// RemoveAllServices removing all services
-func (launcher *Launcher) RemoveAllServices() (err error) {
-	services, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	statusChannel := make(chan error, len(services))
-
-	for _, service := range services {
-		launcher.actionHandler.PutInQueue(service.ID, service,
-			func(id string, data interface{}) {
-				service, ok := data.(Service)
-				if !ok {
-					statusChannel <- aoserrors.New("wrong data type")
-					return
-				}
-
-				if err = launcher.removeService(service); err != nil {
-					log.Errorf("Can't remove service %s: %s", service.ID, err)
-				}
-
-				statusChannel <- err
-			})
-	}
-
-	// Wait all services are deleted
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-
-	err = launcher.systemd.ReloadContext(context.Background())
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	services, err = launcher.serviceProvider.GetServices()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	if len(services) != 0 {
-		return aoserrors.New("can't remove all services")
-	}
-
-	return aoserrors.Wrap(err)
-}
-
-// StateAcceptance notifies launcher about new state acceptance
-func (launcher *Launcher) StateAcceptance(acceptance *pb.StateAcceptance) (err error) {
-	if err := launcher.storageHandler.StateAcceptance(acceptance); err != nil {
-		log.Errorf("Can't set accept state: %s", err)
-
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-// UpdateState updates service state
-func (launcher *Launcher) SetServiceState(state *pb.ServiceState) (err error) {
-	launcher.usersMutex.RLock()
-	defer launcher.usersMutex.RUnlock()
-
-	service, err := launcher.serviceProvider.GetService(state.ServiceId)
-	if err != nil {
-		log.Errorf("Can't get service: %s", err)
-		return aoserrors.Wrap(err)
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		log.Errorf("Can't get aos service config: %s", err)
-		return aoserrors.Wrap(err)
-	}
-
-	if isUsersEqual(state.Users.Users, launcher.users) {
-		if err = launcher.stopService(service); err != nil {
-			log.Errorf("Can't stop service: %s", err)
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if err = launcher.storageHandler.UpdateState(launcher.users, service, state.State, state.StateChecksum,
-		aosConfig.GetStateLimit()); err != nil {
-		log.Errorf("Can't update state: %s", err)
-		return aoserrors.Wrap(err)
-	}
-
-	if isUsersEqual(state.Users.Users, launcher.users) {
-		if err = launcher.startService(service); err != nil {
-			log.Errorf("Can't start service: %s", err)
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-// Cleanup deletes all AOS services, their storages and states
-func Cleanup(cfg *config.Config) (err error) {
-	systemd, err := dbus.NewSystemConnectionContext(context.Background())
-	if err != nil {
-		log.Errorf("Can't connect to systemd: %s", err)
-	}
-
-	if systemd != nil {
-		unitFiles, err := systemd.ListUnitFilesContext(context.Background())
+func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []aostypes.Host, err error) {
+	for _, resource := range resources {
+		boardResource, err := launcher.resourceManager.GetResourceInfo(resource)
 		if err != nil {
-			log.Errorf("Can't list systemd units: %s", err)
-		} else {
-			for _, unitFile := range unitFiles {
-				serviceName := filepath.Base(unitFile.Path)
+			return hosts, aoserrors.Wrap(err)
+		}
 
-				if !strings.HasPrefix(serviceName, "aos_") {
-					continue
-				}
+		hosts = append(hosts, boardResource.Hosts...)
+	}
 
-				desc, err := systemd.GetUnitPropertyContext(context.Background(), serviceName, "Description")
-				if err != nil {
-					log.WithField("name", serviceName).Errorf("Can't get unit property: %s", err)
-					continue
-				}
+	return hosts, nil
+}
 
-				value, ok := desc.Value.Value().(string)
-				if !ok {
-					log.WithField("name", serviceName).Error("Can't convert description")
-					continue
-				}
+func (launcher *Launcher) setupNetwork(instance *instanceInfo) (err error) {
+	networkFilesDir := filepath.Join(instance.runtimeDir, instanceMountPointsDir)
 
-				if value == "AOS Service" {
-					log.WithField("name", serviceName).Debug("Deleting systemd service")
+	if err = os.MkdirAll(filepath.Join(networkFilesDir, "etc"), 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
 
-					channel := make(chan string)
-					if _, err := systemd.StopUnitContext(context.Background(),
-						serviceName, "replace", channel); err != nil {
-						log.WithField("name", serviceName).Errorf("Can't stop unit: %s", err)
-					} else {
-						<-channel
-					}
+	params := networkmanager.NetworkParams{
+		InstanceIdent:      instance.InstanceIdent,
+		HostsFilePath:      filepath.Join(networkFilesDir, "etc", "hosts"),
+		ResolvConfFilePath: filepath.Join(networkFilesDir, "etc", "resolv.conf"),
+	}
 
-					if _, err := systemd.DisableUnitFilesContext(context.Background(),
-						[]string{serviceName}, true); err != nil {
-						log.WithField("name", serviceName).Error("Can't disable unit: ", err)
-					}
-				}
+	if params.Hosts, err = launcher.getHostsFromResources(instance.service.serviceConfig.Resources); err != nil {
+		return err
+	}
+
+	if instance.service.serviceConfig.Quotas.DownloadSpeed != nil {
+		params.IngressKbit = *instance.service.serviceConfig.Quotas.DownloadSpeed
+	}
+
+	if instance.service.serviceConfig.Quotas.UploadSpeed != nil {
+		params.EgressKbit = *instance.service.serviceConfig.Quotas.UploadSpeed
+	}
+
+	if instance.service.serviceConfig.Quotas.DownloadLimit != nil {
+		params.DownloadLimit = *instance.service.serviceConfig.Quotas.DownloadLimit
+	}
+
+	if instance.service.serviceConfig.Quotas.UploadLimit != nil {
+		params.UploadLimit = *instance.service.serviceConfig.Quotas.UploadLimit
+	}
+
+	if instance.service.serviceConfig.Hostname != nil {
+		params.Hostname = *instance.service.serviceConfig.Hostname
+	}
+
+	params.ExposedPorts = make([]string, 0, len(instance.service.imageConfig.Config.ExposedPorts))
+
+	for key := range instance.service.imageConfig.Config.ExposedPorts {
+		params.ExposedPorts = append(params.ExposedPorts, key)
+	}
+
+	params.AllowedConnections = make([]string, 0, len(instance.service.serviceConfig.AllowedConnections))
+
+	for key := range instance.service.serviceConfig.AllowedConnections {
+		params.AllowedConnections = append(params.AllowedConnections, key)
+	}
+
+	if err := launcher.networkManager.AddInstanceToNetwork(
+		instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) getLowPriorityInstance(instance *instanceInfo, deviceName string) (*instanceInfo, error) {
+	deviceInstances, err := launcher.resourceManager.GetDeviceInstances(deviceName)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	checkInstances := make([]*instanceInfo, len(deviceInstances)+1)
+
+	for i, instanceID := range deviceInstances {
+		currentInstance, ok := launcher.currentInstances[instanceID]
+		if !ok {
+			return nil, aoserrors.Errorf("can't get allocated device instance: %s", instanceID)
+		}
+
+		checkInstances[i] = currentInstance
+	}
+
+	checkInstances[len(deviceInstances)] = instance
+
+	sort.Sort(byPriority(checkInstances))
+
+	lowPriorityInstance := checkInstances[len(checkInstances)-1]
+
+	if lowPriorityInstance == instance {
+		return nil, aoserrors.Wrap(resourcemanager.ErrNoAvailableDevice)
+	}
+
+	return lowPriorityInstance, nil
+}
+
+func (launcher *Launcher) allocateDevices(instance *instanceInfo) (conflictInstances []*instanceInfo, err error) {
+	releasedDevices := make(map[string]*instanceInfo)
+
+	defer func() {
+		if err != nil {
+			launcher.revertDeviceAllocation(instance, releasedDevices)
+		}
+	}()
+
+	for _, device := range instance.service.serviceConfig.Devices {
+		if err = launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
+			if !errors.Is(err, resourcemanager.ErrNoAvailableDevice) {
+				return nil, aoserrors.Wrap(err)
 			}
-		}
 
-		if err := systemd.ReloadContext(context.Background()); err != nil {
-			log.Errorf("Can't reload systemd: %s", err)
-		}
-	}
-
-	serviceDir := path.Join(cfg.WorkingDir, serviceDir)
-
-	log.WithField("dir", serviceDir).Debug("Remove service dir")
-
-	if err := os.RemoveAll(serviceDir); err != nil {
-		log.Fatalf("Can't remove service folder: %s", err)
-	}
-
-	log.WithField("dir", cfg.StorageDir).Debug("Remove storage dir")
-
-	if err := os.RemoveAll(cfg.StorageDir); err != nil {
-		log.Fatalf("Can't remove storage folder: %s", err)
-	}
-
-	if err := os.RemoveAll(path.Join(cfg.WorkingDir, serviceTemplateFile)); err != nil {
-		log.Fatalf("Can't remove service template file: %s", err)
-	}
-
-	if err := os.RemoveAll(cfg.LayersDir); err != nil {
-		log.Errorf("Can't cleanup layers: %s", err)
-	}
-
-	return nil
-}
-
-// GetServicePermissions returns service permissions
-func (launcher *Launcher) GetServicePermissions(serviceID string) (permission string, err error) {
-	service, err := launcher.serviceProvider.GetService(serviceID)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	// TODO: delete this functionality after adding a functional vis server
-	jsonPermissions, err := json.Marshal(aosConfig.Permissions)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-
-	return string(jsonPermissions), nil
-}
-
-// RestartServices restarts current users services
-func (launcher *Launcher) RestartServices() {
-	launcher.usersMutex.Lock()
-	defer launcher.usersMutex.Unlock()
-
-	launcher.stopCurrentUserServices()
-	launcher.startCurrentUserServices()
-}
-
-// ProcessDesiredEnvVarsList override env vars fore services
-func (launcher *Launcher) ProcessDesiredEnvVarsList(envVars []*pb.OverrideEnvVar) (status []*pb.EnvVarStatus,
-	err error) {
-	subjectServiceToRestart, status, err := launcher.envVarsProvider.processOverrideEnvVars(envVars)
-	if err != nil {
-		return status, err
-	}
-
-	launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
-
-	return status, nil
-}
-
-func (launcher *Launcher) GetStateMessageChannel() (channel <-chan *pb.SMNotifications) {
-	return launcher.ServiceStateChannel
-}
-
-func (state ServiceState) String() string {
-	return [...]string{"Init", "Running", "Stopped"}[state]
-}
-
-/*******************************************************************************
- * Private
- ******************************************************************************/
-
-func (launcher *Launcher) startCurrentUserServices() {
-	log.WithField("users", launcher.users).Debug("Start user services")
-
-	services, err := launcher.serviceProvider.GetUsersServices(launcher.users)
-	if err != nil {
-		log.Errorf("Can't start services: %s", err)
-		return
-	}
-
-	launcher.startServices(services)
-}
-
-func (launcher *Launcher) stopCurrentUserServices() {
-	log.WithField("users", launcher.users).Debug("Stop user services")
-
-	var services []Service
-	var err error
-
-	if launcher.users == nil {
-		services, err = launcher.serviceProvider.GetServices()
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-			return
-		}
-	} else {
-		services, err = launcher.serviceProvider.GetUsersServices(launcher.users)
-		if err != nil {
-			log.Errorf("Can't stop services: %s", err)
-			return
-		}
-	}
-
-	launcher.stopServices(services)
-}
-
-func (launcher *Launcher) startServices(services []Service) {
-	var err error
-	statusChannel := make(chan error, len(services))
-
-	// Start all services in parallel
-	for _, service := range services {
-		launcher.actionHandler.PutInQueue(service.ID, service,
-			func(id string, data interface{}) {
-				service, ok := data.(Service)
-				if !ok {
-					statusChannel <- aoserrors.New("wrong data type")
-					return
-				}
-
-				if err = launcher.startService(service); err != nil {
-					log.Errorf("Can't start service %s: %s", service.ID, err)
-				}
-
-				statusChannel <- err
-			})
-	}
-
-	// Wait all services are started
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-}
-
-func (launcher *Launcher) stopServices(services []Service) {
-	var err error
-	statusChannel := make(chan error, len(services))
-
-	// Stop all services in parallel
-	for _, service := range services {
-		launcher.actionHandler.PutInQueue(service.ID, service,
-			func(id string, data interface{}) {
-				service, ok := data.(Service)
-				if !ok {
-					statusChannel <- aoserrors.New("wrong data type")
-					return
-				}
-
-				if err = launcher.stopService(service); err != nil {
-					log.Errorf("Can't stop service %s: %s", service.ID, err)
-				}
-
-				statusChannel <- err
-			})
-	}
-
-	// Wait all services are stopped
-	for i := 0; i < len(services); i++ {
-		<-statusChannel
-	}
-}
-
-func (launcher *Launcher) restartServicesBySubjectServiceID(subjectServiceToRestart []subjectServicePair) {
-	servicesToRestart := []Service{}
-
-	for _, value := range subjectServiceToRestart {
-		if launcher.isSubjectActive(value.subjectID) {
-			service, err := launcher.serviceProvider.GetService(value.serviseID)
+			lowPriorityInstance, err := launcher.getLowPriorityInstance(instance, device.Name)
 			if err != nil {
-				log.Errorf("Service %s doesn't present in the system, err: %s", value.serviseID, err.Error())
-				continue
+				if errors.Is(err, resourcemanager.ErrNoAvailableDevice) {
+					launcher.alertSender.SendAlert(deviceAllocateAlert(instance, device.Name, err))
+				}
+
+				return nil, err
 			}
 
-			servicesToRestart = append(servicesToRestart, service)
+			if err = launcher.resourceManager.ReleaseDevice(device.Name, lowPriorityInstance.InstanceID); err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
+
+			releasedDevices[device.Name] = lowPriorityInstance
+			conflictInstances = appendInstances(conflictInstances, lowPriorityInstance)
+
+			if err = launcher.resourceManager.AllocateDevice(device.Name, instance.InstanceID); err != nil {
+				return nil, aoserrors.Wrap(err)
+			}
 		}
 	}
 
-	if len(servicesToRestart) == 0 {
-		return
+	for device, instance := range releasedDevices {
+		launcher.alertSender.SendAlert(deviceAllocateAlert(instance, device, resourcemanager.ErrNoAvailableDevice))
 	}
 
-	launcher.stopServices(servicesToRestart)
-	launcher.startServices(servicesToRestart)
+	return conflictInstances, nil
 }
 
-func (launcher *Launcher) addServicesToSystemd() (err error) {
-	services, err := launcher.serviceProvider.GetServices()
+func (launcher *Launcher) revertDeviceAllocation(instance *instanceInfo, releasedDevices map[string]*instanceInfo) {
+	if err := launcher.resourceManager.ReleaseDevices(instance.InstanceID); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't release instance devices: %v", err)
+	}
+
+	// Allocate back released devices
+	for device, releasedInstance := range releasedDevices {
+		if err := launcher.resourceManager.AllocateDevice(device, releasedInstance.InstanceID); err != nil {
+			log.WithFields(
+				instanceIdentLogFields(instance.InstanceIdent, nil),
+			).Errorf("Can't allocate device %s: %v", device, err)
+		}
+	}
+}
+
+func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
+	if instance.service.serviceConfig.Permissions != nil {
+		secret, err := launcher.instanceRegistrar.RegisterInstance(
+			instance.InstanceIdent, instance.service.serviceConfig.Permissions)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		instance.secret = secret
+	}
+
+	var (
+		storageLimit uint64
+		stateLimit   uint64
+	)
+
+	if instance.service.serviceConfig.Quotas.StorageLimit != nil {
+		storageLimit = *instance.service.serviceConfig.Quotas.StorageLimit
+	}
+
+	if instance.service.serviceConfig.Quotas.StateLimit != nil {
+		stateLimit = *instance.service.serviceConfig.Quotas.StateLimit
+	}
+
+	storagePath, statePath, stateChecksum, err := launcher.storageStateProvider.Setup(instance.InstanceID,
+		storagestate.SetupParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID, GID: instance.service.GID,
+			StorageQuota: storageLimit, StateQuota: stateLimit,
+		})
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, service := range services {
-		fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
-		if err != nil {
-			log.Error("Can't create service file path: ", err)
-			continue
-		}
+	instance.storagePath = storagePath
+	instance.statePath = statePath
 
-		if _, err = launcher.systemd.LinkUnitFilesContext(context.Background(),
-			[]string{fileName}, true, true); err != nil {
-			log.Error("Can't link service file: ", err)
-			continue
-		}
-	}
+	// State checksum can be changed in state changed handler
+	launcher.runMutex.Lock()
+	instance.stateChecksum = stateChecksum
+	launcher.runMutex.Unlock()
 
-	if err = launcher.systemd.ReloadContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
+	if err = launcher.setupNetwork(instance); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (launcher *Launcher) prepareHostfsDir() (err error) {
-	witeoutsDir := path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir)
+func (launcher *Launcher) startInstance(instance *instanceInfo) error {
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Start instance")
 
-	if err = os.MkdirAll(witeoutsDir, 0755); err != nil {
+	if instance.isStarted {
+		return aoserrors.New("instance already started")
+	}
+
+	// clear run status
+	launcher.runMutex.Lock()
+	instance.runStatus = runner.InstanceStatus{}
+	launcher.runMutex.Unlock()
+
+	instance.isStarted = true
+
+	if err := os.MkdirAll(instance.runtimeDir, 0o755); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	allowedDirs := defaultHostfsBinds
+	if err := launcher.setupRuntime(instance); err != nil {
+		return err
+	}
+
+	runtimeSpec, err := launcher.createRuntimeSpec(instance)
+	if err != nil {
+		return err
+	}
+
+	if err := launcher.prepareRootFS(instance, runtimeSpec); err != nil {
+		return err
+	}
+
+	if err := launcher.instanceMonitor.StartInstanceMonitor(
+		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID,
+			GID:           instance.service.GID,
+			AlertRules:    instance.service.serviceConfig.AlertRules,
+		}); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't start instance monitoring: %v", err)
+	}
+
+	runStatus := launcher.instanceRunner.StartInstance(
+		instance.InstanceID, instance.runtimeDir, runner.RunParameters{
+			StartInterval:   instance.service.serviceConfig.RunParameters.StartInterval.Duration,
+			StartBurst:      instance.service.serviceConfig.RunParameters.StartBurst,
+			RestartInterval: instance.service.serviceConfig.RunParameters.RestartInterval.Duration,
+		})
+
+	// Update current status if it is not updated by runner status channel. Instance runner status goes asynchronously
+	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this
+	// situation by checking if run state is not empty value.
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	if instance.runStatus.State == "" {
+		instance.setRunStatus(runStatus)
+	}
+
+	return nil
+}
+
+func (launcher *Launcher) sendRunInstancesStatuses() {
+	runInstancesStatuses := make([]cloudprotocol.InstanceStatus, 0, len(launcher.currentInstances))
+
+	for _, currentInstance := range launcher.currentInstances {
+		runInstancesStatuses = append(runInstancesStatuses, currentInstance.getCloudStatus())
+	}
+
+	launcher.runtimeStatusChannel <- RuntimeStatus{
+		RunStatus: &RunInstancesStatus{
+			UnitSubjects:  launcher.currentSubjects,
+			Instances:     runInstancesStatuses,
+			ErrorServices: launcher.errorServices,
+		},
+	}
+}
+
+func (launcher *Launcher) isCurrentSubject(subject string) bool {
+	for _, currentSubject := range launcher.currentSubjects {
+		if subject == currentSubject {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isSubjectsEqual(subjects1, subjects2 []string) bool {
+	if subjects1 == nil && subjects2 == nil {
+		return true
+	}
+
+	if subjects1 == nil || subjects2 == nil {
+		return false
+	}
+
+	if len(subjects1) != len(subjects2) {
+		return false
+	}
+
+	sort.Strings(subjects1)
+	sort.Strings(subjects2)
+
+	for i := range subjects1 {
+		if subjects1[i] != subjects2[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (launcher *Launcher) stopCurrentInstances() {
+	stopInstances := make([]*instanceInfo, 0, len(launcher.currentInstances))
+
+	for _, instance := range launcher.currentInstances {
+		stopInstances = append(stopInstances, instance)
+	}
+
+	launcher.stopInstances(stopInstances)
+}
+
+func (launcher *Launcher) prepareHostFSDir() (err error) {
+	witeoutsDir := path.Join(launcher.config.WorkingDir, hostFSWiteoutsDir)
+
+	if err = os.MkdirAll(witeoutsDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	allowedDirs := defaultHostFSBinds
 
 	if len(launcher.config.HostBinds) > 0 {
 		allowedDirs = launcher.config.HostBinds
@@ -999,8 +1265,15 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
+rootLabel:
 	for _, item := range rootContent {
 		itemPath := path.Join(witeoutsDir, item.Name())
+
+		for _, allowedItem := range allowedDirs {
+			if item.Name() == allowedItem {
+				continue rootLabel
+			}
+		}
 
 		if _, err = os.Stat(itemPath); err == nil {
 			// skip already exists items
@@ -1009,20 +1282,6 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 
 		if !os.IsNotExist(err) {
 			return aoserrors.Wrap(err)
-		}
-
-		allowed := false
-
-		for _, allowedItem := range allowedDirs {
-			if item.Name() == allowedItem {
-				allowed = true
-
-				break
-			}
-		}
-
-		if allowed {
-			continue
 		}
 
 		// Create whiteout for not allowed items
@@ -1034,719 +1293,129 @@ func (launcher *Launcher) prepareHostfsDir() (err error) {
 	return nil
 }
 
-func isUsersEqual(users1, users2 []string) (result bool) {
-	if users1 == nil && users2 == nil {
-		return true
+func prepareStorageDir(path string, uid, gid int) (upperDir, workDir string, err error) {
+	upperDir = filepath.Join(path, upperDirName)
+	workDir = filepath.Join(path, workDirName)
+
+	if err = os.MkdirAll(upperDir, 0o755); err != nil {
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	if users1 == nil || users2 == nil {
-		return false
+	if err = os.Chown(upperDir, uid, gid); err != nil {
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	if len(users1) != len(users2) {
-		return false
+	if err = os.MkdirAll(workDir, 0o755); err != nil {
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	for i := range users1 {
-		if users1[i] != users2[i] {
-			return false
-		}
+	if err = os.Chown(workDir, uid, gid); err != nil {
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	return true
+	return upperDir, workDir, nil
 }
 
-func (launcher *Launcher) installService(installInfo *pb.InstallServiceRequest) (err error) {
-	if launcher.users == nil {
-		return aoserrors.New("users are not set")
+func (launcher *Launcher) prepareRootFS(instance *instanceInfo, runtimeConfig *runtimeSpec) error {
+	mountPointsDir := filepath.Join(instance.runtimeDir, instanceMountPointsDir)
+
+	if err := launcher.createMountPoints(mountPointsDir, runtimeConfig.ociSpec.Mounts); err != nil {
+		return err
 	}
 
-	service, err := launcher.serviceProvider.GetService(installInfo.GetServiceId())
-	if err != nil && !strings.Contains(err.Error(), "not exist") {
-		return aoserrors.Wrap(err)
-	}
-	serviceExists := err == nil
-
-	// Skip incorrect version
-	if serviceExists && installInfo.GetAosVersion() < service.AosVersion {
-		return aoserrors.New("version mistmatch")
-	}
-
-	// If same service version exists, just start the service
-	if serviceExists && installInfo.GetAosVersion() == service.AosVersion {
-		if err = launcher.addServiceToUsers(installInfo.GetServiceId(), installInfo.GetUsers().Users); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		if err = launcher.startService(service); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		return nil
-	}
-
-	unpackDir, err := ioutil.TempDir("", "aos_")
-	defer os.RemoveAll(unpackDir)
-
-	// download and unpack
-	urlVal, err := url.Parse(installInfo.Url)
+	imageParts, err := launcher.serviceProvider.GetImageParts(instance.service.ServiceInfo)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	var serviceImage string
+	layersDir := []string{mountPointsDir, imageParts.ServiceFSPath}
 
-	if urlVal.Scheme != "file" {
-		if serviceImage, err = image.Download(context.Background(), launcher.downloadDir, installInfo.Url); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		defer os.RemoveAll(serviceImage)
-	} else {
-		serviceImage = urlVal.Path
-	}
-
-	if err = image.CheckFileInfo(context.Background(), serviceImage, image.FileInfo{
-		Sha256: installInfo.Sha256,
-		Sha512: installInfo.Sha512, Size: installInfo.Size,
-	}); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = imageutils.UnpackTarImage(serviceImage, unpackDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = validateUnpackedImage(unpackDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	servicePath := path.Join(launcher.config.WorkingDir, serviceDir)
-	// Create services dir if needed
-	if err = os.MkdirAll(servicePath, 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	// We need to install or update the service
-
-	// create install dir
-	installDir, err := ioutil.TempDir(servicePath, "")
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	defer func() {
-		if err != nil {
-			// Remove install dir if exists
-			if _, err := os.Stat(installDir); err == nil {
-				if err := os.RemoveAll(installDir); err != nil {
-					log.WithField("serviceID", installInfo.GetServiceId()).Errorf("Can't remove service dir: %s", err)
-				}
-			}
-		}
-	}()
-
-	log.WithFields(log.Fields{"dir": installDir, "serviceID": installInfo.GetServiceId()}).Debug("Create install dir")
-
-	newService, err := launcher.prepareService(unpackDir, installDir, installInfo, serviceExists, service)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if !serviceExists {
-		if err = launcher.addService(newService, installInfo.GetUsers().Users); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	} else {
-		if err = launcher.updateService(service, newService, installInfo.GetUsers().Users); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) uninstallService(service Service, users []string) (err error) {
-	if launcher.users == nil {
-		return aoserrors.New("users are not set")
-	}
-
-	if err := launcher.stopService(service); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	userService, err := launcher.serviceProvider.GetUsersService(users, service.ID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if userService.StorageFolder != "" {
-		log.WithFields(log.Fields{
-			"folder":    userService.StorageFolder,
-			"serviceID": service.ID,
-		}).Debug("Remove storage folder")
-
-		if err = os.RemoveAll(userService.StorageFolder); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if err = launcher.serviceProvider.RemoveServiceFromUsers(users, service.ID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) updateServiceState(id string, state ServiceState) (err error) {
-	service, err := launcher.serviceProvider.GetService(id)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if service.State != state {
-		log.WithField("id", id).Debugf("Set service state: %s", state)
-
-		if err = launcher.serviceProvider.SetServiceState(id, state); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) mountRootfs(service Service, storageFolder string, layers []string) (err error) {
-	mergedDir := path.Join(service.Path, serviceMergedDir)
-
-	// create merged dir
-	if err = os.MkdirAll(mergedDir, 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	upperDir, workDir := "", ""
-
-	if storageFolder != "" {
-		upperDir = path.Join(storageFolder, upperDirName)
-		workDir = path.Join(storageFolder, workDirName)
-	}
-
-	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Mount service rootfs")
-
-	layerDirs := []string{path.Join(service.Path, serviceMountPointsDir), path.Join(service.Path, serviceRootfsDir)}
-	layerDirs = append(layerDirs, layers...)
-	layerDirs = append(layerDirs, path.Join(launcher.config.WorkingDir, hostfsWiteoutsDir))
-	layerDirs = append(layerDirs, string("/"))
-
-	if err = overlayMount(mergedDir, layerDirs, workDir, upperDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) umountRootfs(service Service) (err error) {
-	mergedDir := path.Join(service.Path, serviceMergedDir)
-
-	log.WithFields(log.Fields{"path": mergedDir, "id": service.ID}).Debug("Unmount service rootfs")
-
-	if err = umountWithRetry(mergedDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) applyDevicesAndResources(spec *serviceSpec, aosSrvConf *aosServiceConfig) (err error) {
-	// Update Devices in spec
-	if err = launcher.setDevices(spec, aosSrvConf.Devices); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	// Update Resources in spec
-	if err = launcher.setServiceResources(spec, aosSrvConf.Resources); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) prepareServiceRootfs(spec *serviceSpec, service Service,
-	aosSrvConf *aosServiceConfig) (err error) {
-	if err = spec.bindHostDirs(launcher.config.WorkingDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = spec.setRootfs(serviceMergedDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.createMountPoints(service.Path, spec); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	storageFolder, err := launcher.storageHandler.PrepareStorageFolder(launcher.users, service,
-		aosSrvConf.GetStorageLimit(), aosSrvConf.GetStateLimit())
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if aosSrvConf.GetStateLimit() > 0 {
-		if err = spec.addBindMount(path.Join(storageFolder, stateFile), path.Join("/", stateFile), "rw"); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	imageParts, err := getImageParts(service.Path)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	layers := make([]string, 0, len(imageParts.layersDigest))
-
-	for _, layerDigest := range imageParts.layersDigest {
-		layerPath, err := launcher.layerProvider.GetLayerPathByDigest(layerDigest)
+	for _, digest := range imageParts.LayersDigest {
+		layer, err := launcher.layerProvider.GetLayerInfoByDigest(digest)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
 
-		layers = append(layers, layerPath)
+		layersDir = append(layersDir, layer.Path)
 	}
 
-	if err = launcher.mountRootfs(service, storageFolder, layers); err != nil {
+	layersDir = append(layersDir, path.Join(launcher.config.WorkingDir, hostFSWiteoutsDir), "/")
+
+	rootfsDir := filepath.Join(instance.runtimeDir, instanceRootFS)
+
+	if err = os.MkdirAll(rootfsDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	var upperDir, workDir string
+
+	if instance.storagePath != "" {
+		if upperDir, workDir, err = prepareStorageDir(
+			instance.storagePath, instance.UID, instance.service.GID); err != nil {
+			return err
+		}
+	}
+
+	if err = MountFunc(rootfsDir, layersDir, workDir, upperDir); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (launcher *Launcher) applyNetworkSettings(spec *serviceSpec, service Service,
-	aosSrvConf *aosServiceConfig, imageSpec *imagespec.Image) (err error) {
-	networkFiles := []string{"/etc/hosts", "/etc/resolv.conf"}
+func getMountPermissions(mount runtimespec.Mount) (permissions uint64, err error) {
+	for _, option := range mount.Options {
+		nameValue := strings.Split(strings.TrimSpace(option), "=")
 
-	if netNsPath := networkmanager.GetNetNsPathByName(service.ID); netNsPath != "" {
-		for i, ns := range spec.ocSpec.Linux.Namespaces {
-			switch ns.Type {
-			case runtimespec.NetworkNamespace:
-				spec.ocSpec.Linux.Namespaces[i].Path = netNsPath
+		if len(nameValue) > 1 && nameValue[0] == "mode" {
+			if permissions, err = strconv.ParseUint(nameValue[1], 8, 32); err != nil {
+				return 0, aoserrors.Wrap(err)
 			}
 		}
 	}
 
-	params := networkmanager.NetworkParams{
-		HostsFilePath:      path.Join(service.Path, serviceMountPointsDir, networkFiles[0]),
-		ResolvConfFilePath: path.Join(service.Path, serviceMountPointsDir, networkFiles[1]),
-	}
-
-	if aosSrvConf.Quotas.DownloadSpeed != nil {
-		params.IngressKbit = *aosSrvConf.Quotas.DownloadSpeed
-	}
-
-	if aosSrvConf.Quotas.UploadSpeed != nil {
-		params.EgressKbit = *aosSrvConf.Quotas.UploadSpeed
-	}
-
-	if aosSrvConf.Quotas.UploadLimit != nil {
-		params.UploadLimit = *aosSrvConf.Quotas.UploadLimit
-	}
-
-	if aosSrvConf.Quotas.DownloadLimit != nil {
-		params.DownloadLimit = *aosSrvConf.Quotas.DownloadLimit
-	}
-
-	if aosSrvConf.Hostname != nil {
-		params.Hostname = *aosSrvConf.Hostname
-	}
-
-	params.ExposedPorts = make([]string, 0, len(imageSpec.Config.ExposedPorts))
-	for key := range imageSpec.Config.ExposedPorts {
-		params.ExposedPorts = append(params.ExposedPorts, key)
-	}
-
-	params.AllowedConnections = make([]string, 0, len(aosSrvConf.AllowedConnections))
-	for key := range aosSrvConf.AllowedConnections {
-		params.AllowedConnections = append(params.AllowedConnections, key)
-	}
-
-	if aosSrvConf.Hostname != nil {
-		params.Hostname = *aosSrvConf.Hostname
-	}
-
-	if params.Hosts, err = launcher.getHostsFromResources(aosSrvConf.Resources); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.network.AddServiceToNetwork(service.ID, service.ServiceProvider, params); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
+	return permissions, nil
 }
 
-func (launcher *Launcher) registerService(spec *serviceSpec, service Service,
-	aosSrvConf *aosServiceConfig) (err error) {
-	if aosSrvConf.Permissions == nil {
-		return nil
-	}
-
-	secret, err := launcher.serviceRegistrar.RegisterService(service.ID, aosSrvConf.Permissions)
+func createMountPoint(path string, mount runtimespec.Mount, isDir bool) error {
+	permissions, err := getMountPermissions(mount)
 	if err != nil {
-		return aoserrors.Wrap(err)
+		return err
 	}
 
-	spec.mergeEnv([]string{aosSecretEnv + "=" + secret})
+	mountPoint := filepath.Join(path, mount.Destination)
 
-	return nil
-}
-
-func (launcher *Launcher) unregisterService(service Service, aosSrvConf *aosServiceConfig) (err error) {
-	if aosSrvConf.Permissions == nil {
-		return nil
-	}
-
-	if err := launcher.serviceRegistrar.UnregisterService(service.ID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) overrideEnvVars(spec *serviceSpec, service Service) (err error) {
-	currentSubject := launcher.users[0] // TODO: currently supported only one user
-
-	vars, err := launcher.envVarsProvider.getEnvVars(subjectServicePair{
-		subjectID: currentSubject,
-		serviseID: service.ID,
-	})
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if len(vars) == 0 {
-		return nil
-	}
-
-	envVars := []string{}
-	for _, oneVar := range vars {
-		envVars = append(envVars, oneVar.Variable)
-	}
-
-	spec.mergeEnv(envVars)
-
-	return nil
-}
-
-func (launcher *Launcher) prestartService(service Service, aosConfig *aosServiceConfig) (err error) {
-	err = validateImageManifest(service)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	imageSpec, err := getImageSpecFromImageConfig(path.Join(service.Path, ociImageConfigFile))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	// generate config.json
-	spec, err := generateRuntimeSpec(imageSpec, path.Join(service.Path, ociRuntimeConfigFile))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	defer func() {
-		if specErr := spec.save(); specErr != nil {
-			if err == nil {
-				err = specErr
-			}
-		}
-	}()
-
-	spec.setUserUIDGID(service.UID, service.GID)
-
-	if err = spec.applyAosServiceConfig(aosConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := launcher.applyDevicesAndResources(spec, aosConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := launcher.registerService(spec, service, aosConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := launcher.overrideEnvVars(spec, service); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := launcher.prepareServiceRootfs(spec, service, aosConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if launcher.network != nil {
-		if err = launcher.applyNetworkSettings(spec, service, aosConfig, &imageSpec); err != nil {
+	if isDir {
+		if err := os.MkdirAll(mountPoint, 0o755); err != nil {
 			return aoserrors.Wrap(err)
-		}
-	}
-
-	if err = launcher.requestDeviceResources(service, aosConfig.Devices); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) addServiceToSystemd(service Service) (err error) {
-	fileName, err := filepath.Abs(path.Join(service.Path, service.UnitName))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if _, err = launcher.systemd.LinkUnitFilesContext(context.Background(),
-		[]string{fileName}, true, true); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.systemd.ReloadContext(context.Background()); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) requestDeviceResources(service Service, devices []Device) (err error) {
-	for _, device := range devices {
-		log.Debugf("Request device %s, for %s service", device.Name, service.ID)
-
-		if err = launcher.devicemanager.RequestDevice(device.Name, service.ID); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) startService(service Service) (err error) {
-	if _, ok := launcher.services[service.ID]; ok {
-		log.WithFields(log.Fields{"name": service.UnitName}).Warn("Service already started")
-
-		return nil
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.prestartService(service, &aosConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	channel := make(chan string)
-	if _, err = launcher.systemd.StartUnitContext(context.Background(),
-		service.UnitName, "replace", channel); err != nil {
-		return aoserrors.Wrap(err)
-	}
-	status := <-channel
-
-	log.WithFields(log.Fields{"name": service.UnitName, "status": status}).Debug("Start service")
-
-	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
-		if err = launcher.updateMonitoring(service, stateRunning, &aosConfig); err != nil {
-			log.WithField("id", service.ID).Error("Can't update monitoring: ", err)
-		}
-	}
-
-	if err = launcher.updateServiceState(service.ID, stateRunning); err != nil {
-		log.WithField("id", service.ID).Warnf("Can't update service state: %s", err)
-	}
-
-	if err = launcher.serviceProvider.SetServiceStartTime(service.ID, time.Now()); err != nil {
-		log.WithField("id", service.ID).Warnf("Can't set service start time: %s", err)
-	}
-
-	launcher.services[service.ID] = service.UnitName
-
-	return nil
-}
-
-func (launcher *Launcher) releaseDeviceResources(service Service, devices []Device) (err error) {
-	for _, device := range devices {
-		log.Debugf("Release device %s, for %s service", device.Name, service.ID)
-
-		if err = launcher.devicemanager.ReleaseDevice(device.Name, service.ID); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) poststopService(service Service, aosConfig *aosServiceConfig) (retErr error) {
-	if err := launcher.umountRootfs(service); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't umount rootfs: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.storageHandler.StopStateWatching(launcher.users, service, aosConfig.GetStateLimit()); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't stop state watching: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.releaseDeviceResources(service, aosConfig.Devices); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't release devices: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.unregisterService(service, aosConfig); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't unregister service: %s", err)
-			retErr = err
-		}
-	}
-
-	if launcher.network == nil {
-		return aoserrors.Wrap(retErr)
-	}
-
-	if err := launcher.network.IsServiceInNetwork(service.ID, service.ServiceProvider); err == nil {
-		if err := launcher.network.RemoveServiceFromNetwork(
-			service.ID, service.ServiceProvider); err != nil && !strings.Contains(err.Error(), "not found") {
-			if retErr == nil {
-				log.WithField("id", service.ID).Errorf("Can't remove service from network: %s", err)
-				retErr = err
-			}
-		}
-	}
-
-	return aoserrors.Wrap(retErr)
-}
-
-func (launcher *Launcher) stopService(service Service) (retErr error) {
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't get service config: %s", err)
-			retErr = err
-		}
-	}
-
-	channel := make(chan string)
-	if _, err := launcher.systemd.StopUnitContext(context.Background(),
-		service.UnitName, "replace", channel); err != nil {
-		if strings.Contains(err.Error(), errNotLoaded) {
-			log.WithField("id", service.ID).Warn("Service not loaded")
-		} else {
-			log.WithField("id", service.ID).Errorf("Can't stop systemd unit: %s", err)
-			retErr = err
 		}
 	} else {
-		status := <-channel
-		log.WithFields(log.Fields{"id": service.ID, "status": status}).Debug("Stop service")
+		if err = os.MkdirAll(filepath.Dir(mountPoint), 0o755); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		file, err := os.OpenFile(mountPoint, os.O_CREATE, 0o644)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+		defer file.Close()
 	}
 
-	if err := launcher.poststopService(service, &aosConfig); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't perform post stop: %s", err)
-			retErr = err
+	if permissions != 0 {
+		if err := os.Chmod(mountPoint, os.FileMode(permissions)); err != nil {
+			return aoserrors.Wrap(err)
 		}
 	}
 
-	if launcher.monitor != nil && !reflect.ValueOf(launcher.monitor).IsNil() {
-		if err = launcher.updateMonitoring(service, stateStopped, &aosConfig); err != nil {
-			log.WithField("id", service.ID).Error("Can't update monitoring: ", err)
-		}
-	}
-
-	if err := launcher.updateServiceState(service.ID, stateStopped); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't update service state: %s", err)
-			retErr = err
-		}
-	}
-
-	delete(launcher.services, service.ID)
-
-	return aoserrors.Wrap(retErr)
+	return nil
 }
 
-func (launcher *Launcher) restoreService(service Service) (retErr error) {
-	log.WithField("id", service.ID).Warn("Restore previous service version")
-
-	if err := launcher.serviceProvider.UpdateService(service); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't update service in DB: %s", err)
-			retErr = err
-		}
-	}
-
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := platform.SetUserFSQuota(launcher.config.StorageDir, aosConfig.GetStorageLimit(),
-		service.UID, service.GID); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't set user FS quoate: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.addServiceToSystemd(service); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't add service to systemd: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.startService(service); err != nil {
-		if retErr == nil {
-			log.WithField("id", service.ID).Errorf("Can't install service: %s", err)
-			retErr = err
-		}
-	}
-
-	return aoserrors.Wrap(retErr)
-}
-
-func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec) (err error) {
-	mountPointsDir := path.Join(serviceDir, serviceMountPointsDir)
-
-	if err = os.MkdirAll(mountPointsDir, 0755); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	for _, mount := range spec.ocSpec.Mounts {
-		var permissions uint64
-
-		for _, option := range mount.Options {
-			nameValue := strings.Split(strings.TrimSpace(option), "=")
-
-			if len(nameValue) > 1 && nameValue[0] == "mode" {
-				if permissions, err = strconv.ParseUint(nameValue[1], 8, 32); err != nil {
-					return aoserrors.Wrap(err)
-				}
-			}
-		}
-
-		itemPath := path.Join(mountPointsDir, mount.Destination)
-
+func (launcher *Launcher) createMountPoints(path string, mounts []runtimespec.Mount) error {
+	for _, mount := range mounts {
 		switch mount.Type {
 		case "proc", "tmpfs", "sysfs":
-			if err = os.MkdirAll(itemPath, 0755); err != nil {
-				return aoserrors.Wrap(err)
-			}
-
-			if permissions != 0 {
-				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
-					return aoserrors.Wrap(err)
-				}
+			if err := createMountPoint(path, mount, true); err != nil {
+				return err
 			}
 
 		case "bind":
@@ -1755,26 +1424,8 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 				return aoserrors.Wrap(err)
 			}
 
-			if stat.IsDir() {
-				if err = os.MkdirAll(itemPath, 0755); err != nil {
-					return aoserrors.Wrap(err)
-				}
-			} else {
-				if err = os.MkdirAll(filepath.Dir(itemPath), 0755); err != nil {
-					return aoserrors.Wrap(err)
-				}
-
-				file, err := os.OpenFile(itemPath, os.O_CREATE, 0644)
-				if err != nil {
-					return aoserrors.Wrap(err)
-				}
-				file.Close()
-			}
-
-			if permissions != 0 {
-				if err = os.Chmod(itemPath, os.FileMode(permissions)); err != nil {
-					return aoserrors.Wrap(err)
-				}
+			if err := createMountPoint(path, mount, stat.IsDir()); err != nil {
+				return err
 			}
 		}
 	}
@@ -1782,713 +1433,98 @@ func (launcher *Launcher) createMountPoints(serviceDir string, spec *serviceSpec
 	return nil
 }
 
-// get devices from aos service configuration
-// and get all resource information for device from device manager
-// and add groups and host devices for class device
-func (launcher *Launcher) setDevices(spec *serviceSpec, devices []Device) (err error) {
-	for _, device := range devices {
-		deviceResource, err := launcher.devicemanager.RequestDeviceResourceByName(device.Name)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
+func (launcher *Launcher) stopRunningInstances() error {
+	log.Debug("Stop running instances")
 
-		for _, hostDevice := range deviceResource.HostDevices {
-			// use absolute path from host devices and permissions from aos configuration
-			if err = spec.addHostDevice(Device{hostDevice, device.Permissions}); err != nil {
-				return aoserrors.Wrap(err)
-			}
-		}
-
-		for _, group := range deviceResource.Groups {
-			if err = spec.addAdditionalGroup(group); err != nil {
-				return aoserrors.Wrap(err)
-			}
-		}
+	runningInstances, err := launcher.storage.GetRunningInstances()
+	if err != nil {
+		return aoserrors.Wrap(err)
 	}
+
+	launcher.cacheCurrentServices(runningInstances)
+
+	var stopInstances []*instanceInfo // nolint:prealloc // stopInstances size is not determined
+
+	for _, runningInstance := range runningInstances {
+		service, err := launcher.getCurrentServiceInfo(runningInstance.ServiceID)
+		if err != nil {
+			log.WithFields(
+				instanceIdentLogFields(runningInstance.InstanceIdent, nil),
+			).Errorf("Can't get service info: %v", err)
+
+			continue
+		}
+
+		stopInstances = append(stopInstances, &instanceInfo{
+			InstanceInfo: runningInstance,
+			isStarted:    true,
+			service:      service,
+		})
+	}
+
+	launcher.stopInstances(stopInstances)
 
 	return nil
 }
 
-func (launcher *Launcher) setServiceResources(spec *serviceSpec, resources []string) (err error) {
-	for _, resource := range resources {
-		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
+func (launcher *Launcher) removeOutdatedInstances() error {
+	log.Debug("Remove outdated instances")
 
-		for _, group := range boardResource.Groups {
-			if err = spec.addAdditionalGroup(group); err != nil {
-				return aoserrors.Wrap(err)
-			}
-		}
-
-		for _, mount := range boardResource.Mounts {
-			if err = spec.addMount(runtimespec.Mount{
-				Destination: mount.Destination,
-				Source:      mount.Source,
-				Type:        mount.Type,
-				Options:     mount.Options,
-			}); err != nil {
-				return aoserrors.Wrap(err)
-			}
-		}
-
-		spec.mergeEnv(boardResource.Env)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []config.Host, err error) {
-	for _, resource := range resources {
-		boardResource, err := launcher.devicemanager.RequestBoardResourceByName(resource)
-		if err != nil {
-			return hosts, aoserrors.Wrap(err)
-		}
-
-		hosts = append(hosts, boardResource.Hosts...)
-	}
-
-	return hosts, nil
-}
-
-func (launcher *Launcher) prepareService(unpackDir, installDir string,
-	serviceInfo *pb.InstallServiceRequest, update bool, oldService Service) (service Service, err error) {
-	var uid, gid uint32
-
-	if update {
-		uid = oldService.UID
-		gid = oldService.GID
-	} else {
-		uid, gid, err = launcher.idsPool.getFree()
-		if err != nil {
-			return service, aoserrors.Wrap(err)
-		}
-	}
-
-	imageParts, err := getImageParts(unpackDir)
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	if err := imageutils.CopyFile(path.Join(unpackDir, manifestFileName), path.Join(installDir,
-		manifestFileName)); err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	if err := imageutils.CopyFile(imageParts.imageConfigPath, path.Join(installDir, ociImageConfigFile)); err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	if err := imageutils.CopyFile(imageParts.aosSrvConfigPath, path.Join(installDir, aosServiceConfigFile)); err != nil {
-		if !os.IsNotExist(err) {
-			return service, aoserrors.Wrap(err)
-		}
-
-		log.Debug("Service without aos service configuration")
-	}
-
-	rootfsDir := path.Join(installDir, serviceRootfsDir)
-
-	// unpack rootfs layer
-	if err = imageutils.UnpackTarImage(imageParts.serviceFSLayerPath, rootfsDir); err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	if err = filepath.Walk(rootfsDir, func(name string, info os.FileInfo, err error) error {
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		if err = os.Chown(name, int(uid), int(gid)); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		return nil
-	}); err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	serviceName := "aos_" + serviceInfo.GetServiceId() + ".service"
-
-	if err = launcher.createSystemdService(installDir, serviceName, serviceInfo.GetServiceId()); err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	service = Service{
-		ID:              serviceInfo.GetServiceId(),
-		AosVersion:      serviceInfo.GetAosVersion(),
-		VendorVersion:   serviceInfo.GetVendorVersion(),
-		Description:     serviceInfo.GetDescription(),
-		ServiceProvider: serviceInfo.GetProviderId(),
-		Path:            installDir,
-		UnitName:        serviceName,
-		UID:             uid,
-		GID:             gid,
-		State:           stateInit,
-		AlertRules:      serviceInfo.GetAlertRules(),
-	}
-
-	if service.ServiceProvider == "" {
-		service.ServiceProvider = defaultServiceProvider
-	}
-
-	service.ManifestDigest, err = getManifestChecksum(service.Path)
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	return service, nil
-}
-
-// We can't remove service if it is not in serviceProvider. Just return error and rollback will be
-// handled by parent function
-func (launcher *Launcher) addService(service Service, users []string) (err error) {
-	aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
+	instances, err := launcher.storage.GetAllInstances()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir,
-		aosConfig.GetStorageLimit()+aosConfig.GetStateLimit(), service.UID, service.GID); err != nil {
-		return aoserrors.Wrap(err)
-	}
+	launcher.cacheCurrentServices(instances)
 
-	if err = launcher.serviceProvider.AddService(service); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	defer func() {
-		if err != nil {
-			log.WithField("id", service.ID).Errorf("Error adding service: %s", err)
-
-			if err := launcher.removeService(service); err != nil {
-				log.Errorf("Can't remove service: %s", err)
-			}
-		}
-	}()
-
-	if err = launcher.addServiceToUsers(service.ID, users); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.addServiceToSystemd(service); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.startService(service); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return aoserrors.Wrap(err)
-}
-
-func (launcher *Launcher) updateService(oldService, newService Service, users []string) (err error) {
-	defer func() {
-		if err == nil {
-			return
-		}
-
-		log.WithField("id", newService.ID).Errorf("Update service error: %s", err)
-
-		if err := launcher.stopService(newService); err != nil {
-			log.WithField("id", newService.ID).Errorf("Can't stop service: %s", err)
-		}
-
-		if err := os.RemoveAll(newService.Path); err != nil {
-			log.WithField("id", newService.ID).Errorf("Can't remove new service dir: %s", err)
-		}
-
-		if err := launcher.restoreService(oldService); err != nil {
-			if err := launcher.removeService(oldService); err != nil {
-				log.Errorf("Can't remove old service: %s", err)
-			}
-		}
-	}()
-
-	newAosConfig, err := getAosServiceConfig(path.Join(newService.Path, aosServiceConfigFile))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.updateServiceState(oldService.ID, stateStopped); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.addServiceToUsers(newService.ID, users); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = platform.SetUserFSQuota(launcher.config.StorageDir, newAosConfig.GetStorageLimit(),
-		newService.UID, newService.GID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.stopService(oldService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.addServiceToSystemd(newService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.startService(newService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.checkServiceHealth(newService.UnitName); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.serviceProvider.UpdateService(newService); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = os.RemoveAll(oldService.Path); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) removeService(service Service) (retErr error) {
-	log.WithFields(log.Fields{"id": service.ID, "aosVersion": service.AosVersion}).Debug("Remove service")
-
-	if err := launcher.stopService(service); err != nil {
-		if retErr == nil {
-			retErr = err
-		}
-	}
-
-	if _, err := launcher.systemd.DisableUnitFilesContext(context.Background(),
-		[]string{service.UnitName}, true); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't disable systemd unit: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.systemd.ReloadContext(context.Background()); err != nil {
-		log.Errorf("Can't reload systemd: %s", err)
-	}
-
-	usersServices, err := launcher.serviceProvider.GetUsersServicesByServiceID(service.ID)
-	if err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't get users services: %s", err)
-			retErr = err
-		}
-	}
-
-	for _, userService := range usersServices {
-		if userService.StorageFolder != "" {
-			log.WithFields(log.Fields{
-				"folder":    userService.StorageFolder,
-				"serviceID": service.ID,
-			}).Debug("Remove storage folder")
-
-			if err := os.RemoveAll(userService.StorageFolder); err != nil {
-				if retErr == nil {
-					log.WithField("name", service.ID).Errorf("Can't remove storage folder: %s", err)
-					retErr = err
-				}
-			}
-		}
-	}
-
-	if err := launcher.serviceProvider.RemoveServiceFromAllUsers(service.ID); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't delete users from DB: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := launcher.serviceProvider.RemoveService(service.ID); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't remove service from DB: %s", err)
-			retErr = err
-		}
-	}
-
-	if launcher.network != nil {
-		spServices, err := launcher.serviceProvider.GetServiceProviderServices(service.ServiceProvider)
-		if err != nil {
-			if retErr == nil {
-				log.WithField("name", service.ID).Errorf("Can't get service provider services: %s", err)
-				retErr = err
-			}
-		} else {
-			if len(spServices) == 0 {
-				if err := launcher.network.DeleteNetwork(service.ServiceProvider); err != nil {
-					if retErr == nil {
-						log.WithField("name", service.ID).Errorf("Can't remove network: %s", err)
-						retErr = err
+	for _, instance := range instances {
+		if _, serviceErr := launcher.getCurrentServiceInfo(instance.ServiceID); serviceErr != nil {
+			if errors.Is(serviceErr, servicemanager.ErrNotExist) {
+				if removeErr := launcher.removeInstance(instance); removeErr != nil {
+					if err == nil {
+						err = removeErr
 					}
+
+					log.WithFields(
+						instanceIdentLogFields(instance.InstanceIdent, nil),
+					).Errorf("Can't remove outdated instance: %v", removeErr)
 				}
-			}
-		}
-	}
 
-	if err := launcher.idsPool.remove(service.UID, service.GID); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't remove service UID/GID from pool: %s", err)
-			retErr = err
-		}
-	}
-
-	if err := os.RemoveAll(service.Path); err != nil {
-		if retErr == nil {
-			log.WithField("name", service.ID).Errorf("Can't remove service folder: %s", err)
-			retErr = err
-		}
-	}
-
-	return aoserrors.Wrap(retErr)
-}
-
-func (launcher *Launcher) cleanupLayers() (retErr error) {
-	layersToRemove, retErr := launcher.layerProvider.GetLayersInfo()
-	if retErr != nil {
-		return aoserrors.Wrap(retErr)
-	}
-
-	if len(layersToRemove) == 0 {
-		return nil
-	}
-
-	allServices, retErr := launcher.serviceProvider.GetServices()
-	if retErr != nil {
-		return aoserrors.Wrap(retErr)
-	}
-
-	for _, serviceToCheck := range allServices {
-		if len(layersToRemove) == 0 {
-			return nil
-		}
-
-		layersDigest, err := getServiceLayers(serviceToCheck.Path)
-		if err != nil {
-			if retErr == nil {
-				log.WithField("name", serviceToCheck.ID).Errorf("Can't get layers from installed service: %s", err)
-				retErr = err
-			}
-
-			continue
-		}
-
-		for _, digest := range layersDigest {
-			for i, layerToRemove := range layersToRemove {
-				if layerToRemove.Digest == digest {
-					layersToRemove = append(layersToRemove[:i], layersToRemove[i+1:]...)
-
-					break
-				}
-			}
-		}
-	}
-
-	for _, layerToRemove := range layersToRemove {
-		if err := launcher.layerProvider.UninstallLayer(layerToRemove.Digest); err != nil {
-			if retErr == nil {
-				log.Errorf("Can't delete layer: %s", err)
-				retErr = err
-			}
-		}
-	}
-
-	return aoserrors.Wrap(retErr)
-}
-
-func getSystemdServiceTemplate(workingDir string) (template string, err error) {
-	fileName := path.Join(workingDir, serviceTemplateFile)
-
-	fileContent, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return template, aoserrors.Wrap(err)
-		}
-
-		log.Warnf("Service template file does not exist. Creating %s", fileName)
-
-		if err = ioutil.WriteFile(fileName, []byte(serviceTemplate), 0644); err != nil {
-			return template, aoserrors.Wrap(err)
-		}
-
-		return serviceTemplate, nil
-	}
-
-	return string(fileContent), nil
-}
-
-func (launcher *Launcher) createSystemdService(installDir, serviceName, id string) (err error) {
-	f, err := os.Create(path.Join(installDir, serviceName))
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer f.Close()
-
-	absServicePath, err := filepath.Abs(installDir)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	lines := strings.SplitAfter(launcher.serviceTemplate, "\n")
-	for _, line := range lines {
-		// skip comments
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// replaces variables with values
-		line = strings.ReplaceAll(line, "${RUNNER}", launcher.runnerPath)
-		line = strings.ReplaceAll(line, "${ID}", id)
-		line = strings.ReplaceAll(line, "${SERVICEPATH}", absServicePath)
-
-		fmt.Fprint(f, line)
-	}
-
-	return aoserrors.Wrap(err)
-}
-
-func (launcher *Launcher) updateMonitoring(service Service, state ServiceState, aosConfig *aosServiceConfig) (err error) {
-	switch state {
-	case stateRunning:
-		var rules monitoring.ServiceAlertRules
-
-		if err := json.Unmarshal([]byte(service.AlertRules), &rules); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		var ipAddress string
-
-		if launcher.network != nil {
-			if ipAddress, err = launcher.network.GetServiceIP(service.ID, service.ServiceProvider); err != nil {
-				return aoserrors.Wrap(err)
-			}
-		}
-
-		monitoringConfig := monitoring.ServiceMonitoringConfig{
-			ServiceDir:   service.Path,
-			IPAddress:    ipAddress,
-			UID:          service.UID,
-			GID:          service.GID,
-			ServiceRules: &rules,
-		}
-
-		if err = launcher.monitor.StartMonitorService(service.ID, monitoringConfig); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-	case stateStopped:
-		if err = launcher.monitor.StopMonitorService(service.ID); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) addServiceToUsers(serviceID string, users []string) (err error) {
-	_, err = launcher.serviceProvider.GetUsersService(users, serviceID)
-	if err == nil {
-		return nil
-	}
-
-	if !strings.Contains(err.Error(), "not exist") {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.serviceProvider.AddServiceToUsers(users, serviceID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = launcher.envVarsProvider.syncEnvVarsWithStorage(); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) cleanCache() (err error) {
-	log.Debug("Clean cached services and layers")
-
-	startedServices, err := launcher.serviceProvider.GetUsersServices(launcher.users)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	allServices, err := launcher.serviceProvider.GetServices()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	now := time.Now()
-
-	servicesToBeRemoved := 0
-	statusChannel := make(chan error, len(allServices))
-
-	for _, service := range allServices {
-		// check if service just started
-		justStarted := false
-
-		for _, startedService := range startedServices {
-			if service.ID == startedService.ID {
-				justStarted = true
-
-				break
-			}
-		}
-
-		if justStarted {
-			continue
-		}
-
-		aosConfig, err := getAosServiceConfig(path.Join(service.Path, aosServiceConfigFile))
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		ttl := launcher.config.DefaultServiceTTLDays
-
-		if aosConfig.ServiceTTL != nil {
-			ttl = *aosConfig.ServiceTTL
-		}
-
-		if service.StartAt.Add(time.Hour * 24 * time.Duration(ttl)).Before(now) {
-			servicesToBeRemoved++
-
-			go func(service Service) {
-				statusChannel <- launcher.removeService(service)
-			}(service)
-		}
-	}
-
-	// Wait all services are removed
-	for i := 0; i < servicesToBeRemoved; i++ {
-		<-statusChannel
-	}
-
-	if servicesToBeRemoved > 0 {
-		if err := launcher.cleanupLayers(); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) isServiceValid(service Service) (err error) {
-	// check service folder
-	if fi, err := os.Stat(service.Path); os.IsNotExist(err) || !fi.Mode().IsDir() {
-		return aoserrors.Errorf("service folder %s doesn't exist", service.Path)
-	}
-
-	// check image manifest
-	if _, err = os.Stat(path.Join(service.Path, manifestFileName)); os.IsNotExist(err) {
-		return aoserrors.Errorf("image manifest file %s doesn't exist", path.Join(service.Path, manifestFileName))
-	}
-
-	// check image specification
-	if _, err = os.Stat(path.Join(service.Path, ociImageConfigFile)); os.IsNotExist(err) {
-		return aoserrors.Errorf("image specification file %s doesn't exist", path.Join(service.Path, ociImageConfigFile))
-	}
-
-	// check service file
-	if _, err = os.Stat(path.Join(service.Path, service.UnitName)); os.IsNotExist(err) {
-		return aoserrors.Errorf("service file %s doesn't exist", path.Join(service.Path, service.UnitName))
-	}
-
-	return nil
-}
-
-func (launcher *Launcher) isSubjectActive(subjectID string) bool {
-	for _, curSubject := range launcher.users {
-		if subjectID == curSubject {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (launcher *Launcher) validateTTLs() {
-	launcher.Lock()
-
-	if launcher.ttlTicker != nil {
-		launcher.Unlock()
-		return
-	}
-
-	launcher.ttlTicker = time.NewTicker(ttlValidatePeriod)
-	defer launcher.ttlTicker.Stop()
-
-	launcher.ttlRemoveServices = time.NewTicker(ttlRemoveServices)
-	defer launcher.ttlRemoveServices.Stop()
-
-	launcher.Unlock()
-
-	for {
-		select {
-		case <-launcher.ttlTicker.C:
-			subjectServiceToRestart, err := launcher.envVarsProvider.validateEnvVarsTTL()
-			if err != nil {
-				log.Error("Validate env var ttl error: ", err)
 				continue
 			}
 
-			launcher.restartServicesBySubjectServiceID(subjectServiceToRestart)
-
-		case <-launcher.ttlRemoveServices.C:
-			if err := launcher.cleanCache(); err != nil {
-				log.Errorf("Error cleaning cache: %s", err)
-			}
-
-		case <-launcher.ttlStopChannel:
-			return
+			log.WithFields(
+				instanceIdentLogFields(instance.InstanceIdent, nil),
+			).Errorf("Instance service error: %v", err)
 		}
 	}
+
+	return err
 }
 
-func (launcher *Launcher) checkServiceHealth(serviceName string) (err error) {
-	subSet := launcher.systemd.NewSubscriptionSet()
+func (launcher *Launcher) removeInstance(instance InstanceInfo) (err error) {
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Remove outdated instance")
 
-	subSet.Add(serviceName)
+	if storageStateErr := launcher.storageStateProvider.Remove(
+		instance.InstanceID); storageStateErr != nil && err == nil {
+		err = storageStateErr
+	}
 
-	evChan, errChan := subSet.Subscribe()
+	if removeErr := launcher.storage.RemoveInstance(instance.InstanceID); removeErr != nil && err == nil {
+		err = removeErr
+	}
 
-	var curretActiveStatus string
+	return err
+}
 
-	timeoutChannel := time.After(launcher.config.ServiceHealthCheckTimeout.Duration)
-
-	for {
-		select {
-		case changes := <-evChan:
-			unitStatus, ok := changes[serviceName]
-			if !ok {
-				break
-			}
-
-			if unitStatus == nil {
-				return aoserrors.Errorf("service %s disabled", serviceName)
-			}
-
-			if unitStatus.Name == serviceName {
-				if unitStatus.ActiveState == unitStatusFailed {
-					return aoserrors.Errorf("service %s failed", serviceName)
-				}
-
-				curretActiveStatus = unitStatus.ActiveState
-			}
-
-		case err = <-errChan:
-			return aoserrors.Wrap(err)
-
-		case <-timeoutChannel:
-			if curretActiveStatus != unitStatusActive {
-				return aoserrors.Errorf("waiting for activating service %s timeout", serviceName)
-			}
-
-			return nil
-		}
+func deviceAllocateAlert(instance *instanceInfo, device string, err error) cloudprotocol.AlertItem {
+	return cloudprotocol.AlertItem{
+		Timestamp: time.Now(),
+		Tag:       cloudprotocol.AlertTagDeviceAllocate,
+		Payload: cloudprotocol.DeviceAllocateAlert{
+			InstanceIdent: instance.InstanceIdent,
+			Device:        device,
+			Message:       err.Error(),
+		},
 	}
 }

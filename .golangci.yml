@@ -1,15 +1,69 @@
 linters:
-  enable:
-    - structcheck
-    - varcheck
-    - staticcheck
-    - unconvert
-    - gofmt
-    - goimports
-    - revive
-    - ineffassign
-    - vet
-    - unused
-    - misspell
+  enable-all: true  
   disable:
-    - errcheck
+    - varnamelen
+    - exhaustivestruct
+    - gochecknoinits
+    - gci
+    - exhaustive
+    - nlreturn
+    - cyclop
+    - nestif
+    - ireturn
+    - gomoddirectives
+    - unparam
+    - nonamedreturns
+    - exhaustruct
+    - nosnakecase
+    # deprecated
+    - interfacer
+    - golint
+    - scopelint
+    - maligned
+    - bodyclose
+    - contextcheck
+    - nilerr
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - structcheck
+    - tparallel
+    - unparam
+    - wastedassign
+
+linters-settings:
+  revive:
+    rules:
+      - name: line-length-limit
+        disabled: true
+        arguments: [120]
+
+  funlen:
+    lines: 100
+
+  gosec:
+    excludes:
+      - G204
+
+  gomnd:
+    settings:
+      mnd:
+        ignored-numbers: 0o600,0o644,0o755,8,10,16,32,64,128,1000,1000000,0xff
+
+  gofumpt:
+    lang-version: "1.18"
+
+issues:
+  include:
+    - EXC0002
+
+  exclude-rules:
+    - path: _test.go
+      linters:
+        - funlen
+        - gocyclo
+        - gochecknoglobals
+        - gocognit
+        - paralleltest
+        - dupl
+        - maintidx

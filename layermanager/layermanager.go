@@ -21,88 +21,184 @@ package layermanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v1"
 	"github.com/aoscloud/aos_common/image"
+	"github.com/aoscloud/aos_common/spaceallocator"
+	"github.com/aoscloud/aos_common/utils/action"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/utils/action"
-	"github.com/aoscloud/aos_servicemanager/utils/imageutils"
+	"github.com/aoscloud/aos_servicemanager/utils/whiteouts"
 )
 
-/*******************************************************************************
+/***********************************************************************************************************************
  * Consts
- ******************************************************************************/
+ **********************************************************************************************************************/
+
 const (
-	layerDirName       = "layers"
-	extractDirName     = "extract"
-	downloadDirName    = "download"
 	layerOCIDescriptor = "layer.json"
 )
 
-/*******************************************************************************
+const maxConcurrentActions = 10
+
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var ErrNotExist = errors.New("layer does not exist")
+
+// NewSpaceAllocator space allocator constructor.
+// nolint:gochecknoglobals // used for unit test mock
+var NewSpaceAllocator = spaceallocator.New
+
+// RemoveCachedLayersPeriod global variable is used to be able to mocking the layers TTL functionality in test.
+// nolint:gochecknoglobals // used for unit test mock
+var RemoveCachedLayersPeriod = 24 * time.Hour
+
+/***********************************************************************************************************************
  * Types
- ******************************************************************************/
+ **********************************************************************************************************************/
+
+// SpaceAllocator space allocator.
+type SpaceAllocator interface {
+	AllocateLayersSpace(extraSpace int64) (allocatedLayersSize int64, err error)
+}
 
 // LayerManager instance.
 type LayerManager struct {
-	layersDir         string
-	layerInfoProvider LayerInfoProvider
-	extractDir        string
-	downloadDir       string
-	actionHandler     *action.Handler
+	sync.Mutex
+	layerStorage           LayerStorage
+	layersDir              string
+	extractDir             string
+	downloadDir            string
+	actionHandler          *action.Handler
+	layerTTLDays           uint64
+	layerAllocator         spaceallocator.Allocator
+	downloadAllocator      spaceallocator.Allocator
+	extractAllocator       spaceallocator.Allocator
+	validateTTLStopChannel chan struct{}
 }
 
-// LayerInfoProvider provides API to add, remove or access layer information.
-type LayerInfoProvider interface {
-	AddLayer(digest, layerID, path, osVersion, vendorVersion, description string, aosVersion uint64) (err error)
-	DeleteLayerByDigest(digest string) (err error)
-	GetLayerPathByDigest(digest string) (path string, err error)
-	GetLayersInfo() (layersList []*pb.LayerStatus, err error)
-	GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error)
+// LayerStorage provides API to add, remove or access layer information.
+type LayerStorage interface {
+	AddLayer(LayerInfo) error
+	DeleteLayerByDigest(digest string) error
+	GetLayersInfo() ([]LayerInfo, error)
+	GetLayerInfoByDigest(digest string) (LayerInfo, error)
+	SetLayerTimestamp(digest string, timestamp time.Time) error
+	SetLayerCached(digest string, cached bool) error
 }
 
-/*******************************************************************************
+// LayerInfo layer information.
+type LayerInfo struct {
+	Digest        string
+	LayerID       string
+	Path          string
+	OSVersion     string
+	AosVersion    uint64
+	VendorVersion string
+	Description   string
+	Timestamp     time.Time
+	Cached        bool
+	Size          uint64
+}
+
+/**********************************************************************************************************************
  * Public
- ******************************************************************************/
-// New creates new launcher object.
-func New(config *config.Config,
-	infoProvider LayerInfoProvider) (layermanager *LayerManager, err error) {
+ **********************************************************************************************************************/
+// New creates new layer manager instance.
+func New(config *config.Config, layerStorage LayerStorage) (layermanager *LayerManager, err error) {
 	layermanager = &LayerManager{
-		layersDir:         config.LayersDir,
-		layerInfoProvider: infoProvider,
-		extractDir:        path.Join(config.WorkingDir, extractDirName),
-		downloadDir:       path.Join(config.WorkingDir, downloadDirName),
+		layersDir:              config.LayersDir,
+		layerStorage:           layerStorage,
+		extractDir:             config.ExtractDir,
+		downloadDir:            config.DownloadDir,
+		actionHandler:          action.New(maxConcurrentActions),
+		layerTTLDays:           config.LayerTTLDays,
+		validateTTLStopChannel: make(chan struct{}),
 	}
 
-	if layermanager.layersDir == "" {
-		layermanager.layersDir = path.Join(config.WorkingDir, layerDirName)
-	}
-
-	if err := os.MkdirAll(layermanager.extractDir, 0755); err != nil {
+	if err := os.RemoveAll(layermanager.downloadDir); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if layermanager.actionHandler, err = action.New(); err != nil {
+	if err := os.RemoveAll(layermanager.extractDir); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	os.RemoveAll(layermanager.downloadDir)
+	if err := os.MkdirAll(layermanager.downloadDir, 0o755); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if err := os.MkdirAll(layermanager.extractDir, 0o755); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if err := os.MkdirAll(layermanager.layersDir, 0o755); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if layermanager.layerAllocator, err = NewSpaceAllocator(
+		layermanager.layersDir, config.LayersPartLimit, layermanager.removeLayer); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if layermanager.downloadAllocator, err = NewSpaceAllocator(
+		layermanager.downloadDir, 0, nil); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if layermanager.extractAllocator, err = NewSpaceAllocator(
+		layermanager.extractDir, 0, nil); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if err := layermanager.removeDamagedLayerFolders(); err != nil {
+		log.Errorf("Can't remove damaged layer folders: %v", err)
+	}
+
+	if err := layermanager.setOutdatedLayers(); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if err := layermanager.removeOutdatedLayers(); err != nil {
+		log.Errorf("Can't remove outdated layers: %v", err)
+	}
+
+	go layermanager.validateTTLs()
 
 	return layermanager, nil
 }
 
+// Close closes layer manager instance.
+func (layermanager *LayerManager) Close() {
+	if err := layermanager.layerAllocator.Close(); err != nil {
+		log.Errorf("Can't close layer allocator: %v", err)
+	}
+
+	if err := layermanager.downloadAllocator.Close(); err != nil {
+		log.Errorf("Can't close download allocator: %v", err)
+	}
+
+	if err := layermanager.extractAllocator.Close(); err != nil {
+		log.Errorf("Can't close extract allocator: %v", err)
+	}
+
+	close(layermanager.validateTTLStopChannel)
+}
+
 // GetLayersInfo provides list of already installed fs layers.
-func (layermanager *LayerManager) GetLayersInfo() (info []*pb.LayerStatus, err error) {
-	if info, err = layermanager.layerInfoProvider.GetLayersInfo(); err != nil {
+func (layermanager *LayerManager) GetLayersInfo() (info []LayerInfo, err error) {
+	if info, err = layermanager.layerStorage.GetLayersInfo(); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -110,99 +206,157 @@ func (layermanager *LayerManager) GetLayersInfo() (info []*pb.LayerStatus, err e
 }
 
 // InstallLayer installs layer.
-func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerRequest) (err error) {
-	log.WithFields(log.Fields{
-		"id":         installInfo.GetLayerId(),
-		"aosVersion": installInfo.GetAosVersion(),
-		"digest":     installInfo.GetDigest(),
-	}).Debug("Install layer")
+func (layermanager *LayerManager) InstallLayer(
+	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo,
+) error {
+	return <-layermanager.actionHandler.Execute(installInfo.Digest,
+		func(id string) error {
+			return layermanager.doInstallLayer(installInfo, layerURL, fileInfo)
+		})
+}
 
-	defer func() {
-		if err != nil {
-			log.WithFields(log.Fields{
-				"id":         installInfo.LayerId,
-				"aosVersion": installInfo.AosVersion,
-				"digest":     installInfo.Digest,
-			}).Errorf("Can't install layer: %s", err)
-		}
-	}()
+// RestoreLayer restore layer.
+func (layermanager *LayerManager) RestoreLayer(digest string) error {
+	return <-layermanager.actionHandler.Execute(digest,
+		func(id string) error {
+			return layermanager.doRestoreLayer(digest)
+		},
+	)
+}
 
-	if _, errNoLayer := layermanager.layerInfoProvider.GetLayerInfoByDigest(installInfo.GetDigest()); errNoLayer == nil {
-		// layer already installed
-		return nil
+// RemoveLayer remove layer.
+func (layermanager *LayerManager) RemoveLayer(digest string) error {
+	return <-layermanager.actionHandler.Execute(digest,
+		func(id string) error {
+			return layermanager.doRemoveLayer(digest)
+		})
+}
+
+func (layermanager *LayerManager) UseLayer(digest string) error {
+	if err := layermanager.layerStorage.SetLayerTimestamp(digest, time.Now().UTC()); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	urlVal, err := url.Parse(installInfo.Url)
+	return nil
+}
+
+// GetLayerInfoByDigest gets layers information by layer digest.
+func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer LayerInfo, err error) {
+	if layer, err = layermanager.layerStorage.GetLayerInfoByDigest(digest); err != nil {
+		return layer, aoserrors.Wrap(err)
+	}
+
+	return layer, nil
+}
+
+/***********************************************************************************************************************
+ * Private
+ **********************************************************************************************************************/
+
+func (layermanager *LayerManager) doRestoreLayer(digest string) error {
+	layer, err := layermanager.layerStorage.GetLayerInfoByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	var destinationFile string
+	if !layer.Cached {
+		log.Warningf("Layer %v not cached", digest)
 
-	if urlVal.Scheme != "file" {
-		if destinationFile, err = image.Download(context.Background(),
-			layermanager.downloadDir, installInfo.Url); err != nil {
-			return aoserrors.Wrap(err)
+		return nil
+	}
+
+	if err := layermanager.setLayerCached(layer, false); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func (layermanager *LayerManager) doInstallLayer(
+	installInfo LayerInfo, layerURL string, fileInfo image.FileInfo,
+) (err error) {
+	log.WithFields(log.Fields{
+		"id":         installInfo.LayerID,
+		"aosVersion": installInfo.AosVersion,
+		"digest":     installInfo.Digest,
+	}).Debug("Install layer")
+
+	if layerInfo, err := layermanager.layerStorage.GetLayerInfoByDigest(installInfo.Digest); err == nil {
+		// layer already installed
+		if layerInfo.Cached {
+			if err := layermanager.setLayerCached(layerInfo, false); err != nil {
+				return aoserrors.Wrap(err)
+			}
 		}
 
-		defer os.RemoveAll(destinationFile)
-	} else {
-		destinationFile = urlVal.Path
+		return nil
 	}
 
-	if err = image.CheckFileInfo(context.Background(), destinationFile, image.FileInfo{
-		Sha256: installInfo.Sha256,
-		Sha512: installInfo.Sha512, Size: installInfo.Size,
-	}); err != nil {
+	extractLayerDir := filepath.Join(layermanager.extractDir, installInfo.Digest)
+
+	if err := os.MkdirAll(extractLayerDir, 0o755); err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer os.RemoveAll(extractLayerDir)
+
+	layerDescriptor, spaceExtract, err := layermanager.extractPackageByURL(extractLayerDir, layerURL, fileInfo)
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	unpackDir := path.Join(layermanager.extractDir, filepath.Base(destinationFile))
+	defer func() {
+		if err := spaceExtract.Release(); err != nil {
+			log.Errorf("Can't release memory: %v", err)
+		}
+	}()
 
-	if err = imageutils.UnpackTarImage(destinationFile, unpackDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
-	defer os.RemoveAll(unpackDir)
-
-	var byteValue []byte
-
-	if byteValue, err = ioutil.ReadFile(path.Join(unpackDir, layerOCIDescriptor)); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	var layerDescriptor imagespec.Descriptor
-
-	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
+	layerPath, err := getValidLayerPath(layerDescriptor, extractLayerDir)
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	var layerPath string
-
-	if layerPath, err = getValidLayerPath(layerDescriptor, unpackDir); err != nil {
+	spaceLayer, err := layermanager.layerAllocator.AllocateSpace(uint64(layerDescriptor.Size))
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	layerStorageDir := path.Join(layermanager.layersDir, "blobs",
+	installInfo.Path = filepath.Join(layermanager.layersDir,
 		(string)(layerDescriptor.Digest.Algorithm()), layerDescriptor.Digest.Hex())
 
-	if err = imageutils.UnpackTarImage(layerPath, layerStorageDir); err != nil {
-		return aoserrors.Wrap(err)
-	}
+	defer func() {
+		if err != nil {
+			releaseAllocatedSpace(installInfo.Path, spaceLayer)
 
-	osVersion := ""
+			log.WithFields(log.Fields{
+				"id":         installInfo.LayerID,
+				"aosVersion": installInfo.AosVersion,
+				"digest":     installInfo.Digest,
+			}).Errorf("Can't install layer: %s", err)
+
+			return
+		}
+
+		if err := spaceLayer.Accept(); err != nil {
+			log.Errorf("Can't accept memory: %v", err)
+		}
+	}()
+
+	if err = unpackLayer(layerPath, installInfo.Path); err != nil {
+		return err
+	}
 
 	if layerDescriptor.Platform != nil {
-		osVersion = layerDescriptor.Platform.OSVersion
+		installInfo.OSVersion = layerDescriptor.Platform.OSVersion
 	}
 
-	if err = layermanager.layerInfoProvider.AddLayer(installInfo.Digest, installInfo.LayerId,
-		layerStorageDir, osVersion, installInfo.VendorVersion, installInfo.Description,
-		installInfo.AosVersion); err != nil {
+	installInfo.Size = uint64(layerDescriptor.Size)
+
+	if err = layermanager.layerStorage.AddLayer(installInfo); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
-		"id":         installInfo.LayerId,
+		"id":         installInfo.LayerID,
 		"aosVersion": installInfo.AosVersion,
 		"digest":     installInfo.Digest,
 	}).Info("Layer successfully installed")
@@ -210,93 +364,262 @@ func (layermanager *LayerManager) InstallLayer(installInfo *pb.InstallLayerReque
 	return nil
 }
 
-// UninstallLayer uninstalls layer.
-func (layermanager *LayerManager) UninstallLayer(digest string) (err error) {
-	log.WithFields(log.Fields{"digest": digest}).Debug("Uninstall layer")
+func (layermanager *LayerManager) doRemoveLayer(digest string) error {
+	log.WithFields(log.Fields{"digest": digest}).Debug("Remove layer")
 
-	layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(digest)
+	layer, err := layermanager.layerStorage.GetLayerInfoByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = os.RemoveAll(layerPath); err != nil {
-		return aoserrors.Wrap(err)
+	if layer.Cached {
+		log.Warningf("Layer %v already cached", digest)
+
+		return nil
 	}
 
-	if err = layermanager.layerInfoProvider.DeleteLayerByDigest(digest); err != nil {
+	if err := layermanager.setLayerCached(layer, true); err != nil {
 		return aoserrors.Wrap(err)
 	}
-
-	log.WithFields(log.Fields{"digest": digest}).Info("Layer successfully uninstalled")
 
 	return nil
 }
 
-// CheckLayersConsistency checks layers data to be consistent.
-func (layermanager *LayerManager) CheckLayersConsistency() (err error) {
-	layers, err := layermanager.layerInfoProvider.GetLayersInfo()
+func (layermanager *LayerManager) setLayerCached(layer LayerInfo, cached bool) error {
+	if err := layermanager.layerStorage.SetLayerCached(layer.Digest, cached); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if cached {
+		if err := layermanager.layerAllocator.AddOutdatedItem(
+			layer.Digest, layer.Size, layer.Timestamp); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		return nil
+	}
+
+	layermanager.layerAllocator.RestoreOutdatedItem(layer.Digest)
+
+	return nil
+}
+
+func (layermanager *LayerManager) validateTTLs() {
+	removeTicker := time.NewTicker(RemoveCachedLayersPeriod)
+	defer removeTicker.Stop()
+
+	for {
+		select {
+		case <-removeTicker.C:
+			if err := layermanager.removeOutdatedLayers(); err != nil {
+				log.Errorf("Can't remove outdated layers: %v", err)
+			}
+
+		case <-layermanager.validateTTLStopChannel:
+			return
+		}
+	}
+}
+
+func (layermanager *LayerManager) removeOutdatedLayers() error {
+	layers, err := layermanager.layerStorage.GetLayersInfo()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	for _, layer := range layers {
-		// Checking if Layer path exists
-		layerPath, err := layermanager.layerInfoProvider.GetLayerPathByDigest(layer.Digest)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
+		if layer.Cached &&
+			layer.Timestamp.Add(time.Hour*24*time.Duration(layermanager.layerTTLDays)).Before(time.Now()) {
+			if err := <-layermanager.actionHandler.Execute(layer.Digest,
+				func(digest string) error {
+					if err := layermanager.removeLayer(digest); err != nil {
+						return err
+					}
 
-		fi, err := os.Stat(layerPath)
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
+					layermanager.layerAllocator.RestoreOutdatedItem(digest)
 
-		if !fi.Mode().IsDir() {
-			return aoserrors.New("layer is not a dir")
+					return nil
+				}); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-// Cleanup clears all Layers.
-func (layermanager *LayerManager) Cleanup() (err error) {
-	layersInfo, err := layermanager.layerInfoProvider.GetLayersInfo()
+func (layermanager *LayerManager) removeLayer(digest string) error {
+	layer, err := layermanager.layerStorage.GetLayerInfoByDigest(digest)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, layerInfo := range layersInfo {
-		if curErr := layermanager.UninstallLayer(layerInfo.Digest); curErr != nil {
-			if err == nil {
-				err = aoserrors.Wrap(curErr)
+	if err = os.RemoveAll(layer.Path); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = layermanager.layerStorage.DeleteLayerByDigest(digest); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"digest": digest}).Info("Layer successfully removed")
+
+	return nil
+}
+
+func (layermanager *LayerManager) setOutdatedLayers() error {
+	layersInfo, err := layermanager.GetLayersInfo()
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, layer := range layersInfo {
+		if layer.Cached {
+			if err = layermanager.layerAllocator.AddOutdatedItem(
+				layer.Digest, layer.Size, layer.Timestamp); err != nil {
+				return aoserrors.Wrap(err)
 			}
 		}
 	}
 
-	return aoserrors.Wrap(err)
+	return nil
 }
 
-// GetLayerPathByDigest provied installed layer path by digest.
-func (layermanager *LayerManager) GetLayerPathByDigest(layerDigest string) (layerPath string, err error) {
-	layerPath, err = layermanager.layerInfoProvider.GetLayerPathByDigest(layerDigest)
+func (layermanager *LayerManager) removeDamagedLayerFolders() error {
+	layersInfo, err := layermanager.GetLayersInfo()
 	if err != nil {
-		return "", aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
-	return layerPath, nil
+	for _, layer := range layersInfo {
+		fi, err := os.Stat(layer.Path)
+		if err != nil || !fi.Mode().IsDir() {
+			log.Warnf("Layer missing: %v", layer.Path)
+
+			if err = layermanager.layerStorage.DeleteLayerByDigest(layer.Digest); err != nil {
+				return aoserrors.Wrap(err)
+			}
+		}
+	}
+
+	algorithms, err := ioutil.ReadDir(layermanager.layersDir)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, algorithm := range algorithms {
+		algorithmPath := filepath.Join(layermanager.layersDir, algorithm.Name())
+
+		digests, err := ioutil.ReadDir(algorithmPath)
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+	digestsLoop:
+		for _, digest := range digests {
+			digestPath := filepath.Join(algorithmPath, digest.Name())
+
+			for _, layer := range layersInfo {
+				if layer.Path == digestPath {
+					continue digestsLoop
+				}
+			}
+
+			log.Warnf("Layer missing in storage: %v", digestPath)
+
+			if err := os.RemoveAll(digestPath); err != nil {
+				return aoserrors.Wrap(err)
+			}
+		}
+	}
+
+	return nil
 }
 
-// GetLayerInfoByDigest get layers information by layer digest.
-func (layermanager *LayerManager) GetLayerInfoByDigest(digest string) (layer pb.LayerStatus, err error) {
-	return layermanager.layerInfoProvider.GetLayerInfoByDigest(digest) //nolint
+func (layermanager *LayerManager) extractPackageByURL(
+	extractDir, packageURL string, fileInfo image.FileInfo,
+) (layerDescriptor imagespec.Descriptor, space spaceallocator.Space, err error) {
+	urlVal, err := url.Parse(packageURL)
+	if err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	var sourceFile string
+
+	if urlVal.Scheme != "file" {
+		spaceDownload, err := layermanager.downloadAllocator.AllocateSpace(fileInfo.Size)
+		if err != nil {
+			return layerDescriptor, nil, aoserrors.Wrap(err)
+		}
+
+		defer func() {
+			if err := spaceDownload.Release(); err != nil {
+				log.Errorf("Can't release memory: %v", err)
+			}
+		}()
+
+		if sourceFile, err = image.Download(context.Background(), layermanager.downloadDir, packageURL); err != nil {
+			return layerDescriptor, nil, aoserrors.Wrap(err)
+		}
+
+		defer os.RemoveAll(sourceFile)
+	} else {
+		sourceFile = urlVal.Path
+	}
+
+	if err = image.CheckFileInfo(context.Background(), sourceFile, fileInfo); err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	size, err := image.GetUncompressedTarContentSize(sourceFile)
+	if err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	spaceExtract, err := layermanager.extractAllocator.AllocateSpace(uint64(size))
+	if err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	if err = image.UnpackTarImage(sourceFile, extractDir); err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	var byteValue []byte
+
+	if byteValue, err = ioutil.ReadFile(filepath.Join(extractDir, layerOCIDescriptor)); err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	if err = json.Unmarshal(byteValue, &layerDescriptor); err != nil {
+		return layerDescriptor, nil, aoserrors.Wrap(err)
+	}
+
+	return layerDescriptor, spaceExtract, nil
 }
 
-/*******************************************************************************
- * Private
- ******************************************************************************/
+func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) {
+	return filepath.Join(unTarPath, layerDescriptor.Digest.Hex()), nil
+}
 
-func getValidLayerPath(layerDescriptor imagespec.Descriptor, unTarPath string) (layerPath string, err error) { //nolint
-	// TODO implement descriptor validation
-	return path.Join(unTarPath, layerDescriptor.Digest.Hex()), nil
+func releaseAllocatedSpace(path string, spaceLayer spaceallocator.Space) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Warnf("Can't remove layer storage dir: %v", err)
+	}
+
+	if err := spaceLayer.Release(); err != nil {
+		log.Errorf("Can't release memory: %v", err)
+	}
+}
+
+func unpackLayer(source, destination string) error {
+	if err := image.UnpackTarImage(source, destination); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := whiteouts.OCIWhiteoutsToOverlay(destination, 0, 0); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
 }
