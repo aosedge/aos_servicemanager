@@ -1,0 +1,19 @@
+name: integration_test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  tests:
+    runs-on: self-hosted
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+
+      - name: Test
+        run: |
+          pwd
+          sudo env "PATH=$PATH" go test ./integration/* -v -failfast
