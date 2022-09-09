@@ -723,13 +723,14 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 		defer func() {
 			if err != nil {
 				log.WithFields(
-					instanceIdentLogFields(instance.InstanceIdent, nil),
+					instanceIdentLogFields(instance.InstanceIdent, log.Fields{"instanceID": instance.InstanceID}),
 				).Errorf("Can't stop instance: %v", err)
 
 				return
 			}
 
-			log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Info("Instance successfully stopped")
+			log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+				log.Fields{"instanceID": instance.InstanceID})).Info("Instance successfully stopped")
 		}()
 
 		if stopErr := launcher.stopInstance(instance); stopErr != nil && err == nil {
@@ -766,7 +767,8 @@ func (launcher *Launcher) releaseRuntime(instance *instanceInfo) (err error) {
 }
 
 func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Stop instance")
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+		log.Fields{"instanceID": instance.InstanceID})).Debug("Stop instance")
 
 	if !instance.isStarted {
 		return aoserrors.New("instance already stopped")
@@ -1124,7 +1126,8 @@ func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
 }
 
 func (launcher *Launcher) startInstance(instance *instanceInfo) error {
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Start instance")
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+		log.Fields{"instanceID": instance.InstanceID})).Debug("Start instance")
 
 	if instance.isStarted {
 		return aoserrors.New("instance already started")
