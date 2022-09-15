@@ -780,6 +780,11 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		return err
 	}
 
+	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
+		instance.InstanceID); monitorErr != nil && err == nil {
+		err = aoserrors.Wrap(monitorErr)
+	}
+
 	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil && err == nil {
 		err = aoserrors.Wrap(runnerErr)
 	}
@@ -800,11 +805,6 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 
 	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
 		err = aoserrors.Wrap(removeErr)
-	}
-
-	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
-		instance.InstanceID); monitorErr != nil && err == nil {
-		err = aoserrors.Wrap(monitorErr)
 	}
 
 	return err
@@ -1180,10 +1180,23 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this
 	// situation by checking if run state is not empty value.
 	launcher.runMutex.Lock()
-	defer launcher.runMutex.Unlock()
 
 	if instance.runStatus.State == "" {
 		instance.setRunStatus(runStatus)
+	}
+
+	launcher.runMutex.Unlock()
+
+	if err := launcher.instanceMonitor.StartInstanceMonitor(
+		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID,
+			GID:           instance.service.GID,
+			AlertRules:    instance.service.serviceConfig.AlertRules,
+		}); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't start instance monitoring: %v", err)
 	}
 
 	return nil
