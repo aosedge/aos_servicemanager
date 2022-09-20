@@ -4,6 +4,8 @@ go 1.18
 
 replace github.com/ThalesIgnite/crypto11 => github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f
 
+replace github.com/coreos/go-iptables => github.com/aoscloud/go-iptables v0.0.0-20220926113402-e57055a8a459
+
 require (
 	github.com/aoscloud/aos_common v0.0.0-20220926114048-c73feb449869
 	github.com/apparentlymart/go-cidr v1.1.0
