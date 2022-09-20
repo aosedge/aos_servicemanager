@@ -32,7 +32,7 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	serviceConfig *serviceConfig
+	serviceConfig *servicemanager.ServiceConfig
 	imageConfig   *imagespec.Image
 	err           error
 }
