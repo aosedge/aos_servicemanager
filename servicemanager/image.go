@@ -127,6 +127,18 @@ func validateUnpackedImage(installDir string) (err error) {
 		if err = validateDigest(installDir, manifest.AosService.Digest); err != nil {
 			return aoserrors.Wrap(err)
 		}
+
+		byteValue, err := ioutil.ReadFile(path.Join(
+			installDir, blobsFolder, string(manifest.AosService.Digest.Algorithm()), manifest.AosService.Digest.Hex()))
+		if err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		var tmpServiceConfig ServiceConfig
+
+		if err = json.Unmarshal(byteValue, &tmpServiceConfig); err != nil {
+			return aoserrors.Errorf("invalid Aos service config: %v", err)
+		}
 	}
 
 	layersSize := len(manifest.Layers)
