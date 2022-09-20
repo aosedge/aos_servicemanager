@@ -29,10 +29,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
@@ -59,46 +57,6 @@ const (
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
-
-type serviceDevice struct {
-	Name        string `json:"name"`
-	Permissions string `json:"permissions"`
-}
-
-type serviceQuotas struct {
-	CPULimit      *uint64 `json:"cpuLimit,omitempty"`
-	RAMLimit      *uint64 `json:"ramLimit,omitempty"`
-	PIDsLimit     *uint64 `json:"pidsLimit,omitempty"`
-	NoFileLimit   *uint64 `json:"noFileLimit,omitempty"`
-	TmpLimit      *uint64 `json:"tmpLimit,omitempty"`
-	StateLimit    *uint64 `json:"stateLimit,omitempty"`
-	StorageLimit  *uint64 `json:"storageLimit,omitempty"`
-	UploadSpeed   *uint64 `json:"uploadSpeed,omitempty"`
-	DownloadSpeed *uint64 `json:"downloadSpeed,omitempty"`
-	UploadLimit   *uint64 `json:"uploadLimit,omitempty"`
-	DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
-}
-
-type runParameters struct {
-	StartInterval   aostypes.Duration `json:"startInterval,omitempty"`
-	StartBurst      uint              `json:"startBurst,omitempty"`
-	RestartInterval aostypes.Duration `json:"restartInterval,omitempty"`
-}
-
-type serviceConfig struct {
-	Created            time.Time                    `json:"created"`
-	Author             string                       `json:"author"`
-	Hostname           *string                      `json:"hostname,omitempty"`
-	Sysctl             map[string]string            `json:"sysctl,omitempty"`
-	ServiceTTL         *uint64                      `json:"serviceTtl,omitempty"`
-	Quotas             serviceQuotas                `json:"quotas"`
-	AllowedConnections map[string]struct{}          `json:"allowedConnections,omitempty"`
-	Devices            []serviceDevice              `json:"devices,omitempty"`
-	Resources          []string                     `json:"resources,omitempty"`
-	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
-	AlertRules         *aostypes.ServiceAlertRules  `json:"alertRules,omitempty"`
-	RunParameters      runParameters                `json:"runParameters,omitempty"`
-}
 
 type runtimeSpec struct {
 	ociSpec         runtimespec.Spec
@@ -159,7 +117,7 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 	spec.ociSpec.Linux.Resources.CPU.Quota = &cpuQuota
 }
 
-func (spec *runtimeSpec) applyServiceConfig(config *serviceConfig) error {
+func (spec *runtimeSpec) applyServiceConfig(config *servicemanager.ServiceConfig) error {
 	if config.Hostname != nil {
 		spec.ociSpec.Hostname = *config.Hostname
 	}
@@ -441,7 +399,7 @@ func (spec *runtimeSpec) setRootfs(rootfsPath string) {
 	spec.ociSpec.Root = &runtimespec.Root{Path: rootfsPath, Readonly: false}
 }
 
-func (spec *runtimeSpec) setDevices(devices []serviceDevice) error {
+func (spec *runtimeSpec) setDevices(devices []servicemanager.ServiceDevice) error {
 	const numDeviceFields = 2
 
 	for _, device := range devices {
@@ -547,13 +505,13 @@ func (launcher *Launcher) getImageConfig(service servicemanager.ServiceInfo) (*i
 	return &imageConfig, nil
 }
 
-func (launcher *Launcher) getServiceConfig(service servicemanager.ServiceInfo) (*serviceConfig, error) {
+func (launcher *Launcher) getServiceConfig(service servicemanager.ServiceInfo) (*servicemanager.ServiceConfig, error) {
 	imageParts, err := launcher.serviceProvider.GetImageParts(service)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	var serviceConfig serviceConfig
+	var serviceConfig servicemanager.ServiceConfig
 
 	if imageParts.ServiceConfigPath != "" {
 		if err = getJSONFromFile(

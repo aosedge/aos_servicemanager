@@ -180,7 +180,7 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 
 	jobStatus := <-channel
 
-	log.WithFields(log.Fields{"name": unitName, "jobStatus": jobStatus}).Debug("Start service")
+	log.WithFields(log.Fields{"name": unitName, "jobStatus": jobStatus, "instanceID": instanceID}).Debug("Start service")
 
 	if jobStatus != jobStatusDone {
 		return status
