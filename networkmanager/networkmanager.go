@@ -159,6 +159,8 @@ type outputAccessConfig struct {
 // nolint:gochecknoglobals
 var skipNetworkFileNames = []string{"lock", "last_reserved_ip.0"}
 
+var errTrafficMonitorDisable = errors.New("traffic monitoring is disabled")
+
 // These global variables are used to be able to mocking the functionality of networking in tests.
 // nolint:gochecknoglobals
 var (
@@ -208,6 +210,8 @@ func New(cfg *config.Config, trafficStorage TrafficStorage) (manager *NetworkMan
 		if err != nil {
 			return manager, err
 		}
+
+		manager.trafficMonitoring.runUpdateIptables()
 	} else {
 		log.Warn("Can't initialize traffic monitoring: storage is nil")
 	}
@@ -220,9 +224,7 @@ func (manager *NetworkManager) Close() error {
 	log.Debug("Close network manager")
 
 	if manager.trafficMonitoring != nil {
-		if err := manager.trafficMonitoring.deleteAllTrafficChains(); err != nil {
-			return aoserrors.Wrap(err)
-		}
+		manager.trafficMonitoring.close()
 	}
 
 	return nil
@@ -361,11 +363,7 @@ func (manager *NetworkManager) GetInstanceIP(instanceID, networkID string) (ip s
 
 func (manager *NetworkManager) GetSystemTraffic() (inputTraffic, outputTraffic uint64, err error) {
 	if manager.trafficMonitoring == nil {
-		return 0, 0, errors.New("traffic monitoring is disabled")
-	}
-
-	if err = manager.trafficMonitoring.processTrafficMonitor(); err != nil {
-		return 0, 0, aoserrors.Wrap(err)
+		return 0, 0, errTrafficMonitorDisable
 	}
 
 	inputTrafficData, ok := manager.trafficMonitoring.trafficMap[manager.trafficMonitoring.inChain]
@@ -383,16 +381,12 @@ func (manager *NetworkManager) GetSystemTraffic() (inputTraffic, outputTraffic u
 
 func (manager *NetworkManager) GetInstanceTraffic(instanceID string) (inputTraffic, outputTraffic uint64, err error) {
 	if manager.trafficMonitoring == nil {
-		return 0, 0, errors.New("traffic monitoring is disabled")
+		return 0, 0, errTrafficMonitorDisable
 	}
 
 	instanceChains, ok := manager.trafficMonitoring.instanceChainsMap[instanceID]
 	if !ok {
 		return 0, 0, errors.Errorf("chain for instance %s is not found", instanceID)
-	}
-
-	if err = manager.trafficMonitoring.processTrafficMonitor(); err != nil {
-		return 0, 0, aoserrors.Wrap(err)
 	}
 
 	inTrafficData, ok := manager.trafficMonitoring.trafficMap[instanceChains.inChain]
@@ -402,7 +396,7 @@ func (manager *NetworkManager) GetInstanceTraffic(instanceID string) (inputTraff
 
 	outTrafficData, ok := manager.trafficMonitoring.trafficMap[instanceChains.outChain]
 	if !ok {
-		return inTrafficData.currentValue, 0, errors.Errorf("output chain %s for instance %s is not found",
+		return 0, 0, errors.Errorf("output chain %s for instance %s is not found",
 			instanceChains.outChain, instanceID)
 	}
 
@@ -411,7 +405,7 @@ func (manager *NetworkManager) GetInstanceTraffic(instanceID string) (inputTraff
 
 func (manager *NetworkManager) SetTrafficPeriod(period int) error {
 	if manager.trafficMonitoring == nil {
-		return errors.New("traffic monitoring is disabled")
+		return errTrafficMonitorDisable
 	}
 
 	if period < MinutePeriod || period > YearPeriod {
