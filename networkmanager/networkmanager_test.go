@@ -99,6 +99,7 @@ type testIPTablesInterface struct {
 	disableResetMonitoringTraffic bool
 	chain                         map[string]iptablesData
 	trafficLimitCounter           uint64
+	notifyIptablesCacheUpdate     chan struct{}
 }
 
 /***********************************************************************************************************************
@@ -640,9 +641,12 @@ func TestTrafficMonitoring(t *testing.T) {
 		disableResetMonitoringTraffic: true,
 		chain:                         make(map[string]iptablesData),
 		trafficLimitCounter:           20,
+		notifyIptablesCacheUpdate:     make(chan struct{}),
 	}
 
 	networkmanager.IPTables = iptableInterface
+
+	networkmanager.UpdateIptablesCachePeriod = 10 * time.Millisecond
 
 	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
@@ -652,28 +656,28 @@ func TestTrafficMonitoring(t *testing.T) {
 	testData := []testTrafficMonitoringData{
 		{
 			period:                networkmanager.DayPeriod,
+			expectedInputTraffic:  0,
+			expectedOutputTraffic: 0,
+		},
+		{
+			period:                networkmanager.HourPeriod,
 			expectedInputTraffic:  20,
 			expectedOutputTraffic: 20,
 		},
 		{
-			period:                networkmanager.HourPeriod,
+			period:                networkmanager.MonthPeriod,
 			expectedInputTraffic:  40,
 			expectedOutputTraffic: 40,
 		},
 		{
-			period:                networkmanager.MonthPeriod,
+			period:                networkmanager.YearPeriod,
 			expectedInputTraffic:  60,
 			expectedOutputTraffic: 60,
 		},
 		{
-			period:                networkmanager.YearPeriod,
+			period:                networkmanager.MinutePeriod,
 			expectedInputTraffic:  80,
 			expectedOutputTraffic: 80,
-		},
-		{
-			period:                networkmanager.MinutePeriod,
-			expectedInputTraffic:  100,
-			expectedOutputTraffic: 100,
 		},
 	}
 
@@ -688,6 +692,8 @@ func TestTrafficMonitoring(t *testing.T) {
 		if err := manager.SetTrafficPeriod(item.period); err != nil {
 			t.Errorf("Can't set traffic period: %s", err)
 		}
+
+		iptableInterface.waitUpdateIptablesCache()
 
 		in, out, err := manager.GetInstanceTraffic("instance0")
 		if err != nil {
@@ -707,24 +713,24 @@ func TestTrafficMonitoring(t *testing.T) {
 
 	testData = []testTrafficMonitoringData{
 		{
-			expectedInputTraffic:  40,
-			expectedOutputTraffic: 40,
-		},
-		{
-			expectedInputTraffic:  60,
-			expectedOutputTraffic: 60,
-		},
-		{
-			expectedInputTraffic:  60,
-			expectedOutputTraffic: 60,
-		},
-		{
 			expectedInputTraffic:  0,
 			expectedOutputTraffic: 0,
 		},
 		{
 			expectedInputTraffic:  20,
 			expectedOutputTraffic: 20,
+		},
+		{
+			expectedInputTraffic:  40,
+			expectedOutputTraffic: 40,
+		},
+		{
+			expectedInputTraffic:  20,
+			expectedOutputTraffic: 20,
+		},
+		{
+			expectedInputTraffic:  40,
+			expectedOutputTraffic: 40,
 		},
 	}
 
@@ -735,16 +741,20 @@ func TestTrafficMonitoring(t *testing.T) {
 		t.Fatalf("Can't add instance to network: %s", err)
 	}
 
+	iptableInterface.waitUpdateIptablesCache()
+
 	in, out, err := manager.GetSystemTraffic()
 	if err != nil {
 		t.Errorf("Can't get system traffic: %s", err)
 	}
 
-	if in != 160 && out != 160 {
+	if in != 100 && out != 100 {
 		t.Error("Unexpected system traffic")
 	}
 
 	for i := 0; i < 3; i++ {
+		iptableInterface.waitUpdateIptablesCache()
+
 		in, out, err = manager.GetInstanceTraffic("instance1")
 		if err != nil {
 			t.Fatalf("Can't get instance traffic: %s", err)
@@ -756,6 +766,8 @@ func TestTrafficMonitoring(t *testing.T) {
 	}
 
 	iptableInterface.disableResetMonitoringTraffic = false
+
+	iptableInterface.waitUpdateIptablesCache()
 
 	in, out, err = manager.GetInstanceTraffic("instance1")
 	if err != nil {
@@ -769,6 +781,8 @@ func TestTrafficMonitoring(t *testing.T) {
 	iptableInterface.disableResetMonitoringTraffic = true
 
 	for i := 3; i < len(testData); i++ {
+		iptableInterface.waitUpdateIptablesCache()
+
 		in, out, err = manager.GetInstanceTraffic("instance1")
 		if err != nil {
 			t.Fatalf("Can't get instance traffic: %s", err)
@@ -1162,25 +1176,6 @@ func (iptables *testIPTablesInterface) Clear() {
 	}
 }
 
-func (iptables *testIPTablesInterface) ListWithCounters(table, chain string) ([]string, error) {
-	iptablesData, ok := iptables.chain[chain]
-	if !ok {
-		return nil, networkmanager.ErrRuleNotExist
-	}
-
-	var counters []string
-
-	for i := 0; i < iptablesData.countChain; i++ {
-		counters = append(counters, fmt.Sprintf("-c 0 %d", iptablesData.limit))
-	}
-
-	iptablesData.limit += iptables.trafficLimitCounter
-
-	iptables.chain[chain] = iptablesData
-
-	return counters, nil
-}
-
 func (iptables *testIPTablesInterface) Append(table, chain string, rulespec ...string) error {
 	data, ok := iptables.chain[chain]
 	if !ok {
@@ -1249,6 +1244,30 @@ func (iptables *testIPTablesInterface) ListChains(table string) ([]string, error
 	}
 
 	return listChain, nil
+}
+
+func (iptables *testIPTablesInterface) ListAllRulesWithCounters(table string) ([]string, error) {
+	var counters []string
+
+	for chain, iptablesData := range iptables.chain {
+		for i := 0; i < iptablesData.countChain; i++ {
+			counters = append(counters, fmt.Sprintf("%s -c 0 %d", chain, iptablesData.limit))
+		}
+
+		iptablesData.limit += iptables.trafficLimitCounter
+		iptables.chain[chain] = iptablesData
+	}
+
+	if iptables.notifyIptablesCacheUpdate != nil {
+		iptables.notifyIptablesCacheUpdate <- struct{}{}
+	}
+
+	return counters, nil
+}
+
+func (iptables *testIPTablesInterface) waitUpdateIptablesCache() {
+	<-iptables.notifyIptablesCacheUpdate
+	time.Sleep(100 * time.Millisecond)
 }
 
 func setup() (err error) {

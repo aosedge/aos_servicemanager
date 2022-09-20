@@ -18,6 +18,7 @@
 package networkmanager
 
 import (
+	"context"
 	"errors"
 	"hash/fnv"
 	"strconv"
@@ -69,18 +70,20 @@ type trafficData struct {
 }
 
 type trafficMonitoring struct {
-	iptables          IPTablesInterface
-	trafficPeriod     int
-	skipAddresses     string
-	inChain           string
-	outChain          string
-	trafficMap        map[string]*trafficData
-	instanceChainsMap map[string]*trafficChains
-	trafficStorage    TrafficStorage
+	iptables            IPTablesInterface
+	trafficPeriod       int
+	skipAddresses       string
+	inChain             string
+	outChain            string
+	trafficMap          map[string]*trafficData
+	instanceChainsMap   map[string]*trafficChains
+	iptablesFilterCache []string
+	trafficStorage      TrafficStorage
+	pollTimer           *time.Ticker
+	cancelFunction      context.CancelFunc
 }
 
 type IPTablesInterface interface {
-	ListWithCounters(table, chain string) ([]string, error)
 	Append(table, chain string, rulespec ...string) error
 	Delete(table, chain string, rulespec ...string) error
 	NewChain(table, chain string) error
@@ -88,6 +91,7 @@ type IPTablesInterface interface {
 	ClearChain(table, chain string) error
 	DeleteChain(table, chain string) error
 	ListChains(table string) ([]string, error)
+	ListAllRulesWithCounters(table string) ([]string, error)
 }
 
 /***********************************************************************************************************************
@@ -105,6 +109,10 @@ var (
 	IsSamePeriod = isSamePeriod
 	IPTables     IPTablesInterface
 )
+
+// UpdateIptablesCachePeriod is used to be able to mocking the functionality of networking in tests.
+// nolint:gochecknoglobals
+var UpdateIptablesCachePeriod = 1 * time.Minute
 
 /***********************************************************************************************************************
  * Private
@@ -152,17 +160,65 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if err = monitor.processTrafficMonitor(); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
 	return monitor, nil
 }
 
-func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint64, err error) {
-	stats, err := monitor.iptables.ListWithCounters("filter", chain)
+func (monitor *trafficMonitoring) runUpdateIptables() {
+	monitor.pollTimer = time.NewTicker(UpdateIptablesCachePeriod)
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	monitor.cancelFunction = cancelFunc
+
+	go func(ctx context.Context) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-monitor.pollTimer.C:
+				if err := monitor.updateIptablesFilterCache(); err != nil {
+					log.Errorf("Failed to update iptables cache: %v", err)
+				}
+
+				if err := monitor.processTrafficMonitor(); err != nil {
+					log.Errorf("Failed to process traffic monitor: %v", err)
+				}
+			}
+		}
+	}(ctx)
+}
+
+func (monitor *trafficMonitoring) close() {
+	if monitor.pollTimer != nil {
+		monitor.pollTimer.Stop()
+	}
+
+	if monitor.cancelFunction != nil {
+		monitor.cancelFunction()
+	}
+
+	if err := monitor.deleteAllTrafficChains(); err != nil {
+		log.Errorf("Can't delete all traffic chains: %v", err)
+	}
+}
+
+func (monitor *trafficMonitoring) updateIptablesFilterCache() error {
+	iptablesFilterCache, err := monitor.iptables.ListAllRulesWithCounters("filter")
 	if err != nil {
-		return 0, aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
+	}
+
+	monitor.iptablesFilterCache = iptablesFilterCache
+
+	return nil
+}
+
+func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint64, err error) {
+	var stats []string
+
+	for _, rule := range monitor.iptablesFilterCache {
+		if strings.Contains(rule, chain) {
+			stats = append(stats, rule)
+		}
 	}
 
 	if len(stats) > 0 {
@@ -178,7 +234,7 @@ func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint
 		}
 	}
 
-	return 0, aoserrors.New("statistic for chain not found")
+	return 0, nil
 }
 
 func isSamePeriod(trafficPeriod int, t1, t2 time.Time) (result bool) {
@@ -370,20 +426,16 @@ func (monitor *trafficMonitoring) processTrafficMonitor() (err error) {
 
 		if chainErr = monitor.checkTrafficLimit(traffic, chain); chainErr != nil && err == nil {
 			err = chainErr
+			continue
+		}
+
+		if chainErr = monitor.trafficStorage.SetTrafficMonitorData(
+			chain, traffic.lastUpdate, traffic.currentValue); chainErr != nil && err == nil {
+			err = aoserrors.Wrap(err)
 		}
 	}
-
-	monitor.saveTraffic()
 
 	return err
-}
-
-func (monitor *trafficMonitoring) saveTraffic() {
-	for chain, traffic := range monitor.trafficMap {
-		if err := monitor.trafficStorage.SetTrafficMonitorData(chain, traffic.lastUpdate, traffic.currentValue); err != nil {
-			log.WithField("chain", chain).Errorf("Can't set traffic data: %s", err)
-		}
-	}
 }
 
 func (monitor *trafficMonitoring) deleteAllTrafficChains() (err error) {
@@ -443,10 +495,6 @@ func (monitor *trafficMonitoring) startInstanceTrafficMonitor(
 
 	monitor.trafficMap[serviceChains.outChain].limit = uploadLimit
 	monitor.instanceChainsMap[instanceID] = &serviceChains
-
-	if err = monitor.processTrafficMonitor(); err != nil {
-		return aoserrors.Wrap(err)
-	}
 
 	return nil
 }
