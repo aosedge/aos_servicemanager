@@ -830,7 +830,10 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 
 		service, err := launcher.getCurrentServiceInfo(instance.ServiceID)
 		if err != nil {
-			launcher.instanceFailed(startInstance, err)
+			log.WithFields(instanceIdentLogFields(startInstance.InstanceIdent, nil)).Errorf("Instance failed: %v", err)
+
+			startInstance.runStatus.State = cloudprotocol.InstanceStateFailed
+			startInstance.runStatus.Err = err
 
 			continue
 		}
@@ -839,7 +842,10 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 			startInstance.AosVersion = service.AosVersion
 
 			if err = launcher.storage.UpdateInstance(startInstance.InstanceInfo); err != nil {
-				launcher.instanceFailed(startInstance, err)
+				log.WithFields(instanceIdentLogFields(startInstance.InstanceIdent, nil)).Errorf("Instance failed: %v", err)
+
+				startInstance.runStatus.State = cloudprotocol.InstanceStateFailed
+				startInstance.runStatus.Err = err
 
 				continue
 			}
