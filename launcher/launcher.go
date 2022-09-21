@@ -652,7 +652,7 @@ func (launcher *Launcher) checkNewServices() {
 
 serviceLoop:
 	for _, service := range launcher.currentServices {
-		if service.IsActive {
+		if service.IsActive || errors.Is(service.err, servicemanager.ErrNotExist) {
 			continue
 		}
 
