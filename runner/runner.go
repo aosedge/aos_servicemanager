@@ -180,7 +180,9 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 
 	jobStatus := <-channel
 
-	log.WithFields(log.Fields{"name": unitName, "jobStatus": jobStatus, "instanceID": instanceID}).Debug("Start service")
+	log.WithFields(log.Fields{
+		"name": unitName, "jobStatus": jobStatus, "instanceID": instanceID,
+	}).Debug("Start instance")
 
 	if jobStatus != jobStatusDone {
 		return status
@@ -213,7 +215,9 @@ func (runner *Runner) StopInstance(instanceID string) (err error) {
 	} else {
 		jobStatus := <-channel
 
-		log.WithFields(log.Fields{"id": instanceID, "jobStatus": jobStatus}).Debug("Stop service")
+		log.WithFields(log.Fields{
+			"name": unitName, "jobStatus": jobStatus, "instanceID": instanceID,
+		}).Debug("Stop instance")
 
 		if jobStatus != jobStatusDone && err == nil {
 			err = aoserrors.Errorf("job status %s", jobStatus)
