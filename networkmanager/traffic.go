@@ -23,6 +23,7 @@ import (
 	"hash/fnv"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
@@ -70,6 +71,7 @@ type trafficData struct {
 }
 
 type trafficMonitoring struct {
+	sync.RWMutex
 	iptables            IPTablesInterface
 	trafficPeriod       int
 	skipAddresses       string
@@ -152,11 +154,11 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 
 	monitor.skipAddresses = strings.Join(skipNetworks, ",")
 
-	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0"); err != nil {
+	if err = monitor.createTrafficChain(monitor.inChain, "INPUT", "0/0", 0); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT", "0/0"); err != nil {
+	if err = monitor.createTrafficChain(monitor.outChain, "OUTPUT", "0/0", 0); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -207,7 +209,9 @@ func (monitor *trafficMonitoring) updateIptablesFilterCache() error {
 		return aoserrors.Wrap(err)
 	}
 
+	monitor.Lock()
 	monitor.iptablesFilterCache = iptablesFilterCache
+	monitor.Unlock()
 
 	return nil
 }
@@ -215,11 +219,13 @@ func (monitor *trafficMonitoring) updateIptablesFilterCache() error {
 func (monitor *trafficMonitoring) getTrafficChainBytes(chain string) (value uint64, err error) {
 	var stats []string
 
+	monitor.RLock()
 	for _, rule := range monitor.iptablesFilterCache {
 		if strings.Contains(rule, chain) {
 			stats = append(stats, rule)
 		}
 	}
+	monitor.RUnlock()
 
 	if len(stats) > 0 {
 		items := strings.Fields(stats[len(stats)-1])
@@ -321,7 +327,7 @@ func (monitor *trafficMonitoring) deleteAllRules(chain string, rulespec ...strin
 	}
 }
 
-func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses string) (err error) {
+func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses string, limit uint64) (err error) {
 	var skipAddrType, addrType string
 
 	log.WithField("chain", chain).Debug("Create iptables chain")
@@ -357,12 +363,18 @@ func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses
 
 	traffic := trafficData{addresses: addresses}
 
+	if limit != 0 {
+		traffic.limit = limit
+	}
+
 	traffic.lastUpdate, traffic.initialValue, err = monitor.trafficStorage.GetTrafficMonitorData(chain)
 	if err != nil && !errors.Is(err, ErrEntryNotExist) {
 		return aoserrors.Wrap(err)
 	}
 
+	monitor.Lock()
 	monitor.trafficMap[chain] = &traffic
+	monitor.Unlock()
 
 	return nil
 }
@@ -370,6 +382,7 @@ func (monitor *trafficMonitoring) createTrafficChain(chain, rootChain, addresses
 func (monitor *trafficMonitoring) deleteTrafficChain(chain, rootChain string) (err error) {
 	log.WithField("chain", chain).Debug("Delete iptables chain")
 
+	monitor.Lock()
 	// Store traffic data to DB
 	if traffic, ok := monitor.trafficMap[chain]; ok {
 		if err := monitor.trafficStorage.SetTrafficMonitorData(chain,
@@ -379,6 +392,7 @@ func (monitor *trafficMonitoring) deleteTrafficChain(chain, rootChain string) (e
 	}
 
 	delete(monitor.trafficMap, chain)
+	monitor.Unlock()
 
 	if err = monitor.deleteAllRules(rootChain, "-j", chain); err != nil {
 		return aoserrors.Wrap(err)
@@ -483,43 +497,70 @@ func (monitor *trafficMonitoring) startInstanceTrafficMonitor(
 	chainBase := strconv.FormatUint(hash.Sum64(), 16)
 	serviceChains := trafficChains{inChain: "AOS_" + chainBase + "_IN", outChain: "AOS_" + chainBase + "_OUT"}
 
-	if err = monitor.createTrafficChain(serviceChains.inChain, "FORWARD", ipAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceChains.inChain, "FORWARD", ipAddress, downloadLimit); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	monitor.trafficMap[serviceChains.inChain].limit = downloadLimit
-
-	if err = monitor.createTrafficChain(serviceChains.outChain, "FORWARD", ipAddress); err != nil {
+	if err = monitor.createTrafficChain(serviceChains.outChain, "FORWARD", ipAddress, uploadLimit); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	monitor.trafficMap[serviceChains.outChain].limit = uploadLimit
+	monitor.Lock()
 	monitor.instanceChainsMap[instanceID] = &serviceChains
+	monitor.Unlock()
 
 	return nil
 }
 
 func (monitor *trafficMonitoring) stopInstanceTrafficMonitor(instanceID string) (err error) {
-	serviceChains, ok := monitor.instanceChainsMap[instanceID]
-	if !ok {
+	instanceChains := monitor.getInstanceChains(instanceID)
+	if instanceChains == nil {
 		return nil
 	}
 
-	if serviceChains.inChain != "" {
-		if err = monitor.deleteTrafficChain(serviceChains.inChain, "FORWARD"); err != nil {
+	if instanceChains.inChain != "" {
+		if err = monitor.deleteTrafficChain(instanceChains.inChain, "FORWARD"); err != nil {
 			log.WithField("id", instanceID).Errorf("Can't delete chain: %s", err)
 		}
 	}
 
-	if serviceChains.outChain != "" {
-		if err = monitor.deleteTrafficChain(serviceChains.outChain, "FORWARD"); err != nil {
+	if instanceChains.outChain != "" {
+		if err = monitor.deleteTrafficChain(instanceChains.outChain, "FORWARD"); err != nil {
 			log.WithField("id", instanceID).Errorf("Can't delete chain: %s", err)
 		}
 	}
 
+	monitor.Lock()
 	delete(monitor.instanceChainsMap, instanceID)
+	monitor.Unlock()
 
 	return nil
+}
+
+func (monitor *trafficMonitoring) getInstanceChains(instanceID string) *trafficChains {
+	monitor.RLock()
+	defer monitor.RUnlock()
+
+	return monitor.instanceChainsMap[instanceID]
+}
+
+func (monitor *trafficMonitoring) getInputOutputTrafficData(
+	inChain, outChain string,
+) (input *trafficData, output *trafficData, err error) {
+	monitor.RLock()
+	defer monitor.RUnlock()
+
+	inputTrafficData, ok := monitor.trafficMap[inChain]
+	if !ok {
+		return nil, nil, aoserrors.New("chain for input system traffic is not found")
+	}
+
+	outputTrafficData, ok := monitor.trafficMap[outChain]
+	if !ok {
+		return nil, nil, aoserrors.New("chain for output system traffic is not found")
+	}
+
+	return inputTrafficData, outputTrafficData, nil
 }
 
 func (monitor *trafficMonitoring) checkTrafficLimit(traffic *trafficData, chain string) (err error) {

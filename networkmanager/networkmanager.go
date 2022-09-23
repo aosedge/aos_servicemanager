@@ -353,14 +353,10 @@ func (manager *NetworkManager) GetSystemTraffic() (inputTraffic, outputTraffic u
 		return 0, 0, errTrafficMonitorDisable
 	}
 
-	inputTrafficData, ok := manager.trafficMonitoring.trafficMap[manager.trafficMonitoring.inChain]
-	if !ok {
-		return 0, 0, errors.New("chain for input system traffic is not found")
-	}
-
-	outputTrafficData, ok := manager.trafficMonitoring.trafficMap[manager.trafficMonitoring.outChain]
-	if !ok {
-		return inputTrafficData.currentValue, 0, errors.New("chain for output system traffic is not found")
+	inputTrafficData, outputTrafficData, err := manager.trafficMonitoring.getInputOutputTrafficData(
+		manager.trafficMonitoring.inChain, manager.trafficMonitoring.outChain)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return inputTrafficData.currentValue, outputTrafficData.currentValue, nil
@@ -371,20 +367,15 @@ func (manager *NetworkManager) GetInstanceTraffic(instanceID string) (inputTraff
 		return 0, 0, errTrafficMonitorDisable
 	}
 
-	instanceChains, ok := manager.trafficMonitoring.instanceChainsMap[instanceID]
-	if !ok {
+	instanceChains := manager.trafficMonitoring.getInstanceChains(instanceID)
+	if instanceChains == nil {
 		return 0, 0, errors.Errorf("chain for instance %s is not found", instanceID)
 	}
 
-	inTrafficData, ok := manager.trafficMonitoring.trafficMap[instanceChains.inChain]
-	if !ok {
-		return 0, 0, errors.Errorf("input chain %s for instance %s is not found", instanceChains.inChain, instanceID)
-	}
-
-	outTrafficData, ok := manager.trafficMonitoring.trafficMap[instanceChains.outChain]
-	if !ok {
-		return 0, 0, errors.Errorf("output chain %s for instance %s is not found",
-			instanceChains.outChain, instanceID)
+	inTrafficData, outTrafficData, err := manager.trafficMonitoring.getInputOutputTrafficData(
+		instanceChains.inChain, instanceChains.outChain)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return inTrafficData.currentValue, outTrafficData.currentValue, nil
