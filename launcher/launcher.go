@@ -1157,18 +1157,6 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 		return err
 	}
 
-	if err := launcher.instanceMonitor.StartInstanceMonitor(
-		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
-			InstanceIdent: instance.InstanceIdent,
-			UID:           instance.UID,
-			GID:           instance.service.GID,
-			AlertRules:    instance.service.serviceConfig.AlertRules,
-		}); err != nil {
-		log.WithFields(
-			instanceIdentLogFields(instance.InstanceIdent, nil),
-		).Errorf("Can't start instance monitoring: %v", err)
-	}
-
 	runStatus := launcher.instanceRunner.StartInstance(
 		instance.InstanceID, instance.runtimeDir, runner.RunParameters{
 			StartInterval:   instance.service.serviceConfig.RunParameters.StartInterval.Duration,
