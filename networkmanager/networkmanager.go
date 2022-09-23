@@ -71,7 +71,7 @@ type netInstanceData struct {
 
 // NetworkManager network manager instance.
 type NetworkManager struct {
-	sync.Mutex
+	sync.RWMutex
 	cniInterface      cni.CNI
 	ipamSubnetwork    *ipSubnetwork
 	hosts             []aostypes.Host
@@ -237,9 +237,6 @@ func (manager *NetworkManager) GetNetnsPath(instanceID string) (pathToNetNS stri
 
 // AddInstanceToNetwork adds instance to network.
 func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string, params NetworkParams) error {
-	manager.Lock()
-	defer manager.Unlock()
-
 	log.WithFields(log.Fields{"instanceID": instanceID, "networkID": networkID}).Debug("Add instance to network")
 
 	if manager.isInstanceInNetwork(instanceID, networkID) {
@@ -251,9 +248,13 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 		return err
 	}
 
+	manager.addInstanceNetworkToCache(instanceID, networkID)
+
 	defer func() {
 		if err != nil {
-			manager.ipamSubnetwork.releaseIPNetPool(networkID)
+			if err := manager.deleteInstanceNetworkFromCache(instanceID, networkID); err != nil {
+				log.Errorf("Can't delete network instance: %v", err)
+			}
 		}
 	}()
 
@@ -298,13 +299,8 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 		}
 	}
 
-	if _, ok := manager.instancesData[networkID]; !ok {
-		manager.instancesData[networkID] = make(map[string]netInstanceData)
-	}
-
-	manager.instancesData[networkID][instanceID] = netInstanceData{
-		instanceIP: instanceIP,
-		hosts:      hosts,
+	if err = manager.updateInstanceNetworkCache(instanceID, networkID, instanceIP, hosts); err != nil {
+		return err
 	}
 
 	log.WithFields(log.Fields{
@@ -317,9 +313,6 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 
 // RemoveInstanceFromNetwork removes instance from network.
 func (manager *NetworkManager) RemoveInstanceFromNetwork(instanceID, networkID string) error {
-	manager.Lock()
-	defer manager.Unlock()
-
 	log.WithFields(log.Fields{"instanceID": instanceID}).Debug("Remove instance from network")
 
 	if !manager.isInstanceInNetwork(instanceID, networkID) {
@@ -336,20 +329,11 @@ func (manager *NetworkManager) RemoveInstanceFromNetwork(instanceID, networkID s
 		return aoserrors.Wrap(err)
 	}
 
-	delete(manager.instancesData[networkID], instanceID)
-
-	if len(manager.instancesData[networkID]) == 0 {
-		return aoserrors.Wrap(manager.clearNetwork(networkID))
-	}
-
-	return nil
+	return manager.deleteInstanceNetworkFromCache(instanceID, networkID)
 }
 
 // GetInstanceIP return instance IP address.
 func (manager *NetworkManager) GetInstanceIP(instanceID, networkID string) (ip string, err error) {
-	manager.Lock()
-	defer manager.Unlock()
-
 	log.WithFields(log.Fields{"instanceID": instanceID, "networkID": networkID}).Debug("Get instance IP")
 
 	if !manager.isInstanceInNetwork(instanceID, networkID) {
@@ -357,6 +341,9 @@ func (manager *NetworkManager) GetInstanceIP(instanceID, networkID string) (ip s
 
 		return "", aoserrors.New("Instance is not in network")
 	}
+
+	manager.RLock()
+	defer manager.RUnlock()
 
 	return manager.instancesData[networkID][instanceID].instanceIP, nil
 }
@@ -421,6 +408,50 @@ func (manager *NetworkManager) SetTrafficPeriod(period int) error {
  * Private
  **********************************************************************************************************************/
 
+func (manager *NetworkManager) updateInstanceNetworkCache(
+	instanceID, networkID, instanceIP string, hosts []string,
+) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+	networkInstanceData, ok := manager.instancesData[networkID][instanceID]
+	if !ok {
+		return aoserrors.Errorf("can't find network instanceID: %s", instanceID)
+	}
+
+	networkInstanceData.hosts = hosts
+	networkInstanceData.instanceIP = instanceIP
+
+	manager.instancesData[networkID][instanceID] = networkInstanceData
+
+	return nil
+}
+
+func (manager *NetworkManager) addInstanceNetworkToCache(instanceID, networkID string) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	if _, ok := manager.instancesData[networkID]; !ok {
+		manager.instancesData[networkID] = make(map[string]netInstanceData)
+	}
+
+	manager.instancesData[networkID][instanceID] = netInstanceData{}
+}
+
+func (manager *NetworkManager) deleteInstanceNetworkFromCache(instanceID, networkID string) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+	delete(manager.instancesData[networkID], instanceID)
+	networkEmpty := len(manager.instancesData[networkID]) == 0
+
+	if networkEmpty {
+		return manager.clearNetwork(networkID)
+	}
+
+	return nil
+}
+
 func createResolvConfAndHostFile(networkID, instanceIP string, nameservers []string, params NetworkParams) error {
 	if params.HostsFilePath != "" {
 		if err := writeHostToHostsFile(params.HostsFilePath, instanceIP,
@@ -466,6 +497,9 @@ func (manager *NetworkManager) addNetwork(
 }
 
 func (manager *NetworkManager) getIPSubnet(networkID string) (allocIPNet *net.IPNet, err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
 	ipSubnet, exist := manager.ipamSubnetwork.tryToGetExistIPNetFromPool(networkID)
 	if !exist {
 		if ipSubnet, err = checkExistNetInterface(bridgePrefix + networkID); err != nil {
@@ -498,9 +532,6 @@ func (manager *NetworkManager) prepareCNIConfig(
 }
 
 func (manager *NetworkManager) deleteAllNetworks() error {
-	manager.Lock()
-	defer manager.Unlock()
-
 	log.Debug("Delete all networks")
 
 	filesNetworkID, err := ioutil.ReadDir(manager.networkDir)
@@ -524,6 +555,9 @@ func (manager *NetworkManager) deleteAllNetworks() error {
 }
 
 func (manager *NetworkManager) isInstanceInNetwork(instanceID, networkID string) (status bool) {
+	manager.RLock()
+	defer manager.RUnlock()
+
 	if instances, ok := manager.instancesData[networkID]; ok {
 		if _, ok := instances[instanceID]; ok {
 			return true
@@ -670,6 +704,9 @@ func (manager *NetworkManager) prepareRuntimeConfig(instanceID, networkID string
 }
 
 func (manager *NetworkManager) isHostnameExists(networkID string, hosts []string) error {
+	manager.RLock()
+	defer manager.RUnlock()
+
 	instances, ok := manager.instancesData[networkID]
 	if !ok {
 		return nil
