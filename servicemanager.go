@@ -407,9 +407,12 @@ func main() {
 
 	defer sm.close()
 
-	if err = sm.launcher.SubjectsChanged(sm.iam.GetSubjects()); err != nil {
-		log.Errorf("Can't set subjects: %s", err)
-	}
+	go func() {
+		// This is time consuming function, call it in go routine to do not block service manager start
+		if err = sm.launcher.SubjectsChanged(sm.iam.GetSubjects()); err != nil {
+			log.Errorf("Can't set subjects: %s", err)
+		}
+	}()
 
 	// Notify systemd
 	if _, err = daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
