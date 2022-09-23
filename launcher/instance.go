@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"encoding/hex"
+	"path/filepath"
 
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_servicemanager/runner"
@@ -60,6 +61,10 @@ func (instances byPriority) Swap(i, j int) { instances[i], instances[j] = instan
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
+
+func newInstanceInfo(info InstanceInfo) *instanceInfo {
+	return &instanceInfo{InstanceInfo: info, runtimeDir: filepath.Join(RuntimeDir, info.InstanceID)}
+}
 
 func (instance *instanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
 	status := cloudprotocol.InstanceStatus{

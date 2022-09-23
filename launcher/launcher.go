@@ -803,7 +803,7 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		err = aoserrors.Wrap(errStat)
 	}
 
-	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
+	if removeErr := os.RemoveAll(instance.runtimeDir); removeErr != nil && err == nil {
 		err = aoserrors.Wrap(removeErr)
 	}
 
@@ -820,11 +820,7 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 		}
 
 		if !ok {
-			startInstance = &instanceInfo{
-				InstanceInfo: instance,
-				runtimeDir:   filepath.Join(RuntimeDir, instance.InstanceID),
-			}
-
+			startInstance = newInstanceInfo(instance)
 			launcher.currentInstances[instance.InstanceID] = startInstance
 		}
 
@@ -1465,11 +1461,11 @@ func (launcher *Launcher) stopRunningInstances() error {
 			continue
 		}
 
-		stopInstances = append(stopInstances, &instanceInfo{
-			InstanceInfo: runningInstance,
-			isStarted:    true,
-			service:      service,
-		})
+		instance := newInstanceInfo(runningInstance)
+		instance.isStarted = true
+		instance.service = service
+
+		stopInstances = append(stopInstances, instance)
 	}
 
 	launcher.stopInstances(stopInstances)
