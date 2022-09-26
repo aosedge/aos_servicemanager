@@ -5,7 +5,7 @@ go 1.18
 replace github.com/ThalesIgnite/crypto11 => github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f
 
 require (
-	github.com/aoscloud/aos_common v0.0.0-20220706065514-343b736432e9
+	github.com/aoscloud/aos_common v0.0.0-20220926114048-c73feb449869
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/containernetworking/cni v1.1.1
 	github.com/containernetworking/plugins v1.1.1
