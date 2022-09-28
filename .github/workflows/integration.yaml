@@ -16,4 +16,4 @@ jobs:
       - name: Test
         run: |
           pwd
-          sudo env "PATH=$PATH" go test ./integration/* -v -failfast
+          sudo env "PATH=$PATH" go test ./_integration/* -v -failfast
