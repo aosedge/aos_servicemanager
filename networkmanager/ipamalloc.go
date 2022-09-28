@@ -20,6 +20,7 @@ package networkmanager
 
 import (
 	"net"
+	"sync"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	log "github.com/sirupsen/logrus"
@@ -30,6 +31,7 @@ import (
  **********************************************************************************************************************/
 
 type ipSubnetwork struct {
+	sync.Mutex
 	predefinedPrivateNetworks []*net.IPNet
 	usedIPSubnetNetworks      map[string]*net.IPNet
 }
@@ -53,6 +55,9 @@ func newIPam() (ipam *ipSubnetwork, err error) {
 }
 
 func (ipam *ipSubnetwork) tryToGetExistIPNetFromPool(spID string) (allocIPNet *net.IPNet, usedIPNet bool) {
+	ipam.Lock()
+	defer ipam.Unlock()
+
 	allocIPNet, usedIPNet = ipam.usedIPSubnetNetworks[spID]
 	if usedIPNet {
 		return allocIPNet, usedIPNet
@@ -62,10 +67,8 @@ func (ipam *ipSubnetwork) tryToGetExistIPNetFromPool(spID string) (allocIPNet *n
 }
 
 func (ipam *ipSubnetwork) requestIPNetPool(spID string) (allocIPNet *net.IPNet, usedIPNet bool, err error) {
-	allocIPNet, usedIPNet = ipam.tryToGetExistIPNetFromPool(spID)
-	if usedIPNet {
-		return allocIPNet, usedIPNet, nil
-	}
+	ipam.Lock()
+	defer ipam.Unlock()
 
 	if len(ipam.predefinedPrivateNetworks) == 0 {
 		return nil, usedIPNet, aoserrors.Errorf("IP subnet pool is empty")
@@ -82,6 +85,9 @@ func (ipam *ipSubnetwork) requestIPNetPool(spID string) (allocIPNet *net.IPNet, 
 }
 
 func (ipam *ipSubnetwork) releaseIPNetPool(spID string) {
+	ipam.Lock()
+	defer ipam.Unlock()
+
 	ip, exist := ipam.usedIPSubnetNetworks[spID]
 	if !exist {
 		return

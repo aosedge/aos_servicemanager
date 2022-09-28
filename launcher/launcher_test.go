@@ -158,42 +158,9 @@ type testInstance struct {
 	numInstances    uint64
 	unitSubject     bool
 	imageConfig     *imagespec.Image
-	serviceConfig   *serviceConfig
+	serviceConfig   *servicemanager.ServiceConfig
 	stateChecksum   [][]byte
 	err             []error
-}
-
-type serviceDevice struct {
-	Name        string `json:"name"`
-	Permissions string `json:"permissions"`
-}
-
-type serviceQuotas struct {
-	CPULimit      *uint64 `json:"cpuLimit,omitempty"`
-	RAMLimit      *uint64 `json:"ramLimit,omitempty"`
-	PIDsLimit     *uint64 `json:"pidsLimit,omitempty"`
-	NoFileLimit   *uint64 `json:"noFileLimit,omitempty"`
-	TmpLimit      *uint64 `json:"tmpLimit,omitempty"`
-	StateLimit    *uint64 `json:"stateLimit,omitempty"`
-	StorageLimit  *uint64 `json:"storageLimit,omitempty"`
-	UploadSpeed   *uint64 `json:"uploadSpeed,omitempty"`
-	DownloadSpeed *uint64 `json:"downloadSpeed,omitempty"`
-	UploadLimit   *uint64 `json:"uploadLimit,omitempty"`
-	DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
-}
-
-type serviceConfig struct {
-	Created            time.Time                    `json:"created"`
-	Author             string                       `json:"author"`
-	Hostname           *string                      `json:"hostname,omitempty"`
-	Sysctl             map[string]string            `json:"sysctl,omitempty"`
-	ServiceTTL         *uint64                      `json:"serviceTtl,omitempty"`
-	Quotas             serviceQuotas                `json:"quotas"`
-	AllowedConnections map[string]struct{}          `json:"allowedConnections,omitempty"`
-	Devices            []serviceDevice              `json:"devices,omitempty"`
-	Resources          []string                     `json:"resources,omitempty"`
-	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
-	AlertRules         *aostypes.ServiceAlertRules  `json:"alertRules,omitempty"`
 }
 
 type testDevice struct {
@@ -794,17 +761,17 @@ func TestRuntimeSpec(t *testing.T) {
 					Env:        []string{"env1=val1", "env2=val2", "env3=val3"},
 				},
 			},
-			serviceConfig: &serviceConfig{
+			serviceConfig: &servicemanager.ServiceConfig{
 				Hostname: newString("testHostName"),
 				Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
-				Quotas: serviceQuotas{
+				Quotas: servicemanager.ServiceQuotas{
 					CPULimit:    newUint64(42),
 					RAMLimit:    newUint64(1024),
 					PIDsLimit:   newUint64(10),
 					NoFileLimit: newUint64(3),
 					TmpLimit:    newUint64(512),
 				},
-				Devices: []serviceDevice{
+				Devices: []servicemanager.ServiceDevice{
 					{Name: "input", Permissions: "r"},
 					{Name: "video", Permissions: "rw"},
 					{Name: "sound", Permissions: "rwm"},
@@ -1141,11 +1108,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 					ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
 				},
 			},
-			serviceConfig: &serviceConfig{
+			serviceConfig: &servicemanager.ServiceConfig{
 				Hostname:           newString("host1"),
 				Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
 				AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
-				Quotas: serviceQuotas{
+				Quotas: servicemanager.ServiceQuotas{
 					DownloadSpeed: newUint64(4096),
 					UploadSpeed:   newUint64(8192),
 					DownloadLimit: newUint64(16384),
@@ -1154,7 +1121,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 					StateLimit:    newUint64(1024),
 				},
 				Resources: []string{"resource0", "resource1", "resource2"},
-				Devices:   []serviceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
+				Devices:   []servicemanager.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
 				AlertRules: &aostypes.ServiceAlertRules{
 					RAM: &aostypes.AlertRule{
 						MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
@@ -1890,7 +1857,9 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service1", subjectID: "subject1", numInstances: 3,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					serviceConfig: &servicemanager.ServiceConfig{
+						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
+					},
 					err: []error{
 						nil,
 						resourcemanager.ErrNoAvailableDevice,
@@ -1912,7 +1881,9 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service1", subjectID: "subject1", numInstances: 3,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					serviceConfig: &servicemanager.ServiceConfig{
+						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
+					},
 					err: []error{
 						resourcemanager.ErrNoAvailableDevice,
 						resourcemanager.ErrNoAvailableDevice,
@@ -1921,7 +1892,9 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					serviceConfig: &servicemanager.ServiceConfig{
+						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
+					},
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
@@ -1941,12 +1914,16 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
-					err:           []error{resourcemanager.ErrNoAvailableDevice},
+					serviceConfig: &servicemanager.ServiceConfig{
+						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
+					},
+					err: []error{resourcemanager.ErrNoAvailableDevice},
 				},
 				{
 					serviceID: "service0", subjectID: "subject1", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{{Name: "device0", Permissions: "rw"}}},
+					serviceConfig: &servicemanager.ServiceConfig{
+						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
+					},
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
@@ -1960,7 +1937,7 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service0", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device0", Permissions: "rw"},
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
@@ -1968,7 +1945,7 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device0", Permissions: "rw"},
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
@@ -1977,14 +1954,14 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service2", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
 					}},
 				},
 				{
 					serviceID: "service3", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device2", Permissions: "rw"},
 					}},
 					err: []error{nil, resourcemanager.ErrNoAvailableDevice},
@@ -2004,7 +1981,7 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service0", subjectID: "subject0", numInstances: 3,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device0", Permissions: "rw"},
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
@@ -2013,7 +1990,7 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device0", Permissions: "rw"},
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
@@ -2022,7 +1999,7 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service2", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device2", Permissions: "rw"},
 					}},
 				},
@@ -2044,7 +2021,7 @@ func TestInstancePriorities(t *testing.T) {
 			instances: []testInstance{
 				{
 					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device0", Permissions: "rw"},
 						{Name: "device1", Permissions: "rw"},
 						{Name: "device2", Permissions: "rw"},
@@ -2052,7 +2029,7 @@ func TestInstancePriorities(t *testing.T) {
 				},
 				{
 					serviceID: "service2", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &serviceConfig{Devices: []serviceDevice{
+					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
 						{Name: "device2", Permissions: "rw"},
 					}},
 				},

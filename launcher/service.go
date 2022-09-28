@@ -18,6 +18,8 @@
 package launcher
 
 import (
+	"errors"
+
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -32,7 +34,7 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	serviceConfig *serviceConfig
+	serviceConfig *servicemanager.ServiceConfig
 	imageConfig   *imagespec.Image
 	err           error
 }
@@ -51,7 +53,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 
 		var service serviceInfo
 
-		service.ServiceInfo, service.err = launcher.serviceProvider.GetServiceInfo(instance.ServiceID)
+		if service.ServiceInfo, service.err = launcher.serviceProvider.GetServiceInfo(
+			instance.ServiceID); errors.Is(service.err, servicemanager.ErrNotExist) {
+			service.ServiceID = instance.ServiceID
+			service.AosVersion = 0
+		}
 
 		if service.err == nil {
 			service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo)
@@ -67,9 +73,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 
 		launcher.currentServices[instance.ServiceID] = &service
 
-		if err := launcher.serviceProvider.UseService(
-			service.ServiceInfo.ServiceID, service.ServiceInfo.AosVersion); err != nil {
-			log.WithField("serviceID", service.ServiceInfo.ServiceID).Warnf("Can't use service: %v", err)
+		if service.err == nil {
+			if err := launcher.serviceProvider.UseService(
+				service.ServiceInfo.ServiceID, service.ServiceInfo.AosVersion); err != nil {
+				log.WithField("serviceID", service.ServiceInfo.ServiceID).Warnf("Can't use service: %v", err)
+			}
 		}
 	}
 }

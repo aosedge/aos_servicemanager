@@ -572,17 +572,6 @@ func TestRemoveService(t *testing.T) {
 		t.Fatalf("Can't remove service: %v", err)
 	}
 
-	serviceInfo, err = sm.GetServiceInfo(serviceID)
-	if err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !serviceInfo.Cached {
-		t.Error("Service should be cached")
-	}
-
-	time.Sleep(2 * time.Second)
-
 	if _, err = sm.GetServiceInfo(serviceID); err == nil {
 		t.Error("Should be error service doesn't exist")
 	}
@@ -655,13 +644,8 @@ func TestRestoreService(t *testing.T) {
 		t.Fatal("Should be error service cashed")
 	}
 
-	service, err = sm.GetServiceInfo(serviceID)
-	if err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !service.Cached {
-		t.Error("Service should be cached")
+	if _, err := sm.GetServiceInfo(serviceID); !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Fatalf("Should be error not exist: %v", err)
 	}
 
 	serviceStorage.cachedServiceError = true
@@ -744,20 +728,16 @@ func TestAllocateMemoryInstallService(t *testing.T) {
 		t.Fatalf("Can't remove service: %v", err)
 	}
 
-	if serviceInfo, err = sm.GetServiceInfo(serviceID); err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !serviceInfo.Cached {
-		t.Error("Service should be cached")
+	if _, err := sm.GetServiceInfo(serviceID); !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Fatalf("Should be error not exist: %v", err)
 	}
 
 	if err = sm.InstallService(serviceInfo1, serviceURL1, fileInfo1); err != nil {
 		t.Fatalf("Should be error install service")
 	}
 
-	if serviceInfo, err = sm.GetServiceInfo(serviceID); err == nil {
-		t.Fatal("Service should not be exist")
+	if _, err := sm.GetServiceInfo(serviceID); !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Fatalf("Should be error not exist: %v", err)
 	}
 }
 
@@ -840,13 +820,8 @@ func TestCachedServiceOnStart(t *testing.T) {
 		t.Fatalf("Can't create SM: %v", err)
 	}
 
-	serviceInfo, err := sm1.GetServiceInfo(serviceID1)
-	if err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !serviceInfo.Cached {
-		t.Fatal("Service should be cached")
+	if _, err := sm.GetServiceInfo(serviceID1); !errors.Is(err, servicemanager.ErrNotExist) {
+		t.Fatalf("Should be error not exist: %v", err)
 	}
 
 	if err = sm1.InstallService(serviceInfo3, serviceURL3, fileInfo3); err != nil {

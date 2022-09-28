@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"encoding/hex"
+	"path/filepath"
 
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_servicemanager/runner"
@@ -61,6 +62,10 @@ func (instances byPriority) Swap(i, j int) { instances[i], instances[j] = instan
  * Private
  **********************************************************************************************************************/
 
+func newInstanceInfo(info InstanceInfo) *instanceInfo {
+	return &instanceInfo{InstanceInfo: info, runtimeDir: filepath.Join(RuntimeDir, info.InstanceID)}
+}
+
 func (instance *instanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
 	status := cloudprotocol.InstanceStatus{
 		InstanceIdent: instance.InstanceIdent,
@@ -84,12 +89,14 @@ func (instance *instanceInfo) setRunStatus(runStatus runner.InstanceStatus) {
 	instance.runStatus = runStatus
 
 	if runStatus.State == cloudprotocol.InstanceStateFailed {
-		log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Errorf("Instance failed: %v", runStatus.Err)
+		log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+			log.Fields{"instanceID": runStatus.InstanceID})).Errorf("Instance failed: %v", runStatus.Err)
 
 		return
 	}
 
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Info("Instance successfully started")
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+		log.Fields{"instanceID": runStatus.InstanceID})).Info("Instance successfully started")
 }
 
 func (launcher *Launcher) getCurrentInstance(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error) {

@@ -652,7 +652,7 @@ func (launcher *Launcher) checkNewServices() {
 
 serviceLoop:
 	for _, service := range launcher.currentServices {
-		if service.IsActive {
+		if service.IsActive || errors.Is(service.err, servicemanager.ErrNotExist) {
 			continue
 		}
 
@@ -723,13 +723,14 @@ func (launcher *Launcher) doStopAction(instance *instanceInfo) {
 		defer func() {
 			if err != nil {
 				log.WithFields(
-					instanceIdentLogFields(instance.InstanceIdent, nil),
+					instanceIdentLogFields(instance.InstanceIdent, log.Fields{"instanceID": instance.InstanceID}),
 				).Errorf("Can't stop instance: %v", err)
 
 				return
 			}
 
-			log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Info("Instance successfully stopped")
+			log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+				log.Fields{"instanceID": instance.InstanceID})).Info("Instance successfully stopped")
 		}()
 
 		if stopErr := launcher.stopInstance(instance); stopErr != nil && err == nil {
@@ -766,7 +767,8 @@ func (launcher *Launcher) releaseRuntime(instance *instanceInfo) (err error) {
 }
 
 func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Stop instance")
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+		log.Fields{"instanceID": instance.InstanceID})).Debug("Stop instance")
 
 	if !instance.isStarted {
 		return aoserrors.New("instance already stopped")
@@ -776,6 +778,11 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 
 	if instance.service == nil {
 		return err
+	}
+
+	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
+		instance.InstanceID); monitorErr != nil && err == nil {
+		err = aoserrors.Wrap(monitorErr)
 	}
 
 	if runnerErr := launcher.instanceRunner.StopInstance(instance.InstanceID); runnerErr != nil && err == nil {
@@ -796,13 +803,8 @@ func (launcher *Launcher) stopInstance(instance *instanceInfo) (err error) {
 		err = aoserrors.Wrap(errStat)
 	}
 
-	if removeErr := os.RemoveAll(filepath.Join(RuntimeDir, instance.InstanceID)); removeErr != nil && err == nil {
+	if removeErr := os.RemoveAll(instance.runtimeDir); removeErr != nil && err == nil {
 		err = aoserrors.Wrap(removeErr)
-	}
-
-	if monitorErr := launcher.instanceMonitor.StopInstanceMonitor(
-		instance.InstanceID); monitorErr != nil && err == nil {
-		err = aoserrors.Wrap(monitorErr)
 	}
 
 	return err
@@ -818,17 +820,16 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 		}
 
 		if !ok {
-			startInstance = &instanceInfo{
-				InstanceInfo: instance,
-				runtimeDir:   filepath.Join(RuntimeDir, instance.InstanceID),
-			}
-
+			startInstance = newInstanceInfo(instance)
 			launcher.currentInstances[instance.InstanceID] = startInstance
 		}
 
 		service, err := launcher.getCurrentServiceInfo(instance.ServiceID)
 		if err != nil {
-			launcher.instanceFailed(startInstance, err)
+			log.WithFields(instanceIdentLogFields(startInstance.InstanceIdent, nil)).Errorf("Instance failed: %v", err)
+
+			startInstance.runStatus.State = cloudprotocol.InstanceStateFailed
+			startInstance.runStatus.Err = err
 
 			continue
 		}
@@ -837,7 +838,10 @@ func (launcher *Launcher) getStartInstances(runInstances []InstanceInfo) []*inst
 			startInstance.AosVersion = service.AosVersion
 
 			if err = launcher.storage.UpdateInstance(startInstance.InstanceInfo); err != nil {
-				launcher.instanceFailed(startInstance, err)
+				log.WithFields(instanceIdentLogFields(startInstance.InstanceIdent, nil)).Errorf("Instance failed: %v", err)
+
+				startInstance.runStatus.State = cloudprotocol.InstanceStateFailed
+				startInstance.runStatus.Err = err
 
 				continue
 			}
@@ -1124,7 +1128,8 @@ func (launcher *Launcher) setupRuntime(instance *instanceInfo) error {
 }
 
 func (launcher *Launcher) startInstance(instance *instanceInfo) error {
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Debug("Start instance")
+	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
+		log.Fields{"instanceID": instance.InstanceID})).Debug("Start instance")
 
 	if instance.isStarted {
 		return aoserrors.New("instance already started")
@@ -1154,18 +1159,6 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 		return err
 	}
 
-	if err := launcher.instanceMonitor.StartInstanceMonitor(
-		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
-			InstanceIdent: instance.InstanceIdent,
-			UID:           instance.UID,
-			GID:           instance.service.GID,
-			AlertRules:    instance.service.serviceConfig.AlertRules,
-		}); err != nil {
-		log.WithFields(
-			instanceIdentLogFields(instance.InstanceIdent, nil),
-		).Errorf("Can't start instance monitoring: %v", err)
-	}
-
 	runStatus := launcher.instanceRunner.StartInstance(
 		instance.InstanceID, instance.runtimeDir, runner.RunParameters{
 			StartInterval:   instance.service.serviceConfig.RunParameters.StartInterval.Duration,
@@ -1177,10 +1170,23 @@ func (launcher *Launcher) startInstance(instance *instanceInfo) error {
 	// by status channel. And therefore, new status may arrive before returning by StartInstance API. We detect this
 	// situation by checking if run state is not empty value.
 	launcher.runMutex.Lock()
-	defer launcher.runMutex.Unlock()
 
 	if instance.runStatus.State == "" {
 		instance.setRunStatus(runStatus)
+	}
+
+	launcher.runMutex.Unlock()
+
+	if err := launcher.instanceMonitor.StartInstanceMonitor(
+		instance.InstanceID, resourcemonitor.ResourceMonitorParams{
+			InstanceIdent: instance.InstanceIdent,
+			UID:           instance.UID,
+			GID:           instance.service.GID,
+			AlertRules:    instance.service.serviceConfig.AlertRules,
+		}); err != nil {
+		log.WithFields(
+			instanceIdentLogFields(instance.InstanceIdent, nil),
+		).Errorf("Can't start instance monitoring: %v", err)
 	}
 
 	return nil
@@ -1455,11 +1461,11 @@ func (launcher *Launcher) stopRunningInstances() error {
 			continue
 		}
 
-		stopInstances = append(stopInstances, &instanceInfo{
-			InstanceInfo: runningInstance,
-			isStarted:    true,
-			service:      service,
-		})
+		instance := newInstanceInfo(runningInstance)
+		instance.isStarted = true
+		instance.service = service
+
+		stopInstances = append(stopInstances, instance)
 	}
 
 	launcher.stopInstances(stopInstances)

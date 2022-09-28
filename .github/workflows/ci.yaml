@@ -33,7 +33,7 @@ jobs:
       - name: Test
         run: |
           sudo iptables -P FORWARD ACCEPT 
-          sudo env "PATH=$PATH" go test $(go list ./... | grep -v "/runner") -p=1 -failfast -v -coverprofile=coverage.out -covermode=atomic
+          sudo env "PATH=$PATH" go test $(go list ./... | grep -v "/integration") -p=1 -failfast -v -coverprofile=coverage.out -covermode=atomic
           sudo chmod 666 coverage.out
 
       - name: Code coverage

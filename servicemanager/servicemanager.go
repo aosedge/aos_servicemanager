@@ -247,8 +247,15 @@ func (sm *ServiceManager) GetAllServicesStatus() ([]ServiceInfo, error) {
 
 // GetServiceInfo gets service information by id.
 func (sm *ServiceManager) GetServiceInfo(serviceID string) (serviceInfo ServiceInfo, err error) {
-	serviceInfo, err = sm.serviceInfoProvider.GetService(serviceID)
-	return serviceInfo, aoserrors.Wrap(err)
+	if serviceInfo, err = sm.serviceInfoProvider.GetService(serviceID); err != nil {
+		return serviceInfo, aoserrors.Wrap(err)
+	}
+
+	if serviceInfo.Cached {
+		return serviceInfo, ErrNotExist
+	}
+
+	return serviceInfo, nil
 }
 
 // GetImageParts gets image parts for the service.
