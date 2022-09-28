@@ -1,7 +1,6 @@
 [Unit]
 Description=AOS Service
 After=network.target
-Before=aos-servicemanager.service
 
 [Service]
 Type=forking
