@@ -38,7 +38,7 @@ import (
 func createConfigFile() (err error) {
 	configContent := `{
 	"CACert" : "CACert",	
-	"smServerUrl": "smserver",
+	"cmServerUrl" : "aoscm:8093",
 	"workingDir" : "workingDir",
 	"certStorage": "sm",
 	"storageDir" : "/var/aos/storage",
@@ -153,14 +153,14 @@ func TestGetCrypt(t *testing.T) {
 	}
 }
 
-func TestSMServerURL(t *testing.T) {
+func TestCMServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.SMServerURL != "smserver" {
-		t.Errorf("Wrong smServer value: %s", config.SMServerURL)
+	if config.CMServerURL != "aoscm:8093" {
+		t.Errorf("Wrong cmServer url value: %s", config.CMServerURL)
 	}
 }
 
