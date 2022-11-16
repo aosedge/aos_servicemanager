@@ -41,9 +41,8 @@ import (
  **********************************************************************************************************************/
 
 const (
-	devHostDirectory       = "/dev/"
-	userHostDirectory      = "/etc/group"
-	supportedFormatVersion = 1
+	devHostDirectory  = "/dev/"
+	userHostDirectory = "/etc/group"
 )
 
 /***********************************************************************************************************************
@@ -54,18 +53,24 @@ const (
 type ResourceManager struct {
 	sync.Mutex
 
+	nodeType         string
 	allocatedDevices map[string][]string
 	hostDevices      []string
 	hostGroups       []string
-	boardConfigFile  string
-	boardConfig      aostypes.BoardConfig
-	boardConfigError error
+	unitConfigFile   string
+	unitConfig       unitConfig
+	unitConfigError  error
 	alertSender      AlertSender
 }
 
 // AlertSender provides alert sender interface.
 type AlertSender interface {
 	SendAlert(alert cloudprotocol.AlertItem)
+}
+
+type unitConfig struct {
+	aostypes.NodeUnitConfig
+	VendorVersion string `json:"vendorVersion"`
 }
 
 /***********************************************************************************************************************
@@ -80,12 +85,13 @@ var ErrNoAvailableDevice = errors.New("no device available")
  **********************************************************************************************************************/
 
 // New creates new resource manager object.
-func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
+func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
-		boardConfigFile: boardConfigFile,
-		alertSender:     alertSender,
+		nodeType:       nodeType,
+		unitConfigFile: unitConfigFile,
+		alertSender:    alertSender,
 	}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
@@ -98,49 +104,60 @@ func New(boardConfigFile string, alertSender AlertSender) (resourcemanager *Reso
 
 	resourcemanager.allocatedDevices = make(map[string][]string)
 
-	if err = resourcemanager.loadBoardConfiguration(); err != nil {
-		log.Errorf("Board configuration error: %s", err)
+	if err = resourcemanager.loadUnitConfiguration(); err != nil {
+		log.Errorf("Unit configuration error: %s", err)
 	}
 
-	log.WithField("version", resourcemanager.boardConfig.VendorVersion).Debug("Board config version")
+	log.WithField("version", resourcemanager.unitConfig.VendorVersion).Debug("Unit config version")
 
 	return resourcemanager, nil
 }
 
-// GetBoardConfigInfo returns board config info.
-func (resourcemanager *ResourceManager) GetBoardConfigInfo() (version string) {
+// GetUnitConfigInfo returns unit config info.
+func (resourcemanager *ResourceManager) GetUnitConfigInfo() (version string) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.boardConfig.VendorVersion
+	return resourcemanager.unitConfig.VendorVersion
 }
 
-// CheckBoardConfig checks board config.
-func (resourcemanager *ResourceManager) CheckBoardConfig(configJSON string) error {
+// CheckUnitConfig checks unit config.
+func (resourcemanager *ResourceManager) CheckUnitConfig(configJSON, version string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.checkBoardConfig(configJSON)
+	return resourcemanager.checkUnitConfig(configJSON, version)
 }
 
-// UpdateBoardConfig updates board configuration.
-func (resourcemanager *ResourceManager) UpdateBoardConfig(configJSON string) error {
+// UpdateUnitConfig updates unit configuration.
+func (resourcemanager *ResourceManager) UpdateUnitConfig(configJSON, version string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	if err := resourcemanager.checkBoardConfig(configJSON); err != nil {
+	if err := resourcemanager.checkUnitConfig(configJSON, version); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err := ioutil.WriteFile(resourcemanager.boardConfigFile, []byte(configJSON), 0o600); err != nil {
+	config := unitConfig{VendorVersion: version}
+
+	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err := resourcemanager.loadBoardConfiguration(); err != nil {
+	dataToWrite, err := json.Marshal(config)
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	log.WithField("version", resourcemanager.boardConfig.VendorVersion).Debug("Update board configuration")
+	if err := ioutil.WriteFile(resourcemanager.unitConfigFile, dataToWrite, 0o600); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := resourcemanager.loadUnitConfiguration(); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	log.WithField("version", resourcemanager.unitConfig.VendorVersion).Debug("Update unit configuration")
 
 	return nil
 }
@@ -162,7 +179,7 @@ func (resourcemanager *ResourceManager) GetResourceInfo(name string) (aostypes.R
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	for _, resource := range resourcemanager.boardConfig.Resources {
+	for _, resource := range resourcemanager.unitConfig.Resources {
 		if resource.Name == name {
 			return resource, nil
 		}
@@ -178,8 +195,8 @@ func (resourcemanager *ResourceManager) AllocateDevice(device, instanceID string
 
 	log.WithFields(log.Fields{"instanceID": instanceID, "device": device}).Debug("Allocate device")
 
-	if resourcemanager.boardConfigError != nil {
-		return aoserrors.Wrap(resourcemanager.boardConfigError)
+	if resourcemanager.unitConfigError != nil {
+		return aoserrors.Wrap(resourcemanager.unitConfigError)
 	}
 
 	deviceInfo, err := resourcemanager.getAvailableDevice(device)
@@ -268,18 +285,18 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
  * Private
  **********************************************************************************************************************/
 
-func (resourcemanager *ResourceManager) checkBoardConfig(configJSON string) error {
-	boardConfig := aostypes.BoardConfig{}
+func (resourcemanager *ResourceManager) checkUnitConfig(configJSON, version string) error {
+	nodeConfig := aostypes.NodeUnitConfig{}
 
-	if err := json.Unmarshal([]byte(configJSON), &boardConfig); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if boardConfig.VendorVersion == resourcemanager.boardConfig.VendorVersion {
+	if version == resourcemanager.unitConfig.VendorVersion {
 		return aoserrors.New("invalid vendor version")
 	}
 
-	if err := resourcemanager.validateBoardConfig(boardConfig); err != nil {
+	if err := json.Unmarshal([]byte(configJSON), &nodeConfig); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err := resourcemanager.validateUnitConfig(nodeConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -338,32 +355,32 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 	return hostGroups, nil
 }
 
-func (resourcemanager *ResourceManager) loadBoardConfiguration() (err error) {
+func (resourcemanager *ResourceManager) loadUnitConfiguration() (err error) {
 	defer func() {
-		resourcemanager.boardConfigError = aoserrors.Wrap(err)
+		resourcemanager.unitConfigError = aoserrors.Wrap(err)
 	}()
 
-	resourcemanager.boardConfig = aostypes.BoardConfig{}
+	resourcemanager.unitConfig = unitConfig{}
 
-	byteValue, err := ioutil.ReadFile(resourcemanager.boardConfigFile)
+	byteValue, err := ioutil.ReadFile(resourcemanager.unitConfigFile)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = json.Unmarshal(byteValue, &resourcemanager.boardConfig); err != nil {
+	if err = json.Unmarshal(byteValue, &resourcemanager.unitConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = resourcemanager.validateBoardConfig(resourcemanager.boardConfig); err != nil {
+	if err = resourcemanager.validateUnitConfig(resourcemanager.unitConfig.NodeUnitConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (resourcemanager *ResourceManager) validateBoardConfig(config aostypes.BoardConfig) (err error) {
-	if config.FormatVersion != supportedFormatVersion {
-		return aoserrors.New("unsupported board configuration format version")
+func (resourcemanager *ResourceManager) validateUnitConfig(config aostypes.NodeUnitConfig) (err error) {
+	if config.NodeType != resourcemanager.nodeType {
+		return aoserrors.New("invalid node type")
 	}
 
 	if err = resourcemanager.validateDevices(config.Devices); err != nil {
@@ -373,7 +390,7 @@ func (resourcemanager *ResourceManager) validateBoardConfig(config aostypes.Boar
 	return nil
 }
 
-// compare available devices from board config with host (real) devices.
+// compare available devices from unit config with host (real) devices.
 func (resourcemanager *ResourceManager) validateDevices(devices []aostypes.DeviceInfo) error {
 	var deviceErrors []cloudprotocol.ResourceValidateError
 
@@ -426,7 +443,7 @@ func (resourcemanager *ResourceManager) validateDevices(devices []aostypes.Devic
 }
 
 func (resourcemanager *ResourceManager) getAvailableDevice(name string) (deviceInfo aostypes.DeviceInfo, err error) {
-	for _, deviceInfo = range resourcemanager.boardConfig.Devices {
+	for _, deviceInfo = range resourcemanager.unitConfig.Devices {
 		if deviceInfo.Name == name {
 			return deviceInfo, nil
 		}
