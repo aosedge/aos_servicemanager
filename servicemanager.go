@@ -48,7 +48,6 @@ import (
 	resource "github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
-	"github.com/aoscloud/aos_servicemanager/smserver"
 	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
@@ -66,7 +65,6 @@ type serviceManager struct {
 	cryptoContext     *cryptutils.CryptoContext
 	journalAlerts     *journalalerts.JournalAlerts
 	alerts            *alerts.Alerts
-	smServer          *smserver.SMServer
 	cfg               *config.Config
 	db                *database.Database
 	launcher          *launcher.Launcher
@@ -235,11 +233,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.smServer, err = smserver.New(cfg, sm.launcher, sm.serviceMgr, sm.layerMgr, sm.storageState,
-		sm.alerts, sm.monitorController, sm.resourcemanager, sm.logging, sm.cryptoContext, sm.iam, false); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	return sm, nil
 }
 
@@ -258,10 +251,6 @@ func (sm *serviceManager) handleChannels(ctx context.Context) {
 }
 
 func (sm *serviceManager) close() {
-	if sm.smServer != nil {
-		sm.smServer.Close()
-	}
-
 	if sm.serviceMgr != nil {
 		sm.serviceMgr.Close()
 	}
