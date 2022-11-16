@@ -127,8 +127,8 @@ func cleanup(cfg *config.Config, dbFile string) {
 		log.Errorf("Can't cleanup database: %s", err)
 	}
 
-	if err := os.RemoveAll(cfg.BoardConfigFile); err != nil {
-		log.Errorf("Can't remove board config file: %v", err)
+	if err := os.RemoveAll(cfg.UnitConfigFile); err != nil {
+		log.Errorf("Can't remove unit config file: %v", err)
 	}
 }
 
@@ -214,7 +214,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.resourcemanager, err = resource.New(cfg.BoardConfigFile, sm.alerts); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.UnitConfigFile, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
