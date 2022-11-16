@@ -49,7 +49,7 @@ func createConfigFile() (err error) {
 	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
-	"boardConfigFile" : "/var/aos/aos_board.cfg",
+	"unitConfigFile" : "/var/aos/aos_unit.cfg",
 	"iamServer" : "localhost:8089",
 	"iamPublicServer" : "localhost:8090",
 	"layerTtlDays" : 40,
@@ -190,14 +190,14 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 	}
 }
 
-func TestGetBoardConfigFile(t *testing.T) {
+func TestGetUnitConfigFile(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.BoardConfigFile != "/var/aos/aos_board.cfg" {
-		t.Errorf("Wrong board config value: %s", config.BoardConfigFile)
+	if config.UnitConfigFile != "/var/aos/aos_unit.cfg" {
+		t.Errorf("Wrong unit config value: %s", config.UnitConfigFile)
 	}
 }
 
