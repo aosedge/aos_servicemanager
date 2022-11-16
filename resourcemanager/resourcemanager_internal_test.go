@@ -83,49 +83,49 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestValidBoardConfiguration(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+func TestValidUnitConfiguration(t *testing.T) {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err != nil {
-		t.Errorf("Board config error: %s", err)
+	if err = rm.unitConfigError; err != nil {
+		t.Errorf("Unit config error: %s", err)
 	}
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
-	if err := writeTestBoardConfigFile(createEmptyBoardConfigJSON()); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createEmptyUnitConfigJSON()); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err != nil {
-		t.Errorf("Board config error: %s", err)
+	if err = rm.unitConfigError; err != nil {
+		t.Errorf("Unit config error: %s", err)
 	}
 }
 
-func TestInvalidBoardConfiguration(t *testing.T) {
-	if err := writeTestBoardConfigFile(createInvalidBoardConfigJSON()); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+func TestInvalidUnitConfiguration(t *testing.T) {
+	if err := writeTestUnitConfigFile(createInvalidUnitConfigJSON()); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err == nil {
+	if err = rm.unitConfigError; err == nil {
 		t.Error("Can't detect unavailable devices")
 	}
 
@@ -133,26 +133,26 @@ func TestInvalidBoardConfiguration(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err == nil {
-		t.Error("Proceed without board configuration")
+	if err = rm.unitConfigError; err == nil {
+		t.Error("Proceed without unit configuration")
 	}
 
 	if err = rm.AllocateDevice("random", "instance0"); err == nil {
-		t.Error("Proceed without board configuration")
+		t.Error("Proceed without unit configuration")
 	}
 }
 
 func TestGetDeviceInfo(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -177,11 +177,11 @@ func TestGetDeviceInfo(t *testing.T) {
 }
 
 func TestGetResourceInfo(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -211,11 +211,11 @@ func TestGetResourceInfo(t *testing.T) {
 }
 
 func TestAllocateAndReleaseDevices(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -238,11 +238,11 @@ func TestAllocateAndReleaseDevices(t *testing.T) {
 }
 
 func TestAllocateUnavailableDevice(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -253,11 +253,11 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 }
 
 func TestReleaseNotAllocatedDevice(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -283,11 +283,11 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 }
 
 func TestAllocateLimitedDevice(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -312,11 +312,11 @@ func TestAllocateLimitedDevice(t *testing.T) {
 }
 
 func TestGetDeviceInstances(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -366,11 +366,11 @@ func TestGetDeviceInstances(t *testing.T) {
 }
 
 func TestReleaseDevices(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
@@ -414,95 +414,95 @@ func TestReleaseDevices(t *testing.T) {
 	}
 }
 
-func TestNotExistBoardConfig(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
+func TestNotExistUnitConfig(t *testing.T) {
+	rm, err := New("mainType", path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err == nil {
-		t.Error("Board config should be invalid if config is not exits")
+	if err = rm.unitConfigError; err == nil {
+		t.Error("Unit config should be invalid if config is not exits")
 	}
 }
 
-func TestInvalidVersionBoardConfig(t *testing.T) {
-	if err := writeTestBoardConfigFile(createWrongVersionBoardConfigJSON()); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+func TestInvalidVersionUnitConfig(t *testing.T) {
+	if err := writeTestUnitConfigFile(createWrongVersionUnitConfigJSON()); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board_wrong_version.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.boardConfigError; err == nil {
-		t.Errorf("Board config should be invalid in case of version mismatch")
+	if err = rm.unitConfigError; err == nil {
+		t.Errorf("Unit config should be invalid in case of version mismatch")
 	}
 }
 
-func TestGetBoardConfigInfo(t *testing.T) {
+func TestGetUnitConfigInfo(t *testing.T) {
 	vendorVersion := "2.1"
 
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON(vendorVersion)); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(vendorVersion)); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	version := rm.GetBoardConfigInfo()
+	version := rm.GetUnitConfigInfo()
 
 	if version != vendorVersion {
-		t.Errorf("Wrong board config version: %s", version)
+		t.Errorf("Wrong unit config version: %s", version)
 	}
 }
 
-func TestUpdateBoardConfig(t *testing.T) {
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+func TestUpdateUnitConfig(t *testing.T) {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), &alertSender{})
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
 	newVendorVersion := "2.0"
 
-	if err = rm.UpdateBoardConfig(createTestBoardConfigJSON(newVendorVersion)); err != nil {
-		t.Fatalf("Can't update board config: %s", err)
+	if err = rm.UpdateUnitConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
+		t.Fatalf("Can't update unit config: %s", err)
 	}
 
-	version := rm.GetBoardConfigInfo()
+	version := rm.GetUnitConfigInfo()
 
 	if version != newVendorVersion {
-		t.Errorf("Wrong board config version: %s", version)
+		t.Errorf("Wrong unit config version: %s", version)
 	}
 }
 
-func TestUpdateErrorBoardConfig(t *testing.T) {
+func TestUpdateErrorUnitConfig(t *testing.T) {
 	currentConfigVersion := "1.0"
 
-	if err := writeTestBoardConfigFile(createTestBoardConfigJSON(currentConfigVersion)); err != nil {
-		t.Fatalf("Can't write board config: %s", err)
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(currentConfigVersion)); err != nil {
+		t.Fatalf("Can't write unit config: %s", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New(path.Join(tmpDir, "aos_board.cfg"), testAlertSender)
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %s", err)
 	}
 
-	if err = rm.UpdateBoardConfig(createInvalidBoardConfigJSON()); err == nil {
+	if err = rm.UpdateUnitConfig(createInvalidUnitConfigJSON(), "3.5"); err == nil {
 		t.Errorf("Update should fail")
 	}
 
-	version := rm.GetBoardConfigInfo()
+	version := rm.GetUnitConfigInfo()
 	if version != currentConfigVersion {
-		t.Errorf("Wrong board config version: %s", version)
+		t.Errorf("Wrong unit config version: %s", version)
 	}
 
 	testAlertSender.checkAlert(t)
@@ -532,7 +532,7 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createWrongVersionBoardConfigJSON() (configJSON string) {
+func createWrongVersionUnitConfigJSON() (configJSON string) {
 	return `{
 	"formatVersion": 256,
 	"vendorVersion": "1.0",
@@ -558,10 +558,10 @@ func createWrongVersionBoardConfigJSON() (configJSON string) {
 }`
 }
 
-func createTestBoardConfigJSON(version string) (configJSON string) {
+func createTestUnitConfigJSON(version string) (configJSON string) {
 	return fmt.Sprintf(`{
-	"formatVersion": 1,
-	"vendorVersion": "%s", 
+	"vendorVersion": "%s",
+	"nodeType": "mainType",
 	"devices": [
 		{
 			"name": "random",
@@ -618,10 +618,69 @@ func createTestBoardConfigJSON(version string) (configJSON string) {
 }`, version)
 }
 
-func createInvalidBoardConfigJSON() (configJSON string) {
+func createTestNodeConfigJSON() (configJSON string) {
 	return `{
-	"formatVersion": 1,
+	"nodeType": "mainType",
+	"devices": [
+		{
+			"name": "random",
+			"sharedCount": 0,
+			"groups": [
+				"root"
+			],
+			"hostDevices": [
+				"/dev/random"
+			]
+		},
+		{
+			"name": "null",
+			"sharedCount": 2,
+			"hostDevices": [
+				"/dev/null"
+			]
+		},
+		{
+			"name": "input",
+			"sharedCount": 2,
+			"hostDevices": [
+				"/dev/input/by-path"
+			]
+		},
+		{
+			"name": "stdin",
+			"sharedCount": 2,
+			"hostDevices": [
+				"/dev/stdin"
+			]
+		}
+	],
+	"resources": [
+		{
+			"name": "bluetooth",
+			"groups": ["bluetooth"]
+		},
+		{
+			"name": "wifi",
+			"groups": ["wifi-group"]
+		},
+		{
+			"name": "system-dbus",
+			"mounts": [{
+				"destination": "/var/run/dbus/system_bus_socket",
+				"type": "bind",
+				"source": "/var/run/dbus/system_bus_socket",
+				"options": ["rw", "bind"]
+			}],
+			"env": ["DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket"]
+		}
+	]
+}`
+}
+
+func createInvalidUnitConfigJSON() (configJSON string) {
+	return `{
 	"vendorVersion": "3.5",
+	"nodeType": "mainType",
 	"devices": [
 		{
 			"name": "some_not_existed_device",
@@ -637,16 +696,16 @@ func createInvalidBoardConfigJSON() (configJSON string) {
 }`
 }
 
-func createEmptyBoardConfigJSON() (configJSON string) {
+func createEmptyUnitConfigJSON() (configJSON string) {
 	return `{
-		"formatVersion": 1,
 		"vendorVersion": "1.0",
+		"nodeType": "mainType",
 		"devices": []
 }`
 }
 
-func writeTestBoardConfigFile(content string) (err error) {
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_board.cfg"), []byte(content), 0o600); err != nil {
+func writeTestUnitConfigFile(content string) (err error) {
+	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_unit.cfg"), []byte(content), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
