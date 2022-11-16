@@ -586,12 +586,12 @@ func (launcher *Launcher) doStartAction(instance *runtimeInstanceInfo) {
 
 func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []aostypes.Host, err error) {
 	for _, resource := range resources {
-		boardResource, err := launcher.resourceManager.GetResourceInfo(resource)
+		unitResource, err := launcher.resourceManager.GetResourceInfo(resource)
 		if err != nil {
 			return hosts, aoserrors.Wrap(err)
 		}
 
-		hosts = append(hosts, boardResource.Hosts...)
+		hosts = append(hosts, unitResource.Hosts...)
 	}
 
 	return hosts, nil
