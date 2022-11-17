@@ -29,7 +29,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
+	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -53,23 +53,23 @@ const (
  * Types
  **********************************************************************************************************************/
 
-type testPublicServer struct {
+type testServer struct {
 	pb.UnimplementedIAMPublicServiceServer
-	grpcServer             *grpc.Server
+	pb.UnimplementedIAMPublicIdentityServiceServer
+	pb.UnimplementedIAMPublicPermissionsServiceServer
+	pb.UnimplementedIAMPermissionsServiceServer
+
+	publicServer    *grpc.Server
+	protectedServer *grpc.Server
+
 	subjects               []string
 	subjectsChangedChannel chan []string
 	permissionsCache       map[string]servicePermissions
 }
 
-type testProtectedServer struct {
-	pb.UnimplementedIAMProtectedServiceServer
-	grpcServer       *grpc.Server
-	permissionsCache map[string]servicePermissions
-}
-
 type servicePermissions struct {
-	instaneIdent cloudprotocol.InstanceIdent
-	permissions  map[string]map[string]string
+	instanceIdent cloudprotocol.InstanceIdent
+	permissions   map[string]map[string]string
 }
 
 /***********************************************************************************************************************
@@ -101,13 +101,13 @@ func TestMain(m *testing.M) {
 
 	tmpDir, err = ioutil.TempDir("", "iam_")
 	if err != nil {
-		log.Fatalf("Error create temporary dir: %s", err)
+		log.Fatalf("Error create temporary dir: %v", err)
 	}
 
 	ret := m.Run()
 
 	if err := os.RemoveAll(tmpDir); err != nil {
-		log.Fatalf("Error removing tmp dir: %s", err)
+		log.Fatalf("Error removing tmp dir: %v", err)
 	}
 
 	os.Exit(ret)
@@ -120,32 +120,31 @@ func TestMain(m *testing.M) {
 func TestGetSubjects(t *testing.T) {
 	permissionsCache := make(map[string]servicePermissions)
 
-	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
-		t.Fatalf("Can't create test server: %s", err)
+		t.Fatalf("Can't create test server: %v", err)
 	}
 
-	defer publicServer.close()
-	defer protectedServer.close()
+	defer testServer.close()
 
-	publicServer.subjects = []string{"subject1", "subject2", "subject3"}
+	testServer.subjects = []string{"subject1", "subject2", "subject3"}
 
 	client, err := iamclient.New(&config.Config{
 		IAMServerURL:       protectedServerURL,
 		IAMPublicServerURL: publicServerURL,
 	}, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create IAM client: %s", err)
+		t.Fatalf("Can't create IAM client: %v", err)
 	}
 	defer client.Close()
 
-	if !reflect.DeepEqual(publicServer.subjects, client.GetSubjects()) {
+	if !reflect.DeepEqual(testServer.subjects, client.GetSubjects()) {
 		t.Errorf("Invalid subjects: %s", client.GetSubjects())
 	}
 
 	newSubjects := []string{"newSubjects1", "newSubjects2", "newSubjects3"}
 
-	publicServer.subjectsChangedChannel <- newSubjects
+	testServer.subjectsChangedChannel <- newSubjects
 
 	select {
 	case subjects := <-client.GetSubjectsChangedChannel():
@@ -161,20 +160,19 @@ func TestGetSubjects(t *testing.T) {
 func TestRegisterService(t *testing.T) {
 	permissionsCache := make(map[string]servicePermissions)
 
-	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
-		t.Fatalf("Can't create test server: %s", err)
+		t.Fatalf("Can't create test server: %v", err)
 	}
 
-	defer publicServer.close()
-	defer protectedServer.close()
+	defer testServer.close()
 
 	client, err := iamclient.New(&config.Config{
 		IAMServerURL:       protectedServerURL,
 		IAMPublicServerURL: publicServerURL,
 	}, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create IAM client: %s", err)
+		t.Fatalf("Can't create IAM client: %v", err)
 	}
 
 	defer client.Close()
@@ -186,7 +184,7 @@ func TestRegisterService(t *testing.T) {
 
 	secret, err := client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 
 	secret, err = client.RegisterInstance(registerInstance, permissions)
@@ -196,32 +194,31 @@ func TestRegisterService(t *testing.T) {
 
 	err = client.UnregisterInstance(registerInstance)
 	if err != nil {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 
 	secret, err = client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 }
 
 func TestGetPermissions(t *testing.T) {
 	permissionsCache := make(map[string]servicePermissions)
 
-	publicServer, protectedServer, err := newTestServers(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
 	if err != nil {
-		t.Fatalf("Can't create test server: %s", err)
+		t.Fatalf("Can't create test server: %v", err)
 	}
 
-	defer publicServer.close()
-	defer protectedServer.close()
+	defer testServer.close()
 
 	client, err := iamclient.New(&config.Config{
 		IAMServerURL:       protectedServerURL,
 		IAMPublicServerURL: publicServerURL,
 	}, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create IAM client: %s", err)
+		t.Fatalf("Can't create IAM client: %v", err)
 	}
 
 	defer client.Close()
@@ -233,25 +230,25 @@ func TestGetPermissions(t *testing.T) {
 
 	secret, err := client.RegisterInstance(registerInstance, permissions)
 	if err != nil || secret == "" {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 
-	receivedInstacne, respPermissions, err := client.GetPermissions(secret, "vis")
+	receivedInstance, respPermissions, err := client.GetPermissions(secret, "vis")
 	if err != nil {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 
 	if !reflect.DeepEqual(respPermissions, permissions["vis"]) {
 		t.Errorf("Wrong permissions: %v", respPermissions)
 	}
 
-	if receivedInstacne != registerInstance {
+	if receivedInstance != registerInstance {
 		t.Error("Incorrect received instance")
 	}
 
 	err = client.UnregisterInstance(registerInstance)
 	if err != nil {
-		t.Errorf("Can't send a request: %s", err)
+		t.Errorf("Can't send a request: %v", err)
 	}
 
 	_, _, err = client.GetPermissions(secret, "vis")
@@ -264,62 +261,60 @@ func TestGetPermissions(t *testing.T) {
  * Private
  **********************************************************************************************************************/
 
-func newTestServers(publicServerURL, protectedServerURL string, permissionsCache map[string]servicePermissions) (
-	publicServer *testPublicServer, protectedServer *testProtectedServer, err error,
-) {
-	publicServer = &testPublicServer{
+func newTestServer(
+	publicServerURL, protectedServerURL string, permissionsCache map[string]servicePermissions,
+) (*testServer, error) {
+	server := &testServer{
 		subjectsChangedChannel: make(chan []string, 1),
 		permissionsCache:       permissionsCache,
 	}
 
 	publicListener, err := net.Listen("tcp", publicServerURL)
 	if err != nil {
-		return nil, nil, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
 
-	publicServer.grpcServer = grpc.NewServer()
+	server.publicServer = grpc.NewServer()
 
-	pb.RegisterIAMPublicServiceServer(publicServer.grpcServer, publicServer)
+	pb.RegisterIAMPublicServiceServer(server.publicServer, server)
+	pb.RegisterIAMPublicIdentityServiceServer(server.publicServer, server)
+	pb.RegisterIAMPublicPermissionsServiceServer(server.publicServer, server)
 
 	go func() {
-		if err := publicServer.grpcServer.Serve(publicListener); err != nil {
-			log.Errorf("Can't serve grpc server: %s", err)
+		if err := server.publicServer.Serve(publicListener); err != nil {
+			log.Errorf("Can't serve grpc server: %v", err)
 		}
 	}()
-
-	protectedServer = &testProtectedServer{permissionsCache: permissionsCache}
 
 	protectedListener, err := net.Listen("tcp", protectedServerURL)
 	if err != nil {
-		return nil, nil, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
 
-	protectedServer.grpcServer = grpc.NewServer()
+	server.protectedServer = grpc.NewServer()
 
-	pb.RegisterIAMProtectedServiceServer(protectedServer.grpcServer, protectedServer)
+	pb.RegisterIAMPermissionsServiceServer(server.protectedServer, server)
 
 	go func() {
-		if err := protectedServer.grpcServer.Serve(protectedListener); err != nil {
-			log.Errorf("Can't serve grpc server: %s", err)
+		if err := server.protectedServer.Serve(protectedListener); err != nil {
+			log.Errorf("Can't serve grpc server: %v", err)
 		}
 	}()
 
-	return publicServer, protectedServer, nil
+	return server, nil
 }
 
-func (server *testPublicServer) close() {
-	if server.grpcServer != nil {
-		server.grpcServer.Stop()
+func (server *testServer) close() {
+	if server.publicServer != nil {
+		server.publicServer.Stop()
+	}
+
+	if server.protectedServer != nil {
+		server.protectedServer.Stop()
 	}
 }
 
-func (server *testProtectedServer) close() {
-	if server.grpcServer != nil {
-		server.grpcServer.Stop()
-	}
-}
-
-func (server *testProtectedServer) RegisterInstance(
+func (server *testServer) RegisterInstance(
 	context context.Context, req *pb.RegisterInstanceRequest,
 ) (rsp *pb.RegisterInstanceResponse, err error) {
 	rsp = &pb.RegisterInstanceResponse{}
@@ -338,12 +333,12 @@ func (server *testProtectedServer) RegisterInstance(
 		permissions[key] = value.Permissions
 	}
 
-	server.permissionsCache[secret] = servicePermissions{instaneIdent: instanceIdent, permissions: permissions}
+	server.permissionsCache[secret] = servicePermissions{instanceIdent: instanceIdent, permissions: permissions}
 
 	return rsp, nil
 }
 
-func (server *testProtectedServer) UnregisterInstance(
+func (server *testServer) UnregisterInstance(
 	ctx context.Context, req *pb.UnregisterInstanceRequest,
 ) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
@@ -358,7 +353,7 @@ func (server *testProtectedServer) UnregisterInstance(
 	return rsp, nil
 }
 
-func (server *testPublicServer) GetPermissions(
+func (server *testServer) GetPermissions(
 	ctx context.Context, req *pb.PermissionsRequest,
 ) (rsp *pb.PermissionsResponse, err error) {
 	rsp = &pb.PermissionsResponse{}
@@ -374,19 +369,19 @@ func (server *testPublicServer) GetPermissions(
 	}
 
 	rsp.Permissions = &pb.Permissions{Permissions: permissions}
-	rsp.Instance = instanceIdentToPB(funcServersPermissions.instaneIdent)
+	rsp.Instance = instanceIdentToPB(funcServersPermissions.instanceIdent)
 
 	return rsp, nil
 }
 
-func (server *testPublicServer) GetSubjects(context context.Context, req *empty.Empty) (rsp *pb.Subjects, err error) {
+func (server *testServer) GetSubjects(context context.Context, req *empty.Empty) (rsp *pb.Subjects, err error) {
 	rsp = &pb.Subjects{Subjects: server.subjects}
 
 	return rsp, nil
 }
 
-func (server *testPublicServer) SubscribeSubjectsChanged(req *empty.Empty,
-	stream pb.IAMPublicService_SubscribeSubjectsChangedServer,
+func (server *testServer) SubscribeSubjectsChanged(req *empty.Empty,
+	stream pb.IAMPublicIdentityService_SubscribeSubjectsChangedServer,
 ) (err error) {
 	for {
 		select {
@@ -403,9 +398,9 @@ func (server *testPublicServer) SubscribeSubjectsChanged(req *empty.Empty,
 	}
 }
 
-func (server *testProtectedServer) findSecret(instance cloudprotocol.InstanceIdent) (secret string) {
+func (server *testServer) findSecret(instance cloudprotocol.InstanceIdent) (secret string) {
 	for key, value := range server.permissionsCache {
-		if value.instaneIdent == instance {
+		if value.instanceIdent == instance {
 			return key
 		}
 	}
@@ -426,7 +421,7 @@ func randomString() string {
 }
 
 func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }
 
 func pbToInstanceIdent(ident *pb.InstanceIdent) cloudprotocol.InstanceIdent {
