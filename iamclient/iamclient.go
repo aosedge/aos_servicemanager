@@ -24,7 +24,7 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
+	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -56,10 +56,12 @@ type Client struct {
 
 	subjects []string
 
-	publicConnection    *grpc.ClientConn
-	protectedConnection *grpc.ClientConn
-	pbclientPublic      pb.IAMPublicServiceClient
-	pbclientProtected   pb.IAMProtectedServiceClient
+	publicConnection         *grpc.ClientConn
+	protectedConnection      *grpc.ClientConn
+	publicService            pb.IAMPublicServiceClient
+	publicPermissionsService pb.IAMPublicPermissionsServiceClient
+	publicIdentifyService    pb.IAMPublicIdentityServiceClient
+	permissionsService       pb.IAMPermissionsServiceClient
 
 	closeChannel           chan struct{}
 	subjectsChangedChannel chan []string
@@ -106,7 +108,9 @@ func New(
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.publicConnection)
+	client.publicService = pb.NewIAMPublicServiceClient(client.publicConnection)
+	client.publicPermissionsService = pb.NewIAMPublicPermissionsServiceClient(client.publicConnection)
+	client.publicIdentifyService = pb.NewIAMPublicIdentityServiceClient(client.publicConnection)
 
 	if !insecureConn {
 		certURL, keyURL, err := client.GetCertKeyURL(config.CertStorage)
@@ -127,7 +131,7 @@ func New(
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclientProtected = pb.NewIAMProtectedServiceClient(client.protectedConnection)
+	client.permissionsService = pb.NewIAMPermissionsServiceClient(client.protectedConnection)
 
 	log.Debug("Connected to IAM")
 
@@ -171,7 +175,7 @@ func (client *Client) RegisterInstance(
 		reqPermissions[key] = &pb.Permissions{Permissions: value}
 	}
 
-	response, err := client.pbclientProtected.RegisterInstance(ctx,
+	response, err := client.permissionsService.RegisterInstance(ctx,
 		&pb.RegisterInstanceRequest{Instance: instanceIdentToPB(instance), Permissions: reqPermissions})
 	if err != nil {
 		return "", aoserrors.Wrap(err)
@@ -191,7 +195,7 @@ func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	if _, err := client.pbclientProtected.UnregisterInstance(ctx,
+	if _, err := client.permissionsService.UnregisterInstance(ctx,
 		&pb.UnregisterInstanceRequest{Instance: instanceIdentToPB(instance)}); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -210,7 +214,7 @@ func (client *Client) GetPermissions(
 
 	req := &pb.PermissionsRequest{Secret: secret, FunctionalServerId: funcServerID}
 
-	response, err := client.pbclientPublic.GetPermissions(ctx, req)
+	response, err := client.publicPermissionsService.GetPermissions(ctx, req)
 	if err != nil {
 		return instance, nil, aoserrors.Wrap(err)
 	}
@@ -221,9 +225,9 @@ func (client *Client) GetPermissions(
 	}, response.Permissions.Permissions, nil
 }
 
-// GetCertKeyURL gets cerificate and key url from IAM.
+// GetCertKeyURL gets certificate and key url from IAM.
 func (client *Client) GetCertKeyURL(keyType string) (certURL, keyURL string, err error) {
-	response, err := client.pbclientPublic.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
+	response, err := client.publicService.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
 	if err != nil {
 		return "", "", aoserrors.Wrap(err)
 	}
@@ -257,7 +261,7 @@ func (client *Client) getSubjects() (subjects []string, err error) {
 
 	request := &empty.Empty{}
 
-	response, err := client.pbclientPublic.GetSubjects(ctx, request)
+	response, err := client.publicIdentifyService.GetSubjects(ctx, request)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -291,7 +295,7 @@ func (client *Client) subscribeSubjectsChanged() (err error) {
 
 	request := &empty.Empty{}
 
-	stream, err := client.pbclientPublic.SubscribeSubjectsChanged(context.Background(), request)
+	stream, err := client.publicIdentifyService.SubscribeSubjectsChanged(context.Background(), request)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -342,5 +346,5 @@ func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
 }
 
 func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }
