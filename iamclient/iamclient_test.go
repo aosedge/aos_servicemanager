@@ -62,6 +62,7 @@ type testServer struct {
 	publicServer    *grpc.Server
 	protectedServer *grpc.Server
 
+	nodeID                 string
 	subjects               []string
 	subjectsChangedChannel chan []string
 	permissionsCache       map[string]servicePermissions
@@ -116,6 +117,30 @@ func TestMain(m *testing.M) {
 /***********************************************************************************************************************
  * Tests
  **********************************************************************************************************************/
+
+func TestGetNodeID(t *testing.T) {
+	testServer, err := newTestServer(publicServerURL, protectedServerURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer testServer.close()
+
+	testServer.nodeID = "testNodeID"
+
+	client, err := iamclient.New(&config.Config{
+		IAMServerURL:       protectedServerURL,
+		IAMPublicServerURL: publicServerURL,
+	}, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create IAM client: %v", err)
+	}
+	defer client.Close()
+
+	if testServer.nodeID != client.GetNodeID() {
+		t.Errorf("Invalid nodeID: %s", client.GetNodeID())
+	}
+}
 
 func TestGetSubjects(t *testing.T) {
 	testServer, err := newTestServer(publicServerURL, protectedServerURL)
@@ -304,6 +329,10 @@ func (server *testServer) close() {
 	if server.protectedServer != nil {
 		server.protectedServer.Stop()
 	}
+}
+
+func (server *testServer) GetNodeID(context context.Context, req *empty.Empty) (*pb.NodeID, error) {
+	return &pb.NodeID{NodeId: server.nodeID}, nil
 }
 
 func (server *testServer) RegisterInstance(

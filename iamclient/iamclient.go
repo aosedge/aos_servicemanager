@@ -55,6 +55,7 @@ type Client struct {
 	sync.Mutex
 
 	subjects []string
+	nodeID   string
 
 	publicConnection         *grpc.ClientConn
 	protectedConnection      *grpc.ClientConn
@@ -135,6 +136,10 @@ func New(
 
 	log.Debug("Connected to IAM")
 
+	if client.nodeID, err = client.getNodeID(); err != nil {
+		return client, aoserrors.Wrap(err)
+	}
+
 	if client.subjects, err = client.getSubjects(); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
@@ -142,6 +147,11 @@ func New(
 	go client.handleSubjectsChanged()
 
 	return client, nil
+}
+
+// GetNodeID returns node ID.
+func (client *Client) GetNodeID() string {
+	return client.nodeID
 }
 
 // GetSubjects returns current subjects.
@@ -254,6 +264,20 @@ func (client *Client) Close() (err error) {
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
+
+func (client *Client) getNodeID() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	response, err := client.publicService.GetNodeID(ctx, &empty.Empty{})
+	if err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"nodeID": response.NodeId}).Debug("Get node ID")
+
+	return response.NodeId, nil
+}
 
 func (client *Client) getSubjects() (subjects []string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
