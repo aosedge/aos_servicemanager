@@ -118,9 +118,7 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestGetSubjects(t *testing.T) {
-	permissionsCache := make(map[string]servicePermissions)
-
-	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
@@ -158,9 +156,7 @@ func TestGetSubjects(t *testing.T) {
 }
 
 func TestRegisterService(t *testing.T) {
-	permissionsCache := make(map[string]servicePermissions)
-
-	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
@@ -204,9 +200,7 @@ func TestRegisterService(t *testing.T) {
 }
 
 func TestGetPermissions(t *testing.T) {
-	permissionsCache := make(map[string]servicePermissions)
-
-	testServer, err := newTestServer(publicServerURL, protectedServerURL, permissionsCache)
+	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
@@ -261,12 +255,10 @@ func TestGetPermissions(t *testing.T) {
  * Private
  **********************************************************************************************************************/
 
-func newTestServer(
-	publicServerURL, protectedServerURL string, permissionsCache map[string]servicePermissions,
-) (*testServer, error) {
+func newTestServer(publicServerURL, protectedServerURL string) (*testServer, error) {
 	server := &testServer{
 		subjectsChangedChannel: make(chan []string, 1),
-		permissionsCache:       permissionsCache,
+		permissionsCache:       make(map[string]servicePermissions),
 	}
 
 	publicListener, err := net.Listen("tcp", publicServerURL)
