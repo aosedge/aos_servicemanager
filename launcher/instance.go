@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"path/filepath"
 
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	log "github.com/sirupsen/logrus"
@@ -99,7 +100,7 @@ func (instance *instanceInfo) setRunStatus(runStatus runner.InstanceStatus) {
 		log.Fields{"instanceID": runStatus.InstanceID})).Info("Instance successfully started")
 }
 
-func (launcher *Launcher) getCurrentInstance(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error) {
+func (launcher *Launcher) getCurrentInstance(instanceIdent aostypes.InstanceIdent) (InstanceInfo, error) {
 	for _, currentInstance := range launcher.currentInstances {
 		if currentInstance.InstanceIdent == instanceIdent {
 			return currentInstance.InstanceInfo, nil
@@ -119,7 +120,7 @@ func (launcher *Launcher) instanceFailed(instance *instanceInfo, err error) {
 	instance.runStatus.Err = err
 }
 
-func instanceIdentLogFields(instance cloudprotocol.InstanceIdent, extraFields log.Fields) log.Fields {
+func instanceIdentLogFields(instance aostypes.InstanceIdent, extraFields log.Fields) log.Fields {
 	logFields := log.Fields{
 		"serviceID": instance.ServiceID,
 		"subjectID": instance.SubjectID,

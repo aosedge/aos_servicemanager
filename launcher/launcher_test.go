@@ -111,7 +111,7 @@ type testNetworkManager struct {
 
 type testRegistrar struct {
 	sync.Mutex
-	secrets map[cloudprotocol.InstanceIdent]string
+	secrets map[aostypes.InstanceIdent]string
 }
 
 type testStorageStateProvider struct {
@@ -407,7 +407,7 @@ func TestUpdateInstances(t *testing.T) {
 		},
 	}
 
-	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
 		ServiceID: changedInstances[0].serviceID, SubjectID: changedInstances[0].subjectID, Instance: 0,
 	})
 	if err != nil {
@@ -883,7 +883,7 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
 		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
 	})
 	if err != nil {
@@ -1196,7 +1196,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
 		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
 	})
 	if err != nil {
@@ -1478,7 +1478,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	t.Cleanup(func() { launcher.CheckTLLsPeriod = defaultTTLPeriod })
 
 	type instanceEnvVars struct {
-		cloudprotocol.InstanceIdent
+		aostypes.InstanceIdent
 		envVars []string
 	}
 
@@ -1512,31 +1512,31 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			instances: []instanceEnvVars{
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
@@ -1568,30 +1568,30 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			instances: []instanceEnvVars{
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
 					},
 				},
@@ -1617,28 +1617,28 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			instances: []instanceEnvVars{
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR5=VAL5"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
 					},
 				},
@@ -1680,28 +1680,28 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			instances: []instanceEnvVars{
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
 					},
 					envVars: []string{"VAR7=VAL7"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
 					},
 					envVars: []string{"VAR7=VAL7"},
@@ -1744,28 +1744,28 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			instances: []instanceEnvVars{
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 					},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
 					},
 					envVars: []string{"VAR9=VAL9"},
 				},
 				{
-					InstanceIdent: cloudprotocol.InstanceIdent{
+					InstanceIdent: aostypes.InstanceIdent{
 						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
 					},
 					envVars: []string{"VAR9=VAL9"},
@@ -1868,10 +1868,10 @@ func TestInstancePriorities(t *testing.T) {
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
 				}, "device0"),
 			},
@@ -1898,13 +1898,13 @@ func TestInstancePriorities(t *testing.T) {
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject1", Instance: 0,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
 				}, "device0"),
 			},
@@ -1927,7 +1927,7 @@ func TestInstancePriorities(t *testing.T) {
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
 				}, "device0"),
 			},
@@ -1968,10 +1968,10 @@ func TestInstancePriorities(t *testing.T) {
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service3", SubjectID: "subject0", Instance: 1,
 				}, "device2"),
 			},
@@ -2005,13 +2005,13 @@ func TestInstancePriorities(t *testing.T) {
 				},
 			},
 			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service0", SubjectID: "subject0", Instance: 1,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service0", SubjectID: "subject0", Instance: 2,
 				}, "device0"),
-				createDeviceAllocateAlert(cloudprotocol.InstanceIdent{
+				createDeviceAllocateAlert(aostypes.InstanceIdent{
 					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
 				}, "device0"),
 			},
@@ -2149,27 +2149,27 @@ func TestRemoveOutdatedInstances(t *testing.T) {
 
 	outdatedInstances := []launcher.InstanceInfo{
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0},
 			InstanceID:    uuid.NewString(),
 			UID:           6000,
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1},
 			InstanceID:    uuid.NewString(),
 			UID:           6001,
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 0},
 			InstanceID:    uuid.NewString(),
 			UID:           6002,
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 1},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 1},
 			InstanceID:    uuid.NewString(),
 			UID:           6003,
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "service3", SubjectID: "subject2", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject2", Instance: 0},
 			InstanceID:    uuid.NewString(),
 			UID:           6004,
 		},
@@ -2257,7 +2257,7 @@ func (storage *testStorage) RemoveInstance(instanceID string) error {
 }
 
 func (storage *testStorage) GetInstanceByIdent(
-	instanceIdent cloudprotocol.InstanceIdent,
+	instanceIdent aostypes.InstanceIdent,
 ) (launcher.InstanceInfo, error) {
 	storage.RLock()
 	defer storage.RUnlock()
@@ -2356,7 +2356,7 @@ func (storage *testStorage) fromTestInstances(testInstances []testInstance, runn
 			}
 
 			storage.instances[newInstanceID] = launcher.InstanceInfo{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					ServiceID: testInstance.serviceID,
 					SubjectID: testInstance.subjectID,
 					Instance:  i,
@@ -2775,11 +2775,11 @@ func (manager *testNetworkManager) RemoveInstanceFromNetwork(instanceID, network
  **********************************************************************************************************************/
 
 func newTestRegistrar() *testRegistrar {
-	return &testRegistrar{secrets: make(map[cloudprotocol.InstanceIdent]string)}
+	return &testRegistrar{secrets: make(map[aostypes.InstanceIdent]string)}
 }
 
 func (registrar *testRegistrar) RegisterInstance(
-	instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+	instance aostypes.InstanceIdent, permissions map[string]map[string]string,
 ) (secret string, err error) {
 	registrar.Lock()
 	defer registrar.Unlock()
@@ -2795,7 +2795,7 @@ func (registrar *testRegistrar) RegisterInstance(
 	return secret, nil
 }
 
-func (registrar *testRegistrar) UnregisterInstance(instance cloudprotocol.InstanceIdent) error {
+func (registrar *testRegistrar) UnregisterInstance(instance aostypes.InstanceIdent) error {
 	registrar.Lock()
 	defer registrar.Unlock()
 
@@ -3163,7 +3163,7 @@ func createInstancesStatuses(testInstances []testInstance) (instances []cloudpro
 	for _, testInstance := range testInstances {
 		for index := uint64(0); index < testInstance.numInstances; index++ {
 			instanceStatus := cloudprotocol.InstanceStatus{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					ServiceID: testInstance.serviceID,
 					SubjectID: testInstance.subjectID,
 					Instance:  index,
@@ -3221,7 +3221,7 @@ func createRunStatus(
 ) (runStatus []runner.InstanceStatus, err error) {
 	for _, testInstance := range testInstances {
 		for i := uint64(0); i < testInstance.numInstances; i++ {
-			instance, err := storage.GetInstanceByIdent(cloudprotocol.InstanceIdent{
+			instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
 				ServiceID: testInstance.serviceID,
 				SubjectID: testInstance.subjectID,
 				Instance:  i,
@@ -3623,7 +3623,7 @@ func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstan
 }
 
 func createDeviceAllocateAlert(
-	instanceIdent cloudprotocol.InstanceIdent, device string,
+	instanceIdent aostypes.InstanceIdent, device string,
 ) cloudprotocol.DeviceAllocateAlert {
 	return cloudprotocol.DeviceAllocateAlert{
 		InstanceIdent: instanceIdent,
