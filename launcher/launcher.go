@@ -79,7 +79,7 @@ type Storage interface {
 	AddInstance(instance InstanceInfo) error
 	UpdateInstance(instance InstanceInfo) error
 	RemoveInstance(instanceID string) error
-	GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error)
+	GetInstanceByIdent(instanceIdent aostypes.InstanceIdent) (InstanceInfo, error)
 	GetInstanceByID(instanceID string) (InstanceInfo, error)
 	GetAllInstances() ([]InstanceInfo, error)
 	GetRunningInstances() ([]InstanceInfo, error)
@@ -130,9 +130,9 @@ type NetworkManager interface {
 // InstanceRegistrar provides API to register/unregister instance.
 type InstanceRegistrar interface {
 	RegisterInstance(
-		instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+		instance aostypes.InstanceIdent, permissions map[string]map[string]string,
 	) (secret string, err error)
-	UnregisterInstance(instance cloudprotocol.InstanceIdent) error
+	UnregisterInstance(instance aostypes.InstanceIdent) error
 }
 
 // StorageStateProvider provides API for instance storage/state.
@@ -158,7 +158,7 @@ type AlertSender interface {
 
 // InstanceInfo instance information.
 type InstanceInfo struct {
-	cloudprotocol.InstanceIdent
+	aostypes.InstanceIdent
 	AosVersion  uint64
 	InstanceID  string
 	UnitSubject bool
@@ -403,7 +403,7 @@ func (launcher *Launcher) RunInstances(instances []cloudprotocol.InstanceInfo) e
 	for _, item := range instances {
 		for i := uint64(0); i < item.NumInstances; i++ {
 			// Get instance from current map. If not available, get it from storage. Otherwise, generate new instance.
-			instanceIdent := cloudprotocol.InstanceIdent{
+			instanceIdent := aostypes.InstanceIdent{
 				ServiceID: item.ServiceID,
 				SubjectID: item.SubjectID,
 				Instance:  i,
@@ -560,7 +560,7 @@ func (launcher *Launcher) updateInstanceState(stateChangedIngo storagestate.Stat
 	}
 }
 
-func (launcher *Launcher) createNewInstance(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error) {
+func (launcher *Launcher) createNewInstance(instanceIdent aostypes.InstanceIdent) (InstanceInfo, error) {
 	instance := InstanceInfo{
 		InstanceIdent: instanceIdent,
 		InstanceID:    uuid.New().String(),
