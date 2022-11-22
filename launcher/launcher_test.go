@@ -230,7 +230,7 @@ func TestRunInstances(t *testing.T) {
 	}
 
 	data := []testData{
-		// start from scretch
+		// start from scratch
 		{
 			instances: []testInstance{
 				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
@@ -749,7 +749,7 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	testInstaces := []testInstance{
+	testInstances := []testInstance{
 		{
 			serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1, serviceGID: 9999,
 			imageConfig: &imagespec.Image{
@@ -869,22 +869,22 @@ func TestRuntimeSpec(t *testing.T) {
 		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
 	})
 
-	if err = serviceProvider.fromTestInstances(testInstaces, true); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstaces)); err != nil {
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
 	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstaces)},
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
 	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
+		ServiceID: testInstances[0].serviceID, SubjectID: testInstances[0].subjectID, Instance: 0,
 	})
 	if err != nil {
 		t.Fatalf("Can't get instance info: %v", err)
@@ -904,10 +904,10 @@ func TestRuntimeSpec(t *testing.T) {
 	// Check args
 
 	expectedArgs := make([]string, 0,
-		len(testInstaces[0].imageConfig.Config.Entrypoint)+len(testInstaces[0].imageConfig.Config.Cmd))
+		len(testInstances[0].imageConfig.Config.Entrypoint)+len(testInstances[0].imageConfig.Config.Cmd))
 
-	expectedArgs = append(expectedArgs, testInstaces[0].imageConfig.Config.Entrypoint...)
-	expectedArgs = append(expectedArgs, testInstaces[0].imageConfig.Config.Cmd...)
+	expectedArgs = append(expectedArgs, testInstances[0].imageConfig.Config.Entrypoint...)
+	expectedArgs = append(expectedArgs, testInstances[0].imageConfig.Config.Cmd...)
 
 	if !compareArrays(len(expectedArgs), len(runtimeSpec.Process.Args), func(index1, index2 int) bool {
 		return expectedArgs[index1] == runtimeSpec.Process.Args[index2]
@@ -917,19 +917,19 @@ func TestRuntimeSpec(t *testing.T) {
 
 	// Check working dir
 
-	if runtimeSpec.Process.Cwd != testInstaces[0].imageConfig.Config.WorkingDir {
+	if runtimeSpec.Process.Cwd != testInstances[0].imageConfig.Config.WorkingDir {
 		t.Errorf("Wrong working dir value: %s", runtimeSpec.Process.Cwd)
 	}
 
 	// Check host name
 
-	if runtimeSpec.Hostname != *testInstaces[0].serviceConfig.Hostname {
+	if runtimeSpec.Hostname != *testInstances[0].serviceConfig.Hostname {
 		t.Errorf("Wrong host name value: %s", runtimeSpec.Hostname)
 	}
 
 	// Check sysctl
 
-	if !reflect.DeepEqual(runtimeSpec.Linux.Sysctl, testInstaces[0].serviceConfig.Sysctl) {
+	if !reflect.DeepEqual(runtimeSpec.Linux.Sysctl, testInstances[0].serviceConfig.Sysctl) {
 		t.Errorf("Wrong sysctl value: %s", runtimeSpec.Linux.Sysctl)
 	}
 
@@ -940,19 +940,19 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 
 	if *runtimeSpec.Linux.Resources.CPU.Quota !=
-		int64(*testInstaces[0].serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
+		int64(*testInstances[0].serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
 	// Check RAM limit
 
-	if *runtimeSpec.Linux.Resources.Memory.Limit != int64(*testInstaces[0].serviceConfig.Quotas.RAMLimit) {
+	if *runtimeSpec.Linux.Resources.Memory.Limit != int64(*testInstances[0].serviceConfig.Quotas.RAMLimit) {
 		t.Errorf("Wrong RAM limit value: %d", *runtimeSpec.Linux.Resources.Memory.Limit)
 	}
 
 	// Check PIDs limit
 
-	if runtimeSpec.Linux.Resources.Pids.Limit != int64(*testInstaces[0].serviceConfig.Quotas.PIDsLimit) {
+	if runtimeSpec.Linux.Resources.Pids.Limit != int64(*testInstances[0].serviceConfig.Quotas.PIDsLimit) {
 		t.Errorf("Wrong PIDs limit value: %d", runtimeSpec.Linux.Resources.Pids.Limit)
 	}
 
@@ -960,13 +960,13 @@ func TestRuntimeSpec(t *testing.T) {
 	expectedRLimits := []runtimespec.POSIXRlimit{
 		{
 			Type: "RLIMIT_NPROC",
-			Hard: *testInstaces[0].serviceConfig.Quotas.PIDsLimit,
-			Soft: *testInstaces[0].serviceConfig.Quotas.PIDsLimit,
+			Hard: *testInstances[0].serviceConfig.Quotas.PIDsLimit,
+			Soft: *testInstances[0].serviceConfig.Quotas.PIDsLimit,
 		},
 		{
 			Type: "RLIMIT_NOFILE",
-			Hard: *testInstaces[0].serviceConfig.Quotas.NoFileLimit,
-			Soft: *testInstaces[0].serviceConfig.Quotas.NoFileLimit,
+			Hard: *testInstances[0].serviceConfig.Quotas.NoFileLimit,
+			Soft: *testInstances[0].serviceConfig.Quotas.NoFileLimit,
 		},
 	}
 
@@ -1044,7 +1044,7 @@ func TestRuntimeSpec(t *testing.T) {
 		Type:        "tmpfs",
 		Options: []string{
 			"nosuid", "strictatime", "mode=1777",
-			"size=" + strconv.FormatUint(*testInstaces[0].serviceConfig.Quotas.TmpLimit, 10),
+			"size=" + strconv.FormatUint(*testInstances[0].serviceConfig.Quotas.TmpLimit, 10),
 		},
 	})
 	expectedMounts = append(expectedMounts, runtimespec.Mount{
@@ -1062,7 +1062,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	// Check env vars
 	envVars = append(envVars, defaultEnvVars...)
-	envVars = append(envVars, testInstaces[0].imageConfig.Config.Env...)
+	envVars = append(envVars, testInstances[0].imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
 	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
 
@@ -1078,7 +1078,7 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong UID: %d", runtimeSpec.Process.User.UID)
 	}
 
-	if runtimeSpec.Process.User.GID != uint32(testInstaces[0].serviceGID) {
+	if runtimeSpec.Process.User.GID != uint32(testInstances[0].serviceGID) {
 		t.Errorf("Wrong GID: %d", runtimeSpec.Process.User.GID)
 	}
 
@@ -1097,7 +1097,7 @@ func TestRuntimeSpec(t *testing.T) {
 }
 
 func TestRuntimeEnvironment(t *testing.T) {
-	testInstaces := []testInstance{
+	testInstances := []testInstance{
 		{
 			serviceID: "service0", serviceVersion: 0, serviceProvider: "sp0", serviceGID: 1234,
 			subjectID: "subject0", numInstances: 1,
@@ -1154,7 +1154,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
 	registrar := newTestRegistrar()
-	storageStateProvider := newTestStorageStateProvider(testInstaces)
+	storageStateProvider := newTestStorageStateProvider(testInstances)
 	instanceMonitor := newTestInstanceMonitor()
 
 	resourceHosts := []aostypes.Host{
@@ -1178,26 +1178,26 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = serviceProvider.fromTestInstances(testInstaces, true); err != nil {
+	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
 		t.Fatalf("Can't create test services: %v", err)
 	}
 
-	if err = layerProvider.fromTestInstances(testInstaces); err != nil {
+	if err = layerProvider.fromTestInstances(testInstances); err != nil {
 		t.Fatalf("Can't create test layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstaces)); err != nil {
+	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
 	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstaces)},
+		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
 	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-		ServiceID: testInstaces[0].serviceID, SubjectID: testInstaces[0].subjectID, Instance: 0,
+		ServiceID: testInstances[0].serviceID, SubjectID: testInstances[0].subjectID, Instance: 0,
 	})
 	if err != nil {
 		t.Fatalf("Can't get instance info: %v", err)
@@ -1220,11 +1220,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Errorf("Wrong storage & state instance ident: %v", storageStateInfo.InstanceIdent)
 	}
 
-	if storageStateInfo.StorageQuota != *testInstaces[0].serviceConfig.Quotas.StorageLimit {
+	if storageStateInfo.StorageQuota != *testInstances[0].serviceConfig.Quotas.StorageLimit {
 		t.Errorf("Wrong storage quota value: %d", storageStateInfo.StorageQuota)
 	}
 
-	if storageStateInfo.StateQuota != *testInstaces[0].serviceConfig.Quotas.StateLimit {
+	if storageStateInfo.StateQuota != *testInstances[0].serviceConfig.Quotas.StateLimit {
 		t.Errorf("Wrong state quota value: %d", storageStateInfo.StateQuota)
 	}
 
@@ -1232,7 +1232,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Errorf("Wrong storage & state UID: %d", storageStateInfo.UID)
 	}
 
-	if storageStateInfo.GID != testInstaces[0].serviceGID {
+	if storageStateInfo.GID != testInstances[0].serviceGID {
 		t.Errorf("Wrong storage & state GID: %d", storageStateInfo.GID)
 	}
 
@@ -1243,18 +1243,18 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance should be registered to network")
 	}
 
-	if !compateNetParams(netParams, networkmanager.NetworkParams{
+	if !compareNetParams(netParams, networkmanager.NetworkParams{
 		InstanceIdent:      instance.InstanceIdent,
-		Hostname:           *testInstaces[0].serviceConfig.Hostname,
+		Hostname:           *testInstances[0].serviceConfig.Hostname,
 		Hosts:              resourceHosts,
-		ExposedPorts:       convertMapToStringList(testInstaces[0].imageConfig.Config.ExposedPorts),
-		AllowedConnections: convertMapToStringList(testInstaces[0].serviceConfig.AllowedConnections),
+		ExposedPorts:       convertMapToStringList(testInstances[0].imageConfig.Config.ExposedPorts),
+		AllowedConnections: convertMapToStringList(testInstances[0].serviceConfig.AllowedConnections),
 		HostsFilePath:      filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "hosts"),
 		ResolvConfFilePath: filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "resolv.conf"),
-		IngressKbit:        *testInstaces[0].serviceConfig.Quotas.DownloadSpeed,
-		EgressKbit:         *testInstaces[0].serviceConfig.Quotas.UploadSpeed,
-		DownloadLimit:      *testInstaces[0].serviceConfig.Quotas.DownloadLimit,
-		UploadLimit:        *testInstaces[0].serviceConfig.Quotas.UploadLimit,
+		IngressKbit:        *testInstances[0].serviceConfig.Quotas.DownloadSpeed,
+		EgressKbit:         *testInstances[0].serviceConfig.Quotas.UploadSpeed,
+		DownloadLimit:      *testInstances[0].serviceConfig.Quotas.DownloadLimit,
+		UploadLimit:        *testInstances[0].serviceConfig.Quotas.UploadLimit,
 	}) {
 		t.Errorf("Wrong network params: %v", netParams)
 	}
@@ -1277,8 +1277,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 	if !reflect.DeepEqual(monitorPrams, resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
 		UID:           instance.UID,
-		GID:           testInstaces[0].serviceGID,
-		AlertRules:    testInstaces[0].serviceConfig.AlertRules,
+		GID:           testInstances[0].serviceGID,
+		AlertRules:    testInstances[0].serviceConfig.AlertRules,
 	}) {
 		t.Errorf("Wrong monitor params: %v", monitorPrams)
 	}
@@ -3520,7 +3520,7 @@ func convertMapToStringList(m map[string]struct{}) (result []string) {
 	return result
 }
 
-func compateNetParams(p1, p2 networkmanager.NetworkParams) bool {
+func compareNetParams(p1, p2 networkmanager.NetworkParams) bool {
 	if p1.InstanceIdent != p2.InstanceIdent {
 		return false
 	}
