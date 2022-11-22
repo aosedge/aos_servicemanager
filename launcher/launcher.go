@@ -539,24 +539,24 @@ func (launcher *Launcher) updateInstancesStatuses(instances []runner.InstanceSta
 	}
 }
 
-func (launcher *Launcher) updateInstanceState(stateChangedIngo storagestate.StateChangedInfo) {
+func (launcher *Launcher) updateInstanceState(stateChangedInfo storagestate.StateChangedInfo) {
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
 
-	instance, ok := launcher.currentInstances[stateChangedIngo.InstanceID]
+	instance, ok := launcher.currentInstances[stateChangedInfo.InstanceID]
 	if !ok {
-		log.WithField("instanceID", stateChangedIngo.InstanceID).Errorf("Unknown instance state changed")
+		log.WithField("instanceID", stateChangedInfo.InstanceID).Errorf("Unknown instance state changed")
 
 		return
 	}
 
-	if !bytes.Equal(stateChangedIngo.Checksum, instance.stateChecksum) {
+	if !bytes.Equal(stateChangedInfo.Checksum, instance.stateChecksum) {
 		log.WithFields(log.Fields{
-			"instanceID": stateChangedIngo.InstanceID,
-			"checksum":   hex.EncodeToString(stateChangedIngo.Checksum),
+			"instanceID": stateChangedInfo.InstanceID,
+			"checksum":   hex.EncodeToString(stateChangedInfo.Checksum),
 		}).Debugf("Instance state changed")
 
-		instance.stateChecksum = stateChangedIngo.Checksum
+		instance.stateChecksum = stateChangedInfo.Checksum
 	}
 }
 
