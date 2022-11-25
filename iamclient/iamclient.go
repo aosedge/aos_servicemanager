@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/aostypes"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
@@ -169,7 +169,7 @@ func (client *Client) GetSubjectsChangedChannel() (channel <-chan []string) {
 
 // RegisterInstance registers new service instance with permissions and create secret.
 func (client *Client) RegisterInstance(
-	instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+	instance aostypes.InstanceIdent, permissions map[string]map[string]string,
 ) (secret string, err error) {
 	log.WithFields(log.Fields{
 		"serviceID": instance.ServiceID,
@@ -195,7 +195,7 @@ func (client *Client) RegisterInstance(
 }
 
 // UnregisterInstance unregisters service instance.
-func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (err error) {
+func (client *Client) UnregisterInstance(instance aostypes.InstanceIdent) (err error) {
 	log.WithFields(log.Fields{
 		"serviceID": instance.ServiceID,
 		"subjectID": instance.SubjectID,
@@ -216,7 +216,7 @@ func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (
 // GetPermissions gets permissions by secret and functional server ID.
 func (client *Client) GetPermissions(
 	secret, funcServerID string,
-) (instance cloudprotocol.InstanceIdent, permissions map[string]string, err error) {
+) (instance aostypes.InstanceIdent, permissions map[string]string, err error) {
 	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -229,9 +229,9 @@ func (client *Client) GetPermissions(
 		return instance, nil, aoserrors.Wrap(err)
 	}
 
-	return cloudprotocol.InstanceIdent{
+	return aostypes.InstanceIdent{
 		ServiceID: response.Instance.ServiceId,
-		SubjectID: response.Instance.SubjectId, Instance: uint64(response.Instance.Instance),
+		SubjectID: response.Instance.SubjectId, Instance: response.Instance.Instance,
 	}, response.Permissions.Permissions, nil
 }
 
@@ -369,6 +369,6 @@ func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
 	return true
 }
 
-func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
+func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
 	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }

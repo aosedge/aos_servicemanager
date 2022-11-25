@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/migration"
 	_ "github.com/mattn/go-sqlite3" // ignore lint
@@ -362,7 +363,7 @@ func (db *Database) RemoveInstance(instanceID string) (err error) {
 }
 
 // GetInstanceByIdent returns instance information by serviceID + subjectID + instance.
-func (db *Database) GetInstanceByIdent(instanceIdent cloudprotocol.InstanceIdent) (
+func (db *Database) GetInstanceByIdent(instanceIdent aostypes.InstanceIdent) (
 	instance launcher.InstanceInfo, err error,
 ) {
 	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE serviceID = ? AND subjectID = ? AND instance = ?",
@@ -377,7 +378,7 @@ func (db *Database) GetInstanceByID(instanceID string) (instance launcher.Instan
 // GetInstanceInfoByID returns instance ident and service aos version by instanceID.
 func (db *Database) GetInstanceInfoByID(
 	instanceID string,
-) (ident cloudprotocol.InstanceIdent, aosVersion uint64, err error) {
+) (ident aostypes.InstanceIdent, aosVersion uint64, err error) {
 	instance, err := db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
 	if err != nil {
 		return ident, 0, err

@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/aostypes"
 	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -69,7 +69,7 @@ type testServer struct {
 }
 
 type servicePermissions struct {
-	instanceIdent cloudprotocol.InstanceIdent
+	instanceIdent aostypes.InstanceIdent
 	permissions   map[string]map[string]string
 }
 
@@ -200,7 +200,7 @@ func TestRegisterService(t *testing.T) {
 
 	var (
 		permissions      = map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
-		registerInstance = cloudprotocol.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
+		registerInstance = aostypes.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
 	)
 
 	secret, err := client.RegisterInstance(registerInstance, permissions)
@@ -244,7 +244,7 @@ func TestGetPermissions(t *testing.T) {
 
 	var (
 		permissions      = map[string]map[string]string{"vis": {"*": "rw", "test": "r"}}
-		registerInstance = cloudprotocol.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
+		registerInstance = aostypes.InstanceIdent{ServiceID: "serviceID1", SubjectID: "s1", Instance: 1}
 	)
 
 	secret, err := client.RegisterInstance(registerInstance, permissions)
@@ -419,7 +419,7 @@ func (server *testServer) SubscribeSubjectsChanged(req *empty.Empty,
 	}
 }
 
-func (server *testServer) findSecret(instance cloudprotocol.InstanceIdent) (secret string) {
+func (server *testServer) findSecret(instance aostypes.InstanceIdent) (secret string) {
 	for key, value := range server.permissionsCache {
 		if value.instanceIdent == instance {
 			return key
@@ -441,12 +441,12 @@ func randomString() string {
 	return string(secret)
 }
 
-func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
+func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
 	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }
 
-func pbToInstanceIdent(ident *pb.InstanceIdent) cloudprotocol.InstanceIdent {
-	return cloudprotocol.InstanceIdent{
-		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: uint64(ident.Instance),
+func pbToInstanceIdent(ident *pb.InstanceIdent) aostypes.InstanceIdent {
+	return aostypes.InstanceIdent{
+		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: ident.Instance,
 	}
 }
