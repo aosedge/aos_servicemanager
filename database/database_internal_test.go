@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -671,7 +672,7 @@ func TestInstances(t *testing.T) {
 	var subjectInstances, serviceInstances, running, allInstances []launcher.InstanceInfo
 
 	for i := 0; i < 5; i++ {
-		subjectInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+		subjectInstance := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
 			ServiceID: "someServiceID" + strconv.Itoa(i),
 			SubjectID: testSubjectID, Instance: uint64(i),
 		}, AosVersion: uint64(i), UnitSubject: true, UID: i + 100, InstanceID: uuid.New().String()}
@@ -688,7 +689,7 @@ func TestInstances(t *testing.T) {
 		subjectInstances = append(subjectInstances, subjectInstance)
 		allInstances = append(allInstances, subjectInstance)
 
-		serviceInstance := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+		serviceInstance := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
 			ServiceID: testServiceID,
 			SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
 		}, AosVersion: uint64(i + 20), UnitSubject: true, UID: i + 200, InstanceID: uuid.New().String()}
@@ -757,7 +758,7 @@ func TestInstances(t *testing.T) {
 	}
 
 	// Negative test: add the same instance should be failed
-	testInstanceInfo := launcher.InstanceInfo{InstanceIdent: cloudprotocol.InstanceIdent{
+	testInstanceInfo := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
 		ServiceID: testServiceID,
 		SubjectID: testSubjectID, Instance: 42,
 	}, AosVersion: 42, UnitSubject: true, UID: 42, InstanceID: uuid.New().String()}
@@ -810,7 +811,7 @@ func TestInstances(t *testing.T) {
 	}
 
 	// Test get all instances identifier
-	testInstanceIdent := cloudprotocol.InstanceIdent{ServiceID: testServiceID, SubjectID: testSubjectID, Instance: 42}
+	testInstanceIdent := aostypes.InstanceIdent{ServiceID: testServiceID, SubjectID: testSubjectID, Instance: 42}
 
 	if instanceResult, err = db.GetInstanceByIdent(testInstanceIdent); err != nil {
 		t.Fatalf("Can't get instance by identifier %v", err)
@@ -844,19 +845,19 @@ func TestInstances(t *testing.T) {
 func TestInstancesID(t *testing.T) {
 	addedInstance := []launcher.InstanceInfo{
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
 			InstanceID:    "TestSevrID_TestSubID_0",
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
 			InstanceID:    "TestSevrID_TestSubID_1",
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
 			InstanceID:    "TestSevrID_TestSubID1_0",
 		},
 		{
-			InstanceIdent: cloudprotocol.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
+			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
 			InstanceID:    "TestSevrID2_TestSubID_0",
 		},
 	}
