@@ -32,7 +32,6 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -82,7 +81,7 @@ type NetworkManager struct {
 
 // NetworkParams network parameters set for instance.
 type NetworkParams struct {
-	cloudprotocol.InstanceIdent
+	aostypes.InstanceIdent
 	Hostname           string
 	Aliases            []string
 	IngressKbit        uint64
