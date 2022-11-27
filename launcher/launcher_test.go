@@ -20,7 +20,6 @@ package launcher_test
 import (
 	"bufio"
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,12 +37,12 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/resourcemonitor"
 	"github.com/google/uuid"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aoscloud/aos_common/resourcemonitor"
 	"github.com/aoscloud/aos_servicemanager/config"
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
@@ -51,7 +50,6 @@ import (
 	"github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
-	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /***********************************************************************************************************************
@@ -82,8 +80,8 @@ type testStorage struct {
 }
 
 type testServiceProvider struct {
-	sync.RWMutex
-	services map[string]serviceInfo
+	services map[string]servicemanager.ServiceInfo
+	configs  map[string]serviceConfigs
 }
 
 type testLayerProvider struct {
@@ -114,14 +112,6 @@ type testRegistrar struct {
 	secrets map[aostypes.InstanceIdent]string
 }
 
-type testStorageStateProvider struct {
-	sync.Mutex
-	testInstances    []testInstance
-	removedInstances []string
-	infos            map[string]storageStateInfo
-	stateChannel     chan storagestate.StateChangedInfo
-}
-
 type testInstanceMonitor struct {
 	sync.Mutex
 	instances map[string]resourcemonitor.ResourceMonitorParams
@@ -132,9 +122,11 @@ type testMounter struct {
 	mounts map[string]mountInfo
 }
 
-type serviceInfo struct {
-	servicemanager.ServiceInfo
-	layerDigests []string
+type serviceConfigs struct {
+	gid           uint32
+	imageConfig   *imagespec.Image
+	serviceConfig *servicemanager.ServiceConfig
+	layerDigests  []string
 }
 
 type mountInfo struct {
@@ -143,24 +135,11 @@ type mountInfo struct {
 	workDir   string
 }
 
-type storageStateInfo struct {
-	storagestate.SetupParams
-	storagePath, statePath string
-}
-
-type testInstance struct {
-	serviceID       string
-	serviceVersion  uint64
-	serviceProvider string
-	subjectID       string
-	serviceGID      int
-	layerDigests    []string
-	numInstances    uint64
-	unitSubject     bool
-	imageConfig     *imagespec.Image
-	serviceConfig   *servicemanager.ServiceConfig
-	stateChecksum   [][]byte
-	err             []error
+type testItem struct {
+	services  []aostypes.ServiceInfo
+	layers    []aostypes.LayerInfo
+	instances []aostypes.InstanceInfo
+	err       []error
 }
 
 type testDevice struct {
@@ -225,71 +204,87 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestRunInstances(t *testing.T) {
-	type testData struct {
-		instances []testInstance
-	}
-
-	data := []testData{
+	data := []testItem{
 		// start from scratch
 		{
-			instances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+			services: []aostypes.ServiceInfo{
+				{ID: "service0"},
+				{ID: "service1"},
+				{ID: "service2"},
+			},
+			instances: []aostypes.InstanceInfo{
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
 			},
 		},
 		// start the same instances
 		{
-			instances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
+			services: []aostypes.ServiceInfo{
+				{ID: "service0"},
+				{ID: "service1"},
+				{ID: "service2"},
+			},
+			instances: []aostypes.InstanceInfo{
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
 			},
 		},
 		// stop and start some instances
 		{
-			instances: []testInstance{
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject1", numInstances: 3},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4},
+			services: []aostypes.ServiceInfo{
+				{ID: "service0"},
+				{ID: "service2"},
+				{ID: "service3"},
+			},
+			instances: []aostypes.InstanceInfo{
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 1}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 2}},
 			},
 		},
 		// new service version
 		{
-			instances: []testInstance{
-				{serviceID: "service1", serviceVersion: 2, subjectID: "subject1", numInstances: 1},
-				{serviceID: "service1", serviceVersion: 2, subjectID: "subject2", numInstances: 2},
-				{serviceID: "service2", serviceVersion: 3, subjectID: "subject1", numInstances: 3},
-				{serviceID: "service2", serviceVersion: 3, subjectID: "subject2", numInstances: 4},
+			services: []aostypes.ServiceInfo{
+				{ID: "service0", VersionInfo: aostypes.VersionInfo{AosVersion: 1}},
+				{ID: "service2"},
+				{ID: "service3"},
+			},
+			instances: []aostypes.InstanceInfo{
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 1}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 2}},
 			},
 		},
 		// start error
 		{
-			instances: []testInstance{
-				{
-					serviceID: "service3", serviceVersion: 3, subjectID: "subject3", numInstances: 3,
-					err: []error{errors.New("error0"), errors.New("error1")}, // nolint:goerr113
-				},
+			services: []aostypes.ServiceInfo{
+				{ID: "service0"},
+				{ID: "service1"},
+				{ID: "service2"},
 			},
+			instances: []aostypes.InstanceInfo{
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject1", Instance: 0}},
+				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject1", Instance: 0}},
+			},
+			err: []error{errors.New("error1"), errors.New("error2")}, // nolint:goerr113
 		},
 		// stop all instances
-		{
-			instances: []testInstance{},
-		},
+		{},
 	}
 
-	var currentTestInstances []testInstance
+	var currentTestItem testItem
 
 	runningInstances := make(map[string]runner.InstanceStatus)
 
 	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider()
+	serviceProvider := newTestServiceProvider(nil)
+	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(
 		func(instanceID string) runner.InstanceStatus {
-			status := getRunnerStatus(instanceID, currentTestInstances, storage)
+			status := getRunnerStatus(instanceID, currentTestItem, storage)
 			runningInstances[instanceID] = status
 
 			return status
@@ -302,28 +297,37 @@ func TestRunInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
+		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
 	for i, item := range data {
 		t.Logf("Run instances: %d", i)
 
-		currentTestInstances = item.instances
+		currentTestItem = item
 
-		if err = serviceProvider.fromTestInstances(currentTestInstances, true); err != nil {
-			t.Fatalf("Can't create test services: %v", err)
+		if err = serviceProvider.installServices(item.services); err != nil {
+			t.Fatalf("Can't install services: %v", err)
 		}
 
-		if err = testLauncher.RunInstances(createInstancesInfos(currentTestInstances)); err != nil {
+		if err = layerProvider.installLayers(item.layers); err != nil {
+			t.Fatalf("Can't install layers: %v", err)
+		}
+
+		if err = testLauncher.RunInstances(item.instances); err != nil {
 			t.Fatalf("Can't run instances: %v", err)
 		}
 
 		runtimeStatus := launcher.RuntimeStatus{
-			RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(currentTestInstances)},
+			RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item)},
 		}
 
 		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
@@ -338,146 +342,69 @@ func TestRunInstances(t *testing.T) {
 
 func TestUpdateInstances(t *testing.T) {
 	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider()
+	serviceProvider := newTestServiceProvider(nil)
+	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(nil, nil)
-	storageStateProvider := newTestStorageStateProvider(nil)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
+		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
-	testInstances := []testInstance{
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 3},
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"},
+			{ID: "service1"},
+			{ID: "service2"},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+		},
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+	if err = serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err = layerProvider.installLayers(runItem.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(runItem.instances); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	runtimeStatus := launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	// Check update status on runtime state changed
 
-	changedInstances := []testInstance{
-		{
-			serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 2,
-			err: []error{errors.New("error0"), errors.New("error1")}, // nolint:goerr113
+	changedItem := testItem{
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
 		},
+		err: []error{errors.New("error0"), errors.New("error1")}, // nolint:goerr113
 	}
 
-	runStatus, err := createRunStatus(storage, changedInstances)
-	if err != nil {
-		t.Fatalf("Can't create run status: %v", err)
-	}
+	instanceRunner.statusChannel <- createRunStatus(storage, changedItem)
 
-	instanceRunner.statusChannel <- runStatus
-
-	runtimeStatus = launcher.RuntimeStatus{
-		UpdateStatus: &launcher.UpdateInstancesStatus{Instances: createInstancesStatuses(changedInstances)},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
-		t.Errorf("Check runtime status error: %v", err)
-	}
-
-	// Check checksum on runtime state changed
-
-	newChecksum := []byte("new checksum")
-
-	changedInstances = []testInstance{
-		{
-			serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1,
-			stateChecksum: [][]byte{newChecksum}, err: []error{errors.New("some error")}, // nolint:goerr113
-		},
-	}
-
-	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-		ServiceID: changedInstances[0].serviceID, SubjectID: changedInstances[0].subjectID, Instance: 0,
-	})
-	if err != nil {
-		t.Fatalf("Can't get instance info: %v", err)
-	}
-
-	storageStateProvider.stateChannel <- storagestate.StateChangedInfo{
-		InstanceID: instance.InstanceID, Checksum: newChecksum,
-	}
-
-	// Wait for state event processed by launcher
-	time.Sleep(1 * time.Second)
-
-	if runStatus, err = createRunStatus(storage, changedInstances); err != nil {
-		t.Fatalf("Can't create run status: %v", err)
-	}
-
-	instanceRunner.statusChannel <- runStatus
-
-	runtimeStatus = launcher.RuntimeStatus{
-		UpdateStatus: &launcher.UpdateInstancesStatus{Instances: createInstancesStatuses(changedInstances)},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
-		t.Fatalf("Check runtime status error: %v", err)
-	}
-}
-
-func TestSendCurrentRuntimeStatus(t *testing.T) {
-	serviceProvider := newTestServiceProvider()
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	testInstances := []testInstance{
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 3},
-	}
-
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
-	}
-
-	if err = testLauncher.SendCurrentRuntimeStatus(); !errors.Is(launcher.ErrNoRuntimeStatus, err) {
-		t.Error("No runtime status error expected")
-	}
-
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
-		t.Fatalf("Can't run instances: %v", err)
-	}
-
-	runtimeStatus := launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
-		t.Errorf("Check runtime status error: %v", err)
-	}
-
-	if err = testLauncher.SendCurrentRuntimeStatus(); err != nil {
-		t.Errorf("Can't send current runtime status: %v", err)
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		UpdateStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(changedItem)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 }
@@ -490,7 +417,8 @@ func TestRestartInstances(t *testing.T) {
 
 	restartMap := make(map[string]startStopCount)
 
-	serviceProvider := newTestServiceProvider()
+	serviceProvider := newTestServiceProvider(nil)
+	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(
 		func(instanceID string) runner.InstanceStatus {
 			status := runner.InstanceStatus{InstanceID: instanceID, State: cloudprotocol.InstanceStateActive}
@@ -513,32 +441,51 @@ func TestRestartInstances(t *testing.T) {
 	)
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
+		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
-	testInstances := []testInstance{
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"},
+			{ID: "service1"},
+			{ID: "service2"},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 3}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 1}},
+		},
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+	if err = serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err = layerProvider.installLayers(runItem.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(runItem.instances); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
 	runtimeStatus := launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
 	}
 
 	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
@@ -553,7 +500,7 @@ func TestRestartInstances(t *testing.T) {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	if len(restartMap) != 13 {
+	if len(restartMap) != 9 {
 		t.Errorf("Wrong running instances count: %d", len(restartMap))
 	}
 
@@ -568,111 +515,6 @@ func TestRestartInstances(t *testing.T) {
 	}
 }
 
-func TestSubjectsChanged(t *testing.T) {
-	type testData struct {
-		initialInstances []testInstance
-		subjects         []string
-		resultInstances  []testInstance
-	}
-
-	data := []testData{
-		{
-			initialInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
-			},
-			subjects: []string{"subject2"},
-			resultInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4},
-			},
-		},
-		{
-			initialInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
-			},
-			subjects: []string{"subject1"},
-			resultInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-			},
-		},
-		{
-			initialInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
-			},
-			subjects: []string{"subject1", "subject2"},
-			resultInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4},
-			},
-		},
-		{
-			initialInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2, unitSubject: true},
-				{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1, unitSubject: true},
-				{serviceID: "service2", serviceVersion: 2, subjectID: "subject2", numInstances: 4, unitSubject: true},
-			},
-			subjects: []string{"subject3"},
-			resultInstances: []testInstance{
-				{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-			},
-		},
-	}
-
-	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider()
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	for i, item := range data {
-		t.Logf("Subjects changed: %d", i)
-
-		if err = serviceProvider.fromTestInstances(item.initialInstances, true); err != nil {
-			t.Fatalf("Can't create test services: %v", err)
-		}
-
-		storage.fromTestInstances(item.initialInstances, true)
-
-		if err = testLauncher.SubjectsChanged(item.subjects); err != nil {
-			t.Fatalf("Subjects changed error: %v", err)
-		}
-
-		select {
-		case runtimeStatus := <-testLauncher.RuntimeStatusChannel():
-			runStatus := &launcher.RunInstancesStatus{
-				UnitSubjects: item.subjects,
-				Instances:    createInstancesStatuses(item.resultInstances),
-			}
-
-			if err = compareRuntimeStatus(launcher.RuntimeStatus{RunStatus: runStatus}, runtimeStatus); err != nil {
-				t.Errorf("Compare runtime status failed: %v", err)
-			}
-
-		case <-time.After(5 * time.Second):
-			t.Error("Wait for runtime status timeout")
-		}
-	}
-}
-
 func TestHostFSDir(t *testing.T) {
 	hostFSBinds := []string{"bin", "sbin", "lib", "lib64", "usr"}
 
@@ -680,9 +522,9 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestStorageStateProvider(nil),
-		newTestInstanceMonitor(), newTestAlertSender())
+		newTestStorage(), newTestServiceProvider(nil), newTestLayerProvider(), newTestRunner(nil, nil),
+		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
+		newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -734,24 +576,9 @@ func TestHostFSDir(t *testing.T) {
 }
 
 func TestRuntimeSpec(t *testing.T) {
-	serviceProvider := newTestServiceProvider()
-	storage := newTestStorage()
-	resourceManager := newTestResourceManager()
-	networkManager := newTestNetworkManager()
-	testRegistrar := newTestRegistrar()
-	storageStateProvider := newTestStorageStateProvider(nil)
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
-		storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	testInstances := []testInstance{
-		{
-			serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 1, serviceGID: 9999,
+	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
+		"service0": {
+			gid: 3456,
 			imageConfig: &imagespec.Image{
 				OS: "linux",
 				Config: imagespec.ImageConfig{
@@ -780,6 +607,41 @@ func TestRuntimeSpec(t *testing.T) {
 				Permissions: map[string]map[string]string{"perm1": {"key1": "val1"}},
 			},
 		},
+	})
+	layerProvider := newTestLayerProvider()
+	storage := newTestStorage()
+	resourceManager := newTestResourceManager()
+	networkManager := newTestNetworkManager()
+	testRegistrar := newTestRegistrar()
+
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"},
+		},
+		instances: []aostypes.InstanceInfo{
+			{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0},
+				StatePath:     "state.dat",
+				UID:           9483,
+			},
+		},
+	}
+
+	testLauncher, err := launcher.New(&config.Config{
+		WorkingDir: tmpDir,
+		StorageDir: filepath.Join(tmpDir, "storages"),
+		StateDir:   filepath.Join(tmpDir, "states"),
+	}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
+		newTestInstanceMonitor(), newTestAlertSender())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	hostGroups, err := getSystemGroups(9)
@@ -869,23 +731,25 @@ func TestRuntimeSpec(t *testing.T) {
 		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
 	})
 
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
+	if err = serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+	if err = layerProvider.installLayers(runItem.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(runItem.instances); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
 	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
 	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-		ServiceID: testInstances[0].serviceID, SubjectID: testInstances[0].subjectID, Instance: 0,
-	})
+	instance, err := storage.getInstanceByIdent(runItem.instances[0].InstanceIdent)
 	if err != nil {
 		t.Fatalf("Can't get instance info: %v", err)
 	}
@@ -894,6 +758,9 @@ func TestRuntimeSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't get instance runtime spec: %v", err)
 	}
+
+	imageConfig := serviceProvider.configs[runItem.services[0].ID].imageConfig
+	serviceConfig := serviceProvider.configs[runItem.services[0].ID].serviceConfig
 
 	// Check terminal is false
 
@@ -904,10 +771,10 @@ func TestRuntimeSpec(t *testing.T) {
 	// Check args
 
 	expectedArgs := make([]string, 0,
-		len(testInstances[0].imageConfig.Config.Entrypoint)+len(testInstances[0].imageConfig.Config.Cmd))
+		len(imageConfig.Config.Entrypoint)+len(imageConfig.Config.Cmd))
 
-	expectedArgs = append(expectedArgs, testInstances[0].imageConfig.Config.Entrypoint...)
-	expectedArgs = append(expectedArgs, testInstances[0].imageConfig.Config.Cmd...)
+	expectedArgs = append(expectedArgs, imageConfig.Config.Entrypoint...)
+	expectedArgs = append(expectedArgs, imageConfig.Config.Cmd...)
 
 	if !compareArrays(len(expectedArgs), len(runtimeSpec.Process.Args), func(index1, index2 int) bool {
 		return expectedArgs[index1] == runtimeSpec.Process.Args[index2]
@@ -917,19 +784,19 @@ func TestRuntimeSpec(t *testing.T) {
 
 	// Check working dir
 
-	if runtimeSpec.Process.Cwd != testInstances[0].imageConfig.Config.WorkingDir {
+	if runtimeSpec.Process.Cwd != imageConfig.Config.WorkingDir {
 		t.Errorf("Wrong working dir value: %s", runtimeSpec.Process.Cwd)
 	}
 
 	// Check host name
 
-	if runtimeSpec.Hostname != *testInstances[0].serviceConfig.Hostname {
+	if runtimeSpec.Hostname != *serviceConfig.Hostname {
 		t.Errorf("Wrong host name value: %s", runtimeSpec.Hostname)
 	}
 
 	// Check sysctl
 
-	if !reflect.DeepEqual(runtimeSpec.Linux.Sysctl, testInstances[0].serviceConfig.Sysctl) {
+	if !reflect.DeepEqual(runtimeSpec.Linux.Sysctl, serviceConfig.Sysctl) {
 		t.Errorf("Wrong sysctl value: %s", runtimeSpec.Linux.Sysctl)
 	}
 
@@ -940,19 +807,19 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 
 	if *runtimeSpec.Linux.Resources.CPU.Quota !=
-		int64(*testInstances[0].serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
+		int64(*serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
 	// Check RAM limit
 
-	if *runtimeSpec.Linux.Resources.Memory.Limit != int64(*testInstances[0].serviceConfig.Quotas.RAMLimit) {
+	if *runtimeSpec.Linux.Resources.Memory.Limit != int64(*serviceConfig.Quotas.RAMLimit) {
 		t.Errorf("Wrong RAM limit value: %d", *runtimeSpec.Linux.Resources.Memory.Limit)
 	}
 
 	// Check PIDs limit
 
-	if runtimeSpec.Linux.Resources.Pids.Limit != int64(*testInstances[0].serviceConfig.Quotas.PIDsLimit) {
+	if runtimeSpec.Linux.Resources.Pids.Limit != int64(*serviceConfig.Quotas.PIDsLimit) {
 		t.Errorf("Wrong PIDs limit value: %d", runtimeSpec.Linux.Resources.Pids.Limit)
 	}
 
@@ -960,13 +827,13 @@ func TestRuntimeSpec(t *testing.T) {
 	expectedRLimits := []runtimespec.POSIXRlimit{
 		{
 			Type: "RLIMIT_NPROC",
-			Hard: *testInstances[0].serviceConfig.Quotas.PIDsLimit,
-			Soft: *testInstances[0].serviceConfig.Quotas.PIDsLimit,
+			Hard: *serviceConfig.Quotas.PIDsLimit,
+			Soft: *serviceConfig.Quotas.PIDsLimit,
 		},
 		{
 			Type: "RLIMIT_NOFILE",
-			Hard: *testInstances[0].serviceConfig.Quotas.NoFileLimit,
-			Soft: *testInstances[0].serviceConfig.Quotas.NoFileLimit,
+			Hard: *serviceConfig.Quotas.NoFileLimit,
+			Soft: *serviceConfig.Quotas.NoFileLimit,
 		},
 	}
 
@@ -1044,11 +911,11 @@ func TestRuntimeSpec(t *testing.T) {
 		Type:        "tmpfs",
 		Options: []string{
 			"nosuid", "strictatime", "mode=1777",
-			"size=" + strconv.FormatUint(*testInstances[0].serviceConfig.Quotas.TmpLimit, 10),
+			"size=" + strconv.FormatUint(*serviceConfig.Quotas.TmpLimit, 10),
 		},
 	})
 	expectedMounts = append(expectedMounts, runtimespec.Mount{
-		Source:      storageStateProvider.infos[instance.InstanceID].statePath,
+		Source:      filepath.Join(tmpDir, "states", runItem.instances[0].StatePath),
 		Destination: "/state.dat",
 		Type:        "bind",
 		Options:     []string{"bind", "rw"},
@@ -1062,7 +929,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	// Check env vars
 	envVars = append(envVars, defaultEnvVars...)
-	envVars = append(envVars, testInstances[0].imageConfig.Config.Env...)
+	envVars = append(envVars, imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
 	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
 
@@ -1074,11 +941,11 @@ func TestRuntimeSpec(t *testing.T) {
 
 	// Check UID/GID
 
-	if runtimeSpec.Process.User.UID != uint32(instance.UID) {
+	if runtimeSpec.Process.User.UID != instance.UID {
 		t.Errorf("Wrong UID: %d", runtimeSpec.Process.User.UID)
 	}
 
-	if runtimeSpec.Process.User.GID != uint32(testInstances[0].serviceGID) {
+	if runtimeSpec.Process.User.GID != serviceProvider.services[instance.ServiceID].GID {
 		t.Errorf("Wrong GID: %d", runtimeSpec.Process.User.GID)
 	}
 
@@ -1097,11 +964,13 @@ func TestRuntimeSpec(t *testing.T) {
 }
 
 func TestRuntimeEnvironment(t *testing.T) {
-	testInstances := []testInstance{
-		{
-			serviceID: "service0", serviceVersion: 0, serviceProvider: "sp0", serviceGID: 1234,
-			subjectID: "subject0", numInstances: 1,
-			layerDigests: []string{uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()},
+	layerDigest1, layerDigest2, layerDigest3, layerDigest4 := uuid.NewString(), uuid.NewString(),
+		uuid.NewString(), uuid.NewString()
+
+	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
+		"service0": {
+			gid:          3456,
+			layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
 			imageConfig: &imagespec.Image{
 				OS: "linux",
 				Config: imagespec.ImageConfig{
@@ -1146,15 +1015,13 @@ func TestRuntimeEnvironment(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 
-	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
 	registrar := newTestRegistrar()
-	storageStateProvider := newTestStorageStateProvider(testInstances)
 	instanceMonitor := newTestInstanceMonitor()
 
 	resourceHosts := []aostypes.Host{
@@ -1170,35 +1037,58 @@ func TestRuntimeEnvironment(t *testing.T) {
 	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device1"})
 	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2"})
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, registrar, storageStateProvider,
-		instanceMonitor, newTestAlertSender())
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"},
+		},
+		layers: []aostypes.LayerInfo{
+			{Digest: layerDigest1}, {Digest: layerDigest2}, {Digest: layerDigest3}, {Digest: layerDigest4},
+		},
+		instances: []aostypes.InstanceInfo{
+			{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0},
+				StoragePath:   "storage",
+				StatePath:     "state.dat",
+				UID:           9483,
+			},
+		},
+	}
+
+	testLauncher, err := launcher.New(&config.Config{
+		WorkingDir: tmpDir,
+		StorageDir: filepath.Join(tmpDir, "storages"),
+		StateDir:   filepath.Join(tmpDir, "states"),
+	}, storage, serviceProvider, layerProvider,
+		newTestRunner(nil, nil), resourceManager, networkManager, registrar, instanceMonitor, newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	if err = layerProvider.fromTestInstances(testInstances); err != nil {
-		t.Fatalf("Can't create test layers: %v", err)
+	if err = serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+	if err = layerProvider.installLayers(runItem.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(runItem.instances); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
 	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
 	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-		ServiceID: testInstances[0].serviceID, SubjectID: testInstances[0].subjectID, Instance: 0,
-	})
+	instance, err := storage.getInstanceByIdent(runItem.instances[0].InstanceIdent)
 	if err != nil {
 		t.Fatalf("Can't get instance info: %v", err)
 	}
@@ -1209,33 +1099,6 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance should be registered")
 	}
 
-	// Check storage state
-
-	storageStateInfo, ok := storageStateProvider.infos[instance.InstanceID]
-	if !ok {
-		t.Error("Storage & state should be setup")
-	}
-
-	if storageStateInfo.InstanceIdent != instance.InstanceIdent {
-		t.Errorf("Wrong storage & state instance ident: %v", storageStateInfo.InstanceIdent)
-	}
-
-	if storageStateInfo.StorageQuota != *testInstances[0].serviceConfig.Quotas.StorageLimit {
-		t.Errorf("Wrong storage quota value: %d", storageStateInfo.StorageQuota)
-	}
-
-	if storageStateInfo.StateQuota != *testInstances[0].serviceConfig.Quotas.StateLimit {
-		t.Errorf("Wrong state quota value: %d", storageStateInfo.StateQuota)
-	}
-
-	if storageStateInfo.UID != instance.UID {
-		t.Errorf("Wrong storage & state UID: %d", storageStateInfo.UID)
-	}
-
-	if storageStateInfo.GID != testInstances[0].serviceGID {
-		t.Errorf("Wrong storage & state GID: %d", storageStateInfo.GID)
-	}
-
 	// Check network
 
 	netParams, ok := networkManager.instances[instance.InstanceID]
@@ -1243,18 +1106,21 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance should be registered to network")
 	}
 
+	serviceConfig := serviceProvider.configs["service0"].serviceConfig
+	imageConfig := serviceProvider.configs["service0"].imageConfig
+
 	if !compareNetParams(netParams, networkmanager.NetworkParams{
 		InstanceIdent:      instance.InstanceIdent,
-		Hostname:           *testInstances[0].serviceConfig.Hostname,
+		Hostname:           *serviceConfig.Hostname,
 		Hosts:              resourceHosts,
-		ExposedPorts:       convertMapToStringList(testInstances[0].imageConfig.Config.ExposedPorts),
-		AllowedConnections: convertMapToStringList(testInstances[0].serviceConfig.AllowedConnections),
+		ExposedPorts:       convertMapToStringList(imageConfig.Config.ExposedPorts),
+		AllowedConnections: convertMapToStringList(serviceConfig.AllowedConnections),
 		HostsFilePath:      filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "hosts"),
 		ResolvConfFilePath: filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "resolv.conf"),
-		IngressKbit:        *testInstances[0].serviceConfig.Quotas.DownloadSpeed,
-		EgressKbit:         *testInstances[0].serviceConfig.Quotas.UploadSpeed,
-		DownloadLimit:      *testInstances[0].serviceConfig.Quotas.DownloadLimit,
-		UploadLimit:        *testInstances[0].serviceConfig.Quotas.UploadLimit,
+		IngressKbit:        *serviceConfig.Quotas.DownloadSpeed,
+		EgressKbit:         *serviceConfig.Quotas.UploadSpeed,
+		DownloadLimit:      *serviceConfig.Quotas.DownloadLimit,
+		UploadLimit:        *serviceConfig.Quotas.UploadLimit,
 	}) {
 		t.Errorf("Wrong network params: %v", netParams)
 	}
@@ -1277,8 +1143,20 @@ func TestRuntimeEnvironment(t *testing.T) {
 	if !reflect.DeepEqual(monitorPrams, resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
 		UID:           instance.UID,
-		GID:           testInstances[0].serviceGID,
-		AlertRules:    testInstances[0].serviceConfig.AlertRules,
+		GID:           serviceProvider.configs["service0"].gid,
+		AlertRules:    serviceConfig.AlertRules,
+		Partitions: []resourcemonitor.PartitionParam{
+			{
+				Name:  "storage",
+				Path:  filepath.Join(tmpDir, storagesDir, instance.StoragePath),
+				Types: []string{cloudprotocol.StoragesPartition},
+			},
+			{
+				Name:  "state",
+				Path:  filepath.Join(tmpDir, statesDir, instance.StatePath),
+				Types: []string{cloudprotocol.StatesPartition},
+			},
+		},
 	}) {
 		t.Errorf("Wrong monitor params: %v", monitorPrams)
 	}
@@ -1290,11 +1168,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance root FS should be mounted")
 	}
 
-	if mountInfo.upperDir != filepath.Join(tmpDir, storagesDir, instance.InstanceID, "upperdir") {
+	if mountInfo.upperDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "upperdir") {
 		t.Errorf("Wrong upper dir value: %v", mountInfo.upperDir)
 	}
 
-	if mountInfo.workDir != filepath.Join(tmpDir, storagesDir, instance.InstanceID, "workdir") {
+	if mountInfo.workDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "workdir") {
 		t.Errorf("Wrong work dir value: %v", mountInfo.workDir)
 	}
 
@@ -1333,9 +1211,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't stop instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
+		testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1343,12 +1220,6 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	if _, ok := registrar.secrets[instance.InstanceIdent]; ok {
 		t.Error("Instance should be unregistered")
-	}
-
-	// Check storage state
-
-	if _, ok := storageStateProvider.infos[instance.InstanceID]; ok {
-		t.Error("Storage state should be cleanup")
 	}
 
 	// Check network
@@ -1375,98 +1246,6 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	if _, ok := mounter.mounts[filepath.Join(launcher.RuntimeDir, instance.InstanceID, instanceRootFS)]; ok {
 		t.Error("Instance root FS should be unmounted")
-	}
-}
-
-func TestRevertApplyService(t *testing.T) {
-	// nolint:goerr113
-	testInstances := []testInstance{
-		// All instances of service0 fails, service should be reverted
-		{
-			serviceID: "service0", subjectID: "subject0", numInstances: 3,
-			err: []error{errors.New("error"), errors.New("error"), errors.New("error")},
-		},
-		{
-			serviceID: "service0", subjectID: "subject1", numInstances: 2,
-			err: []error{errors.New("error"), errors.New("error")},
-		},
-		// Some instances of service1 fails, some are ok, service should be applied
-		{
-			serviceID: "service1", subjectID: "subject0", numInstances: 1,
-		},
-		{
-			serviceID: "service1", subjectID: "subject1", numInstances: 2,
-			err: []error{errors.New("error"), errors.New("error")},
-		},
-		// All instances of service2 are ok, service should be applied
-		{serviceID: "service2", subjectID: "subject1", numInstances: 1},
-		{serviceID: "service2", subjectID: "subject2", numInstances: 2},
-	}
-
-	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider()
-	instanceRunner := newTestRunner(
-		func(instanceID string) runner.InstanceStatus {
-			return getRunnerStatus(instanceID, testInstances, storage)
-		}, nil,
-	)
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	if err = serviceProvider.fromTestInstances(testInstances, false); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
-	}
-
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
-		t.Fatalf("Can't run instances: %v", err)
-	}
-
-	runtimeStatus := launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{
-			Instances: createInstancesStatuses(testInstances),
-			ErrorServices: []cloudprotocol.ServiceStatus{{
-				ID: "service0", Status: cloudprotocol.ErrorStatus,
-				ErrorInfo: &cloudprotocol.ErrorInfo{Message: "can't start any instances"},
-			}},
-		},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
-		t.Errorf("Check runtime status error: %v", err)
-	}
-
-	var service servicemanager.ServiceInfo
-
-	// Check service0 is reverted
-
-	if _, err = serviceProvider.GetServiceInfo("service0"); !errors.Is(err, servicemanager.ErrNotExist) {
-		t.Error("service2 should be reverted")
-	}
-
-	// Check service1 is active
-
-	if service, err = serviceProvider.GetServiceInfo("service1"); err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !service.IsActive {
-		t.Error("service1 should be active")
-	}
-
-	// Check service1 is active
-
-	if service, err = serviceProvider.GetServiceInfo("service2"); err != nil {
-		t.Fatalf("Can't get service info: %v", err)
-	}
-
-	if !service.IsActive {
-		t.Error("service2 should be active")
 	}
 }
 
@@ -1775,35 +1554,52 @@ func TestOverrideEnvVars(t *testing.T) {
 		},
 	}
 
-	testInstances := []testInstance{
-		{serviceID: "service0", subjectID: "subject0", numInstances: 3},
-		{serviceID: "service0", subjectID: "subject1", numInstances: 2},
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 1}},
+		},
 	}
 
-	serviceProvider := newTestServiceProvider()
+	serviceProvider := newTestServiceProvider(nil)
+	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
-	if err = serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Fatalf("Check runtime status error: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(createInstancesInfos(testInstances)); err != nil {
+	if err = serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err = layerProvider.installLayers(runItem.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(runItem.instances); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	runtimeStatus := launcher.RuntimeStatus{
-		RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(testInstances)},
-	}
-
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 
@@ -1822,7 +1618,7 @@ func TestOverrideEnvVars(t *testing.T) {
 		time.Sleep(item.waitDuration)
 
 		for _, checkInstance := range item.instances {
-			instanceInfo, err := storage.GetInstanceByIdent(checkInstance.InstanceIdent)
+			instanceInfo, err := storage.getInstanceByIdent(checkInstance.InstanceIdent)
 			if err != nil {
 				t.Fatalf("Can't get instance: %v", err)
 			}
@@ -1844,366 +1640,47 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 }
 
-func TestInstancePriorities(t *testing.T) {
-	type testData struct {
-		instances []testInstance
-		alerts    []cloudprotocol.DeviceAllocateAlert
-	}
-
-	data := []testData{
-		// Try to allocate device0 (shared count 1) by 3 instances of one serveice for the same subject. Instance with
-		// index 0 should allocate the device.
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service1", subjectID: "subject1", numInstances: 3,
-					serviceConfig: &servicemanager.ServiceConfig{
-						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
-					},
-					err: []error{
-						nil,
-						resourcemanager.ErrNoAvailableDevice,
-						resourcemanager.ErrNoAvailableDevice,
-					},
-				},
-			},
-			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
-				}, "device0"),
-			},
-		},
-		// Add same service instance with higher priority subject.
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service1", subjectID: "subject1", numInstances: 3,
-					serviceConfig: &servicemanager.ServiceConfig{
-						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
-					},
-					err: []error{
-						resourcemanager.ErrNoAvailableDevice,
-						resourcemanager.ErrNoAvailableDevice,
-						resourcemanager.ErrNoAvailableDevice,
-					},
-				},
-				{
-					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{
-						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
-					},
-				},
-			},
-			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject1", Instance: 0,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject1", Instance: 1,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject1", Instance: 2,
-				}, "device0"),
-			},
-		},
-		// Add higher priority service for the same subject.
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{
-						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
-					},
-					err: []error{resourcemanager.ErrNoAvailableDevice},
-				},
-				{
-					serviceID: "service0", subjectID: "subject1", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{
-						Devices: []servicemanager.ServiceDevice{{Name: "device0", Permissions: "rw"}},
-					},
-				},
-			},
-			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
-				}, "device0"),
-			},
-		},
-		// Multiple devices test 1
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service0", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device0", Permissions: "rw"},
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-				},
-				{
-					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device0", Permissions: "rw"},
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-					err: []error{resourcemanager.ErrNoAvailableDevice},
-				},
-				{
-					serviceID: "service2", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-				},
-				{
-					serviceID: "service3", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device2", Permissions: "rw"},
-					}},
-					err: []error{nil, resourcemanager.ErrNoAvailableDevice},
-				},
-			},
-			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service3", SubjectID: "subject0", Instance: 1,
-				}, "device2"),
-			},
-		},
-		// Multiple devices test 2
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service0", subjectID: "subject0", numInstances: 3,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device0", Permissions: "rw"},
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-					err: []error{nil, resourcemanager.ErrNoAvailableDevice, resourcemanager.ErrNoAvailableDevice},
-				},
-				{
-					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device0", Permissions: "rw"},
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-					err: []error{resourcemanager.ErrNoAvailableDevice},
-				},
-				{
-					serviceID: "service2", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device2", Permissions: "rw"},
-					}},
-				},
-			},
-			alerts: []cloudprotocol.DeviceAllocateAlert{
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service0", SubjectID: "subject0", Instance: 1,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service0", SubjectID: "subject0", Instance: 2,
-				}, "device0"),
-				createDeviceAllocateAlert(aostypes.InstanceIdent{
-					ServiceID: "service1", SubjectID: "subject0", Instance: 0,
-				}, "device0"),
-			},
-		},
-		// Multiple devices test 3
-		{
-			instances: []testInstance{
-				{
-					serviceID: "service1", subjectID: "subject0", numInstances: 1,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device0", Permissions: "rw"},
-						{Name: "device1", Permissions: "rw"},
-						{Name: "device2", Permissions: "rw"},
-					}},
-				},
-				{
-					serviceID: "service2", subjectID: "subject0", numInstances: 2,
-					serviceConfig: &servicemanager.ServiceConfig{Devices: []servicemanager.ServiceDevice{
-						{Name: "device2", Permissions: "rw"},
-					}},
-				},
-			},
-		},
-	}
-
-	resourceManager := newTestResourceManager()
-	serviceProvider := newTestServiceProvider()
-	alertSender := newTestAlertSender()
-
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device0", SharedCount: 1})
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device1", SharedCount: 2})
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2", SharedCount: 3})
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor(), alertSender)
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	for i, item := range data {
-		t.Logf("Run instances: %d", i)
-
-		alertSender.alerts = nil
-
-		if err = serviceProvider.fromTestInstances(item.instances, true); err != nil {
-			t.Fatalf("Can't create test services: %v", err)
-		}
-
-		if err = testLauncher.RunInstances(createInstancesInfos(item.instances)); err != nil {
-			t.Fatalf("Can't run instances: %v", err)
-		}
-
-		runtimeStatus := launcher.RuntimeStatus{
-			RunStatus: &launcher.RunInstancesStatus{Instances: createInstancesStatuses(item.instances)},
-		}
-
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
-			t.Errorf("Check runtime status error: %v", err)
-		}
-
-		if err = compareDeviceAllocateAlerts(item.alerts, alertSender.alerts); err != nil {
-			t.Errorf("Compare device allocation alerts error: %v", err)
-		}
-	}
-}
-
-func TestStopInstancesOnStart(t *testing.T) {
-	stopCounts := make(map[string]int)
-
-	serviceProvider := newTestServiceProvider()
+func TestRestartStoredInstancesOnStart(t *testing.T) {
 	storage := newTestStorage()
-	instanceRunner := newTestRunner(nil,
-		func(instanceID string) error {
-			stopCounts[instanceID]++
+	serviceProvider := newTestServiceProvider(nil)
 
-			return nil
+	runItem := testItem{
+		services: []aostypes.ServiceInfo{
+			{ID: "service0"}, {ID: "service1"}, {ID: "service2"},
 		},
-	)
-
-	testInstances := []testInstance{
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
-	}
-
-	if err := serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
-	}
-
-	storage.fromTestInstances(testInstances, true)
-
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestStorageStateProvider(nil), newTestInstanceMonitor(), newTestAlertSender())
-	if err != nil {
-		t.Fatalf("Can't create launcher: %v", err)
-	}
-	defer testLauncher.Close()
-
-	if len(stopCounts) != 13 {
-		t.Errorf("Wrong stop instances count: %d", len(stopCounts))
-	}
-
-	for instanceID, count := range stopCounts {
-		if count != 1 {
-			t.Errorf("Wrong stop count for instance %s: %d", instanceID, count)
-		}
-	}
-}
-
-func TestRemoveOutdatedInstances(t *testing.T) {
-	serviceProvider := newTestServiceProvider()
-	storage := newTestStorage()
-	storageStateProvider := newTestStorageStateProvider(nil)
-
-	testInstances := []testInstance{
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject0", numInstances: 3},
-		{serviceID: "service0", serviceVersion: 0, subjectID: "subject1", numInstances: 2},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject1", numInstances: 1},
-		{serviceID: "service1", serviceVersion: 1, subjectID: "subject2", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject3", numInstances: 2},
-		{serviceID: "service2", serviceVersion: 2, subjectID: "subject4", numInstances: 3},
-	}
-
-	if err := serviceProvider.fromTestInstances(testInstances, true); err != nil {
-		t.Fatalf("Can't create test services: %v", err)
-	}
-
-	storage.fromTestInstances(testInstances, false)
-
-	outdatedInstances := []launcher.InstanceInfo{
-		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0},
-			InstanceID:    uuid.NewString(),
-			UID:           6000,
-		},
-		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1},
-			InstanceID:    uuid.NewString(),
-			UID:           6001,
-		},
-		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 0},
-			InstanceID:    uuid.NewString(),
-			UID:           6002,
-		},
-		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject1", Instance: 1},
-			InstanceID:    uuid.NewString(),
-			UID:           6003,
-		},
-		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject2", Instance: 0},
-			InstanceID:    uuid.NewString(),
-			UID:           6004,
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject1", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject3", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject3", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject4", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject4", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject4", Instance: 2}},
 		},
 	}
 
-	for _, instance := range outdatedInstances {
-		if err := storage.AddInstance(instance); err != nil {
-			t.Fatalf("Can't add instance: %v", err)
-		}
+	storage.fromTestItem(runItem)
+
+	if err := serviceProvider.installServices(runItem.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
 	}
 
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
 		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), storageStateProvider, newTestInstanceMonitor(), newTestAlertSender())
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
 	defer testLauncher.Close()
 
-	expectedRemovedStorages := make([]string, 0, len(outdatedInstances))
-
-	for _, instance := range outdatedInstances {
-		expectedRemovedStorages = append(expectedRemovedStorages, instance.InstanceID)
-
-		if _, err := storage.GetInstanceByID(instance.InstanceID); !errors.Is(err, launcher.ErrNotExist) {
-			t.Errorf("Instance should be removed: %s", instance.InstanceID)
-		}
-	}
-
-	if !compareArrays(len(expectedRemovedStorages), len(storageStateProvider.removedInstances),
-		func(index1, index2 int) bool {
-			return expectedRemovedStorages[index1] == storageStateProvider.removedInstances[index2]
-		}) {
-		t.Errorf("Wrong removed storages instance IDs: %v", storageStateProvider.removedInstances)
+	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
+	}, testLauncher.RuntimeStatusChannel()); err != nil {
+		t.Fatalf("Check runtime status error: %v", err)
 	}
 }
 
@@ -2256,59 +1733,6 @@ func (storage *testStorage) RemoveInstance(instanceID string) error {
 	return nil
 }
 
-func (storage *testStorage) GetInstanceByIdent(
-	instanceIdent aostypes.InstanceIdent,
-) (launcher.InstanceInfo, error) {
-	storage.RLock()
-	defer storage.RUnlock()
-
-	for _, instance := range storage.instances {
-		if instance.InstanceIdent == instanceIdent {
-			return instance, nil
-		}
-	}
-
-	return launcher.InstanceInfo{}, launcher.ErrNotExist
-}
-
-func (storage *testStorage) GetInstanceByID(instanceID string) (launcher.InstanceInfo, error) {
-	storage.RLock()
-	defer storage.RUnlock()
-
-	instance, ok := storage.instances[instanceID]
-	if !ok {
-		return launcher.InstanceInfo{}, launcher.ErrNotExist
-	}
-
-	return instance, nil
-}
-
-func (storage *testStorage) GetRunningInstances() (instances []launcher.InstanceInfo, err error) {
-	storage.RLock()
-	defer storage.RUnlock()
-
-	for _, instance := range storage.instances {
-		if instance.Running {
-			instances = append(instances, instance)
-		}
-	}
-
-	return instances, nil
-}
-
-func (storage *testStorage) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
-	storage.RLock()
-	defer storage.RUnlock()
-
-	for _, instance := range storage.instances {
-		if instance.SubjectID == subjectID {
-			instances = append(instances, instance)
-		}
-	}
-
-	return instances, nil
-}
-
 func (storage *testStorage) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
 	storage.RLock()
 	defer storage.RUnlock()
@@ -2336,38 +1760,18 @@ func (storage *testStorage) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVa
 	return nil
 }
 
-func (storage *testStorage) fromTestInstances(testInstances []testInstance, running bool) {
+func (storage *testStorage) fromTestItem(item testItem) {
 	storage.Lock()
 	defer storage.Unlock()
 
 	storage.instances = make(map[string]launcher.InstanceInfo)
 
-	uid := 5000
+	for _, instance := range item.instances {
+		instanceID := uuid.New().String()
 
-	for _, testInstance := range testInstances {
-		for i := uint64(0); i < testInstance.numInstances; i++ {
-			newInstanceID := uuid.New().String()
-
-			for instanceID, instance := range storage.instances {
-				if instance.ServiceID == testInstance.serviceID && instance.SubjectID == testInstance.subjectID &&
-					instance.Instance == i {
-					newInstanceID = instanceID
-				}
-			}
-
-			storage.instances[newInstanceID] = launcher.InstanceInfo{
-				InstanceIdent: aostypes.InstanceIdent{
-					ServiceID: testInstance.serviceID,
-					SubjectID: testInstance.subjectID,
-					Instance:  i,
-				},
-				InstanceID:  newInstanceID,
-				UnitSubject: testInstance.unitSubject,
-				Running:     running,
-				UID:         uid,
-			}
-
-			uid++
+		storage.instances[instanceID] = launcher.InstanceInfo{
+			InstanceInfo: instance,
+			InstanceID:   instanceID,
 		}
 	}
 }
@@ -2376,32 +1780,27 @@ func (storage *testStorage) fromTestInstances(testInstances []testInstance, runn
  * testServiceProvider
  **********************************************************************************************************************/
 
-func newTestServiceProvider() *testServiceProvider {
-	return &testServiceProvider{
-		services: make(map[string]serviceInfo),
+func newTestServiceProvider(configs map[string]serviceConfigs) *testServiceProvider {
+	if configs == nil {
+		configs = make(map[string]serviceConfigs)
 	}
+
+	return &testServiceProvider{configs: configs}
 }
 
 func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error) {
-	provider.RLock()
-	defer provider.RUnlock()
-
 	service, ok := provider.services[serviceID]
 	if !ok {
 		return servicemanager.ServiceInfo{}, servicemanager.ErrNotExist
 	}
 
-	return service.ServiceInfo, nil
+	return service, nil
 }
 
 func (provider *testServiceProvider) GetImageParts(
 	service servicemanager.ServiceInfo,
 ) (servicemanager.ImageParts, error) {
-	provider.RLock()
-	defer provider.RUnlock()
-
-	info, ok := provider.services[service.ServiceID]
-	if !ok {
+	if _, ok := provider.services[service.ServiceID]; !ok {
 		return servicemanager.ImageParts{}, servicemanager.ErrNotExist
 	}
 
@@ -2409,7 +1808,7 @@ func (provider *testServiceProvider) GetImageParts(
 		ImageConfigPath:   filepath.Join(service.ImagePath, imageConfigFile),
 		ServiceConfigPath: filepath.Join(service.ImagePath, serviceConfigFile),
 		ServiceFSPath:     filepath.Join(service.ImagePath, instanceRootFS),
-		LayersDigest:      info.layerDigests,
+		LayersDigest:      provider.configs[service.ServiceID].layerDigests,
 	}, nil
 }
 
@@ -2417,73 +1816,22 @@ func (provider *testServiceProvider) ValidateService(service servicemanager.Serv
 	return nil
 }
 
-func (provider *testServiceProvider) ApplyService(service servicemanager.ServiceInfo) error {
-	provider.Lock()
-	defer provider.Unlock()
-
-	serviceInfo, ok := provider.services[service.ServiceID]
-	if !ok {
-		return servicemanager.ErrNotExist
-	}
-
-	serviceInfo.IsActive = true
-	provider.services[service.ServiceID] = serviceInfo
-
-	return nil
-}
-
-func (provider *testServiceProvider) RevertService(service servicemanager.ServiceInfo) error {
-	provider.Lock()
-	defer provider.Unlock()
-
-	if _, ok := provider.services[service.ServiceID]; !ok {
-		return servicemanager.ErrNotExist
-	}
-
-	delete(provider.services, service.ServiceID)
-
-	return nil
-}
-
-func (provider *testServiceProvider) UseService(serviceID string, aosVersion uint64) error {
-	provider.Lock()
-	defer provider.Unlock()
-
-	service, ok := provider.services[serviceID]
-	if !ok {
-		return servicemanager.ErrNotExist
-	}
-
-	service.Timestamp = time.Now().UTC()
-	provider.services[serviceID] = service
-
-	return nil
-}
-
-func (provider *testServiceProvider) fromTestInstances(testInstances []testInstance, active bool) error {
-	provider.services = make(map[string]serviceInfo)
-
+func (provider *testServiceProvider) installServices(services []aostypes.ServiceInfo) error {
 	if err := os.RemoveAll(filepath.Join(tmpDir, servicesDir)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, testInstance := range testInstances {
-		if _, ok := provider.services[testInstance.serviceID]; ok {
-			continue
-		}
+	provider.services = make(map[string]servicemanager.ServiceInfo)
 
-		servicePath := filepath.Join(tmpDir, servicesDir, testInstance.serviceID)
+	for _, service := range services {
+		servicePath := filepath.Join(tmpDir, servicesDir, service.ID)
 
-		provider.services[testInstance.serviceID] = serviceInfo{
-			ServiceInfo: servicemanager.ServiceInfo{
-				ServiceID:       testInstance.serviceID,
-				AosVersion:      testInstance.serviceVersion,
-				ServiceProvider: testInstance.serviceProvider,
-				ImagePath:       servicePath,
-				GID:             testInstance.serviceGID,
-				IsActive:        active,
-			},
-			layerDigests: testInstance.layerDigests,
+		provider.services[service.ID] = servicemanager.ServiceInfo{
+			VersionInfo:     service.VersionInfo,
+			ServiceID:       service.ID,
+			ServiceProvider: service.ProviderID,
+			ImagePath:       servicePath,
+			GID:             provider.configs[service.ID].gid,
 		}
 
 		if err := os.MkdirAll(filepath.Join(servicePath, instanceRootFS), 0o755); err != nil {
@@ -2492,24 +1840,34 @@ func (provider *testServiceProvider) fromTestInstances(testInstances []testInsta
 
 		imageConfig := &imagespec.Image{OS: "linux"}
 
-		if testInstance.imageConfig != nil {
-			imageConfig = testInstance.imageConfig
+		if provider.configs[service.ID].imageConfig != nil {
+			imageConfig = provider.configs[service.ID].imageConfig
 		}
 
-		if err := writeConfig(filepath.Join(tmpDir, servicesDir, testInstance.serviceID, imageConfigFile),
+		if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, imageConfigFile),
 			imageConfig); err != nil {
 			return err
 		}
 
-		if testInstance.serviceConfig != nil {
-			if err := writeConfig(filepath.Join(tmpDir, servicesDir, testInstance.serviceID, serviceConfigFile),
-				testInstance.serviceConfig); err != nil {
+		if provider.configs[service.ID].serviceConfig != nil {
+			if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, serviceConfigFile),
+				provider.configs[service.ID].serviceConfig); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func (storage *testStorage) getInstanceByIdent(instanceIdent aostypes.InstanceIdent) (launcher.InstanceInfo, error) {
+	for _, instance := range storage.instances {
+		if instance.InstanceIdent == instanceIdent {
+			return instance, nil
+		}
+	}
+
+	return launcher.InstanceInfo{}, launcher.ErrNotExist
 }
 
 /***********************************************************************************************************************
@@ -2531,25 +1889,24 @@ func (provider *testLayerProvider) GetLayerInfoByDigest(digest string) (layerman
 	return layer, nil
 }
 
-func (provider *testLayerProvider) fromTestInstances(testInstances []testInstance) error {
+func (provider *testLayerProvider) installLayers(layers []aostypes.LayerInfo) error {
 	provider.layers = make(map[string]layermanager.LayerInfo)
 
 	if err := os.RemoveAll(filepath.Join(tmpDir, layersDir)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, testInstance := range testInstances {
-		for _, digest := range testInstance.layerDigests {
-			layerPath := filepath.Join(tmpDir, layersDir, digest)
+	for _, layer := range layers {
+		layerPath := filepath.Join(tmpDir, layersDir, layer.Digest)
 
-			provider.layers[digest] = layermanager.LayerInfo{
-				Digest: digest,
-				Path:   layerPath,
-			}
+		provider.layers[layer.Digest] = layermanager.LayerInfo{
+			VersionInfo: layer.VersionInfo,
+			Digest:      layer.Digest,
+			Path:        layerPath,
+		}
 
-			if err := os.MkdirAll(layerPath, 0o755); err != nil {
-				return aoserrors.Wrap(err)
-			}
+		if err := os.MkdirAll(layerPath, 0o755); err != nil {
+			return aoserrors.Wrap(err)
 		}
 	}
 
@@ -2809,85 +2166,6 @@ func (registrar *testRegistrar) UnregisterInstance(instance aostypes.InstanceIde
 }
 
 /***********************************************************************************************************************
- * testStateStorageProvider
- **********************************************************************************************************************/
-
-func newTestStorageStateProvider(testInstances []testInstance) *testStorageStateProvider {
-	return &testStorageStateProvider{
-		testInstances: testInstances,
-		infos:         make(map[string]storageStateInfo),
-		stateChannel:  make(chan storagestate.StateChangedInfo, 1),
-	}
-}
-
-func (provider *testStorageStateProvider) Setup(
-	instanceID string, params storagestate.SetupParams,
-) (storagePath, statePath string, stateChecksum []byte, err error) {
-	provider.Lock()
-	defer provider.Unlock()
-
-	storagePath = filepath.Join(tmpDir, storagesDir, instanceID)
-	statePath = filepath.Join(tmpDir, statesDir, instanceID)
-
-	if err = os.MkdirAll(filepath.Join(tmpDir, statesDir), 0o755); err != nil {
-		return "", "", nil, aoserrors.Wrap(err)
-	}
-
-	file, err := os.OpenFile(statePath, os.O_CREATE, 0o644)
-	if err != nil {
-		return "", "", nil, aoserrors.Wrap(err)
-	}
-	defer file.Close()
-
-	provider.infos[instanceID] = storageStateInfo{
-		SetupParams: params,
-		storagePath: storagePath,
-		statePath:   statePath,
-	}
-
-	if len(provider.testInstances) > 0 {
-		for _, testInstance := range provider.testInstances {
-			if testInstance.serviceID == params.ServiceID && testInstance.subjectID == params.SubjectID &&
-				params.Instance < uint64(len(testInstance.stateChecksum)) {
-				stateChecksum = testInstance.stateChecksum[params.Instance]
-			}
-		}
-	}
-
-	return storagePath, statePath, stateChecksum, nil
-}
-
-func (provider *testStorageStateProvider) Cleanup(instanceID string) error {
-	provider.Lock()
-	defer provider.Unlock()
-
-	if _, ok := provider.infos[instanceID]; !ok {
-		return nil
-	}
-
-	if err := os.RemoveAll(provider.infos[instanceID].statePath); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	delete(provider.infos, instanceID)
-
-	return nil
-}
-
-func (provider *testStorageStateProvider) Remove(instanceID string) error {
-	provider.Lock()
-	defer provider.Unlock()
-
-	provider.removedInstances = append(provider.removedInstances, instanceID)
-
-	return nil
-}
-
-func (provider *testStorageStateProvider) StateChangedChannel() <-chan storagestate.StateChangedInfo {
-	return provider.stateChannel
-}
-
-/***********************************************************************************************************************
  * testInstanceMonitor
  **********************************************************************************************************************/
 
@@ -3019,27 +2297,11 @@ func compareRuntimeStatus(status1, status2 launcher.RuntimeStatus) error {
 	case status1.RunStatus == nil && status2.RunStatus == nil:
 
 	case status1.RunStatus != nil && status2.RunStatus != nil:
-		if !compareArrays(len(status1.RunStatus.UnitSubjects), len(status2.RunStatus.UnitSubjects),
-			func(index1, index2 int) bool {
-				return status1.RunStatus.UnitSubjects[index1] == status2.RunStatus.UnitSubjects[index2]
-			}) {
-			return aoserrors.New("unit subjects mismatch")
-		}
-
 		if !compareArrays(len(status1.RunStatus.Instances), len(status2.RunStatus.Instances),
 			func(index1, index2 int) bool {
 				return isInstanceStatusesEqual(status1.RunStatus.Instances[index1], status2.RunStatus.Instances[index2])
 			}) {
 			return aoserrors.New("run instances statuses mismatch")
-		}
-
-		if !compareArrays(len(status1.RunStatus.ErrorServices), len(status2.RunStatus.ErrorServices),
-			func(index1, index2 int) bool {
-				return isServiceStatusesEqual(
-					status1.RunStatus.ErrorServices[index1],
-					status2.RunStatus.ErrorServices[index2])
-			}) {
-			return aoserrors.New("error services mismatch")
 		}
 
 	case status1.RunStatus == nil || status2.RunStatus == nil:
@@ -3083,16 +2345,6 @@ func isErrorInfosEqual(info1, info2 *cloudprotocol.ErrorInfo) bool {
 }
 
 func isInstanceStatusesEqual(status1, status2 cloudprotocol.InstanceStatus) bool {
-	if !isErrorInfosEqual(status1.ErrorInfo, status2.ErrorInfo) {
-		return false
-	}
-
-	status1.ErrorInfo, status2.ErrorInfo = nil, nil
-
-	return status1 == status2
-}
-
-func isServiceStatusesEqual(status1, status2 cloudprotocol.ServiceStatus) bool {
 	if !isErrorInfosEqual(status1.ErrorInfo, status2.ErrorInfo) {
 		return false
 	}
@@ -3147,110 +2399,80 @@ func checkRuntimeStatus(refStatus launcher.RuntimeStatus, statusChannel <-chan l
 	return nil
 }
 
-func createInstancesInfos(testInstances []testInstance) (instances []cloudprotocol.InstanceInfo) {
-	for _, testInstance := range testInstances {
-		instances = append(instances, cloudprotocol.InstanceInfo{
-			ServiceID:    testInstance.serviceID,
-			SubjectID:    testInstance.subjectID,
-			NumInstances: testInstance.numInstances,
-		})
-	}
-
-	return instances
-}
-
-func createInstancesStatuses(testInstances []testInstance) (instances []cloudprotocol.InstanceStatus) {
-	for _, testInstance := range testInstances {
-		for index := uint64(0); index < testInstance.numInstances; index++ {
-			instanceStatus := cloudprotocol.InstanceStatus{
-				InstanceIdent: aostypes.InstanceIdent{
-					ServiceID: testInstance.serviceID,
-					SubjectID: testInstance.subjectID,
-					Instance:  index,
-				},
-				AosVersion: testInstance.serviceVersion,
-				RunState:   cloudprotocol.InstanceStateActive,
-			}
-
-			if index < uint64(len(testInstance.err)) && testInstance.err[index] != nil {
-				instanceStatus.RunState = cloudprotocol.InstanceStateFailed
-				instanceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{
-					Message: testInstance.err[index].Error(),
-				}
-			}
-
-			if index < uint64(len(testInstance.stateChecksum)) {
-				instanceStatus.StateChecksum = hex.EncodeToString(testInstance.stateChecksum[index])
-			}
-
-			instances = append(instances, instanceStatus)
+func createInstancesStatuses(item testItem) (instancesStatuses []cloudprotocol.InstanceStatus) {
+	for i, instance := range item.instances {
+		instanceStatus := cloudprotocol.InstanceStatus{
+			InstanceIdent: item.instances[i].InstanceIdent,
+			RunState:      cloudprotocol.InstanceStateActive,
 		}
+
+		for _, service := range item.services {
+			if instance.ServiceID == service.ID {
+				instanceStatus.AosVersion = service.AosVersion
+			}
+		}
+
+		if i < len(item.err) && item.err[i] != nil {
+			instanceStatus.RunState = cloudprotocol.InstanceStateFailed
+			instanceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{
+				Message: item.err[i].Error(),
+			}
+		}
+
+		instancesStatuses = append(instancesStatuses, instanceStatus)
 	}
 
-	return instances
+	return instancesStatuses
 }
 
-func getRunnerStatus(instanceID string, testInstances []testInstance, storage *testStorage) runner.InstanceStatus {
+func getRunnerStatus(instanceID string, item testItem, storage *testStorage) runner.InstanceStatus {
 	activeStatus := runner.InstanceStatus{InstanceID: instanceID, State: cloudprotocol.InstanceStateActive}
 
-	instance, err := storage.GetInstanceByID(instanceID)
-	if err != nil {
+	curInstance, ok := storage.instances[instanceID]
+	if !ok {
 		return activeStatus
 	}
 
-	for _, testInstance := range testInstances {
-		if testInstance.serviceID == instance.ServiceID && testInstance.subjectID == instance.SubjectID &&
-			instance.Instance < uint64(len(testInstance.err)) {
-			if testInstance.err[instance.Instance] != nil {
-				return runner.InstanceStatus{
-					InstanceID: instanceID,
-					State:      cloudprotocol.InstanceStateFailed,
-					Err:        testInstance.err[instance.Instance],
-				}
+	for i, testInstance := range item.instances {
+		if curInstance.InstanceIdent == testInstance.InstanceIdent && i < len(item.err) && item.err[i] != nil {
+			return runner.InstanceStatus{
+				InstanceID: instanceID,
+				State:      cloudprotocol.InstanceStateFailed,
+				Err:        item.err[i],
 			}
-
-			return activeStatus
 		}
 	}
 
 	return activeStatus
 }
 
-func createRunStatus(
-	storage *testStorage, testInstances []testInstance,
-) (runStatus []runner.InstanceStatus, err error) {
-	for _, testInstance := range testInstances {
-		for i := uint64(0); i < testInstance.numInstances; i++ {
-			instance, err := storage.GetInstanceByIdent(aostypes.InstanceIdent{
-				ServiceID: testInstance.serviceID,
-				SubjectID: testInstance.subjectID,
-				Instance:  i,
-			})
-			if err != nil {
-				return nil, aoserrors.Wrap(err)
+func createRunStatus(storage *testStorage, item testItem) []runner.InstanceStatus {
+	var runStatus []runner.InstanceStatus
+
+	for i, instance := range item.instances {
+		for _, storedInstance := range storage.instances {
+			if storedInstance.InstanceIdent != instance.InstanceIdent {
+				continue
 			}
 
-			var runError error
-
-			if i < uint64(len(testInstance.err)) {
-				runError = testInstance.err[i]
+			status := runner.InstanceStatus{
+				InstanceID: storedInstance.InstanceID,
+				State:      cloudprotocol.InstanceStateActive,
 			}
 
-			state := cloudprotocol.InstanceStateActive
+			if i < len(item.err) {
+				status.Err = item.err[i]
 
-			if runError != nil {
-				state = cloudprotocol.InstanceStateFailed
+				if status.Err != nil {
+					status.State = cloudprotocol.InstanceStateFailed
+				}
 			}
 
-			runStatus = append(runStatus, runner.InstanceStatus{
-				InstanceID: instance.InstanceID,
-				State:      state,
-				Err:        runError,
-			})
+			runStatus = append(runStatus, status)
 		}
 	}
 
-	return runStatus, nil
+	return runStatus
 }
 
 func writeConfig(fileName string, config interface{}) error {
