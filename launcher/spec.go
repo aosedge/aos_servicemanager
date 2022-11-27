@@ -523,7 +523,7 @@ func (launcher *Launcher) getServiceConfig(service servicemanager.ServiceInfo) (
 	return &serviceConfig, nil
 }
 
-func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpec, error) {
+func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*runtimeSpec, error) {
 	spec := &runtimeSpec{
 		resourceManager: launcher.resourceManager,
 		ociSpec:         *specconv.Example(),
@@ -539,13 +539,19 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	instance.overrideEnvVars = launcher.getInstanceEnvVars(instance.InstanceInfo)
 	spec.mergeEnv(instance.overrideEnvVars)
 
-	if instance.statePath != "" {
-		if err := spec.addBindMount(instance.statePath, instanceStateFile, "rw"); err != nil {
+	if instance.StatePath != "" {
+		absStatePath := launcher.getAbsStatePath(instance.StatePath)
+
+		if err := prepareStateFile(absStatePath, instance.UID, instance.service.GID); err != nil {
+			return nil, err
+		}
+
+		if err := spec.addBindMount(absStatePath, instanceStateFile, "rw"); err != nil {
 			return nil, err
 		}
 	}
 
-	if err := spec.setUserUIDGID(uint32(instance.UID), uint32(instance.service.GID)); err != nil {
+	if err := spec.setUserUIDGID(instance.UID, instance.service.GID); err != nil {
 		return nil, err
 	}
 
@@ -559,9 +565,7 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 
 	fileName := filepath.Join(instance.runtimeDir, runtimeConfigFile)
 
-	log.WithFields(
-		instanceIdentLogFields(instance.InstanceIdent, log.Fields{"fileName": fileName}),
-	).Debug("Save runtime spec")
+	log.WithFields(instanceLogFields(instance, log.Fields{"fileName": fileName})).Debug("Save runtime spec")
 
 	if err := spec.save(fileName); err != nil {
 		return nil, err
@@ -570,7 +574,7 @@ func (launcher *Launcher) createRuntimeSpec(instance *instanceInfo) (*runtimeSpe
 	return spec, nil
 }
 
-func createAosEnvVars(instance *instanceInfo) (aosEnvVars []string) {
+func createAosEnvVars(instance *runtimeInstanceInfo) (aosEnvVars []string) {
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosServiceID, instance.ServiceID))
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%s", envAosSubjectID, instance.SubjectID))
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("%s=%d", envAosInstanceIndex, instance.Instance))
