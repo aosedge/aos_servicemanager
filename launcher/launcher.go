@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -405,6 +406,16 @@ func (launcher *Launcher) calculateInstances(
 		currentInstances = append(currentInstances, currentInstance)
 	}
 
+	sort.Slice(runInstances, func(i, j int) bool { return runInstances[i].Priority > runInstances[j].Priority })
+	sort.Slice(currentInstances, func(i, j int) bool {
+		return currentInstances[i].Priority > currentInstances[j].Priority
+	})
+
+	maxPriorityIncreased := len(runInstances) > 0 && len(currentInstances) > 0 &&
+		runInstances[0].Priority > currentInstances[0].Priority
+
+	var maxStartPriority uint64
+
 runInstancesLoop:
 	for _, runInstance := range runInstances {
 		for i, currentInstance := range currentInstances {
@@ -415,7 +426,8 @@ runInstancesLoop:
 			if currentInstance.service != nil &&
 				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion &&
 				currentInstance.InstanceInfo.InstanceInfo == runInstance.InstanceInfo &&
-				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive {
+				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive &&
+				currentInstance.Priority >= maxStartPriority && !maxPriorityIncreased {
 				currentInstances = append(currentInstances[:i], currentInstances[i+1:]...)
 
 				continue runInstancesLoop
@@ -425,6 +437,10 @@ runInstancesLoop:
 			currentInstances = append(currentInstances[:i], currentInstances[i+1:]...)
 
 			break
+		}
+
+		if runInstance.Priority > maxStartPriority {
+			maxStartPriority = runInstance.Priority
 		}
 
 		startInstances = append(startInstances, newRuntimeInstanceInfo(runInstance))
@@ -541,7 +557,23 @@ func (launcher *Launcher) stopInstance(instance *runtimeInstanceInfo) (err error
 }
 
 func (launcher *Launcher) startInstances(instances []*runtimeInstanceInfo) {
+	var currentPriority uint64
+
+	if len(instances) > 0 {
+		currentPriority = instances[0].Priority
+
+		log.WithField("priority", currentPriority).Debug("Start instances with priority")
+	}
+
 	for _, instance := range instances {
+		if currentPriority != instance.Priority {
+			launcher.actionHandler.Wait()
+
+			currentPriority = instance.Priority
+
+			log.WithField("priority", currentPriority).Debug("Start instances with priority")
+		}
+
 		launcher.doStartAction(instance)
 	}
 
