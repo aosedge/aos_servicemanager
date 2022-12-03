@@ -100,14 +100,14 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestAddGetService(t *testing.T) {
-	// AddService
 	service := servicemanager.ServiceInfo{
-		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false, Size: 30,
-	}
-
-	if _, err := db.GetService(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
-		t.Error("Should be error get service")
+		ServiceID: "service1",
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceProvider: "sp1",
+		ImagePath:       "to/service1",
+		Size:            30,
 	}
 
 	if _, err := db.GetAllServiceVersions(service.ServiceID); err == nil || !errors.Is(err, servicemanager.ErrNotExist) {
@@ -115,195 +115,141 @@ func TestAddGetService(t *testing.T) {
 	}
 
 	if err := db.AddService(service); err != nil {
-		t.Errorf("Can't add service: %s", err)
+		t.Errorf("Can't add service: %v", err)
 	}
 
-	// GetService
-	serviceFromDB, err := db.GetService("service1")
+	serviceFromDB, err := db.GetAllServiceVersions("service1")
 	if err != nil {
-		t.Errorf("Can't get service: %s", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	if !reflect.DeepEqual(serviceFromDB, service) {
+	if !reflect.DeepEqual(serviceFromDB, []servicemanager.ServiceInfo{service}) {
 		t.Error("service1 doesn't match stored one")
 	}
 
 	service2 := servicemanager.ServiceInfo{
-		ServiceID: "service2", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false, Size: 80,
+		ServiceID: "service2",
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceProvider: "sp1",
+		ImagePath:       "to/service1",
+		Size:            80,
 	}
 
 	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %s", err)
+		t.Errorf("Can't add service: %v", err)
 	}
 
 	if err := db.AddService(service2); err == nil {
 		t.Error("Should be error can't add service")
 	}
 
-	serviceFromDB, err = db.GetService("service2")
+	serviceFromDB, err = db.GetAllServiceVersions("service2")
 	if err != nil {
 		t.Errorf("Can't get service: %v", err)
 	}
 
-	if !reflect.DeepEqual(serviceFromDB, service2) {
-		t.Error("service1 doesn't match stored one")
+	if !reflect.DeepEqual(serviceFromDB, []servicemanager.ServiceInfo{service2}) {
+		t.Error("service doesn't match stored one")
 	}
 
-	service.AosVersion = 2
+	service3 := service2
+	service3.AosVersion = 2
 
-	if err := db.AddService(service); err != nil {
+	if err := db.AddService(service3); err != nil {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	services, err := db.GetAllServiceVersions("service1")
+	services, err := db.GetAllServiceVersions("service2")
 	if err != nil {
-		t.Errorf("Can't get all service versions: %s", err)
+		t.Errorf("Can't get all service versions: %v", err)
 	}
 
 	if len(services) != 2 {
 		t.Errorf("incorrect count of services %d", len(services))
 	}
 
-	services, err = db.GetLatestVersionServices()
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service2, service3}, services) {
+		t.Error("service doesn't match stored one")
+	}
+
+	services, err = db.GetServices()
 	if err != nil {
 		t.Errorf("Can't get services: %v", err)
 	}
 
-	if len(services) != 2 {
-		t.Errorf("Incorrect count of services: %v", len(services))
-	}
-
-	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
-		t.Error("service1 doesn't match stored one")
-	}
-
-	service.AosVersion = 3
-
-	if err := db.AddService(service); err != nil {
-		t.Errorf("Can't add service: %v", err)
-	}
-
-	if len(services) != 2 {
-		t.Errorf("Unexpected service count: %v", len(services))
-	}
-
-	services, err = db.GetLatestVersionServices()
-	if err != nil {
-		t.Errorf("Can't get services: %v", err)
-	}
-
-	if len(services) != 2 {
-		t.Errorf("Incorrect count of services: %v", len(services))
-	}
-
-	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
-		t.Error("service1 doesn't match stored one")
-	}
-
-	service2.AosVersion = 5
-
-	if err := db.AddService(service2); err != nil {
-		t.Errorf("Can't add service: %v", err)
-	}
-
-	services, err = db.GetLatestVersionServices()
-	if err != nil {
-		t.Errorf("Can't get services: %v", err)
-	}
-
-	if len(services) != 2 {
+	if len(services) != 3 {
 		t.Errorf("Incorrect count of services: %d", len(services))
 	}
 
-	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
-		t.Error("service1 doesn't match stored one")
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2, service3}, services) {
+		t.Error("service doesn't match stored one")
 	}
 
 	// Clear DB
 	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
+		t.Errorf("Can't remove all services: %v", err)
 	}
 }
 
 func TestNotExistService(t *testing.T) {
 	// GetService
-	_, err := db.GetService("service3")
+	_, err := db.GetAllServiceVersions("service3")
 	if err == nil {
 		t.Error("Error in non existed service")
 	} else if !errors.Is(err, servicemanager.ErrNotExist) {
-		t.Errorf("Can't get service: %s", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 }
 
 func TestRemoveService(t *testing.T) {
-	// AddService
 	service := servicemanager.ServiceInfo{
-		ServiceID: "service1", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false,
+		ServiceID: "service1",
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceProvider: "sp1",
+		ImagePath:       "to/service1",
 	}
 
 	if err := db.AddService(service); err != nil {
-		t.Errorf("Can't add service: %s", err)
+		t.Errorf("Can't add service: %v", err)
 	}
 
-	// GetService
-	serviceFromDB, err := db.GetService("service1")
+	serviceFromDB, err := db.GetAllServiceVersions("service1")
 	if err != nil {
-		t.Errorf("Can't get service: %s", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	if !reflect.DeepEqual(serviceFromDB, service) {
-		t.Error("service1 doesn't match stored one")
+	if !reflect.DeepEqual(serviceFromDB, []servicemanager.ServiceInfo{service}) {
+		t.Error("service doesn't match stored one")
 	}
 
-	if err := db.RemoveService(service); err != nil {
-		t.Errorf("Can't delete service: %s", err)
+	if err := db.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+		t.Errorf("Can't remove service: %v", err)
 	}
 
-	if _, err := db.GetService("service1"); err == nil {
+	if _, err := db.GetAllServiceVersions("service1"); err == nil {
 		t.Errorf("Should be error: service does not exist ")
 	}
 
 	// Clear DB
 	if err = db.removeAllServices(); err != nil {
-		t.Errorf("Can't remove all services: %s", err)
-	}
-}
-
-func TestActivateService(t *testing.T) {
-	// AddService
-	service := servicemanager.ServiceInfo{
-		ServiceID: "serviceActivate", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false,
-	}
-
-	if err := db.AddService(service); err != nil {
-		t.Errorf("Can't add service: %s", err)
-	}
-
-	if err := db.ActivateService(service.ServiceID, service.AosVersion); err != nil {
-		t.Errorf("Can't activate service: %s", err)
-	}
-
-	// GetService
-	serviceFromDB, err := db.GetService("serviceActivate")
-	if err != nil {
-		t.Errorf("Can't get service: %s", err)
-	}
-
-	if serviceFromDB.IsActive != true {
-		t.Error("Wrong active value")
+		t.Errorf("Can't remove all services: %v", err)
 	}
 }
 
 func TestCachedService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "serviceCached", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: true, Cached: false,
+		ServiceID: "serviceCached",
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceProvider: "sp1",
+		ImagePath:       "to/service1",
+		Cached:          false,
 	}
-
-	expectedServices := []servicemanager.ServiceInfo{service}
 
 	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %v", err)
@@ -311,105 +257,81 @@ func TestCachedService(t *testing.T) {
 
 	services, err := db.GetAllServiceVersions("serviceCached")
 	if err != nil {
-		t.Errorf("Can't get all service versions: %v", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	if !reflect.DeepEqual(expectedServices, services) {
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service}, services) {
 		t.Error("Unexpected services")
 	}
 
 	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
-		t.Errorf("Can't add service: %v", err)
+		t.Errorf("Can't set service cached: %v", err)
 	}
 
-	services, err = db.GetCachedServices()
+	services, err = db.GetAllServiceVersions("serviceCached")
 	if err != nil {
-		t.Errorf("Can't get all cached services: %v", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	expectedServices[0].Cached = true
+	service.Cached = true
 
-	if !reflect.DeepEqual(expectedServices, services) {
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service}, services) {
 		t.Error("Unexpected services")
 	}
 
-	service.AosVersion = 2
+	service2 := service
+	service2.AosVersion = 2
 
-	if err := db.AddService(service); err != nil {
+	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %v", err)
 	}
 
 	services, err = db.GetAllServiceVersions("serviceCached")
 	if err != nil {
-		t.Errorf("Can't get all service versions: %v", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	expectedServices = append(expectedServices, service)
-
-	if !reflect.DeepEqual(expectedServices, services) {
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
 		t.Error("Unexpected services")
 	}
 
-	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
-		t.Errorf("Can't add service: %v", err)
+	if err := db.SetServiceCached(service2.ServiceID, true); err != nil {
+		t.Errorf("Can't set service cached: %v", err)
 	}
 
-	services, err = db.GetCachedServices()
+	services, err = db.GetAllServiceVersions("serviceCached")
 	if err != nil {
-		t.Errorf("Can't get cached services: %v", err)
+		t.Errorf("Can't get service: %v", err)
 	}
 
-	expectedServices[1].Cached = true
+	service2.Cached = true
 
-	if !reflect.DeepEqual(expectedServices, services) {
+	if !reflect.DeepEqual([]servicemanager.ServiceInfo{service, service2}, services) {
 		t.Error("Unexpected services")
-	}
-
-	if err := db.SetServiceCached(service.ServiceID, false); err != nil {
-		t.Errorf("Can't add service: %v", err)
-	}
-
-	services, err = db.GetCachedServices()
-	if err != nil {
-		t.Errorf("Can't get cached services: %v", err)
-	}
-
-	if len(services) != 0 {
-		t.Errorf("Incorrect count of cached services: %d", len(services))
 	}
 }
 
 func TestSetTimestampService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "serviceTimestamp", AosVersion: 1, ServiceProvider: "sp1", Description: "", ImagePath: "to/service1",
-		GID: 5001, IsActive: false,
+		ServiceID: "serviceTimestamp",
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceProvider: "sp1",
+		ImagePath:       "to/service1",
+		Timestamp:       time.Now().UTC(),
 	}
 
 	if err := db.AddService(service); err != nil {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	serviceFromDB, err := db.GetService("serviceTimestamp")
-	if err != nil {
-		t.Fatalf("Can't get service: %v", err)
-	}
-
-	if serviceFromDB.ServiceID != "serviceTimestamp" {
-		t.Errorf("Incorrect service ID: %v", serviceFromDB.ServiceID)
-	}
-
-	service.Timestamp = time.Now().UTC()
-
-	if err = db.SetServiceTimestamp(service.ServiceID, service.AosVersion, service.Timestamp); err != nil {
-		t.Errorf("Can't set timestamp service: %v", err)
-	}
-
-	serviceFromDB, err = db.GetService("serviceTimestamp")
+	serviceFromDB, err := db.GetAllServiceVersions("serviceTimestamp")
 	if err != nil {
 		t.Errorf("Can't get service: %v", err)
 	}
 
-	if serviceFromDB.Timestamp != service.Timestamp {
+	if serviceFromDB[0].Timestamp != service.Timestamp {
 		t.Error("Wrong service timestamp")
 	}
 }
@@ -538,8 +460,13 @@ func TestMultiThread(t *testing.T) {
 
 func TestLayers(t *testing.T) {
 	layer1 := layermanager.LayerInfo{
-		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1", VendorVersion: "1.0",
-		Description: "some layer 1", AosVersion: 1, Size: 40,
+		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1",
+		VersionInfo: aostypes.VersionInfo{
+			VendorVersion: "1.0",
+			Description:   "some layer 1",
+			AosVersion:    1,
+		},
+		Size: 40,
 	}
 
 	if err := db.AddLayer(layer1); err != nil {
@@ -556,8 +483,12 @@ func TestLayers(t *testing.T) {
 	}
 
 	layer2 := layermanager.LayerInfo{
-		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1", VendorVersion: "2.0",
-		Description: "some layer 2", AosVersion: 2, Size: 50,
+		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1",
+		VersionInfo: aostypes.VersionInfo{
+			VendorVersion: "2.0",
+			Description:   "some layer 2",
+			AosVersion:    2,
+		}, Size: 50,
 	}
 
 	if err := db.AddLayer(layer2); err != nil {
@@ -574,8 +505,13 @@ func TestLayers(t *testing.T) {
 	}
 
 	layer3 := layermanager.LayerInfo{
-		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1", VendorVersion: "1.0",
-		Description: "some layer 3", AosVersion: 3, Size: 60,
+		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1",
+		VersionInfo: aostypes.VersionInfo{
+			VendorVersion: "1.0",
+			Description:   "some layer 3",
+			AosVersion:    3,
+		},
+		Size: 60,
 	}
 
 	if err := db.AddLayer(layer3); err != nil {
