@@ -99,58 +99,27 @@ func (db *Database) SetOperationVersion(version uint64) error {
 
 // AddService adds new service.
 func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
-	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
-		service.GID, service.ManifestDigest, service.IsActive, service.Cached, service.Timestamp, service.Size)
+		service.ManifestDigest, service.Cached, service.Timestamp, service.Size)
 }
 
 // RemoveService removes existing service.
-func (db *Database) RemoveService(service servicemanager.ServiceInfo) (err error) {
+func (db *Database) RemoveService(serviceID string, aosVersion uint64) (err error) {
 	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND aosVersion = ?",
-		service.ServiceID, service.AosVersion); errors.Is(err, errNotExist) {
+		serviceID, aosVersion); errors.Is(err, errNotExist) {
 		return nil
 	}
 
 	return err
 }
 
-// GetService returns service by service ID.
-func (db *Database) GetService(serviceID string) (service servicemanager.ServiceInfo, err error) {
-	stmt, err := db.sql.Prepare(
-		"SELECT * FROM services WHERE aosVersion = (SELECT MAX(aosVersion) FROM services WHERE id = ?) AND id = ?")
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(serviceID, serviceID).Scan(
-		&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-		&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive,
-		&service.Cached, &service.Timestamp, &service.Size)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return service, servicemanager.ErrNotExist
-	}
-
-	if err != nil {
-		return service, aoserrors.Wrap(err)
-	}
-
-	return service, aoserrors.Wrap(err)
+// GetServices returns all services.
+func (db *Database) GetServices() (services []servicemanager.ServiceInfo, err error) {
+	return db.getServicesFromQuery(`SELECT * FROM services`)
 }
 
-// GetLatestVersionServices returns all latest version services.
-func (db *Database) GetLatestVersionServices() (services []servicemanager.ServiceInfo, err error) {
-	return db.getServicesFromQuery(`SELECT * FROM services WHERE(id, aosVersion)
-									IN (SELECT id, MAX(aosVersion) FROM services GROUP BY id)`)
-}
-
-// GetCachedServices returns all cached services.
-func (db *Database) GetCachedServices() (services []servicemanager.ServiceInfo, err error) {
-	return db.getServicesFromQuery(`SELECT * FROM services WHERE cached = 1`)
-}
-
-// GetAllServiceVersions returns all service versions.
+// GetAllServiceVersions returns all service version by service ID.
 func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
 	if services, err = db.getServicesFromQuery(
 		"SELECT * FROM services WHERE id = ? ORDER BY aosVersion", id); err != nil {
@@ -164,16 +133,6 @@ func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.
 	return services, nil
 }
 
-// ActivateService sets isActive to true for the service.
-func (db *Database) ActivateService(serviceID string, aosVersion uint64) (err error) {
-	if err = db.executeQuery("UPDATE services SET isActive = 1 WHERE id = ? AND aosVersion = ?",
-		serviceID, aosVersion); errors.Is(err, errNotExist) {
-		return aoserrors.Wrap(servicemanager.ErrNotExist)
-	}
-
-	return err
-}
-
 // SetServiceCached sets cached status for the service.
 func (db *Database) SetServiceCached(serviceID string, cached bool) (err error) {
 	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ?",
@@ -182,16 +141,6 @@ func (db *Database) SetServiceCached(serviceID string, cached bool) (err error) 
 	}
 
 	return err
-}
-
-// SetServiceTimestamp sets timestamp for the service.
-func (db *Database) SetServiceTimestamp(serviceID string, aosVersion uint64, timestamp time.Time) error {
-	if err := db.executeQuery("UPDATE services SET timestamp = ? WHERE id = ? AND aosVersion = ?",
-		timestamp, serviceID, aosVersion); errors.Is(err, errNotExist) {
-		return aoserrors.Wrap(servicemanager.ErrNotExist)
-	}
-
-	return nil
 }
 
 // SetTrafficMonitorData stores traffic monitor data.
@@ -618,12 +567,10 @@ func (db *Database) createServiceTable() (err error) {
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL ,
 															   aosVersion INTEGER,
-															   serviceProvider TEXT,
+															   providerID TEXT,
 															   description TEXT,
 															   imagePath TEXT,
-															   gid INTEGER,
 															   manifestDigest BLOB,
-															   isActive INTEGER,
 															   cached INTEGER,
 															   timestamp TIMESTAMP,
 															   size INTEGER,
@@ -807,8 +754,8 @@ func (db *Database) getServicesFromQuery(
 
 		if err = rows.Scan(
 			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-			&service.ImagePath, &service.GID, &service.ManifestDigest, &service.IsActive,
-			&service.Cached, &service.Timestamp, &service.Size); err != nil {
+			&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
+			&service.Size); err != nil {
 			return services, aoserrors.Wrap(err)
 		}
 
