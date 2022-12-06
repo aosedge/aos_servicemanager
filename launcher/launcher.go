@@ -276,31 +276,19 @@ func (launcher *Launcher) Close() (err error) {
 }
 
 // RunInstances runs desired services instances.
-func (launcher *Launcher) RunInstances(instances []aostypes.InstanceInfo) error {
+func (launcher *Launcher) RunInstances(instances []aostypes.InstanceInfo, forceRestart bool) error {
 	launcher.Lock()
 	defer launcher.Unlock()
 
-	log.Debug("Run instances")
+	if forceRestart {
+		log.Debug("Restart instances")
 
-	launcher.runInstances(launcher.getRunningInstances(instances))
-
-	return nil
-}
-
-// RestartInstances restarts all running instances.
-func (launcher *Launcher) RestartInstances() error {
-	launcher.Lock()
-	defer launcher.Unlock()
-
-	runInstances := make([]InstanceInfo, 0, len(launcher.currentInstances))
-
-	for _, instance := range launcher.currentInstances {
-		runInstances = append(runInstances, instance.InstanceInfo)
+		launcher.stopCurrentInstances()
+	} else {
+		log.Debug("Run instances")
 	}
 
-	launcher.stopCurrentInstances()
-
-	launcher.runInstances(runInstances)
+	launcher.runInstances(launcher.getRunningInstances(instances))
 
 	return nil
 }
@@ -1074,9 +1062,8 @@ func (launcher *Launcher) restartStoredInstances() error {
 
 	launcher.runMutex.Unlock()
 
-	if err := launcher.RestartInstances(); err != nil {
-		return err
-	}
+	launcher.stopCurrentInstances()
+	launcher.runInstances(currentInstances)
 
 	return nil
 }

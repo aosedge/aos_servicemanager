@@ -322,7 +322,7 @@ func TestRunInstances(t *testing.T) {
 			t.Fatalf("Can't install layers: %v", err)
 		}
 
-		if err = testLauncher.RunInstances(item.instances); err != nil {
+		if err = testLauncher.RunInstances(item.instances, false); err != nil {
 			t.Fatalf("Can't run instances: %v", err)
 		}
 
@@ -380,7 +380,7 @@ func TestUpdateInstances(t *testing.T) {
 		t.Fatalf("Can't install layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(runItem.instances); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, false); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
@@ -480,7 +480,7 @@ func TestRestartInstances(t *testing.T) {
 		t.Fatalf("Can't install layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(runItem.instances); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, false); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
@@ -492,7 +492,7 @@ func TestRestartInstances(t *testing.T) {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
-	if err = testLauncher.RestartInstances(); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, true); err != nil {
 		t.Errorf("Can't stop instances: %v", err)
 	}
 
@@ -739,7 +739,7 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't install layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(runItem.instances); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, false); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
@@ -1078,7 +1078,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't install layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(runItem.instances); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, false); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
@@ -1207,7 +1207,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	// Stop instances and check runtime release
 
-	if err = testLauncher.RunInstances(nil); err != nil {
+	if err = testLauncher.RunInstances(nil, false); err != nil {
 		t.Fatalf("Can't stop instances: %v", err)
 	}
 
@@ -1593,7 +1593,7 @@ func TestOverrideEnvVars(t *testing.T) {
 		t.Fatalf("Can't install layers: %v", err)
 	}
 
-	if err = testLauncher.RunInstances(runItem.instances); err != nil {
+	if err = testLauncher.RunInstances(runItem.instances, false); err != nil {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
@@ -2160,7 +2160,7 @@ func TestInstancePriorities(t *testing.T) {
 			t.Fatalf("Can't install layers: %v", err)
 		}
 
-		if err = testLauncher.RunInstances(item.instances); err != nil {
+		if err = testLauncher.RunInstances(item.instances, false); err != nil {
 			t.Fatalf("Can't run instances: %v", err)
 		}
 
@@ -2320,7 +2320,7 @@ func TestResourceAlerts(t *testing.T) {
 			t.Fatalf("Can't install layers: %v", err)
 		}
 
-		if err = testLauncher.RunInstances(item.instances); err != nil {
+		if err = testLauncher.RunInstances(item.instances, false); err != nil {
 			t.Fatalf("Can't run instances: %v", err)
 		}
 
