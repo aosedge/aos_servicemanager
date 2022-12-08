@@ -63,6 +63,7 @@ type testServer struct {
 	protectedServer *grpc.Server
 
 	nodeID                 string
+	nodeType               string
 	subjects               []string
 	subjectsChangedChannel chan []string
 	permissionsCache       map[string]servicePermissions
@@ -118,7 +119,7 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestGetNodeID(t *testing.T) {
+func TestGetNodeIDAndType(t *testing.T) {
 	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
@@ -127,6 +128,7 @@ func TestGetNodeID(t *testing.T) {
 	defer testServer.close()
 
 	testServer.nodeID = "testNodeID"
+	testServer.nodeType = "testNodeType"
 
 	client, err := iamclient.New(&config.Config{
 		IAMServerURL:       protectedServerURL,
@@ -139,6 +141,10 @@ func TestGetNodeID(t *testing.T) {
 
 	if testServer.nodeID != client.GetNodeID() {
 		t.Errorf("Invalid nodeID: %s", client.GetNodeID())
+	}
+
+	if testServer.nodeType != client.GetNodeType() {
+		t.Errorf("Invalid nodeType: %s", client.GetNodeType())
 	}
 }
 
@@ -331,8 +337,8 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) GetNodeID(context context.Context, req *empty.Empty) (*pb.NodeID, error) {
-	return &pb.NodeID{NodeId: server.nodeID}, nil
+func (server *testServer) GetNodeInfo(context context.Context, req *empty.Empty) (*pb.NodeInfo, error) {
+	return &pb.NodeInfo{NodeId: server.nodeID, NodeType: server.nodeType}, nil
 }
 
 func (server *testServer) RegisterInstance(

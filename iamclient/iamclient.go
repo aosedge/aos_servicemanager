@@ -56,6 +56,7 @@ type Client struct {
 
 	subjects []string
 	nodeID   string
+	nodeType string
 
 	publicConnection         *grpc.ClientConn
 	protectedConnection      *grpc.ClientConn
@@ -136,7 +137,7 @@ func New(
 
 	log.Debug("Connected to IAM")
 
-	if client.nodeID, err = client.getNodeID(); err != nil {
+	if client.nodeID, client.nodeType, err = client.getNodeInfo(); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
@@ -152,6 +153,11 @@ func New(
 // GetNodeID returns node ID.
 func (client *Client) GetNodeID() string {
 	return client.nodeID
+}
+
+// GetNodeType returns node type.
+func (client *Client) GetNodeType() string {
+	return client.nodeType
 }
 
 // GetSubjects returns current subjects.
@@ -265,18 +271,21 @@ func (client *Client) Close() (err error) {
  * Private
  **********************************************************************************************************************/
 
-func (client *Client) getNodeID() (string, error) {
+func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	response, err := client.publicService.GetNodeID(ctx, &empty.Empty{})
+	response, err := client.publicService.GetNodeInfo(ctx, &empty.Empty{})
 	if err != nil {
-		return "", aoserrors.Wrap(err)
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	log.WithFields(log.Fields{"nodeID": response.NodeId}).Debug("Get node ID")
+	log.WithFields(log.Fields{
+		"nodeID":   response.NodeId,
+		"nodeType": response.NodeType,
+	}).Debug("Get node Info")
 
-	return response.NodeId, nil
+	return response.NodeId, response.NodeType, nil
 }
 
 func (client *Client) getSubjects() (subjects []string, err error) {
