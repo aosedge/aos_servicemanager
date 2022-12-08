@@ -60,21 +60,22 @@ type Migration struct {
 
 // Config instance.
 type Config struct {
-	CACert             string `json:"caCert"`
-	CMServerURL        string `json:"cmServerUrl"`
-	CertStorage        string `json:"certStorage"`
-	IAMServerURL       string `json:"iamServer"`
-	IAMPublicServerURL string `json:"iamPublicServer"`
-	WorkingDir         string `json:"workingDir"`
-	StorageDir         string `json:"storageDir"`
-	StateDir           string `json:"stateDir"`
-	ServicesDir        string `json:"servicesDir"`
-	ServicesPartLimit  uint   `json:"servicesPartLimit"`
-	LayersDir          string `json:"layersDir"`
-	LayersPartLimit    uint   `json:"layersPartLimit"`
-	DownloadDir        string `json:"downloadDir"`
-	ExtractDir         string `json:"extractDir"`
-	RemoteNode         bool   `json:"remoteNode"`
+	CACert             string   `json:"caCert"`
+	CMServerURL        string   `json:"cmServerUrl"`
+	CertStorage        string   `json:"certStorage"`
+	IAMServerURL       string   `json:"iamServer"`
+	IAMPublicServerURL string   `json:"iamPublicServer"`
+	WorkingDir         string   `json:"workingDir"`
+	StorageDir         string   `json:"storageDir"`
+	StateDir           string   `json:"stateDir"`
+	ServicesDir        string   `json:"servicesDir"`
+	ServicesPartLimit  uint     `json:"servicesPartLimit"`
+	LayersDir          string   `json:"layersDir"`
+	LayersPartLimit    uint     `json:"layersPartLimit"`
+	DownloadDir        string   `json:"downloadDir"`
+	ExtractDir         string   `json:"extractDir"`
+	RemoteNode         bool     `json:"remoteNode"`
+	RunnerFeatures     []string `json:"runnerFeatures"`
 
 	UnitConfigFile            string                 `json:"unitConfigFile"`
 	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
