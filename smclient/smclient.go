@@ -59,6 +59,7 @@ const (
 // SMClient SM client instance.
 type SMClient struct {
 	sync.Mutex
+	config               *config.Config
 	connection           *grpc.ClientConn
 	stream               pb.SMService_RegisterSMClient
 	closeChannel         chan struct{}
@@ -74,6 +75,7 @@ type SMClient struct {
 	logsChannel          <-chan cloudprotocol.PushLog
 	nodeID               string
 	nodeType             string
+	systemInfo           cloudprotocol.SystemInfo
 }
 
 // CertificateProvider interface to get certificate.
@@ -114,6 +116,7 @@ type AlertsProvider interface {
 type MonitoringDataProvider interface {
 	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.NodeMonitoringData)
 	GetNodeMonitoringData() cloudprotocol.NodeMonitoringData
+	GetSystemInfo() cloudprotocol.SystemInfo
 }
 
 // LogsProvider logs data provider interface.
@@ -143,7 +146,7 @@ func New(config *config.Config, nodeID, nodeType string, provider CertificatePro
 	cmClient := &SMClient{
 		closeChannel: make(chan struct{}, 1), servicesProcessor: servicesProcessor, layersProcessor: layersProcessor,
 		launcher: launcher, unitConfigProcessor: unitConfigProcessor, monitoringProvider: monitoringProvider,
-		logsProvider: logsProvider, nodeID: nodeID, nodeType: nodeType,
+		logsProvider: logsProvider, nodeID: nodeID, nodeType: nodeType, config: config,
 	}
 
 	if err := cmClient.createConnection(config, provider, cryptcoxontext, insecure); err != nil {
@@ -160,6 +163,7 @@ func New(config *config.Config, nodeID, nodeType string, provider CertificatePro
 
 	if monitoringProvider != nil {
 		cmClient.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
+		cmClient.systemInfo = monitoringProvider.GetSystemInfo()
 	}
 
 	if logsProvider != nil {
@@ -270,7 +274,18 @@ func (client *SMClient) register(config *config.Config) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	nodeCfg := pb.NodeConfiguration{NodeId: client.nodeID, NodeType: client.nodeType}
+	nodeCfg := pb.NodeConfiguration{
+		NodeId: client.nodeID, NodeType: client.nodeType, RemoteNode: config.RemoteNode,
+		RunnerFeatures: config.RunnerFeatures,
+		NumCpus:        client.systemInfo.NumCPUs, TotalRam: client.systemInfo.TotalRAM,
+		Partitions: make([]*pb.Partition, len(client.systemInfo.Partitions)),
+	}
+
+	for i, partition := range client.systemInfo.Partitions {
+		nodeCfg.Partitions[i] = &pb.Partition{
+			Name: partition.Name, Type: partition.Type, TotalSize: partition.TotalSize,
+		}
+	}
 
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
