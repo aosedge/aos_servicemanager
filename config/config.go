@@ -74,6 +74,7 @@ type Config struct {
 	LayersPartLimit    uint   `json:"layersPartLimit"`
 	DownloadDir        string `json:"downloadDir"`
 	ExtractDir         string `json:"extractDir"`
+	RemoteNode         bool   `json:"remoteNode"`
 
 	UnitConfigFile            string                 `json:"unitConfigFile"`
 	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
