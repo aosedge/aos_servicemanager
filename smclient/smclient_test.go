@@ -53,7 +53,7 @@ const waitRegisteredTimeout = 30 * time.Second
 type testServer struct {
 	grpcServer        *grpc.Server
 	stream            pb.SMService_RegisterSMServer
-	registerChannel   chan bool
+	registerChannel   chan *pb.NodeConfiguration
 	alertChannel      chan *pb.Alert
 	monitoringChannel chan *pb.SMOutgoingMessages_NodeMonitoring
 	logChannel        chan *pb.SMOutgoingMessages_Log
@@ -62,6 +62,7 @@ type testServer struct {
 
 type testMonitoringProvider struct {
 	monitoringChannel chan cloudprotocol.NodeMonitoringData
+	systemInfo        cloudprotocol.SystemInfo
 }
 
 type testLogProvider struct {
@@ -109,14 +110,29 @@ func TestSmRegistration(t *testing.T) {
 
 	defer server.close()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, true)
+	testMonitoring := &testMonitoringProvider{
+		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
+		systemInfo: cloudprotocol.SystemInfo{
+			NumCPUs: 1, TotalRAM: 100,
+			Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		},
+	}
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
+		"mainSM", "model1", nil, nil, nil, nil, nil,
+		nil, testMonitoring, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(); err != nil {
+	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+		NodeId: "mainSM", NodeType: "model1", RemoteNode: false, RunnerFeatures: []string{"crun"},
+		NumCpus: 1, TotalRam: 100,
+		Partitions: []*pb.Partition{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+	}
+
+	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 }
@@ -129,16 +145,30 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	defer server.close()
 
-	testMonitoring := &testMonitoringProvider{monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10)}
+	testMonitoring := &testMonitoringProvider{
+		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
+		systemInfo: cloudprotocol.SystemInfo{
+			NumCPUs: 1, TotalRAM: 100,
+			Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		},
+	}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil,
-		nil, nil, testMonitoring, nil, nil, true)
+	client, err := smclient.New(&config.Config{
+		CMServerURL: serverURL, RemoteNode: true,
+		RunnerFeatures: []string{"crun"},
+	}, "mainSM", "model1", nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(); err != nil {
+	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+		NodeId: "mainSM", NodeType: "model1", RemoteNode: true, RunnerFeatures: []string{"crun"},
+		NumCpus: 1, TotalRam: 100,
+		Partitions: []*pb.Partition{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+	}
+
+	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -242,7 +272,11 @@ func TestLogsNotification(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(); err != nil {
+	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+		NodeId: "mainSM", NodeType: "model1",
+	}
+
+	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -336,7 +370,11 @@ func TestAlertNotifications(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(); err != nil {
+	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+		NodeId: "mainSM", NodeType: "model1",
+	}
+
+	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -537,7 +575,7 @@ func TestAlertNotifications(t *testing.T) {
 
 func newTestServer(url string) (server *testServer, err error) {
 	server = &testServer{
-		registerChannel:   make(chan bool),
+		registerChannel:   make(chan *pb.NodeConfiguration, 10),
 		alertChannel:      make(chan *pb.Alert, 10),
 		monitoringChannel: make(chan *pb.SMOutgoingMessages_NodeMonitoring, 10),
 		logChannel:        make(chan *pb.SMOutgoingMessages_Log, 10),
@@ -567,9 +605,16 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) waitClientRegistered() (err error) {
+func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfiguration) (err error) {
 	select {
-	case <-server.registerChannel:
+	case nodeConfig := <-server.registerChannel:
+		if !proto.Equal(nodeConfig, expectedNodeConfig) {
+			log.Debugf("EXP :%v", expectedNodeConfig)
+			log.Debugf("REC :%v", nodeConfig)
+
+			return aoserrors.New("Incorrect node configuration")
+		}
+
 		return nil
 
 	case <-time.After(waitRegisteredTimeout):
@@ -594,7 +639,7 @@ func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) (err 
 		case *pb.SMOutgoingMessages_NodeConfiguration:
 			log.Debug("nodeID ", data.NodeConfiguration.NodeId)
 
-			server.registerChannel <- true
+			server.registerChannel <- data.NodeConfiguration
 
 		case *pb.SMOutgoingMessages_NodeMonitoring:
 			server.monitoringChannel <- data
@@ -642,6 +687,10 @@ func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (
 
 func (monitoring *testMonitoringProvider) GetNodeMonitoringData() cloudprotocol.NodeMonitoringData {
 	return <-monitoring.monitoringChannel
+}
+
+func (monitoring *testMonitoringProvider) GetSystemInfo() cloudprotocol.SystemInfo {
+	return monitoring.systemInfo
 }
 
 func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestServiceLog) {
