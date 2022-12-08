@@ -50,6 +50,7 @@ func createConfigFile() (err error) {
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
 	"remoteNode": true,
+	"runnerFeatures" : ["crun", "runc"],
 	"unitConfigFile" : "/var/aos/aos_unit.cfg",
 	"iamServer" : "localhost:8089",
 	"iamPublicServer" : "localhost:8090",
@@ -441,5 +442,16 @@ func TestRemoteNodeFalg(t *testing.T) {
 
 	if config.RemoteNode != true {
 		t.Errorf("Wrong remoteNode value: %v", config.RemoteNode)
+	}
+}
+
+func TestRunnerFeatures(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if !reflect.DeepEqual(config.RunnerFeatures, []string{"crun", "runc"}) {
+		t.Errorf("Wrong runnerFeatures value: %v", config.RunnerFeatures)
 	}
 }
