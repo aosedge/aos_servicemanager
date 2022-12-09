@@ -991,24 +991,29 @@ func TestRuntimeEnvironment(t *testing.T) {
 				},
 				Resources: []string{"resource0", "resource1", "resource2"},
 				Devices:   []servicemanager.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
-				AlertRules: &aostypes.ServiceAlertRules{
-					RAM: &aostypes.AlertRule{
+				AlertRules: &aostypes.AlertRules{
+					RAM: &aostypes.AlertRuleParam{
 						MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
 						MinThreshold: 10, MaxThreshold: 100,
 					},
-					CPU: &aostypes.AlertRule{
+					CPU: &aostypes.AlertRuleParam{
 						MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
 						MinThreshold: 20, MaxThreshold: 200,
 					},
-					UsedDisk: &aostypes.AlertRule{
-						MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
-						MinThreshold: 30, MaxThreshold: 300,
+					UsedDisks: []aostypes.PartitionAlertRuleParam{
+						{
+							Name: "storage",
+							AlertRuleParam: aostypes.AlertRuleParam{
+								MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
+								MinThreshold: 30, MaxThreshold: 300,
+							},
+						},
 					},
-					InTraffic: &aostypes.AlertRule{
+					InTraffic: &aostypes.AlertRuleParam{
 						MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
 						MinThreshold: 40, MaxThreshold: 400,
 					},
-					OutTraffic: &aostypes.AlertRule{
+					OutTraffic: &aostypes.AlertRuleParam{
 						MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
 						MinThreshold: 50, MaxThreshold: 500,
 					},
@@ -1142,19 +1147,17 @@ func TestRuntimeEnvironment(t *testing.T) {
 
 	if !reflect.DeepEqual(monitorPrams, resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
-		UID:           instance.UID,
-		GID:           serviceProvider.configs["service0"].gid,
+		UID:           int(instance.UID),
+		GID:           int(serviceProvider.configs["service0"].gid),
 		AlertRules:    serviceConfig.AlertRules,
 		Partitions: []resourcemonitor.PartitionParam{
 			{
-				Name:  "storage",
-				Path:  filepath.Join(tmpDir, storagesDir, instance.StoragePath),
-				Types: []string{cloudprotocol.StoragesPartition},
+				Name: "storage",
+				Path: filepath.Join(tmpDir, storagesDir, instance.StoragePath),
 			},
 			{
-				Name:  "state",
-				Path:  filepath.Join(tmpDir, statesDir, instance.StatePath),
-				Types: []string{cloudprotocol.StatesPartition},
+				Name: "state",
+				Path: filepath.Join(tmpDir, statesDir, instance.StatePath),
 			},
 		},
 	}) {
@@ -1268,12 +1271,14 @@ func TestOverrideEnvVars(t *testing.T) {
 		waitDuration time.Duration
 	}
 
+	serviceID := "service0"
+
 	data := []testData{
 		// Override env var for all instances of service0
 		{
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
-					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: "service0"},
+					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: &serviceID},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id0", Variable: "VAR0=VAL0"},
 						{ID: "id1", Variable: "VAR1=VAL1"},
@@ -1283,7 +1288,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			},
 			status: []cloudprotocol.EnvVarsInstanceStatus{
 				{
-					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: "service0"},
+					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: &serviceID},
 					Statuses: []cloudprotocol.EnvVarStatus{
 						{ID: "id0"}, {ID: "id1"}, {ID: "id2"},
 					},
@@ -1292,31 +1297,31 @@ func TestOverrideEnvVars(t *testing.T) {
 			instances: []instanceEnvVars{
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 0,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 2,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 0,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 1,
 					},
 					envVars: []string{"VAR0=VAL0", "VAR1=VAL1", "VAR2=VAL2"},
 				},
@@ -1327,7 +1332,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id3", Variable: "VAR3=VAL3"},
@@ -1338,7 +1343,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			status: []cloudprotocol.EnvVarsInstanceStatus{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{
 						{ID: "id3"}, {ID: "id4"},
@@ -1348,30 +1353,30 @@ func TestOverrideEnvVars(t *testing.T) {
 			instances: []instanceEnvVars{
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 0,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 2,
 					},
 					envVars: []string{"VAR3=VAL3", "VAR4=VAL4"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 0,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 1,
 					},
 				},
 			},
@@ -1381,7 +1386,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"), Instance: newUint64(1),
+						ServiceID: &serviceID, SubjectID: newString("subject0"), Instance: newUint64(1),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{{ID: "id5", Variable: "VAR5=VAL5"}},
 				},
@@ -1389,7 +1394,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			status: []cloudprotocol.EnvVarsInstanceStatus{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"), Instance: newUint64(1),
+						ServiceID: &serviceID, SubjectID: newString("subject0"), Instance: newUint64(1),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id5"}},
 				},
@@ -1397,28 +1402,28 @@ func TestOverrideEnvVars(t *testing.T) {
 			instances: []instanceEnvVars{
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 0,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 1,
 					},
 					envVars: []string{"VAR5=VAL5"},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 2,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 0,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 1,
 					},
 				},
 			},
@@ -1428,7 +1433,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id6", Variable: "VAR6=VAL6", TTL: newTime(time.Now().Add(-10 * time.Second))},
@@ -1436,7 +1441,7 @@ func TestOverrideEnvVars(t *testing.T) {
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject1"),
+						ServiceID: &serviceID, SubjectID: newString("subject1"),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id7", Variable: "VAR7=VAL7", TTL: newTime(time.Now().Add(10 * time.Second))},
@@ -1446,13 +1451,13 @@ func TestOverrideEnvVars(t *testing.T) {
 			status: []cloudprotocol.EnvVarsInstanceStatus{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id6", Error: "environment variable expired"}},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject1"),
+						ServiceID: &serviceID, SubjectID: newString("subject1"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id7"}},
 				},
@@ -1460,22 +1465,22 @@ func TestOverrideEnvVars(t *testing.T) {
 			instances: []instanceEnvVars{
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 0,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 1,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 1,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject0", Instance: 2,
+						ServiceID: serviceID, SubjectID: "subject0", Instance: 2,
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{
-						ServiceID: "service0", SubjectID: "subject1", Instance: 0,
+						ServiceID: serviceID, SubjectID: "subject1", Instance: 0,
 					},
 					envVars: []string{"VAR7=VAL7"},
 				},
@@ -1492,7 +1497,7 @@ func TestOverrideEnvVars(t *testing.T) {
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id8", Variable: "VAR8=VAL8", TTL: newTime(time.Now().Add(2 * time.Second))},
@@ -1500,7 +1505,7 @@ func TestOverrideEnvVars(t *testing.T) {
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject1"),
+						ServiceID: &serviceID, SubjectID: newString("subject1"),
 					},
 					EnvVars: []cloudprotocol.EnvVarInfo{
 						{ID: "id9", Variable: "VAR9=VAL9"},
@@ -1510,13 +1515,13 @@ func TestOverrideEnvVars(t *testing.T) {
 			status: []cloudprotocol.EnvVarsInstanceStatus{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject0"),
+						ServiceID: &serviceID, SubjectID: newString("subject0"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id8"}},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
-						ServiceID: "service0", SubjectID: newString("subject1"),
+						ServiceID: &serviceID, SubjectID: newString("subject1"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id9"}},
 				},

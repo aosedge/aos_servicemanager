@@ -759,24 +759,22 @@ func (launcher *Launcher) startInstance(instance *runtimeInstanceInfo) error {
 
 	monitorParams := resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
-		UID:           instance.UID,
-		GID:           instance.service.GID,
+		UID:           int(instance.UID),
+		GID:           int(instance.service.GID),
 		AlertRules:    instance.service.serviceConfig.AlertRules,
 	}
 
 	if instance.StoragePath != "" {
 		monitorParams.Partitions = append(monitorParams.Partitions, resourcemonitor.PartitionParam{
-			Name:  "storage",
-			Path:  launcher.getAbsStoragePath(instance.StoragePath),
-			Types: []string{cloudprotocol.StoragesPartition},
+			Name: "storage",
+			Path: launcher.getAbsStoragePath(instance.StoragePath),
 		})
 	}
 
 	if instance.StatePath != "" {
 		monitorParams.Partitions = append(monitorParams.Partitions, resourcemonitor.PartitionParam{
-			Name:  "state",
-			Path:  launcher.getAbsStatePath(instance.StatePath),
-			Types: []string{cloudprotocol.StatesPartition},
+			Name: "state",
+			Path: launcher.getAbsStatePath(instance.StatePath),
 		})
 	}
 
