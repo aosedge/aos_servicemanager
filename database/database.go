@@ -283,17 +283,17 @@ func (db *Database) SetLayerCached(digest string, cached bool) (err error) {
 // AddInstance adds instance information to db.
 func (db *Database) AddInstance(instance launcher.InstanceInfo) error {
 	return db.executeQuery("INSERT INTO instances values(?, ?, ?, ?, ?, ?, ?, ?)",
-		instance.InstanceID, instance.ServiceID, instance.SubjectID, instance.Instance,
-		instance.AosVersion, instance.UnitSubject, instance.Running, instance.UID)
+		instance.InstanceID, instance.ServiceID, instance.SubjectID, instance.Instance, instance.UID,
+		instance.Priority, instance.StoragePath, instance.StatePath)
 }
 
 // UpdateInstance updates instance information in db.
 func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
 	if err = db.executeQuery(
-		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, aosVersion = ?, unitSubject = ?, running = ?,
-		 uid = ? WHERE instanceID = ?`,
-		instance.ServiceID, instance.SubjectID, instance.Instance, instance.AosVersion, instance.UnitSubject,
-		instance.Running, instance.UID, instance.InstanceID); errors.Is(err, errNotExist) {
+		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, uid = ?, priority = ?, storagePath = ?,
+		statePath = ? WHERE instanceID = ?`,
+		instance.ServiceID, instance.SubjectID, instance.Instance, instance.UID, instance.Priority,
+		instance.StoragePath, instance.StatePath, instance.InstanceID); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(launcher.ErrNotExist)
 	}
 
@@ -364,7 +364,7 @@ func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instanc
 
 	serviceInstances, err := db.getInstancesFromQuery(
 		fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
-			filter.ServiceID, subjectFiler, instanceFiler))
+			*filter.ServiceID, subjectFiler, instanceFiler))
 	if err != nil {
 		return instances, aoserrors.Wrap(err)
 	}
@@ -559,10 +559,10 @@ func (db *Database) createInstancesTable() (err error) {
 																serviceID TEXT,
 																subjectID TEXT,
 																instance INTEGER,
-																aosVersion INTEGER,
-																unitSubject TEXT,
-																running INTEGER,
-																uid INTEGER)`)
+																uid INTEGER,
+																priority INTEGER,
+																storagePath TEXT,
+																statePath TEXT)`)
 
 	return aoserrors.Wrap(err)
 }
@@ -624,8 +624,8 @@ func (db *Database) getInstanceInfoFromQuery(
 	defer stmt.Close()
 
 	if err := stmt.QueryRow(args...).Scan(
-		&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
-		&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+		&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+		&instance.Priority, &instance.StoragePath, &instance.StatePath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return instance, aoserrors.Wrap(launcher.ErrNotExist)
 		}
@@ -653,8 +653,8 @@ func (db *Database) getInstancesFromQuery(
 		var instance launcher.InstanceInfo
 
 		if err = rows.Scan(
-			&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.AosVersion,
-			&instance.UnitSubject, &instance.Running, &instance.UID); err != nil {
+			&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+			&instance.Priority, &instance.StoragePath, &instance.StatePath); err != nil {
 			return instances, aoserrors.Wrap(err)
 		}
 
