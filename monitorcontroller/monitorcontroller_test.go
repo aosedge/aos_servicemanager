@@ -19,9 +19,11 @@ package monitorcontroller_test
 
 import (
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_servicemanager/monitorcontroller"
 	log "github.com/sirupsen/logrus"
@@ -63,22 +65,50 @@ func TestSendMonitorData(t *testing.T) {
 		t.Fatalf("Can't create monitoring controller: %v", err)
 	}
 
-	monitoringData := cloudprotocol.MonitoringData{
-		Global: cloudprotocol.GlobalMonitoringData{
+	nodeMonitoringData := cloudprotocol.NodeMonitoringData{
+		NodeID:    "nodeID",
+		Timestamp: time.Now(),
+		MonitoringData: cloudprotocol.MonitoringData{
 			RAM:        1100,
 			CPU:        35,
-			UsedDisk:   2300,
 			InTraffic:  150,
 			OutTraffic: 150,
+			Disk: []cloudprotocol.PartitionUsage{
+				{
+					Name:     "partition_1",
+					UsedSize: 2300,
+				},
+			},
+		},
+		ServiceInstances: []cloudprotocol.InstanceMonitoringData{
+			{
+				InstanceIdent: aostypes.InstanceIdent{
+					ServiceID: "serviceID",
+					SubjectID: "subjectID",
+					Instance:  64,
+				},
+				MonitoringData: cloudprotocol.MonitoringData{
+					RAM:        500,
+					CPU:        50,
+					InTraffic:  200,
+					OutTraffic: 200,
+					Disk: []cloudprotocol.PartitionUsage{
+						{
+							Name:     "partition_2",
+							UsedSize: 1000,
+						},
+					},
+				},
+			},
 		},
 	}
 
-	controller.SendMonitoringData(monitoringData)
+	controller.SendMonitoringData(nodeMonitoringData)
 
 	select {
-	case receivedMonitoringData := <-controller.GetMonitoringDataChannel():
-		if receivedMonitoringData.Global != monitoringData.Global {
-			t.Errorf("Incorrect system monitoring data: %v", receivedMonitoringData.Global)
+	case receivedNodeMonitoringData := <-controller.GetMonitoringDataChannel():
+		if !reflect.DeepEqual(receivedNodeMonitoringData, nodeMonitoringData) {
+			t.Errorf("Unexpected node monitoring data")
 		}
 
 	case <-time.After(duration * 2):
