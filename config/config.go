@@ -121,14 +121,6 @@ func New(fileName string) (config *Config, err error) {
 		return config, aoserrors.Wrap(err)
 	}
 
-	if config.Monitoring.WorkingDir == "" {
-		config.Monitoring.WorkingDir = config.WorkingDir
-	}
-
-	if config.Monitoring.StorageDir == "" {
-		config.Monitoring.WorkingDir = config.StorageDir
-	}
-
 	if config.CertStorage == "" {
 		config.CertStorage = "/var/aos/crypt/sm/"
 	}
