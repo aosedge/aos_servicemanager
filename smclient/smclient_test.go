@@ -66,7 +66,7 @@ type testMonitoringProvider struct {
 }
 
 type testLogProvider struct {
-	currentLogRequest cloudprotocol.RequestServiceLog
+	currentLogRequest cloudprotocol.RequestLog
 	testLogs          []testLogData
 	sentIndex         int
 	channel           chan cloudprotocol.PushLog
@@ -693,18 +693,18 @@ func (monitoring *testMonitoringProvider) GetSystemInfo() cloudprotocol.SystemIn
 	return monitoring.systemInfo
 }
 
-func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestServiceLog) {
+func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestLog) {
 	logProvider.currentLogRequest = request
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
 	logProvider.sentIndex++
 }
 
-func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog) {
+func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestLog) {
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
 	logProvider.sentIndex++
 }
 
-func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestSystemLog) {
+func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLog) {
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
 	logProvider.sentIndex++
 }
