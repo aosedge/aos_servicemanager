@@ -809,7 +809,9 @@ func (space *testSpace) Release() error {
 	return nil
 }
 
-func (storage *testServiceStorage) GetAllServiceVersions(serviceID string) (service []servicemanager.ServiceInfo, err error) {
+func (storage *testServiceStorage) GetAllServiceVersions(
+	serviceID string,
+) (service []servicemanager.ServiceInfo, err error) {
 	if serviceID == errorGetServicID {
 		return service, aoserrors.New("can't get service")
 	}
