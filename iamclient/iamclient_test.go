@@ -148,44 +148,6 @@ func TestGetNodeIDAndType(t *testing.T) {
 	}
 }
 
-func TestGetSubjects(t *testing.T) {
-	testServer, err := newTestServer(publicServerURL, protectedServerURL)
-	if err != nil {
-		t.Fatalf("Can't create test server: %v", err)
-	}
-
-	defer testServer.close()
-
-	testServer.subjects = []string{"subject1", "subject2", "subject3"}
-
-	client, err := iamclient.New(&config.Config{
-		IAMProtectedServerURL: protectedServerURL,
-		IAMPublicServerURL:    publicServerURL,
-	}, nil, true)
-	if err != nil {
-		t.Fatalf("Can't create IAM client: %v", err)
-	}
-	defer client.Close()
-
-	if !reflect.DeepEqual(testServer.subjects, client.GetSubjects()) {
-		t.Errorf("Invalid subjects: %s", client.GetSubjects())
-	}
-
-	newSubjects := []string{"newSubjects1", "newSubjects2", "newSubjects3"}
-
-	testServer.subjectsChangedChannel <- newSubjects
-
-	select {
-	case subjects := <-client.GetSubjectsChangedChannel():
-		if !reflect.DeepEqual(subjects, newSubjects) {
-			t.Errorf("Invalid subjects: %s", subjects)
-		}
-
-	case <-time.After(5 * time.Second):
-		t.Error("Wait subjects changed timeout")
-	}
-}
-
 func TestRegisterService(t *testing.T) {
 	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
