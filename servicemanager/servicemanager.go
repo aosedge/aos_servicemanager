@@ -86,6 +86,7 @@ type ServiceInfo struct {
 	Timestamp       time.Time
 	Cached          bool
 	Size            uint64
+	GID             uint32
 }
 
 /***********************************************************************************************************************
@@ -340,6 +341,7 @@ func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error
 		Size:            size,
 		ManifestDigest:  manifestDigest,
 		Timestamp:       time.Now().UTC(),
+		GID:             serviceInfo.GID,
 	}); err != nil {
 		return aoserrors.Wrap(err)
 	}
