@@ -39,7 +39,6 @@ import (
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
-	"github.com/aoscloud/aos_servicemanager/storagestate"
 )
 
 /***********************************************************************************************************************
@@ -264,7 +263,7 @@ func TestCachedService(t *testing.T) {
 		t.Error("Unexpected services")
 	}
 
-	if err := db.SetServiceCached(service.ServiceID, true); err != nil {
+	if err := db.SetServiceCached(service.ServiceID, service.AosVersion, true); err != nil {
 		t.Errorf("Can't set service cached: %v", err)
 	}
 
@@ -295,7 +294,7 @@ func TestCachedService(t *testing.T) {
 		t.Error("Unexpected services")
 	}
 
-	if err := db.SetServiceCached(service2.ServiceID, true); err != nil {
+	if err := db.SetServiceCached(service2.ServiceID, service2.AosVersion, true); err != nil {
 		t.Errorf("Can't set service cached: %v", err)
 	}
 
@@ -605,17 +604,20 @@ func TestInstances(t *testing.T) {
 		testSubjectID = "testSubject"
 	)
 
-	var subjectInstances, serviceInstances, running, allInstances []launcher.InstanceInfo
+	var subjectInstances, serviceInstances, allInstances []launcher.InstanceInfo
 
 	for i := 0; i < 5; i++ {
-		subjectInstance := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
-			ServiceID: "someServiceID" + strconv.Itoa(i),
-			SubjectID: testSubjectID, Instance: uint64(i),
-		}, AosVersion: uint64(i), UnitSubject: true, UID: i + 100, InstanceID: uuid.New().String()}
-
-		if i%2 == 0 {
-			subjectInstance.Running = true
-			running = append(running, subjectInstance)
+		subjectInstance := launcher.InstanceInfo{
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{
+					ServiceID: "someServiceID" + strconv.Itoa(i),
+					SubjectID: testSubjectID, Instance: uint64(i),
+				},
+				StoragePath: fmt.Sprintf("Storage_%d", i),
+				StatePath:   fmt.Sprintf("State_%d", i),
+				UID:         uint32(i + 100),
+			},
+			InstanceID: uuid.New().String(),
 		}
 
 		if err := db.AddInstance(subjectInstance); err != nil {
@@ -625,16 +627,18 @@ func TestInstances(t *testing.T) {
 		subjectInstances = append(subjectInstances, subjectInstance)
 		allInstances = append(allInstances, subjectInstance)
 
-		serviceInstance := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
-			ServiceID: testServiceID,
-			SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
-		}, AosVersion: uint64(i + 20), UnitSubject: true, UID: i + 200, InstanceID: uuid.New().String()}
-
-		if i%2 == 0 {
-			serviceInstance.Running = true
-			running = append(running, serviceInstance)
+		serviceInstance := launcher.InstanceInfo{
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{
+					ServiceID: testServiceID,
+					SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
+				},
+				StoragePath: fmt.Sprintf("Storage_%d", i),
+				StatePath:   fmt.Sprintf("State_%d", i),
+				UID:         uint32(i + 200),
+			},
+			InstanceID: uuid.New().String(),
 		}
-
 		if err := db.AddInstance(serviceInstance); err != nil {
 			t.Fatalf("Can't add instance to DB %v", err)
 		}
@@ -651,16 +655,6 @@ func TestInstances(t *testing.T) {
 
 	if !reflect.DeepEqual(allResults, allInstances) {
 		t.Error("Incorrect get all instances result")
-	}
-
-	// Test get running instances
-	runningResult, err := db.GetRunningInstances()
-	if err != nil {
-		t.Fatalf("Can't get running instances from DB %v", err)
-	}
-
-	if !reflect.DeepEqual(runningResult, running) {
-		t.Error("Incorrect running instances result")
 	}
 
 	// Test get all instances by service ID
@@ -693,18 +687,47 @@ func TestInstances(t *testing.T) {
 		t.Error("Incorrect instances by subjectID result")
 	}
 
-	// Negative test: add the same instance should be failed
-	testInstanceInfo := launcher.InstanceInfo{InstanceIdent: aostypes.InstanceIdent{
-		ServiceID: testServiceID,
-		SubjectID: testSubjectID, Instance: 42,
-	}, AosVersion: 42, UnitSubject: true, UID: 42, InstanceID: uuid.New().String()}
+	testInstanceInfo := launcher.InstanceInfo{
+		InstanceInfo: aostypes.InstanceInfo{
+			InstanceIdent: aostypes.InstanceIdent{
+				ServiceID: testServiceID,
+				SubjectID: testSubjectID, Instance: 42,
+			},
+			StoragePath: "storagePath",
+			StatePath:   "statePath",
+			UID:         42,
+		},
+		InstanceID: uuid.New().String(),
+	}
 
 	if err := db.AddInstance(testInstanceInfo); err != nil {
 		t.Fatalf("Can't add instance to DB %v", err)
 	}
 
 	if err := db.AddInstance(testInstanceInfo); err == nil {
-		t.Error("Should be error can't add instace")
+		t.Error("Should be error can't add instance")
+	}
+
+	if err := db.AddService(servicemanager.ServiceInfo{
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		ServiceID: testServiceID,
+	}); err != nil {
+		t.Errorf("Can't add service: %v", err)
+	}
+
+	ident, aosVersion, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
+	if err != nil {
+		t.Errorf("Can't get instance info: %v", err)
+	}
+
+	if ident != testInstanceInfo.InstanceIdent {
+		t.Error("Unexpected instance ident")
+	}
+
+	if aosVersion != 1 {
+		t.Error("Unexpected aos version")
 	}
 
 	// Test update instance
@@ -717,27 +740,8 @@ func TestInstances(t *testing.T) {
 		t.Error("Incorrect instance by ID result")
 	}
 
-	ident, version, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
-	if err != nil {
-		t.Fatalf("Can't get instance info: %v", err)
-	}
-
-	if ident != testInstanceInfo.InstanceIdent {
-		t.Error("Incorrect instance ident")
-	}
-
-	if version != testInstanceInfo.AosVersion {
-		t.Error("Incorrect aos version")
-	}
-
 	if _, err := db.GetInstanceByID("testInstanceID"); !errors.Is(err, launcher.ErrNotExist) {
 		t.Errorf("Should be error: %v", launcher.ErrNotExist)
-	}
-
-	testInstanceInfo.Running = true
-
-	if err := db.UpdateInstance(testInstanceInfo); err != nil {
-		t.Fatalf("Can't update instance %v", err)
 	}
 
 	// Negative test: update unavailable instance should be failed
@@ -781,20 +785,28 @@ func TestInstances(t *testing.T) {
 func TestInstancesID(t *testing.T) {
 	addedInstance := []launcher.InstanceInfo{
 		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
-			InstanceID:    "TestSevrID_TestSubID_0",
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 0},
+			},
+			InstanceID: "TestSevrID_TestSubID_0",
 		},
 		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
-			InstanceID:    "TestSevrID_TestSubID_1",
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID", Instance: 1},
+			},
+			InstanceID: "TestSevrID_TestSubID_1",
 		},
 		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
-			InstanceID:    "TestSevrID_TestSubID1_0",
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID", SubjectID: "TestSubID1", Instance: 0},
+			},
+			InstanceID: "TestSevrID_TestSubID1_0",
 		},
 		{
-			InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
-			InstanceID:    "TestSevrID2_TestSubID_0",
+			InstanceInfo: aostypes.InstanceInfo{
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "TestSevrID2", SubjectID: "TestSubID", Instance: 0},
+			},
+			InstanceID: "TestSevrID2_TestSubID_0",
 		},
 	}
 
@@ -879,85 +891,6 @@ func TestEnvVars(t *testing.T) {
 
 	if !reflect.DeepEqual(testEnvVars, vars) {
 		t.Errorf("Incorrect env vars from database")
-	}
-}
-
-func TestStorageState(t *testing.T) {
-	var (
-		testID          = "testInstanceID"
-		newCheckSum     = []byte("newCheckSum")
-		newStorageQuota = uint64(88888)
-		newStateQuota   = uint64(99999)
-	)
-
-	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
-		t.Errorf("Should be entry does not exist")
-	}
-
-	testStateStorageInfo := storagestate.StorageStateInstanceInfo{
-		StorageQuota: 12345, StateQuota: 54321,
-		StateChecksum: []byte("checksum1"),
-	}
-
-	if err := db.AddStorageStateInfo(testID, testStateStorageInfo); err != nil {
-		t.Fatalf("Can't add state storage info: %v", err)
-	}
-
-	info, err := db.GetStorageStateInfoByID(testID)
-	if err != nil {
-		t.Fatalf("Can't get state storage info: %v", err)
-	}
-
-	if !reflect.DeepEqual(info, testStateStorageInfo) {
-		t.Error("State storage info from database doesn't match expected one")
-	}
-
-	if err := db.SetStateChecksumByID("noID", newCheckSum); !errors.Is(err, storagestate.ErrNotExist) {
-		t.Errorf("Should be entry does not exist")
-	}
-
-	if err := db.SetStateChecksumByID(testID, newCheckSum); err != nil {
-		t.Fatalf("Can't update checksum: %v", err)
-	}
-
-	testStateStorageInfo.StateChecksum = newCheckSum
-
-	info, err = db.GetStorageStateInfoByID(testID)
-	if err != nil {
-		t.Fatalf("Can't get state storage info: %v", err)
-	}
-
-	if !reflect.DeepEqual(info, testStateStorageInfo) {
-		t.Error("Update state storage info from database doesn't match expected one")
-	}
-
-	if err := db.SetStorageStateQuotasByID(
-		"noID", newStorageQuota, newStateQuota); !errors.Is(err, storagestate.ErrNotExist) {
-		t.Errorf("Should be: entry does not exist")
-	}
-
-	if err := db.SetStorageStateQuotasByID(testID, newStorageQuota, newStateQuota); err != nil {
-		t.Fatalf("Can't update state and storage quotas: %v", err)
-	}
-
-	testStateStorageInfo.StateQuota = newStateQuota
-	testStateStorageInfo.StorageQuota = newStorageQuota
-
-	info, err = db.GetStorageStateInfoByID(testID)
-	if err != nil {
-		t.Fatalf("Can't get state storage info: %v", err)
-	}
-
-	if !reflect.DeepEqual(info, testStateStorageInfo) {
-		t.Error("Update state storage info from database doesn't match expected one")
-	}
-
-	if err := db.RemoveStorageStateInfoByID(testID); err != nil {
-		t.Fatalf("Can't remove state storage info: %v", err)
-	}
-
-	if _, err := db.GetStorageStateInfoByID(testID); !errors.Is(err, storagestate.ErrNotExist) {
-		t.Errorf("Should be: entry does not exist")
 	}
 }
 
