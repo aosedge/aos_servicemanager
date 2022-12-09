@@ -329,10 +329,28 @@ func (db *Database) GetInstanceInfoByID(
 ) (ident aostypes.InstanceIdent, aosVersion uint64, err error) {
 	instance, err := db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
 	if err != nil {
-		return ident, 0, err
+		return ident, 0, aoserrors.Wrap(err)
 	}
 
-	return instance.InstanceIdent, instance.AosVersion, nil
+	stmt, err := db.sql.Prepare(
+		`SELECT aosVersion FROM services WHERE aosVersion = (SELECT MAX(aosVersion)
+		FROM services WHERE id = ?) AND id = ?`)
+	if err != nil {
+		return ident, 0, aoserrors.Wrap(err)
+	}
+	defer stmt.Close()
+
+	err = stmt.QueryRow(instance.ServiceID, instance.ServiceID).Scan(&aosVersion)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return ident, 0, servicemanager.ErrNotExist
+	}
+
+	if err != nil {
+		return ident, 0, aoserrors.Wrap(err)
+	}
+
+	return instance.InstanceIdent, aosVersion, nil
 }
 
 // GetAllInstances returns all instance.
