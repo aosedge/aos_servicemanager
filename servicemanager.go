@@ -18,7 +18,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,7 +47,7 @@ import (
 	resource "github.com/aoscloud/aos_servicemanager/resourcemanager"
 	"github.com/aoscloud/aos_servicemanager/runner"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
-	"github.com/aoscloud/aos_servicemanager/storagestate"
+	"github.com/aoscloud/aos_servicemanager/smclient"
 )
 
 /***********************************************************************************************************************
@@ -74,10 +73,10 @@ type serviceManager struct {
 	monitorController *monitorcontroller.MonitorController
 	network           *networkmanager.NetworkManager
 	iam               *iamclient.Client
+	client            *smclient.SMClient
 	layerMgr          *layermanager.LayerManager
 	serviceMgr        *servicemanager.ServiceManager
 	runner            *runner.Runner
-	storageState      *storagestate.StorageState
 }
 
 type journalHook struct {
@@ -180,7 +179,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.serviceMgr, err = servicemanager.New(cfg, sm.db, sm.layerMgr); err != nil {
+	if sm.serviceMgr, err = servicemanager.New(cfg, sm.db); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -208,11 +207,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.monitor, err = resourcemonitor.New(cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
+	if sm.monitor, err = resourcemonitor.New(
+		sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.resourcemanager, err = resource.New(cfg.UnitConfigFile, sm.alerts); err != nil {
+	if sm.resourcemanager, err = resource.New(sm.iam.GetNodeType(), cfg.UnitConfigFile, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -220,12 +220,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.storageState, err = storagestate.New(cfg, sm.db); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	if sm.launcher, err = launcher.New(cfg, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
-		sm.network, sm.iam, sm.storageState, sm.monitor, sm.alerts); err != nil {
+		sm.network, sm.iam, sm.monitor, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -233,21 +229,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	return sm, nil
-}
-
-func (sm *serviceManager) handleChannels(ctx context.Context) {
-	for {
-		select {
-		case subjects := <-sm.iam.GetSubjectsChangedChannel():
-			if err := sm.launcher.SubjectsChanged(subjects); err != nil {
-				log.Errorf("Can't set subjects: %v", err)
-			}
-
-		case <-ctx.Done():
-			return
-		}
+	if sm.client, err = smclient.New(cfg, sm.iam.GetNodeID(), sm.iam.GetNodeType(), sm.iam, sm.serviceMgr, sm.layerMgr,
+		sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging, sm.cryptoContext,
+		sm.monitor.GetSystemInfo(), false); err != nil {
 	}
+
+	return sm, nil
 }
 
 func (sm *serviceManager) close() {
@@ -265,10 +252,6 @@ func (sm *serviceManager) close() {
 
 	if sm.launcher != nil {
 		sm.launcher.Close()
-	}
-
-	if sm.storageState != nil {
-		sm.storageState.Close()
 	}
 
 	if sm.runner != nil {
@@ -396,27 +379,14 @@ func main() {
 
 	defer sm.close()
 
-	go func() {
-		// This is time consuming function, call it in go routine to do not block service manager start
-		if err = sm.launcher.SubjectsChanged(sm.iam.GetSubjects()); err != nil {
-			log.Errorf("Can't set subjects: %s", err)
-		}
-	}()
-
 	// Notify systemd
 	if _, err = daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
 		log.Errorf("Can't notify systemd: %s", err)
 	}
-
-	ctx, fnCancel := context.WithCancel(context.Background())
-
-	go sm.handleChannels(ctx)
 
 	// Handle SIGTERM
 	terminateChannel := make(chan os.Signal, 1)
 	signal.Notify(terminateChannel, os.Interrupt, syscall.SIGTERM)
 
 	<-terminateChannel
-
-	fnCancel()
 }
