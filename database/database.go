@@ -99,9 +99,9 @@ func (db *Database) SetOperationVersion(version uint64) error {
 
 // AddService adds new service.
 func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
-	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
-		service.ManifestDigest, service.Cached, service.Timestamp, service.Size)
+		service.ManifestDigest, service.Cached, service.Timestamp, service.Size, service.GID)
 }
 
 // RemoveService removes existing service.
@@ -134,9 +134,9 @@ func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.
 }
 
 // SetServiceCached sets cached status for the service.
-func (db *Database) SetServiceCached(serviceID string, cached bool) (err error) {
-	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ?",
-		cached, serviceID); errors.Is(err, errNotExist) {
+func (db *Database) SetServiceCached(serviceID string, aosVersion uint64, cached bool) (err error) {
+	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ? AND aosVersion = ?",
+		cached, serviceID, aosVersion); errors.Is(err, errNotExist) {
 		return servicemanager.ErrNotExist
 	}
 
@@ -519,6 +519,7 @@ func (db *Database) createServiceTable() (err error) {
 															   cached INTEGER,
 															   timestamp TIMESTAMP,
 															   size INTEGER,
+															   GID INTEGER,
 															   PRIMARY KEY(id, aosVersion))`)
 
 	return aoserrors.Wrap(err)
@@ -700,7 +701,7 @@ func (db *Database) getServicesFromQuery(
 		if err = rows.Scan(
 			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
 			&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
-			&service.Size); err != nil {
+			&service.Size, &service.GID); err != nil {
 			return services, aoserrors.Wrap(err)
 		}
 
