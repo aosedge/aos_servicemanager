@@ -116,13 +116,30 @@ func (db *Database) RemoveService(serviceID string, aosVersion uint64) (err erro
 
 // GetServices returns all services.
 func (db *Database) GetServices() (services []servicemanager.ServiceInfo, err error) {
-	return db.getServicesFromQuery(`SELECT * FROM services`)
+	return getFromQuery(
+		db,
+		"SELECT * FROM services",
+		func(service *servicemanager.ServiceInfo) []any {
+			return []any{
+				&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+				&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
+				&service.Size, &service.GID,
+			}
+		})
 }
 
 // GetAllServiceVersions returns all service version by service ID.
 func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
-	if services, err = db.getServicesFromQuery(
-		"SELECT * FROM services WHERE id = ? ORDER BY aosVersion", id); err != nil {
+	if services, err = getFromQuery(
+		db,
+		"SELECT * FROM services WHERE id = ? ORDER BY aosVersion",
+		func(service *servicemanager.ServiceInfo) []any {
+			return []any{
+				&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+				&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
+				&service.Size, &service.GID,
+			}
+		}, id); err != nil {
 		return nil, err
 	}
 
@@ -241,7 +258,16 @@ func (db *Database) DeleteLayerByDigest(digest string) (err error) {
 
 // GetLayersInfo get all installed layers.
 func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err error) {
-	return db.getLayersFromQuery("SELECT * FROM layers")
+	return getFromQuery(
+		db,
+		"SELECT * FROM layers",
+		func(layer *layermanager.LayerInfo) []any {
+			return []any{
+				&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
+				&layer.VendorVersion, &layer.Description, &layer.AosVersion, &layer.Timestamp,
+				&layer.Cached, &layer.Size,
+			}
+		})
 }
 
 // GetLayerInfoByDigest returns layers information by layer digest.
@@ -355,17 +381,41 @@ func (db *Database) GetInstanceInfoByID(
 
 // GetAllInstances returns all instance.
 func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
-	return db.getInstancesFromQuery("SELECT * FROM instances")
+	return getFromQuery(
+		db,
+		"SELECT * FROM instances",
+		func(instance *launcher.InstanceInfo) []any {
+			return []any{
+				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+				&instance.Priority, &instance.StoragePath, &instance.StatePath,
+			}
+		})
 }
 
 // GetSubjectInstances returns instances by subject ID.
 func (db *Database) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
-	return db.getInstancesFromQuery("SELECT * FROM instances WHERE subjectID = ?", subjectID)
+	return getFromQuery(
+		db,
+		"SELECT * FROM instances WHERE subjectID = ?",
+		func(instance *launcher.InstanceInfo) []any {
+			return []any{
+				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+				&instance.Priority, &instance.StoragePath, &instance.StatePath,
+			}
+		}, subjectID)
 }
 
 // GetServiceInstances returns instances by service ID.
 func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.InstanceInfo, err error) {
-	return db.getInstancesFromQuery("SELECT * FROM instances WHERE serviceID = ?", serviceID)
+	return getFromQuery(
+		db,
+		"SELECT * FROM instances WHERE serviceID = ?",
+		func(instance *launcher.InstanceInfo) []any {
+			return []any{
+				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+				&instance.Priority, &instance.StoragePath, &instance.StatePath,
+			}
+		}, serviceID)
 }
 
 // GetInstanceIDs returns instance ids by filter.
@@ -380,9 +430,16 @@ func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instanc
 		instanceFiler = fmt.Sprintf(" AND instance = %d", *filter.Instance)
 	}
 
-	serviceInstances, err := db.getInstancesFromQuery(
+	serviceInstances, err := getFromQuery(
+		db,
 		fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
-			*filter.ServiceID, subjectFiler, instanceFiler))
+			*filter.ServiceID, subjectFiler, instanceFiler),
+		func(instance *launcher.InstanceInfo) []any {
+			return []any{
+				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+				&instance.Priority, &instance.StoragePath, &instance.StatePath,
+			}
+		})
 	if err != nil {
 		return instances, aoserrors.Wrap(err)
 	}
@@ -639,32 +696,31 @@ func (db *Database) getInstanceInfoFromQuery(
 	return instance, nil
 }
 
-func (db *Database) getInstancesFromQuery(
-	query string, args ...interface{},
-) (instances []launcher.InstanceInfo, err error) {
+func getFromQuery[T any](db *Database, query string, binder func(*T) []any, args ...interface{}) (res []T, err error) {
 	rows, err := db.sql.Query(query, args...)
 	if err != nil {
-		return instances, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
-	defer rows.Close()
 
 	if rows.Err() != nil {
 		return nil, aoserrors.Wrap(rows.Err())
 	}
+	defer rows.Close()
 
 	for rows.Next() {
-		var instance launcher.InstanceInfo
+		var data T
 
-		if err = rows.Scan(
-			&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-			&instance.Priority, &instance.StoragePath, &instance.StatePath); err != nil {
-			return instances, aoserrors.Wrap(err)
+		cols := binder(&data)
+
+		err := rows.Scan(cols...)
+		if err != nil {
+			return res, aoserrors.Wrap(err)
 		}
 
-		instances = append(instances, instance)
+		res = append(res, data)
 	}
 
-	return instances, nil
+	return res, nil
 }
 
 func (db *Database) getDataFromQuery(query string, result ...interface{}) error {
@@ -683,62 +739,4 @@ func (db *Database) getDataFromQuery(query string, result ...interface{}) error 
 	}
 
 	return nil
-}
-
-func (db *Database) getServicesFromQuery(
-	query string, args ...interface{},
-) (services []servicemanager.ServiceInfo, err error) {
-	rows, err := db.sql.Query(query, args...)
-	if err != nil {
-		return services, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return nil, aoserrors.Wrap(rows.Err())
-	}
-
-	for rows.Next() {
-		var service servicemanager.ServiceInfo
-
-		if err = rows.Scan(
-			&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
-			&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
-			&service.Size, &service.GID); err != nil {
-			return services, aoserrors.Wrap(err)
-		}
-
-		services = append(services, service)
-	}
-
-	return services, nil
-}
-
-func (db *Database) getLayersFromQuery(
-	query string, args ...interface{},
-) (layers []layermanager.LayerInfo, err error) {
-	rows, err := db.sql.Query(query, args...)
-	if err != nil {
-		return layers, aoserrors.Wrap(err)
-	}
-	defer rows.Close()
-
-	if rows.Err() != nil {
-		return nil, aoserrors.Wrap(rows.Err())
-	}
-
-	for rows.Next() {
-		var layer layermanager.LayerInfo
-
-		if err = rows.Scan(
-			&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
-			&layer.VendorVersion, &layer.Description, &layer.AosVersion, &layer.Timestamp, &layer.Cached, &layer.Size,
-		); err != nil {
-			return layers, aoserrors.Wrap(err)
-		}
-
-		layers = append(layers, layer)
-	}
-
-	return layers, nil
 }

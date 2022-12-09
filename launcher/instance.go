@@ -20,7 +20,6 @@ package launcher
 import (
 	"path/filepath"
 
-	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 
@@ -81,16 +80,6 @@ func (instance *runtimeInstanceInfo) setRunStatus(runStatus runner.InstanceStatu
 	log.WithFields(instanceLogFields(instance, nil)).Info("Instance successfully started")
 }
 
-func (launcher *Launcher) getCurrentInstance(instanceIdent aostypes.InstanceIdent) (*runtimeInstanceInfo, error) {
-	for _, currentInstance := range launcher.currentInstances {
-		if currentInstance.InstanceIdent == instanceIdent {
-			return currentInstance, nil
-		}
-	}
-
-	return nil, ErrNotExist
-}
-
 func (launcher *Launcher) instanceFailed(instance *runtimeInstanceInfo, err error) {
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
@@ -136,21 +125,4 @@ func instanceFilterLogFields(filter cloudprotocol.InstanceFilter, extraFields lo
 	}
 
 	return logFields
-}
-
-func appendInstances(instances []*runtimeInstanceInfo, instance ...*runtimeInstanceInfo) []*runtimeInstanceInfo {
-	var newInstances []*runtimeInstanceInfo
-
-instanceLoop:
-	for _, newInstance := range instance {
-		for _, existingInstance := range instances {
-			if newInstance.InstanceID == existingInstance.InstanceID {
-				continue instanceLoop
-			}
-		}
-
-		newInstances = append(newInstances, newInstance)
-	}
-
-	return newInstances
 }
