@@ -103,7 +103,7 @@ func setEnvVarsErr(
 
 func (launcher *Launcher) getInstanceEnvVars(instance InstanceInfo) (envVars []string) {
 	for _, envVarInfo := range launcher.currentEnvVars {
-		if (envVarInfo.ServiceID == instance.ServiceID) &&
+		if (envVarInfo.ServiceID == nil || *envVarInfo.ServiceID == instance.ServiceID) &&
 			(envVarInfo.SubjectID == nil || *envVarInfo.SubjectID == instance.SubjectID) &&
 			(envVarInfo.Instance == nil || *envVarInfo.Instance == instance.Instance) {
 			for _, envVar := range envVarInfo.EnvVars {
