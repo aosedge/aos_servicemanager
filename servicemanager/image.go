@@ -98,7 +98,7 @@ type ServiceConfig struct {
 	Devices            []ServiceDevice              `json:"devices,omitempty"`
 	Resources          []string                     `json:"resources,omitempty"`
 	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
-	AlertRules         *aostypes.ServiceAlertRules  `json:"alertRules,omitempty"`
+	AlertRules         *aostypes.AlertRules         `json:"alertRules,omitempty"`
 	RunParameters      RunParameters                `json:"runParameters,omitempty"`
 }
 
