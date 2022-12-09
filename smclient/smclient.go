@@ -121,9 +121,9 @@ type MonitoringDataProvider interface {
 
 // LogsProvider logs data provider interface.
 type LogsProvider interface {
-	GetInstanceLog(request cloudprotocol.RequestServiceLog)
-	GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog)
-	GetSystemLog(request cloudprotocol.RequestSystemLog)
+	GetInstanceLog(request cloudprotocol.RequestLog)
+	GetInstanceCrashLog(request cloudprotocol.RequestLog)
+	GetSystemLog(request cloudprotocol.RequestLog)
 	GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog)
 }
 
@@ -433,30 +433,30 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 }
 
 func (client *SMClient) processGetSystemLogRequest(logRequest *pb.SystemLogRequest) {
-	getSystemLogRequest := cloudprotocol.RequestSystemLog{LogID: logRequest.LogId}
+	getSystemLogRequest := cloudprotocol.RequestLog{LogID: logRequest.LogId}
 
-	getSystemLogRequest.From, getSystemLogRequest.Till = getFromTillTimeFromPB(
+	getSystemLogRequest.Filter.From, getSystemLogRequest.Filter.Till = getFromTillTimeFromPB(
 		logRequest.From, logRequest.Till)
 
 	client.logsProvider.GetSystemLog(getSystemLogRequest)
 }
 
 func (client *SMClient) processGetInstanceLogRequest(instanceLogRequest *pb.InstanceLogRequest) {
-	getInstanceLogRequest := cloudprotocol.RequestServiceLog{LogID: instanceLogRequest.LogId}
+	getInstanceLogRequest := cloudprotocol.RequestLog{LogID: instanceLogRequest.LogId}
 
-	getInstanceLogRequest.From, getInstanceLogRequest.Till = getFromTillTimeFromPB(
+	getInstanceLogRequest.Filter.From, getInstanceLogRequest.Filter.Till = getFromTillTimeFromPB(
 		instanceLogRequest.From, instanceLogRequest.Till)
-	getInstanceLogRequest.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.Instance)
+	getInstanceLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.Instance)
 
 	client.logsProvider.GetInstanceLog(getInstanceLogRequest)
 }
 
 func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.InstanceCrashLogRequest) {
-	getInstanceCrashLogRequest := cloudprotocol.RequestServiceCrashLog{LogID: logrequest.LogId}
+	getInstanceCrashLogRequest := cloudprotocol.RequestLog{LogID: logrequest.LogId}
 
-	getInstanceCrashLogRequest.From, getInstanceCrashLogRequest.Till = getFromTillTimeFromPB(
+	getInstanceCrashLogRequest.Filter.From, getInstanceCrashLogRequest.Filter.Till = getFromTillTimeFromPB(
 		logrequest.From, logrequest.Till)
-	getInstanceCrashLogRequest.InstanceFilter = getInstanceFilterFromPB(logrequest.Instance)
+	getInstanceCrashLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(logrequest.Instance)
 
 	client.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest)
 }
@@ -694,7 +694,7 @@ func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
 }
 
 func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {
-	filter.ServiceID = ident.ServiceId
+	filter.ServiceID = &ident.ServiceId
 
 	if ident.SubjectId != "" {
 		filter.SubjectID = &ident.SubjectId
