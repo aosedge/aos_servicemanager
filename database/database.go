@@ -340,11 +340,6 @@ func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err er
 	return db.getInstancesFromQuery("SELECT * FROM instances")
 }
 
-// GetRunningInstances returns all running instances.
-func (db *Database) GetRunningInstances() (instances []launcher.InstanceInfo, err error) {
-	return db.getInstancesFromQuery("SELECT * FROM instances WHERE running = 1")
-}
-
 // GetSubjectInstances returns instances by subject ID.
 func (db *Database) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
 	return db.getInstancesFromQuery("SELECT * FROM instances WHERE subjectID = ?", subjectID)
