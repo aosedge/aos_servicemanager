@@ -34,20 +34,20 @@ const monitoringChannelSize = 64
 
 // MonitorController instance.
 type MonitorController struct {
-	monitoringChannel chan cloudprotocol.MonitoringData
+	monitoringChannel chan cloudprotocol.NodeMonitoringData
 }
 
 // New creates new monitoringcontroller instance.
 func New() (monitor *MonitorController, err error) {
 	monitor = &MonitorController{
-		monitoringChannel: make(chan cloudprotocol.MonitoringData, monitoringChannelSize),
+		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, monitoringChannelSize),
 	}
 
 	return monitor, nil
 }
 
 // SendMonitoringData sends monitoring data.
-func (monitor *MonitorController) SendMonitoringData(monitoringData cloudprotocol.MonitoringData) {
+func (monitor *MonitorController) SendMonitoringData(monitoringData cloudprotocol.NodeMonitoringData) {
 	if len(monitor.monitoringChannel) < cap(monitor.monitoringChannel) {
 		monitor.monitoringChannel <- monitoringData
 	} else {
@@ -56,6 +56,8 @@ func (monitor *MonitorController) SendMonitoringData(monitoringData cloudprotoco
 }
 
 // GetMonitoringDataChannel get monitoring channel.
-func (monitor *MonitorController) GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.MonitoringData) {
+func (monitor *MonitorController) GetMonitoringDataChannel() (
+	monitoringChannel <-chan cloudprotocol.NodeMonitoringData,
+) {
 	return monitor.monitoringChannel
 }
