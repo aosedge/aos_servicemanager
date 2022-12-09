@@ -39,12 +39,7 @@ import (
  * Consts
  **********************************************************************************************************************/
 
-const (
-	iamRequestTimeout   = 30 * time.Second
-	iamReconnectTimeout = 10 * time.Second
-)
-
-const subjectsChangedChannelSize = 1
+const iamRequestTimeout = 30 * time.Second
 
 /***********************************************************************************************************************
  * Types
@@ -65,8 +60,7 @@ type Client struct {
 	publicIdentifyService    pb.IAMPublicIdentityServiceClient
 	permissionsService       pb.IAMPermissionsServiceClient
 
-	closeChannel           chan struct{}
-	subjectsChangedChannel chan []string
+	closeChannel chan struct{}
 }
 
 /***********************************************************************************************************************
@@ -80,8 +74,7 @@ func New(
 	log.Debug("Connecting to IAM...")
 
 	client = &Client{
-		closeChannel:           make(chan struct{}, 1),
-		subjectsChangedChannel: make(chan []string, subjectsChangedChannelSize),
+		closeChannel: make(chan struct{}, 1),
 	}
 
 	defer func() {
@@ -145,8 +138,6 @@ func New(
 		return client, aoserrors.Wrap(err)
 	}
 
-	go client.handleSubjectsChanged()
-
 	return client, nil
 }
 
@@ -166,11 +157,6 @@ func (client *Client) GetSubjects() (subjects []string) {
 	defer client.Unlock()
 
 	return client.subjects
-}
-
-// GetSubjectsChangedChannel returns subjects changed channel.
-func (client *Client) GetSubjectsChangedChannel() (channel <-chan []string) {
-	return client.subjectsChangedChannel
 }
 
 // RegisterInstance registers new service instance with permissions and create secret.
@@ -302,66 +288,6 @@ func (client *Client) getSubjects() (subjects []string, err error) {
 	log.WithFields(log.Fields{"subjects": response.Subjects}).Debug("Get subjects")
 
 	return response.Subjects, nil
-}
-
-func (client *Client) handleSubjectsChanged() {
-	err := client.subscribeSubjectsChanged()
-
-	for {
-		if err != nil && len(client.closeChannel) == 0 {
-			log.Errorf("Error subscribe subjects changed: %s", err)
-			log.Debugf("Reconnect to IAM in %v...", iamReconnectTimeout)
-		}
-
-		select {
-		case <-client.closeChannel:
-			return
-
-		case <-time.After(iamReconnectTimeout):
-			err = client.subscribeSubjectsChanged()
-		}
-	}
-}
-
-func (client *Client) subscribeSubjectsChanged() (err error) {
-	log.Debug("Subscribe to subjects changed notification")
-
-	request := &empty.Empty{}
-
-	stream, err := client.publicIdentifyService.SubscribeSubjectsChanged(context.Background(), request)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	subjects, err := client.getSubjects()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if !isSubjectsEqual(subjects, client.subjects) {
-		client.Lock()
-		client.subjects = subjects
-		client.Unlock()
-
-		client.subjectsChangedChannel <- client.subjects
-	}
-
-	for {
-		notification, err := stream.Recv()
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		log.WithFields(log.Fields{"subjects": notification.Subjects}).Debug("Subjects changed notification")
-
-		if !isSubjectsEqual(notification.Subjects, client.subjects) {
-			client.Lock()
-			client.subjects = notification.Subjects
-			client.Unlock()
-
-			client.subjectsChangedChannel <- client.subjects
-		}
-	}
 }
 
 func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
