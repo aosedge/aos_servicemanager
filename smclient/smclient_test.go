@@ -80,10 +80,6 @@ type testAlertProvider struct {
 	alertsChannel chan cloudprotocol.AlertItem
 }
 
-type testServiceManager struct{}
-
-type testLayerManager struct{}
-
 /***********************************************************************************************************************
  * Init
  **********************************************************************************************************************/
@@ -715,12 +711,4 @@ func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudpr
 
 func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
 	return alerts.alertsChannel
-}
-
-func (serviceManager *testServiceManager) ProcessDesiredServices(services []aostypes.ServiceInfo) error {
-	return nil
-}
-
-func (layerManager *testLayerManager) ProcessDesiredLayers(layers []aostypes.LayerInfo) error {
-	return nil
 }

@@ -290,20 +290,6 @@ func (client *Client) getSubjects() (subjects []string, err error) {
 	return response.Subjects, nil
 }
 
-func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
-	if len(subjects1) != len(subjects2) {
-		return false
-	}
-
-	for i, subject := range subjects1 {
-		if subject != subjects2[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
 func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
 	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }
