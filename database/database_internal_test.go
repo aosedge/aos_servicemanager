@@ -604,7 +604,7 @@ func TestInstances(t *testing.T) {
 		testSubjectID = "testSubject"
 	)
 
-	var subjectInstances, serviceInstances, allInstances []launcher.InstanceInfo
+	var allInstances []launcher.InstanceInfo
 
 	for i := 0; i < 5; i++ {
 		subjectInstance := launcher.InstanceInfo{
@@ -624,7 +624,6 @@ func TestInstances(t *testing.T) {
 			t.Fatalf("Can't add instance to DB %v", err)
 		}
 
-		subjectInstances = append(subjectInstances, subjectInstance)
 		allInstances = append(allInstances, subjectInstance)
 
 		serviceInstance := launcher.InstanceInfo{
@@ -643,7 +642,6 @@ func TestInstances(t *testing.T) {
 			t.Fatalf("Can't add instance to DB %v", err)
 		}
 
-		serviceInstances = append(serviceInstances, serviceInstance)
 		allInstances = append(allInstances, serviceInstance)
 	}
 
@@ -655,36 +653,6 @@ func TestInstances(t *testing.T) {
 
 	if !reflect.DeepEqual(allResults, allInstances) {
 		t.Error("Incorrect get all instances result")
-	}
-
-	// Test get all instances by service ID
-	serviceInstancesResult, err := db.GetServiceInstances(testServiceID)
-	if err != nil {
-		t.Fatalf("Can't get instances by serviceID %v", err)
-	}
-
-	if !reflect.DeepEqual(serviceInstancesResult, serviceInstances) {
-		t.Error("Incorrect instances by serviceID result")
-	}
-
-	// Test get unavailable instances
-	serviceInstancesResult, err = db.GetServiceInstances("notAvailableServiceID")
-	if err != nil {
-		t.Fatalf("Can't get instances by serviceID %v", err)
-	}
-
-	if len(serviceInstancesResult) != 0 {
-		t.Error("incorrect count of instances")
-	}
-
-	// Test get all instances by subject ID
-	subjectInstancesResult, err := db.GetSubjectInstances(testSubjectID)
-	if err != nil {
-		t.Fatalf("Can't get instances by subjectID %v", err)
-	}
-
-	if !reflect.DeepEqual(subjectInstancesResult, subjectInstances) {
-		t.Error("Incorrect instances by subjectID result")
 	}
 
 	testInstanceInfo := launcher.InstanceInfo{
@@ -730,51 +698,15 @@ func TestInstances(t *testing.T) {
 		t.Error("Unexpected aos version")
 	}
 
-	// Test update instance
-	instanceResult, err := db.GetInstanceByID(testInstanceInfo.InstanceID)
-	if err != nil {
-		t.Fatalf("Can't get instance by ID %v", err)
-	}
-
-	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
-		t.Error("Incorrect instance by ID result")
-	}
-
-	if _, err := db.GetInstanceByID("testInstanceID"); !errors.Is(err, launcher.ErrNotExist) {
-		t.Errorf("Should be error: %v", launcher.ErrNotExist)
-	}
-
 	// Negative test: update unavailable instance should be failed
 	if err := db.UpdateInstance(
 		launcher.InstanceInfo{InstanceID: "unavailbale"}); !errors.Is(err, launcher.ErrNotExist) {
 		t.Error("Should be error: instance not exist")
 	}
 
-	// Test get all instances identifier
-	testInstanceIdent := aostypes.InstanceIdent{ServiceID: testServiceID, SubjectID: testSubjectID, Instance: 42}
-
-	if instanceResult, err = db.GetInstanceByIdent(testInstanceIdent); err != nil {
-		t.Fatalf("Can't get instance by identifier %v", err)
-	}
-
-	if !reflect.DeepEqual(instanceResult, testInstanceInfo) {
-		t.Error("Incorrect instance by identifier result")
-	}
-
-	// Negative test get all instances identifier by unavailable identifier
-	testInstanceIdent.Instance = 10500
-
-	if _, err = db.GetInstanceByIdent(testInstanceIdent); !errors.Is(err, launcher.ErrNotExist) {
-		t.Errorf("Should be error: %v", launcher.ErrNotExist)
-	}
-
 	// Test remove instance
 	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
 		t.Errorf("Can't remove instance: %v", err)
-	}
-
-	if _, err := db.GetInstanceByID(testInstanceInfo.InstanceID); !errors.Is(err, launcher.ErrNotExist) {
-		t.Errorf("Should be error: %v", launcher.ErrNotExist)
 	}
 
 	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
