@@ -336,19 +336,6 @@ func (db *Database) RemoveInstance(instanceID string) (err error) {
 	return err
 }
 
-// GetInstanceByIdent returns instance information by serviceID + subjectID + instance.
-func (db *Database) GetInstanceByIdent(instanceIdent aostypes.InstanceIdent) (
-	instance launcher.InstanceInfo, err error,
-) {
-	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE serviceID = ? AND subjectID = ? AND instance = ?",
-		instanceIdent.ServiceID, instanceIdent.SubjectID, instanceIdent.Instance)
-}
-
-// GetInstanceByID returns instance information by instanceID.
-func (db *Database) GetInstanceByID(instanceID string) (instance launcher.InstanceInfo, err error) {
-	return db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
-}
-
 // GetInstanceInfoByID returns instance ident and service aos version by instanceID.
 func (db *Database) GetInstanceInfoByID(
 	instanceID string,
@@ -390,32 +377,6 @@ func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err er
 				&instance.Priority, &instance.StoragePath, &instance.StatePath,
 			}
 		})
-}
-
-// GetSubjectInstances returns instances by subject ID.
-func (db *Database) GetSubjectInstances(subjectID string) (instances []launcher.InstanceInfo, err error) {
-	return getFromQuery(
-		db,
-		"SELECT * FROM instances WHERE subjectID = ?",
-		func(instance *launcher.InstanceInfo) []any {
-			return []any{
-				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-				&instance.Priority, &instance.StoragePath, &instance.StatePath,
-			}
-		}, subjectID)
-}
-
-// GetServiceInstances returns instances by service ID.
-func (db *Database) GetServiceInstances(serviceID string) (instances []launcher.InstanceInfo, err error) {
-	return getFromQuery(
-		db,
-		"SELECT * FROM instances WHERE serviceID = ?",
-		func(instance *launcher.InstanceInfo) []any {
-			return []any{
-				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-				&instance.Priority, &instance.StoragePath, &instance.StatePath,
-			}
-		}, serviceID)
 }
 
 // GetInstanceIDs returns instance ids by filter.
