@@ -129,7 +129,7 @@ func New(
 	}
 
 	if client.protectedConnection, err = grpc.DialContext(
-		ctx, config.IAMServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
+		ctx, config.IAMProtectedServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 

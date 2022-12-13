@@ -37,12 +37,14 @@ import (
 
 func createConfigFile() (err error) {
 	configContent := `{
-	"CACert" : "CACert",	
-	"cmServerUrl" : "aoscm:8093",
-	"workingDir" : "workingDir",
+	"CACert": "CACert",	
 	"certStorage": "sm",
-	"storageDir" : "/var/aos/storage",
-	"stateDir" : "/var/aos/state",
+	"iamProtectedServerUrl": "localhost:8089",
+	"iamPublicServerUrl": "localhost:8090",
+	"cmServerUrl": "aoscm:8093",
+	"workingDir": "workingDir",
+	"storageDir": "/var/aos/storage",
+	"stateDir": "/var/aos/state",
 	"servicesDir": "/var/aos/servicemanager/services",
 	"servicesPartLimit": 10,
 	"layersDir": "/var/aos/srvlib",
@@ -50,11 +52,9 @@ func createConfigFile() (err error) {
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
 	"remoteNode": true,
-	"runnerFeatures" : ["crun", "runc"],
-	"unitConfigFile" : "/var/aos/aos_unit.cfg",
-	"iamServer" : "localhost:8089",
-	"iamPublicServer" : "localhost:8090",
-	"layerTtlDays" : 40,
+	"runnerFeatures": ["crun", "runc"],
+	"unitConfigFile": "/var/aos/aos_unit.cfg",
+	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
 		"sendPeriod": "5m",
@@ -247,14 +247,14 @@ func TestGetExtractDir(t *testing.T) {
 	}
 }
 
-func TestGetIAMServerURL(t *testing.T) {
+func TestGetIAMProtectedServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.IAMServerURL != "localhost:8089" {
-		t.Errorf("Wrong IAM server value: %s", config.IAMServerURL)
+	if config.IAMProtectedServerURL != "localhost:8089" {
+		t.Errorf("Wrong IAM server value: %s", config.IAMProtectedServerURL)
 	}
 }
 
