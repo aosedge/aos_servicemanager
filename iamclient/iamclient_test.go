@@ -131,8 +131,8 @@ func TestGetNodeIDAndType(t *testing.T) {
 	testServer.nodeType = "testNodeType"
 
 	client, err := iamclient.New(&config.Config{
-		IAMServerURL:       protectedServerURL,
-		IAMPublicServerURL: publicServerURL,
+		IAMProtectedServerURL: protectedServerURL,
+		IAMPublicServerURL:    publicServerURL,
 	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %v", err)
@@ -159,8 +159,8 @@ func TestGetSubjects(t *testing.T) {
 	testServer.subjects = []string{"subject1", "subject2", "subject3"}
 
 	client, err := iamclient.New(&config.Config{
-		IAMServerURL:       protectedServerURL,
-		IAMPublicServerURL: publicServerURL,
+		IAMProtectedServerURL: protectedServerURL,
+		IAMPublicServerURL:    publicServerURL,
 	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %v", err)
@@ -195,8 +195,8 @@ func TestRegisterService(t *testing.T) {
 	defer testServer.close()
 
 	client, err := iamclient.New(&config.Config{
-		IAMServerURL:       protectedServerURL,
-		IAMPublicServerURL: publicServerURL,
+		IAMProtectedServerURL: protectedServerURL,
+		IAMPublicServerURL:    publicServerURL,
 	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %v", err)
@@ -239,8 +239,8 @@ func TestGetPermissions(t *testing.T) {
 	defer testServer.close()
 
 	client, err := iamclient.New(&config.Config{
-		IAMServerURL:       protectedServerURL,
-		IAMPublicServerURL: publicServerURL,
+		IAMProtectedServerURL: protectedServerURL,
+		IAMPublicServerURL:    publicServerURL,
 	}, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create IAM client: %v", err)
