@@ -62,7 +62,6 @@ type testServer struct {
 
 type testMonitoringProvider struct {
 	monitoringChannel chan cloudprotocol.NodeMonitoringData
-	systemInfo        cloudprotocol.SystemInfo
 }
 
 type testLogProvider struct {
@@ -108,15 +107,16 @@ func TestSmRegistration(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{
 		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
-		systemInfo: cloudprotocol.SystemInfo{
-			NumCPUs: 1, TotalRAM: 100,
-			Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
-		},
+	}
+
+	systemInfo := cloudprotocol.SystemInfo{
+		NumCPUs: 1, TotalRAM: 100,
+		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
 		"mainSM", "model1", nil, nil, nil, nil, nil,
-		nil, testMonitoring, nil, nil, true)
+		nil, testMonitoring, nil, nil, systemInfo, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -143,16 +143,17 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	testMonitoring := &testMonitoringProvider{
 		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
-		systemInfo: cloudprotocol.SystemInfo{
-			NumCPUs: 1, TotalRAM: 100,
-			Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
-		},
+	}
+
+	systemInfo := cloudprotocol.SystemInfo{
+		NumCPUs: 1, TotalRAM: 100,
+		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
 	}
 
 	client, err := smclient.New(&config.Config{
 		CMServerURL: serverURL, RemoteNode: true,
 		RunnerFeatures: []string{"crun"},
-	}, "mainSM", "model1", nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
+	}, "mainSM", "model1", nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, systemInfo, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -262,7 +263,7 @@ func TestLogsNotification(t *testing.T) {
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil, nil,
-		nil, nil, &logProvider, nil, true)
+		nil, nil, &logProvider, nil, cloudprotocol.SystemInfo{}, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -360,7 +361,7 @@ func TestAlertNotifications(t *testing.T) {
 	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil, nil,
-		testAlerts, nil, nil, nil, true)
+		testAlerts, nil, nil, nil, cloudprotocol.SystemInfo{}, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -681,23 +682,19 @@ func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (
 	return monitoring.monitoringChannel
 }
 
-func (monitoring *testMonitoringProvider) GetNodeMonitoringData() cloudprotocol.NodeMonitoringData {
-	return <-monitoring.monitoringChannel
-}
-
-func (monitoring *testMonitoringProvider) GetSystemInfo() cloudprotocol.SystemInfo {
-	return monitoring.systemInfo
-}
-
-func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestLog) {
+func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestLog) error {
 	logProvider.currentLogRequest = request
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
 	logProvider.sentIndex++
+
+	return nil
 }
 
-func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestLog) {
+func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestLog) error {
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
 	logProvider.sentIndex++
+
+	return nil
 }
 
 func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLog) {
