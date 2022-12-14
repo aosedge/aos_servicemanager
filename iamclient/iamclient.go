@@ -108,7 +108,7 @@ func New(
 	client.publicIdentifyService = pb.NewIAMPublicIdentityServiceClient(client.publicConnection)
 
 	if !insecureConn {
-		certURL, keyURL, err := client.GetCertKeyURL(config.CertStorage)
+		certURL, keyURL, err := client.GetCertificate(config.CertStorage)
 		if err != nil {
 			return client, err
 		}
@@ -157,6 +157,26 @@ func (client *Client) GetSubjects() (subjects []string) {
 	defer client.Unlock()
 
 	return client.subjects
+}
+
+// GetCertificate gets certificate and key url from IAM by type.
+func (client *Client) GetCertificate(certType string) (certURL, keyURL string, err error) {
+	log.WithFields(log.Fields{
+		"type": certType,
+	}).Debug("Get certificate")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	response, err := client.publicService.GetCert(
+		ctx, &pb.GetCertRequest{Type: certType})
+	if err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
+
+	return response.CertUrl, response.KeyUrl, nil
 }
 
 // RegisterInstance registers new service instance with permissions and create secret.
@@ -225,16 +245,6 @@ func (client *Client) GetPermissions(
 		ServiceID: response.Instance.ServiceId,
 		SubjectID: response.Instance.SubjectId, Instance: response.Instance.Instance,
 	}, response.Permissions.Permissions, nil
-}
-
-// GetCertKeyURL gets certificate and key url from IAM.
-func (client *Client) GetCertKeyURL(keyType string) (certURL, keyURL string, err error) {
-	response, err := client.publicService.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
-	if err != nil {
-		return "", "", aoserrors.Wrap(err)
-	}
-
-	return response.CertUrl, response.KeyUrl, nil
 }
 
 // Close closes IAM client.
