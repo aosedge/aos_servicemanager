@@ -159,6 +159,26 @@ func (client *Client) GetSubjects() (subjects []string) {
 	return client.subjects
 }
 
+// GetCertificate gets certificate by issuer.
+func (client *Client) GetCertificate(certType string) (certURL, keyURL string, err error) {
+	log.WithFields(log.Fields{
+		"type": certType,
+	}).Debug("Get certificate")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	response, err := client.publicService.GetCert(
+		ctx, &pb.GetCertRequest{Type: certType})
+	if err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
+
+	return response.CertUrl, response.KeyUrl, nil
+}
+
 // RegisterInstance registers new service instance with permissions and create secret.
 func (client *Client) RegisterInstance(
 	instance aostypes.InstanceIdent, permissions map[string]map[string]string,
