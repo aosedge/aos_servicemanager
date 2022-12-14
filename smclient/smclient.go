@@ -76,11 +76,12 @@ type SMClient struct {
 	nodeID               string
 	nodeType             string
 	systemInfo           cloudprotocol.SystemInfo
+	nodeMonitoringData   cloudprotocol.NodeMonitoringData
 }
 
 // CertificateProvider interface to get certificate.
 type CertificateProvider interface {
-	GetCertificate(certType string, cryptocontext *cryptutils.CryptoContext) (certURL, ketURL string, err error)
+	GetCertificate(certType string) (certURL, ketURL string, err error)
 }
 
 // UnitConfigProcessor unit configuration handler.
@@ -102,7 +103,7 @@ type LayersProcessor interface {
 
 // InstanceLauncher service instances launcher interface.
 type InstanceLauncher interface {
-	RunInstances(instances []aostypes.InstanceInfo, forceRestart bool)
+	RunInstances(instances []aostypes.InstanceInfo, forceRestart bool) error
 	RuntimeStatusChannel() <-chan launcher.RuntimeStatus
 	OverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) ([]cloudprotocol.EnvVarsInstanceStatus, error)
 }
@@ -115,14 +116,12 @@ type AlertsProvider interface {
 // MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
 	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.NodeMonitoringData)
-	GetNodeMonitoringData() cloudprotocol.NodeMonitoringData
-	GetSystemInfo() cloudprotocol.SystemInfo
 }
 
 // LogsProvider logs data provider interface.
 type LogsProvider interface {
-	GetInstanceLog(request cloudprotocol.RequestLog)
-	GetInstanceCrashLog(request cloudprotocol.RequestLog)
+	GetInstanceLog(request cloudprotocol.RequestLog) error
+	GetInstanceCrashLog(request cloudprotocol.RequestLog) error
 	GetSystemLog(request cloudprotocol.RequestLog)
 	GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog)
 }
@@ -141,7 +140,8 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 func New(config *config.Config, nodeID, nodeType string, provider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
 	unitConfigProcessor UnitConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
-	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
+	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, systemInfo cloudprotocol.SystemInfo,
+	insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
 		closeChannel: make(chan struct{}, 1), servicesProcessor: servicesProcessor, layersProcessor: layersProcessor,
@@ -161,9 +161,10 @@ func New(config *config.Config, nodeID, nodeType string, provider CertificatePro
 		cmClient.alertChannel = alertsProvider.GetAlertsChannel()
 	}
 
+	cmClient.systemInfo = systemInfo
+
 	if monitoringProvider != nil {
 		cmClient.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
-		cmClient.systemInfo = monitoringProvider.GetSystemInfo()
 	}
 
 	if logsProvider != nil {
@@ -209,7 +210,7 @@ func (client *SMClient) createConnection(
 	if insecureConn {
 		secureOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
 	} else {
-		certURL, keyURL, err := provider.GetCertificate(config.CertStorage, cryptcoxontext)
+		certURL, keyURL, err := provider.GetCertificate(config.CertStorage)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -429,7 +430,9 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 		}
 	}
 
-	client.launcher.RunInstances(instances, runInstances.ForceRestart)
+	if err := client.launcher.RunInstances(instances, runInstances.ForceRestart); err != nil {
+		log.Errorf("Can't run instances: %v", err)
+	}
 }
 
 func (client *SMClient) processGetSystemLogRequest(logRequest *pb.SystemLogRequest) {
@@ -448,7 +451,9 @@ func (client *SMClient) processGetInstanceLogRequest(instanceLogRequest *pb.Inst
 		instanceLogRequest.From, instanceLogRequest.Till)
 	getInstanceLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.Instance)
 
-	client.logsProvider.GetInstanceLog(getInstanceLogRequest)
+	if err := client.logsProvider.GetInstanceLog(getInstanceLogRequest); err != nil {
+		log.Errorf("Can't get instance log: %v", err)
+	}
 }
 
 func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.InstanceCrashLogRequest) {
@@ -458,7 +463,9 @@ func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.Instanc
 		logrequest.From, logrequest.Till)
 	getInstanceCrashLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(logrequest.Instance)
 
-	client.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest)
+	if err := client.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest); err != nil {
+		log.Errorf("Can't get instance crash log: %v", err)
+	}
 }
 
 func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
@@ -511,7 +518,7 @@ func (client *SMClient) processNodeMonitoringData() {
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
 			SMOutgoingMessage: &pb.SMOutgoingMessages_NodeMonitoring{
-				NodeMonitoring: cloudprotocolMonitoringToPB(client.monitoringProvider.GetNodeMonitoringData()),
+				NodeMonitoring: cloudprotocolMonitoringToPB(client.nodeMonitoringData),
 			},
 		}); err != nil {
 		log.Errorf("Can't send monitoring notification: %v ", err)
@@ -545,6 +552,8 @@ func (client *SMClient) handleChannels() {
 			}
 
 		case monitoringData := <-client.monitoringChannel:
+			client.nodeMonitoringData = monitoringData
+
 			if err := client.stream.Send(
 				&pb.SMOutgoingMessages{
 					SMOutgoingMessage: &pb.SMOutgoingMessages_NodeMonitoring{
