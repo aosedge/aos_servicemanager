@@ -77,6 +77,7 @@ type SMClient struct {
 	nodeType             string
 	systemInfo           cloudprotocol.SystemInfo
 	nodeMonitoringData   cloudprotocol.NodeMonitoringData
+	runStatus            *launcher.InstancesStatus
 }
 
 // CertificateProvider interface to get certificate.
@@ -293,6 +294,14 @@ func (client *SMClient) register(config *config.Config) (err error) {
 			SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfiguration{NodeConfiguration: &nodeCfg},
 		}); err != nil {
 		return aoserrors.Wrap(err)
+	}
+
+	if client.runStatus != nil {
+		if err := client.sendRuntimeInstanceNotifications(launcher.RuntimeStatus{
+			RunStatus: client.runStatus,
+		}); err != nil {
+			return err
+		}
 	}
 
 	log.Debug("Registered to CM")
@@ -529,6 +538,10 @@ func (client *SMClient) handleChannels() {
 	for {
 		select {
 		case runtimeStatus := <-client.runtimeStatusChannel:
+			if runtimeStatus.RunStatus != nil {
+				client.runStatus = runtimeStatus.RunStatus
+			}
+
 			if err := client.sendRuntimeInstanceNotifications(runtimeStatus); err != nil {
 				log.Errorf("Can't send runtime instance notification: %v", err)
 
