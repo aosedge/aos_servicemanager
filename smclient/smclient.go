@@ -381,7 +381,7 @@ func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
-	if err := client.unitConfigProcessor.CheckUnitConfig(config.UnitConfig, config.VendorVersion); err != nil {
+	if err := client.unitConfigProcessor.UpdateUnitConfig(config.UnitConfig, config.VendorVersion); err != nil {
 		status.Error = err.Error()
 	}
 
