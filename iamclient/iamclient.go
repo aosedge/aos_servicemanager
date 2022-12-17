@@ -49,7 +49,6 @@ const iamRequestTimeout = 30 * time.Second
 type Client struct {
 	sync.Mutex
 
-	subjects []string
 	nodeID   string
 	nodeType string
 
@@ -134,10 +133,6 @@ func New(
 		return client, aoserrors.Wrap(err)
 	}
 
-	if client.subjects, err = client.getSubjects(); err != nil {
-		return client, aoserrors.Wrap(err)
-	}
-
 	return client, nil
 }
 
@@ -149,14 +144,6 @@ func (client *Client) GetNodeID() string {
 // GetNodeType returns node type.
 func (client *Client) GetNodeType() string {
 	return client.nodeType
-}
-
-// GetSubjects returns current subjects.
-func (client *Client) GetSubjects() (subjects []string) {
-	client.Lock()
-	defer client.Unlock()
-
-	return client.subjects
 }
 
 // GetCertificate gets certificate by issuer.
@@ -292,22 +279,6 @@ func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
 	}).Debug("Get node Info")
 
 	return response.NodeId, response.NodeType, nil
-}
-
-func (client *Client) getSubjects() (subjects []string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
-	defer cancel()
-
-	request := &empty.Empty{}
-
-	response, err := client.publicIdentifyService.GetSubjects(ctx, request)
-	if err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	log.WithFields(log.Fields{"subjects": response.Subjects}).Debug("Get subjects")
-
-	return response.Subjects, nil
 }
 
 func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
