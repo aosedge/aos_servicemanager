@@ -62,11 +62,9 @@ type testServer struct {
 	publicServer    *grpc.Server
 	protectedServer *grpc.Server
 
-	nodeID                 string
-	nodeType               string
-	subjects               []string
-	subjectsChangedChannel chan []string
-	permissionsCache       map[string]servicePermissions
+	nodeID           string
+	nodeType         string
+	permissionsCache map[string]servicePermissions
 }
 
 type servicePermissions struct {
@@ -250,8 +248,7 @@ func TestGetPermissions(t *testing.T) {
 
 func newTestServer(publicServerURL, protectedServerURL string) (*testServer, error) {
 	server := &testServer{
-		subjectsChangedChannel: make(chan []string, 1),
-		permissionsCache:       make(map[string]servicePermissions),
+		permissionsCache: make(map[string]servicePermissions),
 	}
 
 	publicListener, err := net.Listen("tcp", publicServerURL)
@@ -361,30 +358,6 @@ func (server *testServer) GetPermissions(
 	rsp.Instance = instanceIdentToPB(funcServersPermissions.instanceIdent)
 
 	return rsp, nil
-}
-
-func (server *testServer) GetSubjects(context context.Context, req *empty.Empty) (rsp *pb.Subjects, err error) {
-	rsp = &pb.Subjects{Subjects: server.subjects}
-
-	return rsp, nil
-}
-
-func (server *testServer) SubscribeSubjectsChanged(req *empty.Empty,
-	stream pb.IAMPublicIdentityService_SubscribeSubjectsChangedServer,
-) (err error) {
-	for {
-		select {
-		case <-stream.Context().Done():
-			return nil
-
-		case subjects := <-server.subjectsChangedChannel:
-			if err := stream.Send(&pb.Subjects{Subjects: subjects}); err != nil {
-				return aoserrors.Wrap(err)
-			}
-
-			return nil
-		}
-	}
 }
 
 func (server *testServer) findSecret(instance aostypes.InstanceIdent) (secret string) {
