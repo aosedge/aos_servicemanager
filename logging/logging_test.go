@@ -319,7 +319,7 @@ func TestMaxPartCountLog(t *testing.T) {
 				return
 			}
 
-			if result.Data == nil {
+			if result.Content == nil {
 				t.Error("No data")
 				return
 			}
@@ -648,12 +648,12 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 				return
 			}
 
-			if result.Data == nil {
+			if result.Content == nil {
 				t.Error("No data")
 				return
 			}
 
-			zr, err := gzip.NewReader(bytes.NewBuffer(result.Data))
+			zr, err := gzip.NewReader(bytes.NewBuffer(result.Content))
 			if err != nil {
 				t.Errorf("gzip error: %s", err)
 				return
@@ -707,7 +707,7 @@ func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 				return
 			}
 
-			if (result.Data == nil) || len(result.Data) != 0 {
+			if (result.Content == nil) || len(result.Content) != 0 {
 				t.Error("Empty log expected")
 				return
 			}
