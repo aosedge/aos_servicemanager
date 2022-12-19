@@ -285,7 +285,7 @@ func (client *SMClient) register(config *config.Config) (err error) {
 
 	for i, partition := range client.systemInfo.Partitions {
 		nodeCfg.Partitions[i] = &pb.Partition{
-			Name: partition.Name, Type: partition.Type, TotalSize: partition.TotalSize,
+			Name: partition.Name, Type: partition.Types, TotalSize: partition.TotalSize,
 		}
 	}
 
