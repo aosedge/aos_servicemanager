@@ -111,7 +111,7 @@ func TestSmRegistration(t *testing.T) {
 
 	systemInfo := cloudprotocol.SystemInfo{
 		NumCPUs: 1, TotalRAM: 100,
-		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
@@ -125,7 +125,7 @@ func TestSmRegistration(t *testing.T) {
 	expectedNodeCpnfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1", RemoteNode: false, RunnerFeatures: []string{"crun"},
 		NumCpus: 1, TotalRam: 100,
-		Partitions: []*pb.Partition{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
 	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
@@ -147,7 +147,7 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	systemInfo := cloudprotocol.SystemInfo{
 		NumCPUs: 1, TotalRAM: 100,
-		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
 	client, err := smclient.New(&config.Config{
@@ -162,7 +162,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	expectedNodeCpnfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1", RemoteNode: true, RunnerFeatures: []string{"crun"},
 		NumCpus: 1, TotalRam: 100,
-		Partitions: []*pb.Partition{{Name: "p1", Type: []string{"t1"}, TotalSize: 200}},
+		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
 	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
