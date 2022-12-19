@@ -111,7 +111,7 @@ func (instance *archivator) sendLog(logID string) (err error) {
 			LogID:     logID,
 			PartCount: part,
 			Part:      part,
-			Data:      []byte{},
+			Content:   []byte{},
 		}
 
 		log.WithFields(log.Fields{
@@ -137,7 +137,7 @@ func (instance *archivator) sendLog(logID string) (err error) {
 			LogID:     logID,
 			PartCount: instance.partCount,
 			Part:      part,
-			Data:      data,
+			Content:   data,
 		}
 	}
 
