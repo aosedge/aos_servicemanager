@@ -279,24 +279,24 @@ func TestLogsNotification(t *testing.T) {
 
 	logProvider.testLogs = []testLogData{
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "systemLog", Data: []byte{1, 2, 3}},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "systemLog", Content: []byte{1, 2, 3}},
 			expectedPBLog: pb.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
 			intrenalLog: cloudprotocol.PushLog{
-				LogID: "serviceCrashLog", Data: []byte{1, 2, 4},
+				LogID: "serviceCrashLog", Content: []byte{1, 2, 4},
 				Error: "some error", Part: 1,
 			},
 			expectedPBLog: pb.LogData{LogId: "serviceCrashLog", Data: []byte{1, 2, 4}, Error: "some error", Part: 1},
