@@ -314,8 +314,8 @@ func TestMaxPartCountLog(t *testing.T) {
 	for {
 		select {
 		case result := <-logging.GetLogsDataChannel():
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo.Message != "" {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
@@ -324,13 +324,13 @@ func TestMaxPartCountLog(t *testing.T) {
 				return
 			}
 
-			if result.PartCount == 0 {
+			if result.PartsCount == 0 {
 				t.Error("Missing part count")
 				return
 			}
 
-			if result.PartCount != 2 {
-				t.Errorf("Wrong part count received: %d", result.PartCount)
+			if result.PartsCount != 2 {
+				t.Errorf("Wrong part count received: %d", result.PartsCount)
 				return
 			}
 
@@ -339,7 +339,7 @@ func TestMaxPartCountLog(t *testing.T) {
 				return
 			}
 
-			if result.Part > result.PartCount {
+			if result.Part > result.PartsCount {
 				t.Errorf("Wrong part received: %d", result.Part)
 				return
 			}
@@ -643,8 +643,8 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo.Message != "" {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
@@ -667,7 +667,7 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 
 			receivedLog += string(data)
 
-			if result.Part == result.PartCount {
+			if result.Part == result.PartsCount {
 				if from == nil || till == nil {
 					return
 				}
@@ -702,8 +702,8 @@ func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo.Message != "" {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
@@ -727,8 +727,8 @@ func checkErrorLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error == "" {
-				t.Errorf("Should be error %s", result.Error)
+			if result.ErrorInfo.Message == "" {
+				t.Errorf("Should be error %s", result.ErrorInfo.Message)
 			}
 
 			return

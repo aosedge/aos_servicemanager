@@ -285,7 +285,7 @@ func (client *SMClient) register(config *config.Config) (err error) {
 
 	for i, partition := range client.systemInfo.Partitions {
 		nodeCfg.Partitions[i] = &pb.Partition{
-			Name: partition.Name, Type: partition.Types, TotalSize: partition.TotalSize,
+			Name: partition.Name, Types: partition.Types, TotalSize: partition.TotalSize,
 		}
 	}
 
@@ -710,7 +710,7 @@ func getFromTillTimeFromPB(fromPB, tillPB *timestamp.Timestamp) (from, till *tim
 }
 
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
-	return &pb.LogData{LogId: log.LogID, PartCount: log.PartCount, Part: log.Part, Error: log.Error, Data: log.Content}
+	return &pb.LogData{LogId: log.LogID, PartCount: log.PartsCount, Part: log.Part, Error: log.ErrorInfo.Message, Data: log.Content}
 }
 
 func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {
