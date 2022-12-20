@@ -283,21 +283,24 @@ func TestLogsNotification(t *testing.T) {
 			expectedPBLog: pb.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
 			intrenalLog: cloudprotocol.PushLog{
 				LogID: "serviceCrashLog", Content: []byte{1, 2, 4},
-				Error: "some error", Part: 1,
+				ErrorInfo: cloudprotocol.ErrorInfo{
+					Message: "some error",
+				},
+				Part: 1,
 			},
 			expectedPBLog: pb.LogData{LogId: "serviceCrashLog", Data: []byte{1, 2, 4}, Error: "some error", Part: 1},
 		},
