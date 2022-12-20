@@ -710,7 +710,10 @@ func getFromTillTimeFromPB(fromPB, tillPB *timestamp.Timestamp) (from, till *tim
 }
 
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
-	return &pb.LogData{LogId: log.LogID, PartCount: log.PartsCount, Part: log.Part, Error: log.ErrorInfo.Message, Data: log.Content}
+	return &pb.LogData{
+		LogId: log.LogID, PartCount: log.PartsCount, Part: log.Part,
+		Error: log.ErrorInfo.Message, Data: log.Content,
+	}
 }
 
 func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {

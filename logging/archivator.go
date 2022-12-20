@@ -134,10 +134,10 @@ func (instance *archivator) sendLog(logID string) (err error) {
 		}).Debugf("Push log")
 
 		instance.logChannel <- cloudprotocol.PushLog{
-			LogID:     logID,
+			LogID:      logID,
 			PartsCount: instance.partCount,
-			Part:      part,
-			Content:   data,
+			Part:       part,
+			Content:    data,
 		}
 	}
 
