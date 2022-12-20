@@ -430,7 +430,9 @@ func (instance *Logging) archivateCrashLog(
 func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	response := cloudprotocol.PushLog{
 		LogID: logID,
-		Error: errorStr,
+		ErrorInfo: cloudprotocol.ErrorInfo{
+			Message: errorStr,
+		},
 	}
 
 	instance.logChannel <- response
