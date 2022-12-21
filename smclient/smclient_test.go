@@ -297,7 +297,7 @@ func TestLogsNotification(t *testing.T) {
 		{
 			intrenalLog: cloudprotocol.PushLog{
 				LogID: "serviceCrashLog", Content: []byte{1, 2, 4},
-				ErrorInfo: cloudprotocol.ErrorInfo{
+				ErrorInfo: &cloudprotocol.ErrorInfo{
 					Message: "some error",
 				},
 				Part: 1,
