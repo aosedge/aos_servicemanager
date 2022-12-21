@@ -314,7 +314,7 @@ func TestMaxPartCountLog(t *testing.T) {
 	for {
 		select {
 		case result := <-logging.GetLogsDataChannel():
-			if result.ErrorInfo.Message != "" {
+			if result.ErrorInfo != nil && result.ErrorInfo.Message != "" {
 				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
@@ -643,7 +643,7 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 	for {
 		select {
 		case result := <-logChannel:
-			if result.ErrorInfo.Message != "" {
+			if result.ErrorInfo != nil && result.ErrorInfo.Message != "" {
 				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
@@ -702,7 +702,7 @@ func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.ErrorInfo.Message != "" {
+			if result.ErrorInfo != nil && result.ErrorInfo.Message != "" {
 				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
