@@ -608,11 +608,15 @@ func (launcher *Launcher) setupNetwork(instance *runtimeInstanceInfo) (err error
 		InstanceIdent:      instance.InstanceIdent,
 		HostsFilePath:      filepath.Join(networkFilesDir, "etc", "hosts"),
 		ResolvConfFilePath: filepath.Join(networkFilesDir, "etc", "resolv.conf"),
+		Hosts:              launcher.config.Hosts,
 	}
 
-	if params.Hosts, err = launcher.getHostsFromResources(instance.service.serviceConfig.Resources); err != nil {
+	resourceHosts, err := launcher.getHostsFromResources(instance.service.serviceConfig.Resources)
+	if err != nil {
 		return err
 	}
+
+	params.Hosts = append(params.Hosts, resourceHosts...)
 
 	if instance.service.serviceConfig.Quotas.DownloadSpeed != nil {
 		params.IngressKbit = *instance.service.serviceConfig.Quotas.DownloadSpeed
