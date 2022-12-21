@@ -184,15 +184,12 @@ func (spec *runtimeSpec) addRlimit(rlimit runtimespec.POSIXRlimit) {
 }
 
 func getEnvVarName(envVar string) string {
-	const numEnvFields = 2
-
-	fields := strings.SplitN(envVar, "=", numEnvFields)
-
-	if len(fields) < numEnvFields {
+	lastPosition := strings.LastIndex(envVar, "=")
+	if lastPosition < 0 {
 		return strings.TrimSpace(envVar)
 	}
 
-	return strings.TrimSpace(fields[0])
+	return strings.TrimSpace(envVar[:lastPosition])
 }
 
 func (spec *runtimeSpec) mergeEnv(newVars []string) {
