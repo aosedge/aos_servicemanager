@@ -425,7 +425,7 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 		instances[i] = aostypes.InstanceInfo{
 			InstanceIdent: pbconvert.NewInstanceIdentFromPB(pbInstance.Instance),
 			UID:           pbInstance.Uid, Priority: pbInstance.Priority,
-			StoragePath: pbInstance.StatePath, StatePath: pbInstance.StoragePath,
+			StoragePath: pbInstance.StoragePath, StatePath: pbInstance.StatePath,
 		}
 	}
 
