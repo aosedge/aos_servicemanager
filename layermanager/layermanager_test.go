@@ -29,12 +29,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/spaceallocator"
 	"github.com/opencontainers/go-digest"
@@ -127,7 +127,7 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestInstallRemoveLayer(t *testing.T) {
+func TestProcessDesiredLayers(t *testing.T) {
 	testLayerStorage := &testLayerStorage{}
 
 	layerAllocator = &testAllocator{}
@@ -152,177 +152,86 @@ func TestInstallRemoveLayer(t *testing.T) {
 	}
 	defer layerManager.Close()
 
-	sizeLayerContent := int64(2 * kilobyte)
+	layers := make(map[string]aostypes.LayerInfo)
 
-	layerFile, digest, fileInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
+	generateLayer := []struct {
+		layerID          string
+		layerContentSize uint64
+	}{
+		{layerID: "layer1", layerContentSize: 2 * kilobyte},
+		{layerID: "layer2", layerContentSize: 1 * kilobyte},
+		{layerID: "layer3", layerContentSize: 3 * kilobyte},
 	}
 
-	layer := layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1}
-
-	if err = layerManager.InstallLayer(layer, layerFile, fileInfo); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
-	}
-
-	if err = layerManager.InstallLayer(layer, layerFile, fileInfo); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
-	}
-
-	list, err := layerManager.GetLayersInfo()
-	if err != nil {
-		t.Fatalf("Can't get layer list: %v", err)
-	}
-
-	if len(list) != 1 {
-		t.Error("Count of layers should be 1")
-	}
-
-	layerInfo, err := layerManager.GetLayerInfoByDigest(digest)
-	if err != nil {
-		t.Fatalf("Can't get layer info: %v", err)
-	}
-
-	if layerInfo.Digest != digest {
-		t.Errorf("Unexpected layer digest: %v", layerInfo.Digest)
-	}
-
-	if layerInfo.Path != filepath.Join(tmpDir, "layers", strings.Replace(digest, ":", "/", 1)) {
-		t.Errorf("Unexpected layer Path: %v", layerInfo.Path)
-	}
-
-	sizeLayerContent = int64(3 * kilobyte)
-
-	layerFile1, digest1, fileInfo1, err := createLayer(filepath.Join(tmpDir, "layerdir2"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
-	}
-
-	layer1 := layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest1, AosVersion: 1}
-
-	if err = layerManager.InstallLayer(layer1, layerFile1, fileInfo1); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
-	}
-
-	if list, err = layerManager.GetLayersInfo(); err != nil {
-		t.Fatalf("Can't get layer list: %v", err)
-	}
-
-	if len(list) != 2 {
-		t.Error("Count of layers should be 2")
-	}
-
-	if err = layerManager.RemoveLayer(digest); err != nil {
-		t.Fatalf("Can't remove layer: %v", err)
-	}
-
-	layerInfo, err = layerManager.GetLayerInfoByDigest(digest)
-	if err != nil {
-		t.Fatalf("Can't get layer info: %v", err)
-	}
-
-	if !layerInfo.Cached {
-		t.Error("Layer should be cached")
-	}
-
-	time.Sleep(2 * time.Second)
-
-	if _, err = layerManager.GetLayerInfoByDigest(digest); err == nil {
-		t.Fatal("Layer should not be exist")
-	}
-
-	testLayerStorage.addLayerFail = true
-	sizeLayerContent = int64(2 * kilobyte)
-
-	layerFile2, digest2, fileInfo2, err := createLayer(filepath.Join(tmpDir, "layerdir3"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
-	}
-
-	layer2 := layermanager.LayerInfo{LayerID: "LayerId3", Digest: digest2, AosVersion: 1}
-
-	if err = layerManager.InstallLayer(layer2, layerFile2, fileInfo2); err == nil {
-		t.Fatal("Layer should not be installed")
-	}
-
-	testLayerStorage.getLayerFail = true
-
-	if _, err = layerManager.GetLayersInfo(); err == nil {
-		t.Fatal("Should be error: can't get layers list")
-	}
-}
-
-func TestRestoreLayer(t *testing.T) {
-	testLayerStorage := &testLayerStorage{}
-
-	layerAllocator = &testAllocator{}
-
-	defer func() {
-		if err := os.RemoveAll(layersDir); err != nil {
-			t.Errorf("Can't remove layers dir: %v", err)
+	for _, layer := range generateLayer {
+		layerInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), int64(layer.layerContentSize), layer.layerID)
+		if err != nil {
+			t.Fatalf("Can't prepare layer: %v", err)
 		}
-	}()
 
-	layerManager, err := layermanager.New(
-		&config.Config{
-			LayersDir:    layersDir,
-			ExtractDir:   filepath.Join(tmpDir, "extract"),
-			DownloadDir:  filepath.Join(tmpDir, "download"),
-			LayerTTLDays: 2,
-		}, testLayerStorage)
-	if err != nil {
-		t.Fatalf("Can't create layer manager: %s", err)
-	}
-	defer layerManager.Close()
-
-	sizeLayerContent := int64(2 * kilobyte)
-
-	layerFile, digest, fileInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
+		layers[layer.layerID] = layerInfo
 	}
 
-	layer := layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1}
-
-	if err = layerManager.InstallLayer(layer, layerFile, fileInfo); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
+	cases := []struct {
+		desiredLayers   []aostypes.LayerInfo
+		removedLayers   []string
+		restoreLayers   []string
+		installedLayers []string
+	}{
+		{
+			desiredLayers:   getDesiredLayers(layers, []string{"layer1", "layer2", "layer3"}),
+			installedLayers: []string{"layer1", "layer2", "layer3"},
+		},
+		{
+			desiredLayers:   getDesiredLayers(layers, []string{"layer1", "layer3"}),
+			installedLayers: []string{"layer1", "layer3"},
+			removedLayers:   []string{"layer2"},
+		},
+		{
+			desiredLayers:   getDesiredLayers(layers, []string{"layer1", "layer2"}),
+			installedLayers: []string{"layer1"},
+			removedLayers:   []string{"layer3"},
+			restoreLayers:   []string{"layer2"},
+		},
 	}
 
-	if err = layerManager.UseLayer(digest); err != nil {
-		t.Errorf("Can't set use layer: %v", err)
-	}
+	for _, tCase := range cases {
+		if err := layerManager.ProcessDesiredLayers(tCase.desiredLayers); err != nil {
+			t.Errorf("Can't process desired layers: %v", err)
+		}
 
-	layerInfo, err := layerManager.GetLayerInfoByDigest(digest)
-	if err != nil {
-		t.Fatalf("Can't get layer info: %v", err)
-	}
+	nextInstallLayer:
+		for _, installLayer := range tCase.installedLayers {
+			for _, storeLayer := range testLayerStorage.layers {
+				if installLayer == storeLayer.LayerID {
+					continue nextInstallLayer
+				}
+			}
 
-	if layerInfo.Cached {
-		t.Error("Layer should not be cached")
-	}
+			t.Errorf("Layer %s should be installed", installLayer)
+		}
 
-	if err := layerManager.RemoveLayer(digest); err != nil {
-		t.Fatalf("Can't remove layer: %v", err)
-	}
+	nextRemoveLayer:
+		for _, removeLayer := range tCase.removedLayers {
+			for _, storeLayer := range testLayerStorage.layers {
+				if removeLayer == storeLayer.LayerID && storeLayer.Cached {
+					continue nextRemoveLayer
+				}
+			}
 
-	if layerInfo, err = layerManager.GetLayerInfoByDigest(digest); err != nil {
-		t.Fatalf("Can't get layer info by digest: %v", err)
-	}
+			t.Errorf("Layer %s should be cached", removeLayer)
+		}
 
-	if !layerInfo.Cached {
-		t.Error("Layer should be cached")
-	}
+	nextRestoreLayer:
+		for _, restoreLayer := range tCase.restoreLayers {
+			for _, storeLayer := range testLayerStorage.layers {
+				if restoreLayer == storeLayer.LayerID && !storeLayer.Cached {
+					continue nextRestoreLayer
+				}
+			}
 
-	if err := layerManager.RestoreLayer(digest); err != nil {
-		t.Fatalf("Can't restore layer: %v", err)
-	}
-
-	if layerInfo, err = layerManager.GetLayerInfoByDigest(digest); err != nil {
-		t.Fatalf("Can't get layer info by digest: %v", err)
-	}
-
-	if layerInfo.Cached {
-		t.Error("Layer should not be cached")
+			t.Errorf("Layer %s should not be cached", restoreLayer)
+		}
 	}
 }
 
@@ -349,15 +258,13 @@ func TestRemoveDemageLayerFolder(t *testing.T) {
 
 	sizeLayerContent := int64(1 * kilobyte)
 
-	layerFile, digest, fileInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent)
+	layerInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent, "layer1")
 	if err != nil {
 		t.Fatalf("Can't create layer: %v", err)
 	}
 
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
-		layerFile, fileInfo); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
+	if err = layerManager.ProcessDesiredLayers([]aostypes.LayerInfo{layerInfo}); err != nil {
+		t.Fatalf("Can't process desired layers: %v", err)
 	}
 
 	testLayerDir := filepath.Join(tmpDir, "layers/sha256/test")
@@ -385,18 +292,16 @@ func TestRemoveDemageLayerFolder(t *testing.T) {
 		t.Error("Test layer folder should be deleted")
 	}
 
-	layerFile, digest, fileInfo, err = createLayer(filepath.Join(tmpDir, "layerdir2"), sizeLayerContent)
+	layerInfo, err = createLayer(filepath.Join(tmpDir, "layerdir2"), sizeLayerContent, "layer2")
 	if err != nil {
 		t.Fatalf("Can't create layer: %v", err)
 	}
 
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest, AosVersion: 1},
-		layerFile, fileInfo); err != nil {
+	if err = layerManager.ProcessDesiredLayers([]aostypes.LayerInfo{layerInfo}); err != nil {
 		t.Fatalf("Can't install layer: %v", err)
 	}
 
-	layer, err := layerManager.GetLayerInfoByDigest(digest)
+	layer, err := layerManager.GetLayerInfoByDigest(layerInfo.Digest)
 	if err != nil {
 		t.Fatalf("Can't get layer: %v", err)
 	}
@@ -420,7 +325,7 @@ func TestRemoveDemageLayerFolder(t *testing.T) {
 	}
 	defer layerManager.Close()
 
-	if _, err = layerManager.GetLayerInfoByDigest(digest); err == nil {
+	if _, err = layerManager.GetLayerInfoByDigest(layerInfo.Digest); err == nil {
 		t.Fatal("Should be error: layer doesn't exist")
 	}
 }
@@ -447,7 +352,7 @@ func TestRemoteDownloadLayer(t *testing.T) {
 
 	sizeLayerContent := int64(10 * kilobyte)
 
-	layerFile, digest, fileInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent)
+	layerInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent, "layer1")
 	if err != nil {
 		t.Fatalf("Can't create layer: %v", err)
 	}
@@ -459,7 +364,7 @@ func TestRemoteDownloadLayer(t *testing.T) {
 
 	defer os.RemoveAll(fileServerDir)
 
-	urlVal, err := url.Parse(layerFile)
+	urlVal, err := url.Parse(layerInfo.URL)
 	if err != nil {
 		t.Fatalf("Can't parse url: %v", err)
 	}
@@ -484,9 +389,9 @@ func TestRemoteDownloadLayer(t *testing.T) {
 
 	defer server.Close()
 
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
-		"http://:9000/downloadImage", fileInfo); err != nil {
+	layerInfo.URL = "http://:9000/downloadImage"
+
+	if err = layerManager.ProcessDesiredLayers([]aostypes.LayerInfo{layerInfo}); err != nil {
 		t.Fatalf("Can't install layer: %v", err)
 	}
 }
@@ -514,53 +419,50 @@ func TestInstallLayerNotEnoughSpace(t *testing.T) {
 	}
 	defer layerManager.Close()
 
-	sizeLayerContent := int64(512 * kilobyte)
+	layers := make(map[string]aostypes.LayerInfo)
 
-	layerFile, digest, fileInfo, err := createLayer(filepath.Join(tmpDir, "layerdir1"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
+	generateLayer := []struct {
+		layerID          string
+		layerContentSize uint64
+	}{
+		{layerID: "layer1", layerContentSize: 512 * kilobyte},
+		{layerID: "layer2", layerContentSize: 520 * kilobyte},
+		{layerID: "layer3", layerContentSize: 600 * kilobyte},
 	}
 
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId1", Digest: digest, AosVersion: 1},
-		layerFile, fileInfo); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
+	for i, layer := range generateLayer {
+		layerInfo, err := createLayer(
+			filepath.Join(tmpDir, fmt.Sprintf("layerdir%d", i)), int64(layer.layerContentSize), layer.layerID)
+		if err != nil {
+			t.Fatalf("Can't prepare layer: %v", err)
+		}
+
+		layers[layer.layerID] = layerInfo
 	}
 
-	sizeLayerContent = int64(520 * kilobyte)
-
-	layerFile1, digest1, fileInfo1, err := createLayer(filepath.Join(tmpDir, "layerdir2"), sizeLayerContent)
-	if err != nil {
-		t.Fatalf("Can't create layer: %v", err)
+	cases := []struct {
+		desiredLayers       []aostypes.LayerInfo
+		processDesiredError error
+	}{
+		{
+			desiredLayers: getDesiredLayers(layers, []string{"layer1"}),
+		},
+		{
+			desiredLayers: getDesiredLayers(layers, []string{"layer2"}),
+		},
+		{
+			desiredLayers:       getDesiredLayers(layers, []string{"layer2", "layer3"}),
+			processDesiredError: spaceallocator.ErrNoSpace,
+		},
+		{
+			desiredLayers: getDesiredLayers(layers, []string{"layer3"}),
+		},
 	}
 
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest1, AosVersion: 1},
-		layerFile1, fileInfo1); err == nil {
-		t.Fatal("Should be error install layer")
-	}
-
-	if err := layerManager.UseLayer(digest); err != nil {
-		t.Fatalf("Can't set use layer: %v", err)
-	}
-
-	if err := layerManager.RemoveLayer(digest); err != nil {
-		t.Fatalf("Can't uninstall layer: %v", err)
-	}
-
-	layerInfo, err := layerManager.GetLayerInfoByDigest(digest)
-	if err != nil {
-		t.Fatalf("Can't get layer info: %v", err)
-	}
-
-	if !layerInfo.Cached {
-		t.Fatal("Layer should be cached")
-	}
-
-	if err = layerManager.InstallLayer(
-		layermanager.LayerInfo{LayerID: "LayerId2", Digest: digest1, AosVersion: 1},
-		layerFile1, fileInfo1); err != nil {
-		t.Fatalf("Can't install layer: %v", err)
+	for _, tCase := range cases {
+		if err := layerManager.ProcessDesiredLayers(tCase.desiredLayers); !errors.Is(err, tCase.processDesiredError) {
+			t.Errorf("Can't process desired layers: %v", err)
+		}
 	}
 }
 
@@ -746,50 +648,50 @@ func cleanup() {
 }
 
 func createLayer(
-	dir string, sizeLayerContent int64,
-) (layerFile string, digest string, fileInfo image.FileInfo, err error) {
+	dir string, sizeLayerContent int64, layerID string,
+) (layerInfo aostypes.LayerInfo, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 	defer os.RemoveAll(dir)
 
 	tmpLayerFolder := filepath.Join(tmpDir, "tmpLayerDir")
 	if err := os.MkdirAll(tmpLayerFolder, 0o755); err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	file, err := os.Create(filepath.Join(tmpLayerFolder, "layer.txt"))
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	defer os.RemoveAll(tmpLayerFolder)
 
 	if err := file.Truncate(sizeLayerContent); err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	tarFile := filepath.Join(dir, "layer.tar")
 
 	if output, err := exec.Command("tar", "-C", tmpLayerFolder, "-cf", tarFile, "./").CombinedOutput(); err != nil {
-		return "", "", fileInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
+		return layerInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
 	}
 	defer os.Remove(tarFile)
 
 	file, err = os.Open(tarFile)
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 	defer file.Close()
 
 	byteValue, err := ioutil.ReadAll(file)
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	layerDigest, err := generateAndSaveDigest(dir, byteValue)
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	layerDescriptor := imagespec.Descriptor{
@@ -800,28 +702,39 @@ func createLayer(
 
 	dataJSON, err := json.Marshal(layerDescriptor)
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	jsonFile, err := os.Create(filepath.Join(dir, "layer.json"))
 	if err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
 	if _, err := jsonFile.Write(dataJSON); err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
-	layerFile = filepath.Join(tmpDir, layerDigest.Hex()+".tar.gz")
+	layerFile := filepath.Join(tmpDir, layerDigest.Hex()+".tar.gz")
 	if output, err := exec.Command("tar", "-C", dir, "-czf", layerFile, "./").CombinedOutput(); err != nil {
-		return "", "", fileInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
+		return layerInfo, aoserrors.New(fmt.Sprintf("error: %s, code: %s", string(output), err))
 	}
 
-	if fileInfo, err = image.CreateFileInfo(context.Background(), layerFile); err != nil {
-		return "", "", fileInfo, aoserrors.Wrap(err)
+	fileInfo, err := image.CreateFileInfo(context.Background(), layerFile)
+	if err != nil {
+		return layerInfo, aoserrors.Wrap(err)
 	}
 
-	return "file://" + layerFile, string(layerDigest), fileInfo, nil
+	return aostypes.LayerInfo{
+		VersionInfo: aostypes.VersionInfo{
+			AosVersion: 1,
+		},
+		URL:    "file://" + layerFile,
+		Digest: string(layerDigest),
+		ID:     layerID,
+		Sha256: fileInfo.Sha256,
+		Sha512: fileInfo.Sha512,
+		Size:   fileInfo.Size,
+	}, nil
 }
 
 func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest, err error) {
@@ -841,4 +754,15 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	}
 
 	return retDigest, nil
+}
+
+func getDesiredLayers(layers map[string]aostypes.LayerInfo, layersID []string) (desiredLayers []aostypes.LayerInfo) {
+	for _, layerID := range layersID {
+		layer, ok := layers[layerID]
+		if ok {
+			desiredLayers = append(desiredLayers, layer)
+		}
+	}
+
+	return
 }

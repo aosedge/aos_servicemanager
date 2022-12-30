@@ -18,60 +18,43 @@
 package launcher
 
 import (
-	"encoding/hex"
 	"path/filepath"
 
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_servicemanager/runner"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/aoscloud/aos_servicemanager/runner"
 )
 
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
 
-type instanceInfo struct {
+type runtimeInstanceInfo struct {
 	InstanceInfo
 	service         *serviceInfo
 	runStatus       runner.InstanceStatus
-	isStarted       bool
 	runtimeDir      string
 	secret          string
-	storagePath     string
-	statePath       string
-	stateChecksum   []byte
 	overrideEnvVars []string
 }
-
-type byPriority []*instanceInfo
-
-/***********************************************************************************************************************
- * Sort instance priority
- **********************************************************************************************************************/
-
-func (instances byPriority) Len() int { return len(instances) }
-
-func (instances byPriority) Less(i, j int) bool {
-	return instances[i].SubjectID < instances[j].SubjectID ||
-		instances[i].ServiceID < instances[j].ServiceID ||
-		instances[i].Instance < instances[j].Instance
-}
-func (instances byPriority) Swap(i, j int) { instances[i], instances[j] = instances[j], instances[i] }
 
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
-func newInstanceInfo(info InstanceInfo) *instanceInfo {
-	return &instanceInfo{InstanceInfo: info, runtimeDir: filepath.Join(RuntimeDir, info.InstanceID)}
+func newRuntimeInstanceInfo(info InstanceInfo) *runtimeInstanceInfo {
+	return &runtimeInstanceInfo{InstanceInfo: info, runtimeDir: filepath.Join(RuntimeDir, info.InstanceID)}
 }
 
-func (instance *instanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
+func (instance *runtimeInstanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
 	status := cloudprotocol.InstanceStatus{
 		InstanceIdent: instance.InstanceIdent,
-		AosVersion:    instance.AosVersion,
-		StateChecksum: hex.EncodeToString(instance.stateChecksum),
 		RunState:      instance.runStatus.State,
+	}
+
+	if instance.service != nil {
+		status.AosVersion = instance.service.AosVersion
 	}
 
 	if status.RunState == cloudprotocol.InstanceStateFailed {
@@ -85,45 +68,34 @@ func (instance *instanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
 	return status
 }
 
-func (instance *instanceInfo) setRunStatus(runStatus runner.InstanceStatus) {
+func (instance *runtimeInstanceInfo) setRunStatus(runStatus runner.InstanceStatus) {
 	instance.runStatus = runStatus
 
 	if runStatus.State == cloudprotocol.InstanceStateFailed {
-		log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
-			log.Fields{"instanceID": runStatus.InstanceID})).Errorf("Instance failed: %v", runStatus.Err)
+		log.WithFields(instanceLogFields(instance, nil)).Errorf("Instance failed: %v", runStatus.Err)
 
 		return
 	}
 
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent,
-		log.Fields{"instanceID": runStatus.InstanceID})).Info("Instance successfully started")
+	log.WithFields(instanceLogFields(instance, nil)).Info("Instance successfully started")
 }
 
-func (launcher *Launcher) getCurrentInstance(instanceIdent cloudprotocol.InstanceIdent) (InstanceInfo, error) {
-	for _, currentInstance := range launcher.currentInstances {
-		if currentInstance.InstanceIdent == instanceIdent {
-			return currentInstance.InstanceInfo, nil
-		}
-	}
-
-	return InstanceInfo{}, ErrNotExist
-}
-
-func (launcher *Launcher) instanceFailed(instance *instanceInfo, err error) {
+func (launcher *Launcher) instanceFailed(instance *runtimeInstanceInfo, err error) {
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
 
-	log.WithFields(instanceIdentLogFields(instance.InstanceIdent, nil)).Errorf("Instance failed: %v", err)
+	log.WithFields(instanceLogFields(instance, nil)).Errorf("Instance failed: %v", err)
 
 	instance.runStatus.State = cloudprotocol.InstanceStateFailed
 	instance.runStatus.Err = err
 }
 
-func instanceIdentLogFields(instance cloudprotocol.InstanceIdent, extraFields log.Fields) log.Fields {
+func instanceLogFields(instance *runtimeInstanceInfo, extraFields log.Fields) log.Fields {
 	logFields := log.Fields{
-		"serviceID": instance.ServiceID,
-		"subjectID": instance.SubjectID,
-		"instance":  instance.Instance,
+		"serviceID":     instance.ServiceID,
+		"subjectID":     instance.SubjectID,
+		"instanceIndex": instance.Instance,
+		"instanceID":    instance.InstanceID,
 	}
 
 	for k, v := range extraFields {
@@ -153,21 +125,4 @@ func instanceFilterLogFields(filter cloudprotocol.InstanceFilter, extraFields lo
 	}
 
 	return logFields
-}
-
-func appendInstances(instances []*instanceInfo, instance ...*instanceInfo) []*instanceInfo {
-	var newInstances []*instanceInfo
-
-instanceLoop:
-	for _, newInstance := range instance {
-		for _, existingInstance := range instances {
-			if newInstance == existingInstance {
-				continue instanceLoop
-			}
-		}
-
-		newInstances = append(newInstances, newInstance)
-	}
-
-	return newInstances
 }

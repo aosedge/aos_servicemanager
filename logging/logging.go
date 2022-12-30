@@ -111,23 +111,14 @@ func (instance *Logging) Close() {
 }
 
 // GetInstanceLog returns instance log.
-func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestServiceLog) error {
+func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestLog) error {
 	log.WithField("request", logRequestToString(request)).Debug("Get instance log")
 
-	instances, err := instance.instanceProvider.GetInstanceIDs(request.InstanceFilter)
+	logRequest, err := instance.prepareInstanceLogRequest(request)
 	if err != nil {
-		return aoserrors.Wrap(err)
-	}
+		instance.sendErrorResponse(err.Error(), request.LogID)
 
-	if len(instances) == 0 {
-		return aoserrors.New("no instance IDs for log request")
-	}
-
-	logRequest := getLogRequest{
-		instanceIDs: instances,
-		logID:       request.LogID,
-		from:        request.From,
-		till:        request.Till,
+		return err
 	}
 
 	go func() {
@@ -142,23 +133,14 @@ func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestServiceLog)
 }
 
 // GetServiceCrashLog returns instance crash log.
-func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestServiceCrashLog) error {
+func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestLog) error {
 	log.WithField("request", logRequestToString(request)).Debug("Get instance crash log")
 
-	instances, err := instance.instanceProvider.GetInstanceIDs(request.InstanceFilter)
+	logRequest, err := instance.prepareInstanceLogRequest(request)
 	if err != nil {
-		return aoserrors.Wrap(err)
-	}
+		instance.sendErrorResponse(err.Error(), request.LogID)
 
-	if len(instances) == 0 {
-		return aoserrors.New("no instance ids for crash log request")
-	}
-
-	logRequest := getLogRequest{
-		instanceIDs: instances,
-		logID:       request.LogID,
-		from:        request.From,
-		till:        request.Till,
+		return err
 	}
 
 	go func() {
@@ -173,13 +155,13 @@ func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestServic
 }
 
 // GetSystemLog returns system log.
-func (instance *Logging) GetSystemLog(request cloudprotocol.RequestSystemLog) {
+func (instance *Logging) GetSystemLog(request cloudprotocol.RequestLog) {
 	log.WithField("request", logRequestToString(request)).Debug("Get system log")
 
 	logRequest := getLogRequest{
 		logID: request.LogID,
-		from:  request.From,
-		till:  request.Till,
+		from:  request.Filter.From,
+		till:  request.Filter.Till,
 	}
 
 	go func() {
@@ -430,7 +412,9 @@ func (instance *Logging) archivateCrashLog(
 func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	response := cloudprotocol.PushLog{
 		LogID: logID,
-		Error: errorStr,
+		ErrorInfo: &cloudprotocol.ErrorInfo{
+			Message: errorStr,
+		},
 	}
 
 	instance.logChannel <- response
@@ -472,6 +456,26 @@ func (instance *Logging) seekToTime(journal JournalInterface, from *time.Time) (
 	}
 
 	return aoserrors.Wrap(journal.SeekHead())
+}
+
+func (instance *Logging) prepareInstanceLogRequest(
+	request cloudprotocol.RequestLog,
+) (logRequest getLogRequest, err error) {
+	instances, err := instance.instanceProvider.GetInstanceIDs(request.Filter.InstanceFilter)
+	if err != nil {
+		return logRequest, aoserrors.Wrap(err)
+	}
+
+	if len(instances) == 0 {
+		return logRequest, aoserrors.New("no instance ids for log request")
+	}
+
+	return getLogRequest{
+		instanceIDs: instances,
+		logID:       request.LogID,
+		from:        request.Filter.From,
+		till:        request.Filter.Till,
+	}, nil
 }
 
 func createLogString(entry *sdjournal.JournalEntry, addUnit bool) (logStr string) {

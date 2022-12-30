@@ -60,22 +60,23 @@ type Migration struct {
 
 // Config instance.
 type Config struct {
-	CACert             string `json:"caCert"`
-	SMServerURL        string `json:"smServerUrl"`
-	CertStorage        string `json:"certStorage"`
-	IAMServerURL       string `json:"iamServer"`
-	IAMPublicServerURL string `json:"iamPublicServer"`
-	WorkingDir         string `json:"workingDir"`
-	StorageDir         string `json:"storageDir"`
-	StateDir           string `json:"stateDir"`
-	ServicesDir        string `json:"servicesDir"`
-	ServicesPartLimit  uint   `json:"servicesPartLimit"`
-	LayersDir          string `json:"layersDir"`
-	LayersPartLimit    uint   `json:"layersPartLimit"`
-	DownloadDir        string `json:"downloadDir"`
-	ExtractDir         string `json:"extractDir"`
-
-	BoardConfigFile           string                 `json:"boardConfigFile"`
+	CACert                    string                 `json:"caCert"`
+	CertStorage               string                 `json:"certStorage"`
+	CMServerURL               string                 `json:"cmServerUrl"`
+	IAMProtectedServerURL     string                 `json:"iamProtectedServerUrl"`
+	IAMPublicServerURL        string                 `json:"iamPublicServerUrl"`
+	WorkingDir                string                 `json:"workingDir"`
+	StorageDir                string                 `json:"storageDir"`
+	StateDir                  string                 `json:"stateDir"`
+	ServicesDir               string                 `json:"servicesDir"`
+	ServicesPartLimit         uint                   `json:"servicesPartLimit"`
+	LayersDir                 string                 `json:"layersDir"`
+	LayersPartLimit           uint                   `json:"layersPartLimit"`
+	DownloadDir               string                 `json:"downloadDir"`
+	ExtractDir                string                 `json:"extractDir"`
+	RemoteNode                bool                   `json:"remoteNode"`
+	RunnerFeatures            []string               `json:"runnerFeatures"`
+	UnitConfigFile            string                 `json:"unitConfigFile"`
 	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
 	LayerTTLDays              uint64                 `json:"layerTtlDays"`
 	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
@@ -120,14 +121,6 @@ func New(fileName string) (config *Config, err error) {
 		return config, aoserrors.Wrap(err)
 	}
 
-	if config.Monitoring.WorkingDir == "" {
-		config.Monitoring.WorkingDir = config.WorkingDir
-	}
-
-	if config.Monitoring.StorageDir == "" {
-		config.Monitoring.WorkingDir = config.StorageDir
-	}
-
 	if config.CertStorage == "" {
 		config.CertStorage = "/var/aos/crypt/sm/"
 	}
@@ -152,8 +145,8 @@ func New(fileName string) (config *Config, err error) {
 		config.ExtractDir = path.Join(config.WorkingDir, "extract")
 	}
 
-	if config.BoardConfigFile == "" {
-		config.BoardConfigFile = path.Join(config.WorkingDir, "aos_board.cfg")
+	if config.UnitConfigFile == "" {
+		config.UnitConfigFile = path.Join(config.WorkingDir, "aos_unit.cfg")
 	}
 
 	if config.Migration.MigrationPath == "" {

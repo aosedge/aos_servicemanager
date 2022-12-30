@@ -32,7 +32,7 @@ import (
 	"unicode"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/aostypes"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -406,7 +406,7 @@ func TestDNSPluginPositive(t *testing.T) {
 	testData := []testPluginsData{
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -422,7 +422,7 @@ func TestDNSPluginPositive(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  1,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -447,7 +447,7 @@ func TestDNSPluginPositive(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  2,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -466,7 +466,7 @@ func TestDNSPluginPositive(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -482,7 +482,7 @@ func TestDNSPluginPositive(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  2,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -548,7 +548,7 @@ func TestDNSPluginNegative(t *testing.T) {
 	testData := []testPluginsData{
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -561,7 +561,7 @@ func TestDNSPluginNegative(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -575,7 +575,7 @@ func TestDNSPluginNegative(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
@@ -589,7 +589,7 @@ func TestDNSPluginNegative(t *testing.T) {
 		},
 		{
 			params: networkmanager.NetworkParams{
-				InstanceIdent: cloudprotocol.InstanceIdent{
+				InstanceIdent: aostypes.InstanceIdent{
 					Instance:  1,
 					SubjectID: "user2",
 					ServiceID: "service0",

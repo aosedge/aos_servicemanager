@@ -21,25 +21,27 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/image"
 	"github.com/aoscloud/aos_common/spaceallocator"
-	"github.com/aoscloud/aos_common/utils/action"
 	"github.com/opencontainers/go-digest"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/mod/sumdb/dirhash"
 
 	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/utils/uidgidpool"
 	"github.com/aoscloud/aos_servicemanager/utils/whiteouts"
 )
 
@@ -47,10 +49,7 @@ import (
  * Consts
  **********************************************************************************************************************/
 
-const (
-	maxConcurrentActions = 10
-	tmpRootFSDir         = "tmprootfs"
-)
+const tmpRootFSDir = "tmprootfs"
 
 /***********************************************************************************************************************
  * Types
@@ -58,20 +57,11 @@ const (
 
 // ServiceStorage provides API to create, remove or access services DB.
 type ServiceStorage interface {
-	GetService(serviceID string) (ServiceInfo, error)
-	GetLatestVersionServices() ([]ServiceInfo, error)
-	GetCachedServices() ([]ServiceInfo, error)
-	AddService(ServiceInfo) error
 	GetAllServiceVersions(serviceID string) ([]ServiceInfo, error)
-	RemoveService(ServiceInfo) error
-	ActivateService(serviceID string, aosVersion uint64) error
-	SetServiceTimestamp(serviceID string, aosVersion uint64, timestamp time.Time) error
-	SetServiceCached(serviceID string, cached bool) error
-}
-
-// LayerProvider layer provider.
-type LayerProvider interface {
-	UseLayer(digest string) error
+	GetServices() ([]ServiceInfo, error)
+	AddService(ServiceInfo) error
+	RemoveService(serviceID string, aosVersion uint64) error
+	SetServiceCached(serviceID string, aosVersion uint64, cached bool) error
 }
 
 // ServiceManager instance.
@@ -80,10 +70,7 @@ type ServiceManager struct {
 	servicesDir            string
 	downloadDir            string
 	serviceTTLDays         uint64
-	actionHandler          *action.Handler
-	gidPool                *uidgidpool.IdentifierPool
 	serviceInfoProvider    ServiceStorage
-	layerProvider          LayerProvider
 	serviceAllocator       spaceallocator.Allocator
 	downloadAllocator      spaceallocator.Allocator
 	validateTTLStopChannel chan struct{}
@@ -91,17 +78,15 @@ type ServiceManager struct {
 
 // ServiceInfo service information.
 type ServiceInfo struct {
+	aostypes.VersionInfo
 	ServiceID       string
-	AosVersion      uint64
 	ServiceProvider string
-	Description     string
 	ImagePath       string
-	GID             int
 	ManifestDigest  []byte
 	Timestamp       time.Time
-	IsActive        bool
 	Cached          bool
 	Size            uint64
+	GID             uint32
 }
 
 /***********************************************************************************************************************
@@ -129,16 +114,13 @@ var RemoveCachedServicesPeriod = 24 * time.Hour
 
 // New creates new service manager object.
 func New(
-	config *config.Config, serviceInfoProvider ServiceStorage, layerProvider LayerProvider,
+	config *config.Config, serviceInfoProvider ServiceStorage,
 ) (sm *ServiceManager, err error) {
 	sm = &ServiceManager{
 		servicesDir:            config.ServicesDir,
 		downloadDir:            config.DownloadDir,
 		serviceTTLDays:         config.ServiceTTLDays,
-		actionHandler:          action.New(maxConcurrentActions),
-		gidPool:                uidgidpool.NewGroupIDPool(),
 		serviceInfoProvider:    serviceInfoProvider,
-		layerProvider:          layerProvider,
 		validateTTLStopChannel: make(chan struct{}),
 	}
 
@@ -163,26 +145,19 @@ func New(
 		return nil, aoserrors.Wrap(err)
 	}
 
-	services, err := sm.serviceInfoProvider.GetLatestVersionServices()
+	services, err := sm.serviceInfoProvider.GetServices()
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
 	for _, service := range services {
-		if err = sm.gidPool.AddID(service.GID); err != nil {
-			log.Errorf("Can't add service GID to pool: %v", err)
+		if !service.Cached {
+			continue
 		}
 
-		if service.Cached {
-			size, err := sm.getServiceSize(service.ServiceID)
-			if err != nil {
-				return nil, aoserrors.Wrap(err)
-			}
-
-			if err = sm.serviceAllocator.AddOutdatedItem(
-				service.ServiceID, size, service.Timestamp); err != nil {
-				return nil, aoserrors.Wrap(err)
-			}
+		if err := sm.serviceAllocator.AddOutdatedItem(
+			fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion), service.Size, service.Timestamp); err != nil {
+			return nil, aoserrors.Wrap(err)
 		}
 	}
 
@@ -190,7 +165,7 @@ func New(
 		log.Errorf("Can't remove damaged service folders: %v", err)
 	}
 
-	if err := sm.removeOutdatedServices(); err != nil {
+	if err := sm.removeOutdatedServices(services); err != nil {
 		log.Errorf("Can't remove outdated services: %v", err)
 	}
 
@@ -199,6 +174,7 @@ func New(
 	return sm, nil
 }
 
+// Close closes service manager instance.
 func (sm *ServiceManager) Close() {
 	if err := sm.serviceAllocator.Close(); err != nil {
 		log.Errorf("Can't close service allocator: %v", err)
@@ -211,51 +187,20 @@ func (sm *ServiceManager) Close() {
 	close(sm.validateTTLStopChannel)
 }
 
-// InstallService install service to the system.
-func (sm *ServiceManager) InstallService(
-	newService ServiceInfo, imageURL string, fileInfo image.FileInfo,
-) (err error) {
-	return <-sm.actionHandler.Execute(newService.ServiceID,
-		func(id string) error {
-			return sm.doInstallService(newService, imageURL, fileInfo)
-		},
-	)
-}
-
-func (sm *ServiceManager) RestoreService(serviceID string) error {
-	return <-sm.actionHandler.Execute(serviceID,
-		func(id string) error {
-			return sm.doRestoreService(serviceID)
-		},
-	)
-}
-
-// RemoveService removes service from the system.
-func (sm *ServiceManager) RemoveService(serviceID string) (err error) {
-	return <-sm.actionHandler.Execute(serviceID,
-		func(id string) error {
-			return sm.doRemoveService(serviceID)
-		},
-	)
-}
-
-// GetAllServicesStatus gets all services status.
-func (sm *ServiceManager) GetAllServicesStatus() ([]ServiceInfo, error) {
-	services, err := sm.serviceInfoProvider.GetLatestVersionServices()
-	return services, aoserrors.Wrap(err)
-}
-
 // GetServiceInfo gets service information by id.
 func (sm *ServiceManager) GetServiceInfo(serviceID string) (serviceInfo ServiceInfo, err error) {
-	if serviceInfo, err = sm.serviceInfoProvider.GetService(serviceID); err != nil {
+	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
+	if err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
 
-	if serviceInfo.Cached {
-		return serviceInfo, ErrNotExist
+	for _, service := range services {
+		if service.ServiceID == serviceID && !service.Cached {
+			return service, nil
+		}
 	}
 
-	return serviceInfo, nil
+	return serviceInfo, ErrNotExist
 }
 
 // GetImageParts gets image parts for the service.
@@ -263,49 +208,25 @@ func (sm *ServiceManager) GetImageParts(service ServiceInfo) (parts ImageParts, 
 	return getImageParts(service.ImagePath)
 }
 
-// ApplyService applies already installed service.
-func (sm *ServiceManager) ApplyService(service ServiceInfo) (err error) {
-	return <-sm.actionHandler.Execute(service.ServiceID,
-		func(id string) error {
-			return sm.doApplyService(service)
-		},
-	)
-}
-
-// RevertService reverts already installed service.
-func (sm *ServiceManager) RevertService(service ServiceInfo) (retErr error) {
-	return <-sm.actionHandler.Execute(service.ServiceID,
-		func(id string) error {
-			return sm.doRevertService(service)
-		},
-	)
-}
-
-// UseService sets last use of service.
-func (sm *ServiceManager) UseService(serviceID string, aosVersion uint64) error {
-	if err := sm.serviceInfoProvider.SetServiceTimestamp(serviceID, aosVersion, time.Now().UTC()); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	serviceInfo, err := sm.serviceInfoProvider.GetService(serviceID)
+// ProcessDesiredServices installs, removes, restores desired services on the system.
+func (sm *ServiceManager) ProcessDesiredServices(desiredServices []aostypes.ServiceInfo) error {
+	services, err := sm.serviceInfoProvider.GetServices()
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	manifest, err := getImageManifest(serviceInfo.ImagePath)
-	if err != nil {
-		return aoserrors.Wrap(err)
+	if desiredServices, err = sm.updateCachedServices(desiredServices, services); err != nil {
+		return err
 	}
 
-	for _, digest := range getLayersFromManifest(manifest) {
-		if err := sm.layerProvider.UseLayer(digest); err != nil {
-			return aoserrors.Wrap(err)
-		}
+	if err = sm.installServices(desiredServices); err != nil {
+		return err
 	}
 
 	return nil
 }
 
+// ValidateService validate service.
 func (sm *ServiceManager) ValidateService(service ServiceInfo) error {
 	manifestCheckSum, err := getManifestChecksum(service.ImagePath)
 	if err != nil {
@@ -323,60 +244,66 @@ func (sm *ServiceManager) ValidateService(service ServiceInfo) error {
  * Private
  **********************************************************************************************************************/
 
-func (sm *ServiceManager) doRestoreService(serviceID string) error {
-	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Restore service")
+func (sm *ServiceManager) updateCachedServices(
+	desiredServices []aostypes.ServiceInfo, storeServices []ServiceInfo,
+) (installServices []aostypes.ServiceInfo, err error) {
+nextService:
+	for _, storeService := range storeServices {
+		for i, desiredService := range desiredServices {
+			if desiredService.ID == storeService.ServiceID && desiredService.AosVersion == storeService.AosVersion {
+				if storeService.Cached {
+					if err := sm.setServiceCached(storeService, false); err != nil {
+						return desiredServices, err
+					}
+				}
 
-	service, err := sm.serviceInfoProvider.GetService(serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
+				desiredServices = append(desiredServices[:i], desiredServices[i+1:]...)
+
+				continue nextService
+			}
+		}
+
+		if !storeService.Cached {
+			if err := sm.setServiceCached(storeService, true); err != nil {
+				return desiredServices, err
+			}
+		}
 	}
 
-	if !service.Cached {
-		log.Warningf("Service %v not cached", serviceID)
+	return desiredServices, nil
+}
 
-		return nil
-	}
-
-	if err = sm.setServiceCached(service, false); err != nil {
-		return aoserrors.Wrap(err)
+func (sm *ServiceManager) installServices(desiredServices []aostypes.ServiceInfo) error {
+	for _, desiredService := range desiredServices {
+		if err := sm.installService(desiredService); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL string, fileInfo image.FileInfo) error {
-	log.WithFields(log.Fields{"serviceID": newService.ServiceID}).Debug("Install service")
-
-	serviceFromStorage, err := sm.serviceInfoProvider.GetService(newService.ServiceID)
-	if err != nil && !errors.Is(err, ErrNotExist) {
-		return aoserrors.Wrap(err)
-	}
-
-	var isServiceExist bool
-
-	if err == nil {
-		isServiceExist = true
-
-		if newService.AosVersion <= serviceFromStorage.AosVersion {
-			return ErrVersionMismatch
-		}
-	}
+func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error {
+	log.WithFields(log.Fields{
+		"ID":         serviceInfo.ID,
+		"AosVersion": serviceInfo.AosVersion,
+	}).Debug("Install service")
 
 	var spacePackage, spaceService spaceallocator.Space
 
-	newService.ImagePath, newService.Size, spacePackage, err = sm.extractPackageByURL(imageURL, fileInfo)
+	imagePath, size, spacePackage, err := sm.extractPackageByURL(&serviceInfo)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	defer func() {
 		if err != nil {
-			releaseAllocatedSpace(newService.ImagePath, spaceService, spacePackage)
+			releaseAllocatedSpace(imagePath, spaceService, spacePackage)
 
 			log.WithFields(log.Fields{
-				"id":         newService.ServiceID,
-				"aosVersion": newService.AosVersion,
-				"imagePath":  newService.ImagePath,
+				"id":         serviceInfo.ID,
+				"aosVersion": serviceInfo.AosVersion,
+				"imagePath":  imagePath,
 			}).Errorf("Can't install service: %v", err)
 
 			return
@@ -385,105 +312,45 @@ func (sm *ServiceManager) doInstallService(newService ServiceInfo, imageURL stri
 		acceptAllocatedSpace(spaceService, spacePackage)
 	}()
 
-	if err = validateUnpackedImage(newService.ImagePath); err != nil {
+	if err = validateUnpackedImage(imagePath); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if isServiceExist {
-		newService.GID = serviceFromStorage.GID
-	} else {
-		newService.GID, err = sm.gidPool.GetFreeID()
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	serviceSize, space, rootFSDigest, err := sm.prepareServiceFS(newService.ImagePath, newService.GID)
+	serviceSize, space, rootFSDigest, err := sm.prepareServiceFS(imagePath, int(serviceInfo.GID))
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	spaceService = space
-	newService.Size += uint64(serviceSize)
+	size += uint64(serviceSize)
 
-	if err = updateRootFSDigestInManifest(newService.ImagePath, rootFSDigest); err != nil {
+	if err = updateRootFSDigestInManifest(imagePath, rootFSDigest); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	newService.ManifestDigest, err = getManifestChecksum(newService.ImagePath)
+	manifestDigest, err := getManifestChecksum(imagePath)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if isServiceExist {
-		if err = sm.removeObsoleteServiceVersions(serviceFromStorage); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if err = sm.serviceInfoProvider.AddService(newService); err != nil {
+	if err = sm.serviceInfoProvider.AddService(ServiceInfo{
+		VersionInfo:     serviceInfo.VersionInfo,
+		ServiceID:       serviceInfo.ID,
+		ServiceProvider: serviceInfo.ProviderID,
+		ImagePath:       imagePath,
+		Size:            size,
+		ManifestDigest:  manifestDigest,
+		Timestamp:       time.Now().UTC(),
+		GID:             serviceInfo.GID,
+	}); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
-		"id":         newService.ServiceID,
-		"aosVersion": newService.AosVersion,
-		"imagePath":  newService.ImagePath,
+		"id":         serviceInfo.ID,
+		"aosVersion": serviceInfo.AosVersion,
+		"imagePath":  imagePath,
 	}).Info("Service successfully installed")
-
-	return nil
-}
-
-func (sm *ServiceManager) doApplyService(service ServiceInfo) (err error) {
-	oldServices, err := sm.serviceInfoProvider.GetAllServiceVersions(service.ServiceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	for _, oldService := range oldServices {
-		if oldService.AosVersion == service.AosVersion {
-			continue
-		}
-
-		if err = sm.removeService(oldService); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	if err = sm.serviceInfoProvider.ActivateService(service.ServiceID, service.AosVersion); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func (sm *ServiceManager) doRevertService(service ServiceInfo) error {
-	return sm.removeService(service)
-}
-
-func (sm *ServiceManager) doRemoveService(serviceID string) error {
-	log.WithFields(log.Fields{"serviceID": serviceID}).Debug("Remove service")
-
-	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	var serviceSize uint64
-
-	for _, service := range services {
-		serviceSize += service.Size
-	}
-
-	if serviceSize > 0 {
-		if err = sm.setServiceCached(ServiceInfo{
-			ServiceID: serviceID,
-			Timestamp: services[len(services)-1].Timestamp,
-			Size:      serviceSize,
-		}, true); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
 
 	return nil
 }
@@ -495,7 +362,14 @@ func (sm *ServiceManager) validateTTLs() {
 	for {
 		select {
 		case <-removeTicker.C:
-			if err := sm.removeOutdatedServices(); err != nil {
+			services, err := sm.serviceInfoProvider.GetServices()
+			if err != nil {
+				log.Errorf("Can't get services: %v", err)
+
+				continue
+			}
+
+			if err := sm.removeOutdatedServices(services); err != nil {
 				log.Errorf("Can't remove outdated services: %v", err)
 			}
 
@@ -505,19 +379,15 @@ func (sm *ServiceManager) validateTTLs() {
 	}
 }
 
-func (sm *ServiceManager) removeOutdatedServices() error {
-	services, err := sm.serviceInfoProvider.GetCachedServices()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
+func (sm *ServiceManager) removeOutdatedServices(services []ServiceInfo) error {
 	for _, service := range services {
-		if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
-			if err := <-sm.actionHandler.Execute(service.ServiceID,
-				func(id string) error {
-					return sm.removeService(service)
-				}); err != nil {
-				return err
+		if service.Cached {
+			if service.Timestamp.Add(time.Hour * 24 * time.Duration(sm.serviceTTLDays)).Before(time.Now()) {
+				if err := sm.removeService(service); err != nil {
+					return err
+				}
+
+				sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion))
 			}
 		}
 	}
@@ -525,42 +395,35 @@ func (sm *ServiceManager) removeOutdatedServices() error {
 	return nil
 }
 
-func (sm *ServiceManager) removeOutdatedService(serviceID string) error {
+func (sm *ServiceManager) removeOutdatedService(id string) error {
+	serviceInfo := strings.Split(id, "_")
+	if len(serviceInfo) < 2 { //nolint:gomnd
+		return aoserrors.New("Unexpected service id format")
+	}
+
+	aosVersionStr := serviceInfo[len(serviceInfo)-1]
+	serviceInfo = serviceInfo[:len(serviceInfo)-1]
+	serviceID := strings.Join(serviceInfo, "_")
+
 	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, service := range services {
-		if err := os.RemoveAll(service.ImagePath); err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
-			return aoserrors.Wrap(err)
-		}
-	}
-
-	return nil
-}
-
-func (sm *ServiceManager) removeObsoleteServiceVersions(service ServiceInfo) error {
-	services, err := sm.serviceInfoProvider.GetAllServiceVersions(service.ServiceID)
-	if err != nil && !errors.Is(err, ErrNotExist) {
+	aosVersion, err := strconv.ParseUint(aosVersionStr, 10, 64)
+	if err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	for _, storageService := range services {
-		if service.AosVersion != storageService.AosVersion {
-			if err = sm.removeService(service); err != nil {
-				return err
+	for _, service := range services {
+		if service.AosVersion == aosVersion {
+			if err := os.RemoveAll(service.ImagePath); err != nil {
+				return aoserrors.Wrap(err)
 			}
-		}
-	}
 
-	if service.Cached {
-		if err = sm.setServiceCached(service, false); err != nil {
-			return aoserrors.Wrap(err)
+			if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+				return aoserrors.Wrap(err)
+			}
 		}
 	}
 
@@ -568,20 +431,22 @@ func (sm *ServiceManager) removeObsoleteServiceVersions(service ServiceInfo) err
 }
 
 func (sm *ServiceManager) setServiceCached(service ServiceInfo, cached bool) error {
-	if err := sm.serviceInfoProvider.SetServiceCached(service.ServiceID, cached); err != nil {
+	if err := sm.serviceInfoProvider.SetServiceCached(service.ServiceID, service.AosVersion, cached); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
+	id := fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion)
+
 	if cached {
 		if err := sm.serviceAllocator.AddOutdatedItem(
-			service.ServiceID, service.Size, service.Timestamp); err != nil {
+			id, service.Size, service.Timestamp); err != nil {
 			return aoserrors.Wrap(err)
 		}
 
 		return nil
 	}
 
-	sm.serviceAllocator.RestoreOutdatedItem(service.ServiceID)
+	sm.serviceAllocator.RestoreOutdatedItem(id)
 
 	return nil
 }
@@ -592,16 +457,19 @@ func (sm *ServiceManager) removeService(service ServiceInfo) error {
 	}
 
 	if service.Cached {
-		sm.serviceAllocator.RestoreOutdatedItem(service.ServiceID)
+		sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion))
 	}
 
 	sm.serviceAllocator.FreeSpace(service.Size)
 
-	if err := sm.serviceInfoProvider.RemoveService(service); err != nil {
+	if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	log.WithFields(log.Fields{"serviceID": service.ServiceID}).Info("Service successfully removed")
+	log.WithFields(log.Fields{
+		"serviceID":  service.ServiceID,
+		"aosVersion": service.AosVersion,
+	}).Info("Service successfully removed")
 
 	return nil
 }
@@ -682,7 +550,7 @@ func (sm *ServiceManager) removeDamagedServiceFolders(services []ServiceInfo) er
 		if err != nil || !fi.Mode().IsDir() {
 			log.Warnf("Service missing: %v", service.ImagePath)
 
-			if err = sm.serviceInfoProvider.RemoveService(service); err != nil {
+			if err = sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
 				return aoserrors.Wrap(err)
 			}
 		}
@@ -714,9 +582,9 @@ filesLoop:
 }
 
 func (sm *ServiceManager) extractPackageByURL(
-	packageURL string, fileInfo image.FileInfo,
+	serviceInfo *aostypes.ServiceInfo,
 ) (imagePath string, serviceSize uint64, space spaceallocator.Space, err error) {
-	urlVal, err := url.Parse(packageURL)
+	urlVal, err := url.Parse(serviceInfo.URL)
 	if err != nil {
 		return "", 0, nil, aoserrors.Wrap(err)
 	}
@@ -724,7 +592,7 @@ func (sm *ServiceManager) extractPackageByURL(
 	var sourceFile string
 
 	if urlVal.Scheme != "file" {
-		space, err := sm.downloadAllocator.AllocateSpace(fileInfo.Size)
+		space, err := sm.downloadAllocator.AllocateSpace(serviceInfo.Size)
 		if err != nil {
 			return "", 0, nil, aoserrors.Wrap(err)
 		}
@@ -735,7 +603,7 @@ func (sm *ServiceManager) extractPackageByURL(
 			}
 		}()
 
-		if sourceFile, err = image.Download(context.Background(), sm.downloadDir, packageURL); err != nil {
+		if sourceFile, err = image.Download(context.Background(), sm.downloadDir, serviceInfo.URL); err != nil {
 			return "", 0, nil, aoserrors.Wrap(err)
 		}
 
@@ -744,7 +612,11 @@ func (sm *ServiceManager) extractPackageByURL(
 		sourceFile = urlVal.Path
 	}
 
-	if err = image.CheckFileInfo(context.Background(), sourceFile, fileInfo); err != nil {
+	if err = image.CheckFileInfo(context.Background(), sourceFile, image.FileInfo{
+		Sha256: serviceInfo.Sha256,
+		Sha512: serviceInfo.Sha512,
+		Size:   serviceInfo.Size,
+	}); err != nil {
 		return "", 0, nil, aoserrors.Wrap(err)
 	}
 
@@ -767,19 +639,6 @@ func (sm *ServiceManager) extractPackageByURL(
 	}
 
 	return imagePath, uint64(size), space, nil
-}
-
-func (sm *ServiceManager) getServiceSize(serviceID string) (size uint64, err error) {
-	services, err := sm.serviceInfoProvider.GetAllServiceVersions(serviceID)
-	if err != nil {
-		return 0, aoserrors.Wrap(err)
-	}
-
-	for _, service := range services {
-		size += service.Size
-	}
-
-	return size, nil
 }
 
 func acceptAllocatedSpace(spaceService spaceallocator.Space, spacePackage spaceallocator.Space) {

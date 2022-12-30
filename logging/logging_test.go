@@ -97,9 +97,12 @@ func TestGetServiceLog(t *testing.T) {
 
 	testJournal.addMessage("This is log", unitName, "", "2")
 
-	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &from, Till: &till,
+	if err = logging.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &from, Till: &till,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -115,9 +118,12 @@ func TestGetServiceLog(t *testing.T) {
 		t.Error(err)
 	}
 
-	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &from,
+	if err = logging.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &from,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -151,17 +157,21 @@ func TestGetSystemLog(t *testing.T) {
 		testJournal.addMessage("Hello World", "logger", "", "2")
 	}
 
-	logging.GetSystemLog(cloudprotocol.RequestSystemLog{
+	logging.GetSystemLog(cloudprotocol.RequestLog{
 		LogID: "log10",
-		From:  &from,
-		Till:  &till,
+		Filter: cloudprotocol.LogFilter{
+			From: &from,
+			Till: &till,
+		},
 	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
 
-	logging.GetSystemLog(cloudprotocol.RequestSystemLog{
+	logging.GetSystemLog(cloudprotocol.RequestLog{
 		LogID: "log10",
-		Till:  &till,
+		Filter: cloudprotocol.LogFilter{
+			Till: &till,
+		},
 	})
 
 	checkReceivedLog(t, logging.GetLogsDataChannel(), nil, nil)
@@ -189,9 +199,12 @@ func TestGetEmptyLog(t *testing.T) {
 
 	_ = instanceProvider.addFilter(instanceFilter)
 
-	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &from, Till: &till,
+	if err = logging.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &from, Till: &till,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -228,8 +241,10 @@ func TestGetServiceCrashLog(t *testing.T) {
 	testJournal.addMessage("somelog3", unitName, "", "2")
 	testJournal.addMessage("process exited", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
 
-	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: instanceFilter,
+	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance crash log: %s", err)
 	}
@@ -246,9 +261,11 @@ func TestGetServiceCrashLog(t *testing.T) {
 		t.Error(err)
 	}
 
-	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: instanceFilter,
-		From:           &from, Till: &till,
+	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &from, Till: &till,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance crash log: %s", err)
 	}
@@ -284,9 +301,12 @@ func TestMaxPartCountLog(t *testing.T) {
 			unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
 	}
 
-	if err = logging.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &from, Till: &till,
+	if err = logging.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &from, Till: &till,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -294,23 +314,23 @@ func TestMaxPartCountLog(t *testing.T) {
 	for {
 		select {
 		case result := <-logging.GetLogsDataChannel():
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo != nil {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
-			if result.Data == nil {
+			if result.Content == nil {
 				t.Error("No data")
 				return
 			}
 
-			if result.PartCount == 0 {
+			if result.PartsCount == 0 {
 				t.Error("Missing part count")
 				return
 			}
 
-			if result.PartCount != 2 {
-				t.Errorf("Wrong part count received: %d", result.PartCount)
+			if result.PartsCount != 2 {
+				t.Errorf("Wrong part count received: %d", result.PartsCount)
 				return
 			}
 
@@ -319,7 +339,7 @@ func TestMaxPartCountLog(t *testing.T) {
 				return
 			}
 
-			if result.Part > result.PartCount {
+			if result.Part > result.PartsCount {
 				t.Errorf("Wrong part received: %d", result.Part)
 				return
 			}
@@ -345,14 +365,18 @@ func TestLogErrorCases(t *testing.T) {
 	}
 	defer loggingInstance.Close()
 
-	if err := loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
+	if err := loggingInstance.GetInstanceLog(cloudprotocol.RequestLog{
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
+		},
 	}); err == nil {
 		t.Error("should be error: no instance ids for log request")
 	}
 
-	if err := loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
+	if err := loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
+		},
 	}); err == nil {
 		t.Error("should be error: no instance ids for log request")
 	}
@@ -363,18 +387,24 @@ func TestLogErrorCases(t *testing.T) {
 		unitName       = "aos-service@" + instanceProvider.addFilter(instanceFilter) + ".service"
 	)
 
-	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &faultTime,
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &faultTime,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
 
 	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
 
-	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", Till: &faultTime,
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			Till:           &faultTime,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -385,18 +415,22 @@ func TestLogErrorCases(t *testing.T) {
 
 	testJournal.addMessage("Started", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
 
-	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0",
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
 
 	checkErrorLog(t, loggingInstance.GetLogsDataChannel())
 
-	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0",
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -405,16 +439,22 @@ func TestLogErrorCases(t *testing.T) {
 
 	logging.SDJournal = nil
 
-	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestServiceLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", From: &faultTime,
+	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			From:           &faultTime,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
 
-	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestServiceCrashLog{
-		InstanceFilter: instanceFilter,
-		LogID:          "log0", Till: &faultTime,
+	if err = loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestLog{
+		LogID: "log0",
+		Filter: cloudprotocol.LogFilter{
+			InstanceFilter: instanceFilter,
+			Till:           &faultTime,
+		},
 	}); err != nil {
 		t.Fatalf("Can't get instance log: %s", err)
 	}
@@ -568,7 +608,7 @@ matchLoop:
  **********************************************************************************************************************/
 
 func instanceFormFilter(filter cloudprotocol.InstanceFilter) string {
-	return fmt.Sprintf("%s.%s.%s", filter.ServiceID, *filter.SubjectID, strconv.FormatUint(*filter.Instance, 10))
+	return fmt.Sprintf("%s.%s.%s", *filter.ServiceID, *filter.SubjectID, strconv.FormatUint(*filter.Instance, 10))
 }
 
 func getTimeRange(logData string) (from, till time.Time, err error) {
@@ -603,17 +643,17 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo != nil {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
-			if result.Data == nil {
+			if result.Content == nil {
 				t.Error("No data")
 				return
 			}
 
-			zr, err := gzip.NewReader(bytes.NewBuffer(result.Data))
+			zr, err := gzip.NewReader(bytes.NewBuffer(result.Content))
 			if err != nil {
 				t.Errorf("gzip error: %s", err)
 				return
@@ -627,7 +667,7 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 
 			receivedLog += string(data)
 
-			if result.Part == result.PartCount {
+			if result.Part == result.PartsCount {
 				if from == nil || till == nil {
 					return
 				}
@@ -662,12 +702,12 @@ func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error != "" {
-				t.Errorf("Error log received: %s", result.Error)
+			if result.ErrorInfo != nil {
+				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
 
-			if (result.Data == nil) || len(result.Data) != 0 {
+			if (result.Content == nil) || len(result.Content) != 0 {
 				t.Error("Empty log expected")
 				return
 			}
@@ -687,8 +727,8 @@ func checkErrorLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.Error == "" {
-				t.Errorf("Should be error %s", result.Error)
+			if result.ErrorInfo.Message == "" {
+				t.Errorf("Should be error %s", result.ErrorInfo.Message)
 			}
 
 			return

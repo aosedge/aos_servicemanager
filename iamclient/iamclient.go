@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v2"
+	"github.com/aoscloud/aos_common/aostypes"
+	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
 	"github.com/aoscloud/aos_common/utils/cryptutils"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
@@ -39,12 +39,7 @@ import (
  * Consts
  **********************************************************************************************************************/
 
-const (
-	iamRequestTimeout   = 30 * time.Second
-	iamReconnectTimeout = 10 * time.Second
-)
-
-const subjectsChangedChannelSize = 1
+const iamRequestTimeout = 30 * time.Second
 
 /***********************************************************************************************************************
  * Types
@@ -54,15 +49,17 @@ const subjectsChangedChannelSize = 1
 type Client struct {
 	sync.Mutex
 
-	subjects []string
+	nodeID   string
+	nodeType string
 
-	publicConnection    *grpc.ClientConn
-	protectedConnection *grpc.ClientConn
-	pbclientPublic      pb.IAMPublicServiceClient
-	pbclientProtected   pb.IAMProtectedServiceClient
+	publicConnection         *grpc.ClientConn
+	protectedConnection      *grpc.ClientConn
+	publicService            pb.IAMPublicServiceClient
+	publicPermissionsService pb.IAMPublicPermissionsServiceClient
+	publicIdentifyService    pb.IAMPublicIdentityServiceClient
+	permissionsService       pb.IAMPermissionsServiceClient
 
-	closeChannel           chan struct{}
-	subjectsChangedChannel chan []string
+	closeChannel chan struct{}
 }
 
 /***********************************************************************************************************************
@@ -76,8 +73,7 @@ func New(
 	log.Debug("Connecting to IAM...")
 
 	client = &Client{
-		closeChannel:           make(chan struct{}, 1),
-		subjectsChangedChannel: make(chan []string, subjectsChangedChannelSize),
+		closeChannel: make(chan struct{}, 1),
 	}
 
 	defer func() {
@@ -106,10 +102,12 @@ func New(
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclientPublic = pb.NewIAMPublicServiceClient(client.publicConnection)
+	client.publicService = pb.NewIAMPublicServiceClient(client.publicConnection)
+	client.publicPermissionsService = pb.NewIAMPublicPermissionsServiceClient(client.publicConnection)
+	client.publicIdentifyService = pb.NewIAMPublicIdentityServiceClient(client.publicConnection)
 
 	if !insecureConn {
-		certURL, keyURL, err := client.GetCertKeyURL(config.CertStorage)
+		certURL, keyURL, err := client.GetCertificate(config.CertStorage)
 		if err != nil {
 			return client, err
 		}
@@ -123,39 +121,54 @@ func New(
 	}
 
 	if client.protectedConnection, err = grpc.DialContext(
-		ctx, config.IAMServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
+		ctx, config.IAMProtectedServerURL, secureProtectedOpt, grpc.WithBlock()); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
-	client.pbclientProtected = pb.NewIAMProtectedServiceClient(client.protectedConnection)
+	client.permissionsService = pb.NewIAMPermissionsServiceClient(client.protectedConnection)
 
 	log.Debug("Connected to IAM")
 
-	if client.subjects, err = client.getSubjects(); err != nil {
+	if client.nodeID, client.nodeType, err = client.getNodeInfo(); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
-
-	go client.handleSubjectsChanged()
 
 	return client, nil
 }
 
-// GetSubjects returns current subjects.
-func (client *Client) GetSubjects() (subjects []string) {
-	client.Lock()
-	defer client.Unlock()
-
-	return client.subjects
+// GetNodeID returns node ID.
+func (client *Client) GetNodeID() string {
+	return client.nodeID
 }
 
-// GetSubjectsChangedChannel returns subjects changed channel.
-func (client *Client) GetSubjectsChangedChannel() (channel <-chan []string) {
-	return client.subjectsChangedChannel
+// GetNodeType returns node type.
+func (client *Client) GetNodeType() string {
+	return client.nodeType
+}
+
+// GetCertificate gets certificate and key url from IAM by type.
+func (client *Client) GetCertificate(certType string) (certURL, keyURL string, err error) {
+	log.WithFields(log.Fields{
+		"type": certType,
+	}).Debug("Get certificate")
+
+	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
+	defer cancel()
+
+	response, err := client.publicService.GetCert(
+		ctx, &pb.GetCertRequest{Type: certType})
+	if err != nil {
+		return "", "", aoserrors.Wrap(err)
+	}
+
+	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
+
+	return response.CertUrl, response.KeyUrl, nil
 }
 
 // RegisterInstance registers new service instance with permissions and create secret.
 func (client *Client) RegisterInstance(
-	instance cloudprotocol.InstanceIdent, permissions map[string]map[string]string,
+	instance aostypes.InstanceIdent, permissions map[string]map[string]string,
 ) (secret string, err error) {
 	log.WithFields(log.Fields{
 		"serviceID": instance.ServiceID,
@@ -171,7 +184,7 @@ func (client *Client) RegisterInstance(
 		reqPermissions[key] = &pb.Permissions{Permissions: value}
 	}
 
-	response, err := client.pbclientProtected.RegisterInstance(ctx,
+	response, err := client.permissionsService.RegisterInstance(ctx,
 		&pb.RegisterInstanceRequest{Instance: instanceIdentToPB(instance), Permissions: reqPermissions})
 	if err != nil {
 		return "", aoserrors.Wrap(err)
@@ -181,7 +194,7 @@ func (client *Client) RegisterInstance(
 }
 
 // UnregisterInstance unregisters service instance.
-func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (err error) {
+func (client *Client) UnregisterInstance(instance aostypes.InstanceIdent) (err error) {
 	log.WithFields(log.Fields{
 		"serviceID": instance.ServiceID,
 		"subjectID": instance.SubjectID,
@@ -191,7 +204,7 @@ func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	if _, err := client.pbclientProtected.UnregisterInstance(ctx,
+	if _, err := client.permissionsService.UnregisterInstance(ctx,
 		&pb.UnregisterInstanceRequest{Instance: instanceIdentToPB(instance)}); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -202,7 +215,7 @@ func (client *Client) UnregisterInstance(instance cloudprotocol.InstanceIdent) (
 // GetPermissions gets permissions by secret and functional server ID.
 func (client *Client) GetPermissions(
 	secret, funcServerID string,
-) (instance cloudprotocol.InstanceIdent, permissions map[string]string, err error) {
+) (instance aostypes.InstanceIdent, permissions map[string]string, err error) {
 	log.WithField("funcServerID", funcServerID).Debug("Get permissions")
 
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
@@ -210,25 +223,15 @@ func (client *Client) GetPermissions(
 
 	req := &pb.PermissionsRequest{Secret: secret, FunctionalServerId: funcServerID}
 
-	response, err := client.pbclientPublic.GetPermissions(ctx, req)
+	response, err := client.publicPermissionsService.GetPermissions(ctx, req)
 	if err != nil {
 		return instance, nil, aoserrors.Wrap(err)
 	}
 
-	return cloudprotocol.InstanceIdent{
+	return aostypes.InstanceIdent{
 		ServiceID: response.Instance.ServiceId,
-		SubjectID: response.Instance.SubjectId, Instance: uint64(response.Instance.Instance),
+		SubjectID: response.Instance.SubjectId, Instance: response.Instance.Instance,
 	}, response.Permissions.Permissions, nil
-}
-
-// GetCertKeyURL gets cerificate and key url from IAM.
-func (client *Client) GetCertKeyURL(keyType string) (certURL, keyURL string, err error) {
-	response, err := client.pbclientPublic.GetCert(context.Background(), &pb.GetCertRequest{Type: keyType})
-	if err != nil {
-		return "", "", aoserrors.Wrap(err)
-	}
-
-	return response.CertUrl, response.KeyUrl, nil
 }
 
 // Close closes IAM client.
@@ -251,96 +254,23 @@ func (client *Client) Close() (err error) {
  * Private
  **********************************************************************************************************************/
 
-func (client *Client) getSubjects() (subjects []string, err error) {
+func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
-	request := &empty.Empty{}
-
-	response, err := client.pbclientPublic.GetSubjects(ctx, request)
+	response, err := client.publicService.GetNodeInfo(ctx, &empty.Empty{})
 	if err != nil {
-		return nil, aoserrors.Wrap(err)
+		return "", "", aoserrors.Wrap(err)
 	}
 
-	log.WithFields(log.Fields{"subjects": response.Subjects}).Debug("Get subjects")
+	log.WithFields(log.Fields{
+		"nodeID":   response.NodeId,
+		"nodeType": response.NodeType,
+	}).Debug("Get node Info")
 
-	return response.Subjects, nil
+	return response.NodeId, response.NodeType, nil
 }
 
-func (client *Client) handleSubjectsChanged() {
-	err := client.subscribeSubjectsChanged()
-
-	for {
-		if err != nil && len(client.closeChannel) == 0 {
-			log.Errorf("Error subscribe subjects changed: %s", err)
-			log.Debugf("Reconnect to IAM in %v...", iamReconnectTimeout)
-		}
-
-		select {
-		case <-client.closeChannel:
-			return
-
-		case <-time.After(iamReconnectTimeout):
-			err = client.subscribeSubjectsChanged()
-		}
-	}
-}
-
-func (client *Client) subscribeSubjectsChanged() (err error) {
-	log.Debug("Subscribe to subjects changed notification")
-
-	request := &empty.Empty{}
-
-	stream, err := client.pbclientPublic.SubscribeSubjectsChanged(context.Background(), request)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	subjects, err := client.getSubjects()
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if !isSubjectsEqual(subjects, client.subjects) {
-		client.Lock()
-		client.subjects = subjects
-		client.Unlock()
-
-		client.subjectsChangedChannel <- client.subjects
-	}
-
-	for {
-		notification, err := stream.Recv()
-		if err != nil {
-			return aoserrors.Wrap(err)
-		}
-
-		log.WithFields(log.Fields{"subjects": notification.Subjects}).Debug("Subjects changed notification")
-
-		if !isSubjectsEqual(notification.Subjects, client.subjects) {
-			client.Lock()
-			client.subjects = notification.Subjects
-			client.Unlock()
-
-			client.subjectsChangedChannel <- client.subjects
-		}
-	}
-}
-
-func isSubjectsEqual(subjects1, subjects2 []string) (result bool) {
-	if len(subjects1) != len(subjects2) {
-		return false
-	}
-
-	for i, subject := range subjects1 {
-		if subject != subjects2[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
-func instanceIdentToPB(ident cloudprotocol.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: int64(ident.Instance)}
+func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
+	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
 }

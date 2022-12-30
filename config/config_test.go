@@ -37,22 +37,24 @@ import (
 
 func createConfigFile() (err error) {
 	configContent := `{
-	"CACert" : "CACert",	
-	"smServerUrl": "smserver",
-	"workingDir" : "workingDir",
+	"CACert": "CACert",	
 	"certStorage": "sm",
-	"storageDir" : "/var/aos/storage",
-	"stateDir" : "/var/aos/state",
+	"iamProtectedServerUrl": "localhost:8089",
+	"iamPublicServerUrl": "localhost:8090",
+	"cmServerUrl": "aoscm:8093",
+	"workingDir": "workingDir",
+	"storageDir": "/var/aos/storage",
+	"stateDir": "/var/aos/state",
 	"servicesDir": "/var/aos/servicemanager/services",
 	"servicesPartLimit": 10,
 	"layersDir": "/var/aos/srvlib",
 	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
-	"boardConfigFile" : "/var/aos/aos_board.cfg",
-	"iamServer" : "localhost:8089",
-	"iamPublicServer" : "localhost:8090",
-	"layerTtlDays" : 40,
+	"remoteNode": true,
+	"runnerFeatures": ["crun", "runc"],
+	"unitConfigFile": "/var/aos/aos_unit.cfg",
+	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
 		"sendPeriod": "5m",
@@ -153,14 +155,14 @@ func TestGetCrypt(t *testing.T) {
 	}
 }
 
-func TestSMServerURL(t *testing.T) {
+func TestCMServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.SMServerURL != "smserver" {
-		t.Errorf("Wrong smServer value: %s", config.SMServerURL)
+	if config.CMServerURL != "aoscm:8093" {
+		t.Errorf("Wrong cmServer url value: %s", config.CMServerURL)
 	}
 }
 
@@ -190,14 +192,14 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 	}
 }
 
-func TestGetBoardConfigFile(t *testing.T) {
+func TestGetUnitConfigFile(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.BoardConfigFile != "/var/aos/aos_board.cfg" {
-		t.Errorf("Wrong board config value: %s", config.BoardConfigFile)
+	if config.UnitConfigFile != "/var/aos/aos_unit.cfg" {
+		t.Errorf("Wrong unit config value: %s", config.UnitConfigFile)
 	}
 }
 
@@ -245,14 +247,14 @@ func TestGetExtractDir(t *testing.T) {
 	}
 }
 
-func TestGetIAMServerURL(t *testing.T) {
+func TestGetIAMProtectedServerURL(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.IAMServerURL != "localhost:8089" {
-		t.Errorf("Wrong IAM server value: %s", config.IAMServerURL)
+	if config.IAMProtectedServerURL != "localhost:8089" {
+		t.Errorf("Wrong IAM server value: %s", config.IAMProtectedServerURL)
 	}
 }
 
@@ -429,5 +431,27 @@ func TestPartLimit(t *testing.T) {
 
 	if config.LayersPartLimit != 20 {
 		t.Errorf("Wrong LayersPartLimit value: %v", config.LayersPartLimit)
+	}
+}
+
+func TestRemoteNodeFalg(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if config.RemoteNode != true {
+		t.Errorf("Wrong remoteNode value: %v", config.RemoteNode)
+	}
+}
+
+func TestRunnerFeatures(t *testing.T) {
+	config, err := config.New("tmp/aos_servicemanager.cfg")
+	if err != nil {
+		t.Fatalf("Error opening config file: %v", err)
+	}
+
+	if !reflect.DeepEqual(config.RunnerFeatures, []string{"crun", "runc"}) {
+		t.Errorf("Wrong runnerFeatures value: %v", config.RunnerFeatures)
 	}
 }

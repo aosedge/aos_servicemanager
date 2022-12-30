@@ -21,9 +21,7 @@ import (
 	"errors"
 
 	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
@@ -44,6 +42,9 @@ type serviceInfo struct {
  **********************************************************************************************************************/
 
 func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
 	launcher.currentServices = make(map[string]*serviceInfo)
 
 	for _, instance := range instances {
@@ -72,13 +73,6 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 		}
 
 		launcher.currentServices[instance.ServiceID] = &service
-
-		if service.err == nil {
-			if err := launcher.serviceProvider.UseService(
-				service.ServiceInfo.ServiceID, service.ServiceInfo.AosVersion); err != nil {
-				log.WithField("serviceID", service.ServiceInfo.ServiceID).Warnf("Can't use service: %v", err)
-			}
-		}
 	}
 }
 
@@ -89,18 +83,4 @@ func (launcher *Launcher) getCurrentServiceInfo(serviceID string) (*serviceInfo,
 	}
 
 	return service, service.err
-}
-
-func (service *serviceInfo) cloudStatus(status string, err error) cloudprotocol.ServiceStatus {
-	serviceStatus := cloudprotocol.ServiceStatus{
-		ID:         service.ServiceID,
-		AosVersion: service.AosVersion,
-		Status:     status,
-	}
-
-	if err != nil {
-		serviceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{Message: err.Error()}
-	}
-
-	return serviceStatus
 }

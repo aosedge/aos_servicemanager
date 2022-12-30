@@ -23,8 +23,9 @@ import (
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_servicemanager/runner"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/aoscloud/aos_servicemanager/runner"
 )
 
 /***********************************************************************************************************************
@@ -102,7 +103,7 @@ func setEnvVarsErr(
 
 func (launcher *Launcher) getInstanceEnvVars(instance InstanceInfo) (envVars []string) {
 	for _, envVarInfo := range launcher.currentEnvVars {
-		if (envVarInfo.ServiceID == instance.ServiceID) &&
+		if (envVarInfo.ServiceID == nil || *envVarInfo.ServiceID == instance.ServiceID) &&
 			(envVarInfo.SubjectID == nil || *envVarInfo.SubjectID == instance.SubjectID) &&
 			(envVarInfo.Instance == nil || *envVarInfo.Instance == instance.Instance) {
 			for _, envVar := range envVarInfo.EnvVars {
@@ -166,8 +167,7 @@ instancesLoop:
 	for _, instance := range launcher.currentInstances {
 		if !reflect.DeepEqual(launcher.getInstanceEnvVars(instance.InstanceInfo), instance.overrideEnvVars) {
 			log.WithFields(
-				instanceIdentLogFields(instance.InstanceIdent, nil),
-			).Debug("Restart instance due to environment variables change")
+				instanceLogFields(instance, nil)).Debug("Restart instance due to environment variables change")
 
 			statusMap[instance.InstanceID] = instance.runStatus
 
@@ -185,7 +185,7 @@ instancesLoop:
 
 	// Send updated status if it is changed after env vars applying
 
-	updateInstancesStatus := &UpdateInstancesStatus{Instances: make([]cloudprotocol.InstanceStatus, 0)}
+	updateInstancesStatus := &InstancesStatus{Instances: make([]cloudprotocol.InstanceStatus, 0)}
 
 	for instanceID, runStatus := range statusMap {
 		currentInstance, ok := launcher.currentInstances[instanceID]
