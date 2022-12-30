@@ -40,6 +40,7 @@ import (
 	"github.com/google/uuid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 
 	"github.com/aoscloud/aos_servicemanager/config"
@@ -63,6 +64,7 @@ const (
 	instanceStateFile      = "/state.dat"
 	upperDirName           = "upperdir"
 	workDirName            = "workdir"
+	runxRunner             = "runx"
 )
 
 /***********************************************************************************************************************
@@ -475,9 +477,11 @@ func (launcher *Launcher) releaseRuntime(instance *runtimeInstanceInfo) (err err
 		}
 	}
 
-	if networkErr := launcher.networkManager.RemoveInstanceFromNetwork(
-		instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
-		err = aoserrors.Wrap(networkErr)
+	if !slices.Contains(launcher.config.RunnerFeatures, runxRunner) {
+		if networkErr := launcher.networkManager.RemoveInstanceFromNetwork(
+			instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
+			err = aoserrors.Wrap(networkErr)
+		}
 	}
 
 	if deviceErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); deviceErr != nil && err == nil {
@@ -650,9 +654,11 @@ func (launcher *Launcher) setupNetwork(instance *runtimeInstanceInfo) (err error
 		params.AllowedConnections = append(params.AllowedConnections, key)
 	}
 
-	if err := launcher.networkManager.AddInstanceToNetwork(
-		instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
-		return aoserrors.Wrap(err)
+	if !slices.Contains(launcher.config.RunnerFeatures, runxRunner) {
+		if err := launcher.networkManager.AddInstanceToNetwork(
+			instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
+			return aoserrors.Wrap(err)
+		}
 	}
 
 	return nil
