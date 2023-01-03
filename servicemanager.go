@@ -34,6 +34,7 @@ import (
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/coreos/go-systemd/journal"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 
 	"github.com/aoscloud/aos_servicemanager/alerts"
 	"github.com/aoscloud/aos_servicemanager/config"
@@ -207,9 +208,16 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.monitor, err = resourcemonitor.New(
-		sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
-		return sm, aoserrors.Wrap(err)
+	if !slices.Contains(cfg.RunnerFeatures, "runx") {
+		if sm.monitor, err = resourcemonitor.New(
+			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
+			return sm, aoserrors.Wrap(err)
+		}
+	} else {
+		if sm.monitor, err = resourcemonitor.New(
+			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, nil); err != nil {
+			return sm, aoserrors.Wrap(err)
+		}
 	}
 
 	if sm.resourcemanager, err = resource.New(sm.iam.GetNodeType(), cfg.UnitConfigFile, sm.alerts); err != nil {
