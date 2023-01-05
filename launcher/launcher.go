@@ -62,8 +62,7 @@ const (
 	instanceRootFS         = "rootfs"
 	instanceMountPointsDir = "mounts"
 	instanceStateFile      = "/state.dat"
-	upperDirName           = "upperdir"
-	workDirName            = "workdir"
+	instanceStorageDir     = "/storage"
 	runxRunner             = "runx"
 )
 
@@ -863,27 +862,21 @@ rootLabel:
 	return nil
 }
 
-func prepareStorageDir(path string, uid, gid uint32) (upperDir, workDir string, err error) {
-	upperDir = filepath.Join(path, upperDirName)
-	workDir = filepath.Join(path, workDirName)
-
-	if err = os.MkdirAll(upperDir, 0o755); err != nil {
-		return "", "", aoserrors.Wrap(err)
+func prepareStorageDir(path string, uid, gid uint32) error {
+	_, err := os.Stat(path)
+	if err == nil {
+		return nil
 	}
 
-	if err = os.Chown(upperDir, int(uid), int(gid)); err != nil {
-		return "", "", aoserrors.Wrap(err)
+	if err = os.MkdirAll(path, 0o755); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(workDir, 0o755); err != nil {
-		return "", "", aoserrors.Wrap(err)
+	if err = os.Chown(path, int(uid), int(gid)); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	if err = os.Chown(workDir, int(uid), int(gid)); err != nil {
-		return "", "", aoserrors.Wrap(err)
-	}
-
-	return upperDir, workDir, nil
+	return nil
 }
 
 func prepareStateFile(path string, uid, gid uint32) error {
@@ -952,16 +945,7 @@ func (launcher *Launcher) prepareRootFS(instance *runtimeInstanceInfo, runtimeCo
 		return aoserrors.Wrap(err)
 	}
 
-	var upperDir, workDir string
-
-	if instance.StoragePath != "" {
-		if upperDir, workDir, err = prepareStorageDir(
-			launcher.getAbsStoragePath(instance.StoragePath), instance.UID, instance.service.GID); err != nil {
-			return err
-		}
-	}
-
-	if err = MountFunc(rootfsDir, layersDir, workDir, upperDir); err != nil {
+	if err = MountFunc(rootfsDir, layersDir, "", ""); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

@@ -551,6 +551,18 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 		}
 	}
 
+	if instance.StoragePath != "" {
+		absStoragePath := launcher.getAbsStoragePath(instance.StoragePath)
+
+		if err := prepareStorageDir(absStoragePath, instance.UID, instance.service.GID); err != nil {
+			return nil, err
+		}
+
+		if err := spec.addBindMount(absStoragePath, instanceStorageDir, "rw"); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := spec.setUserUIDGID(instance.UID, instance.service.GID); err != nil {
 		return nil, err
 	}
