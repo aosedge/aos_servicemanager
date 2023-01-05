@@ -20,7 +20,6 @@ package launcher
 import (
 	"context"
 	"errors"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -188,7 +187,8 @@ type Launcher struct {
 const OperationVersion = 9
 
 // Mount, unmount instance FS functions.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var (
 	MountFunc   = fs.OverlayMount
 	UnmountFunc = fs.Umount
@@ -201,9 +201,9 @@ var (
 	ErrNoRuntimeStatus = errors.New("no runtime status")
 )
 
-var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
 
-// nolint:gochecknoglobals // used to be overridden in unit tests
+//nolint:gochecknoglobals // used to be overridden in unit tests
 var (
 	// RuntimeDir specifies directory where instance runtime spec is stored.
 	RuntimeDir = "/run/aos/runtime"
@@ -829,7 +829,7 @@ func (launcher *Launcher) prepareHostFSDir() (err error) {
 		allowedDirs = launcher.config.HostBinds
 	}
 
-	rootContent, err := ioutil.ReadDir("/")
+	rootContent, err := os.ReadDir("/")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
