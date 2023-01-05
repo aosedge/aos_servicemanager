@@ -530,12 +530,12 @@ func TestHostFSDir(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	rootItems, err := ioutil.ReadDir("/")
+	rootItems, err := os.ReadDir("/")
 	if err != nil {
 		t.Fatalf("Can't read root dir: %v", err)
 	}
 
-	whiteoutItems, err := ioutil.ReadDir(filepath.Join(tmpDir, "hostfs", "whiteouts"))
+	whiteoutItems, err := os.ReadDir(filepath.Join(tmpDir, "hostfs", "whiteouts"))
 	if err != nil {
 		t.Fatalf("Can't read root dir: %v", err)
 	}
@@ -554,8 +554,13 @@ func TestHostFSDir(t *testing.T) {
 
 		for i, whiteoutItem := range whiteoutItems {
 			if rootItem.Name() == whiteoutItem.Name() {
-				if whiteoutItem.Mode() != 0o410000000 {
-					t.Errorf("Wrong white out mode 0o%o", whiteoutItem.Mode())
+				info, err := whiteoutItem.Info()
+				if err != nil {
+					t.Fatalf("Can't get whiteout info: %v", err)
+				}
+
+				if info.Mode() != 0o410000000 {
+					t.Errorf("Wrong white out mode 0o%o", info.Mode())
 				}
 
 				whiteoutItems = append(whiteoutItems[:i], whiteoutItems[i+1:]...)
