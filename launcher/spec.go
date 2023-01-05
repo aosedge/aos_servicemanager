@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
@@ -110,7 +109,7 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 		spec.ociSpec.Linux.Resources.CPU = &runtimespec.LinuxCPU{}
 	}
 
-	cpuQuota := int64((defaultCPUPeriod * (cpuLimit)) / 100) // nolint:gomnd // Translate to percents
+	cpuQuota := int64((defaultCPUPeriod * (cpuLimit)) / 100) //nolint:gomnd // Translate to percents
 	cpuPeriod := defaultCPUPeriod
 
 	spec.ociSpec.Linux.Resources.CPU.Period = &cpuPeriod
@@ -325,7 +324,7 @@ func (spec *runtimeSpec) addHostDevice(hostPath, containerPath, permissions stri
 				// skip device
 				log.WithField("device", path).Warnf("Skip device: %v", err)
 
-				return nil // nolint:nilerr // returning err stops path walk
+				return nil //nolint:nilerr // returning err stops path walk
 			}
 
 			specDevice.Path = strings.Replace(path, hostPath, containerPath, 1)
@@ -478,7 +477,7 @@ func (spec *runtimeSpec) setNamespacePath(namespaceType runtimespec.LinuxNamespa
 }
 
 func getJSONFromFile(fileName string, data interface{}) error {
-	byteValue, err := ioutil.ReadFile(fileName)
+	byteValue, err := os.ReadFile(fileName)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -547,6 +546,18 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 		}
 
 		if err := spec.addBindMount(absStatePath, instanceStateFile, "rw"); err != nil {
+			return nil, err
+		}
+	}
+
+	if instance.StoragePath != "" {
+		absStoragePath := launcher.getAbsStoragePath(instance.StoragePath)
+
+		if err := prepareStorageDir(absStoragePath, instance.UID, instance.service.GID); err != nil {
+			return nil, err
+		}
+
+		if err := spec.addBindMount(absStoragePath, instanceStorageDir, "rw"); err != nil {
 			return nil, err
 		}
 	}

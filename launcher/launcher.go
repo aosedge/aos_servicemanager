@@ -20,7 +20,6 @@ package launcher
 import (
 	"context"
 	"errors"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -62,8 +61,7 @@ const (
 	instanceRootFS         = "rootfs"
 	instanceMountPointsDir = "mounts"
 	instanceStateFile      = "/state.dat"
-	upperDirName           = "upperdir"
-	workDirName            = "workdir"
+	instanceStorageDir     = "/storage"
 	runxRunner             = "runx"
 )
 
@@ -189,7 +187,8 @@ type Launcher struct {
 const OperationVersion = 9
 
 // Mount, unmount instance FS functions.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var (
 	MountFunc   = fs.OverlayMount
 	UnmountFunc = fs.Umount
@@ -202,9 +201,9 @@ var (
 	ErrNoRuntimeStatus = errors.New("no runtime status")
 )
 
-var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} // nolint:gochecknoglobals // const
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
 
-// nolint:gochecknoglobals // used to be overridden in unit tests
+//nolint:gochecknoglobals // used to be overridden in unit tests
 var (
 	// RuntimeDir specifies directory where instance runtime spec is stored.
 	RuntimeDir = "/run/aos/runtime"
@@ -830,7 +829,7 @@ func (launcher *Launcher) prepareHostFSDir() (err error) {
 		allowedDirs = launcher.config.HostBinds
 	}
 
-	rootContent, err := ioutil.ReadDir("/")
+	rootContent, err := os.ReadDir("/")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -863,27 +862,21 @@ rootLabel:
 	return nil
 }
 
-func prepareStorageDir(path string, uid, gid uint32) (upperDir, workDir string, err error) {
-	upperDir = filepath.Join(path, upperDirName)
-	workDir = filepath.Join(path, workDirName)
-
-	if err = os.MkdirAll(upperDir, 0o755); err != nil {
-		return "", "", aoserrors.Wrap(err)
+func prepareStorageDir(path string, uid, gid uint32) error {
+	_, err := os.Stat(path)
+	if err == nil {
+		return nil
 	}
 
-	if err = os.Chown(upperDir, int(uid), int(gid)); err != nil {
-		return "", "", aoserrors.Wrap(err)
+	if err = os.MkdirAll(path, 0o755); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	if err = os.MkdirAll(workDir, 0o755); err != nil {
-		return "", "", aoserrors.Wrap(err)
+	if err = os.Chown(path, int(uid), int(gid)); err != nil {
+		return aoserrors.Wrap(err)
 	}
 
-	if err = os.Chown(workDir, int(uid), int(gid)); err != nil {
-		return "", "", aoserrors.Wrap(err)
-	}
-
-	return upperDir, workDir, nil
+	return nil
 }
 
 func prepareStateFile(path string, uid, gid uint32) error {
@@ -952,16 +945,7 @@ func (launcher *Launcher) prepareRootFS(instance *runtimeInstanceInfo, runtimeCo
 		return aoserrors.Wrap(err)
 	}
 
-	var upperDir, workDir string
-
-	if instance.StoragePath != "" {
-		if upperDir, workDir, err = prepareStorageDir(
-			launcher.getAbsStoragePath(instance.StoragePath), instance.UID, instance.service.GID); err != nil {
-			return err
-		}
-	}
-
-	if err = MountFunc(rootfsDir, layersDir, workDir, upperDir); err != nil {
+	if err = MountFunc(rootfsDir, layersDir, "", ""); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

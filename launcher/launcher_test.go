@@ -530,12 +530,12 @@ func TestHostFSDir(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	rootItems, err := ioutil.ReadDir("/")
+	rootItems, err := os.ReadDir("/")
 	if err != nil {
 		t.Fatalf("Can't read root dir: %v", err)
 	}
 
-	whiteoutItems, err := ioutil.ReadDir(filepath.Join(tmpDir, "hostfs", "whiteouts"))
+	whiteoutItems, err := os.ReadDir(filepath.Join(tmpDir, "hostfs", "whiteouts"))
 	if err != nil {
 		t.Fatalf("Can't read root dir: %v", err)
 	}
@@ -554,8 +554,13 @@ func TestHostFSDir(t *testing.T) {
 
 		for i, whiteoutItem := range whiteoutItems {
 			if rootItem.Name() == whiteoutItem.Name() {
-				if whiteoutItem.Mode() != 0o410000000 {
-					t.Errorf("Wrong white out mode 0o%o", whiteoutItem.Mode())
+				info, err := whiteoutItem.Info()
+				if err != nil {
+					t.Fatalf("Can't get whiteout info: %v", err)
+				}
+
+				if info.Mode() != 0o410000000 {
+					t.Errorf("Wrong white out mode 0o%o", info.Mode())
 				}
 
 				whiteoutItems = append(whiteoutItems[:i], whiteoutItems[i+1:]...)
@@ -622,6 +627,7 @@ func TestRuntimeSpec(t *testing.T) {
 			{
 				InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0},
 				StatePath:     "state.dat",
+				StoragePath:   "storage",
 				UID:           9483,
 			},
 		},
@@ -914,12 +920,20 @@ func TestRuntimeSpec(t *testing.T) {
 			"size=" + strconv.FormatUint(*serviceConfig.Quotas.TmpLimit, 10),
 		},
 	})
-	expectedMounts = append(expectedMounts, runtimespec.Mount{
-		Source:      filepath.Join(tmpDir, "states", runItem.instances[0].StatePath),
-		Destination: "/state.dat",
-		Type:        "bind",
-		Options:     []string{"bind", "rw"},
-	})
+	expectedMounts = append(expectedMounts,
+		runtimespec.Mount{
+			Source:      filepath.Join(tmpDir, "states", runItem.instances[0].StatePath),
+			Destination: "/state.dat",
+			Type:        "bind",
+			Options:     []string{"bind", "rw"},
+		},
+		runtimespec.Mount{
+			Source:      filepath.Join(tmpDir, "storages", runItem.instances[0].StoragePath),
+			Destination: "/storage",
+			Type:        "bind",
+			Options:     []string{"bind", "rw"},
+		},
+	)
 
 	if !compareArrays(len(expectedMounts), len(runtimeSpec.Mounts), func(index1, index2 int) bool {
 		return reflect.DeepEqual(expectedMounts[index1], runtimeSpec.Mounts[index2])
@@ -1171,11 +1185,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance root FS should be mounted")
 	}
 
-	if mountInfo.upperDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "upperdir") {
+	if mountInfo.upperDir != "" {
 		t.Errorf("Wrong upper dir value: %v", mountInfo.upperDir)
 	}
 
-	if mountInfo.workDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "workdir") {
+	if mountInfo.workDir != "" {
 		t.Errorf("Wrong work dir value: %v", mountInfo.workDir)
 	}
 
