@@ -622,6 +622,7 @@ func TestRuntimeSpec(t *testing.T) {
 			{
 				InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0},
 				StatePath:     "state.dat",
+				StoragePath:   "storage",
 				UID:           9483,
 			},
 		},
@@ -914,12 +915,20 @@ func TestRuntimeSpec(t *testing.T) {
 			"size=" + strconv.FormatUint(*serviceConfig.Quotas.TmpLimit, 10),
 		},
 	})
-	expectedMounts = append(expectedMounts, runtimespec.Mount{
-		Source:      filepath.Join(tmpDir, "states", runItem.instances[0].StatePath),
-		Destination: "/state.dat",
-		Type:        "bind",
-		Options:     []string{"bind", "rw"},
-	})
+	expectedMounts = append(expectedMounts,
+		runtimespec.Mount{
+			Source:      filepath.Join(tmpDir, "states", runItem.instances[0].StatePath),
+			Destination: "/state.dat",
+			Type:        "bind",
+			Options:     []string{"bind", "rw"},
+		},
+		runtimespec.Mount{
+			Source:      filepath.Join(tmpDir, "storages", runItem.instances[0].StoragePath),
+			Destination: "/storage",
+			Type:        "bind",
+			Options:     []string{"bind", "rw"},
+		},
+	)
 
 	if !compareArrays(len(expectedMounts), len(runtimeSpec.Mounts), func(index1, index2 int) bool {
 		return reflect.DeepEqual(expectedMounts[index1], runtimeSpec.Mounts[index2])
@@ -1171,11 +1180,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance root FS should be mounted")
 	}
 
-	if mountInfo.upperDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "upperdir") {
+	if mountInfo.upperDir != "" {
 		t.Errorf("Wrong upper dir value: %v", mountInfo.upperDir)
 	}
 
-	if mountInfo.workDir != filepath.Join(tmpDir, storagesDir, instance.StoragePath, "workdir") {
+	if mountInfo.workDir != "" {
 		t.Errorf("Wrong work dir value: %v", mountInfo.workDir)
 	}
 
