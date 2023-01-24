@@ -72,7 +72,7 @@ type testLogProvider struct {
 }
 
 type testLogData struct {
-	intrenalLog   cloudprotocol.PushLog
+	internalLog   cloudprotocol.PushLog
 	expectedPBLog pb.LogData
 }
 type testAlertProvider struct {
@@ -97,7 +97,7 @@ func init() {
  * Tests
  **********************************************************************************************************************/
 
-func TestSmRegistration(t *testing.T) {
+func TestSMRegistration(t *testing.T) {
 	server, err := newTestServer(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
@@ -122,13 +122,13 @@ func TestSmRegistration(t *testing.T) {
 	}
 	defer client.Close()
 
-	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+	expectedNodeConfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1", RemoteNode: false, RunnerFeatures: []string{"crun"},
 		NumCpus: 1, TotalRam: 100,
 		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
-	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
+	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 }
@@ -159,13 +159,13 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 	defer client.Close()
 
-	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+	expectedNodeConfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1", RemoteNode: true, RunnerFeatures: []string{"crun"},
 		NumCpus: 1, TotalRam: 100,
 		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
 	}
 
-	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
+	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -270,33 +270,33 @@ func TestLogsNotification(t *testing.T) {
 	}
 	defer client.Close()
 
-	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+	expectedNodeConfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1",
 	}
 
-	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
+	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	logProvider.testLogs = []testLogData{
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "systemLog", Content: []byte{1, 2, 3}},
+			internalLog:   cloudprotocol.PushLog{LogID: "systemLog", Content: []byte{1, 2, 3}},
 			expectedPBLog: pb.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
+			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
+			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
+			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
 			expectedPBLog: pb.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
-			intrenalLog: cloudprotocol.PushLog{
+			internalLog: cloudprotocol.PushLog{
 				LogID: "serviceCrashLog", Content: []byte{1, 2, 4},
 				ErrorInfo: &cloudprotocol.ErrorInfo{
 					Message: "some error",
@@ -372,11 +372,11 @@ func TestAlertNotifications(t *testing.T) {
 	}
 	defer client.Close()
 
-	expectedNodeCpnfiguration := &pb.NodeConfiguration{
+	expectedNodeConfiguration := &pb.NodeConfiguration{
 		NodeId: "mainSM", NodeType: "model1",
 	}
 
-	if err = server.waitClientRegistered(expectedNodeCpnfiguration); err != nil {
+	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -607,14 +607,11 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfiguration) (err error) {
+func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfiguration) error {
 	select {
 	case nodeConfig := <-server.registerChannel:
 		if !proto.Equal(nodeConfig, expectedNodeConfig) {
-			log.Debugf("EXP :%v", expectedNodeConfig)
-			log.Debugf("REC :%v", nodeConfig)
-
-			return aoserrors.New("Incorrect node configuration")
+			return aoserrors.New("incorrect node configuration")
 		}
 
 		return nil
@@ -624,7 +621,7 @@ func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfig
 	}
 }
 
-func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) (err error) {
+func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) error {
 	server.stream = stream
 
 	for {
@@ -639,8 +636,6 @@ func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) (err 
 
 		switch data := message.SMOutgoingMessage.(type) {
 		case *pb.SMOutgoingMessages_NodeConfiguration:
-			log.Debug("nodeID ", data.NodeConfiguration.NodeId)
-
 			server.registerChannel <- data.NodeConfiguration
 
 		case *pb.SMOutgoingMessages_NodeMonitoring:
@@ -689,21 +684,21 @@ func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (
 
 func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestLog) error {
 	logProvider.currentLogRequest = request
-	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
 	logProvider.sentIndex++
 
 	return nil
 }
 
 func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestLog) error {
-	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
 	logProvider.sentIndex++
 
 	return nil
 }
 
 func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLog) {
-	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].intrenalLog
+	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
 	logProvider.sentIndex++
 }
 
