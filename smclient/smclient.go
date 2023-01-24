@@ -422,8 +422,8 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 				AosVersion:    pbLayer.VersionInfo.AosVersion,
 				VendorVersion: pbLayer.VersionInfo.VendorVersion, Description: pbLayer.VersionInfo.Description,
 			},
-			Digest: pbLayer.Digest, URL: pbLayer.Url, Sha256: pbLayer.Sha256, Sha512: pbLayer.Sha512,
-			Size: pbLayer.Size,
+			ID: pbLayer.LayerId, Digest: pbLayer.Digest, URL: pbLayer.Url,
+			Sha256: pbLayer.Sha256, Sha512: pbLayer.Sha512, Size: pbLayer.Size,
 		}
 	}
 
