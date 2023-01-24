@@ -96,7 +96,8 @@ type testLauncher struct {
 	envVarsInfo   []cloudprotocol.EnvVarsInstanceInfo
 	envVarsStatus []cloudprotocol.EnvVarsInstanceStatus
 
-	callChannel chan struct{}
+	callChannel       chan struct{}
+	connectionChannel chan bool
 }
 
 /***********************************************************************************************************************
@@ -850,6 +851,66 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 }
 
+func TestCloudConnection(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer server.close()
+
+	launcher := newTestLauncher()
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create UM client: %v", err)
+	}
+	defer client.Close()
+
+	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	// Check connected status
+
+	if err := server.stream.Send(&pb.SMIncomingMessages{
+		SMIncomingMessage: &pb.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pb.ConnectionStatus{
+			CloudStatus: pb.ConnectionEnum_CONNECTED,
+		}},
+	}); err != nil {
+		t.Fatalf("Can't send request: %v", err)
+	}
+
+	connected, err := launcher.waitCloudConnection()
+	if err != nil {
+		t.Fatalf("Cloud connection error: %v", err)
+	}
+
+	if !connected {
+		t.Error("Cloud should be connected")
+	}
+
+	// Check disconnected status
+
+	if err := server.stream.Send(&pb.SMIncomingMessages{
+		SMIncomingMessage: &pb.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pb.ConnectionStatus{
+			CloudStatus: pb.ConnectionEnum_DISCONNECTED,
+		}},
+	}); err != nil {
+		t.Fatalf("Can't send request: %v", err)
+	}
+
+	if connected, err = launcher.waitCloudConnection(); err != nil {
+		t.Fatalf("Cloud connection error: %v", err)
+	}
+
+	if connected {
+		t.Error("Cloud should be disconnected")
+	}
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -1119,7 +1180,7 @@ func (processor *testLayerManager) ProcessDesiredLayers(layers []aostypes.LayerI
 }
 
 func newTestLauncher() *testLauncher {
-	return &testLauncher{callChannel: make(chan struct{}, 1)}
+	return &testLauncher{callChannel: make(chan struct{}, 1), connectionChannel: make(chan bool, 1)}
 }
 
 func (launcher *testLauncher) RunInstances(instances []aostypes.InstanceInfo, forceRestart bool) error {
@@ -1146,6 +1207,8 @@ func (launcher *testLauncher) OverrideEnvVars(
 }
 
 func (launcher *testLauncher) CloudConnection(connected bool) error {
+	launcher.connectionChannel <- connected
+
 	return nil
 }
 
@@ -1156,5 +1219,15 @@ func (launcher *testLauncher) waitCall() error {
 
 	case <-time.After(5 * time.Second):
 		return aoserrors.New("wait call timeout")
+	}
+}
+
+func (launcher *testLauncher) waitCloudConnection() (bool, error) {
+	select {
+	case connected := <-launcher.connectionChannel:
+		return connected, nil
+
+	case <-time.After(5 * time.Second):
+		return false, aoserrors.New("wait cloud connection timeout")
 	}
 }

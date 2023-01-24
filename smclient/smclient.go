@@ -112,6 +112,7 @@ type InstanceLauncher interface {
 	RunInstances(instances []aostypes.InstanceInfo, forceRestart bool) error
 	RuntimeStatusChannel() <-chan launcher.RuntimeStatus
 	OverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) ([]cloudprotocol.EnvVarsInstanceStatus, error)
+	CloudConnection(connected bool) error
 }
 
 // AlertsProvider alert data provider interface.
@@ -354,6 +355,9 @@ func (client *SMClient) processMessages() (err error) {
 
 		case *pb.SMIncomingMessages_GetNodeMonitoring:
 			client.processNodeMonitoringData()
+
+		case *pb.SMIncomingMessages_ConnectionStatus:
+			client.processConnectionStatus(data.ConnectionStatus)
 		}
 	}
 }
@@ -533,6 +537,12 @@ func (client *SMClient) processNodeMonitoringData() {
 			},
 		}); err != nil {
 		log.Errorf("Can't send monitoring notification: %v ", err)
+	}
+}
+
+func (client *SMClient) processConnectionStatus(status *pb.ConnectionStatus) {
+	if err := client.launcher.CloudConnection(status.CloudStatus == pb.ConnectionEnum_CONNECTED); err != nil {
+		log.Errorf("Can't set cloud connection: %v", err)
 	}
 }
 
