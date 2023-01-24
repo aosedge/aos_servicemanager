@@ -115,8 +115,8 @@ func TestSmRegistration(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
-		"mainSM", "model1", nil, nil, nil, nil, nil,
-		nil, testMonitoring, nil, nil, systemInfo, true)
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
+		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -151,9 +151,9 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{
-		CMServerURL: serverURL, RemoteNode: true,
-		RunnerFeatures: []string{"crun"},
-	}, "mainSM", "model1", nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, systemInfo, true)
+		CMServerURL: serverURL, RemoteNode: true, RunnerFeatures: []string{"crun"},
+	}, smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
+		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -262,8 +262,9 @@ func TestLogsNotification(t *testing.T) {
 
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil, nil,
-		nil, nil, &logProvider, nil, cloudprotocol.SystemInfo{}, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -363,8 +364,9 @@ func TestAlertNotifications(t *testing.T) {
 
 	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, "mainSM", "model1", nil, nil, nil, nil, nil,
-		testAlerts, nil, nil, nil, cloudprotocol.SystemInfo{}, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, nil, nil, nil, nil, testAlerts, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
