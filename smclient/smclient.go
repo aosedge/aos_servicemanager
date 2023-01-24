@@ -59,6 +59,7 @@ const (
 // SMClient SM client instance.
 type SMClient struct {
 	sync.Mutex
+
 	config               *config.Config
 	connection           *grpc.ClientConn
 	stream               pb.SMService_RegisterSMClient
@@ -73,11 +74,15 @@ type SMClient struct {
 	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    <-chan cloudprotocol.NodeMonitoringData
 	logsChannel          <-chan cloudprotocol.PushLog
-	nodeID               string
-	nodeType             string
-	systemInfo           cloudprotocol.SystemInfo
+	nodeDescription      NodeDescription
 	nodeMonitoringData   cloudprotocol.NodeMonitoringData
 	runStatus            *launcher.InstancesStatus
+}
+
+type NodeDescription struct {
+	NodeID     string
+	NodeType   string
+	SystemInfo cloudprotocol.SystemInfo
 }
 
 // CertificateProvider interface to get certificate.
@@ -138,19 +143,18 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
  **********************************************************************************************************************/
 
 // New creates SM client fo communication with CM.
-func New(config *config.Config, nodeID, nodeType string, provider CertificateProvider,
+func New(config *config.Config, nodeDescription NodeDescription, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
 	unitConfigProcessor UnitConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
-	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, systemInfo cloudprotocol.SystemInfo,
-	insecure bool,
+	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
-		closeChannel: make(chan struct{}, 1), servicesProcessor: servicesProcessor, layersProcessor: layersProcessor,
-		launcher: launcher, unitConfigProcessor: unitConfigProcessor, monitoringProvider: monitoringProvider,
-		logsProvider: logsProvider, nodeID: nodeID, nodeType: nodeType, config: config,
+		config: config, nodeDescription: nodeDescription, servicesProcessor: servicesProcessor,
+		layersProcessor: layersProcessor, launcher: launcher, unitConfigProcessor: unitConfigProcessor,
+		monitoringProvider: monitoringProvider, logsProvider: logsProvider, closeChannel: make(chan struct{}, 1),
 	}
 
-	if err := cmClient.createConnection(config, provider, cryptcoxontext, insecure); err != nil {
+	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
@@ -161,8 +165,6 @@ func New(config *config.Config, nodeID, nodeType string, provider CertificatePro
 	if alertsProvider != nil {
 		cmClient.alertChannel = alertsProvider.GetAlertsChannel()
 	}
-
-	cmClient.systemInfo = systemInfo
 
 	if monitoringProvider != nil {
 		cmClient.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
@@ -277,13 +279,13 @@ func (client *SMClient) register(config *config.Config) (err error) {
 	}
 
 	nodeCfg := pb.NodeConfiguration{
-		NodeId: client.nodeID, NodeType: client.nodeType, RemoteNode: config.RemoteNode,
+		NodeId: client.nodeDescription.NodeID, NodeType: client.nodeDescription.NodeType, RemoteNode: config.RemoteNode,
 		RunnerFeatures: config.RunnerFeatures,
-		NumCpus:        client.systemInfo.NumCPUs, TotalRam: client.systemInfo.TotalRAM,
-		Partitions: make([]*pb.Partition, len(client.systemInfo.Partitions)),
+		NumCpus:        client.nodeDescription.SystemInfo.NumCPUs, TotalRam: client.nodeDescription.SystemInfo.TotalRAM,
+		Partitions: make([]*pb.Partition, len(client.nodeDescription.SystemInfo.Partitions)),
 	}
 
-	for i, partition := range client.systemInfo.Partitions {
+	for i, partition := range client.nodeDescription.SystemInfo.Partitions {
 		nodeCfg.Partitions[i] = &pb.Partition{
 			Name: partition.Name, Types: partition.Types, TotalSize: partition.TotalSize,
 		}
