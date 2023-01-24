@@ -22,6 +22,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/smclient"
 )
 
@@ -77,6 +79,21 @@ type testLogData struct {
 }
 type testAlertProvider struct {
 	alertsChannel chan cloudprotocol.AlertItem
+}
+
+type testServiceManager struct {
+	services []aostypes.ServiceInfo
+}
+
+type testLayerManager struct {
+	layers []aostypes.LayerInfo
+}
+
+type testLauncher struct {
+	instances    []aostypes.InstanceInfo
+	forceRestart bool
+
+	callChannel chan struct{}
 }
 
 /***********************************************************************************************************************
@@ -571,6 +588,165 @@ func TestAlertNotifications(t *testing.T) {
 	}
 }
 
+func TestRunInstances(t *testing.T) {
+	data := []*pb.RunInstances{
+		{},
+		{ForceRestart: true},
+		{
+			Services: []*pb.ServiceInfo{
+				{
+					VersionInfo: &pb.VersionInfo{AosVersion: 4, VendorVersion: "32", Description: "this is service 1"},
+					Url:         "url123",
+					ServiceId:   "service1",
+					ProviderId:  "provider1",
+					Gid:         984,
+					Sha256:      []byte("fdksj"),
+					Sha512:      []byte("popk"),
+					Size:        789,
+				},
+				{
+					VersionInfo: &pb.VersionInfo{AosVersion: 6, VendorVersion: "17", Description: "this is service 2"},
+					Url:         "url354",
+					ServiceId:   "service2",
+					ProviderId:  "provider2",
+					Gid:         21,
+					Sha256:      []byte("sdfafsd"),
+					Sha512:      []byte("dsklddf"),
+					Size:        12900,
+				},
+			},
+			Layers: []*pb.LayerInfo{
+				{
+					VersionInfo: &pb.VersionInfo{AosVersion: 1, VendorVersion: "7", Description: "this is layer 1"},
+					Url:         "url670",
+					LayerId:     "layer1",
+					Digest:      "digest2329",
+					Sha256:      []byte("sassfdc"),
+					Sha512:      []byte("dsdsjkk"),
+					Size:        3489,
+				},
+				{
+					VersionInfo: &pb.VersionInfo{AosVersion: 3, VendorVersion: "9", Description: "this is layer 2"},
+					Url:         "url654",
+					LayerId:     "layer2",
+					Digest:      "digest6509",
+					Sha256:      []byte("asdasdd"),
+					Sha512:      []byte("pcxalks"),
+					Size:        3489,
+				},
+				{
+					VersionInfo: &pb.VersionInfo{AosVersion: 5, VendorVersion: "5", Description: "this is layer 3"},
+					Url:         "url986",
+					LayerId:     "layer3",
+					Digest:      "digest3209",
+					Sha256:      []byte("dsakjcd"),
+					Sha512:      []byte("cszxdfa"),
+					Size:        3489,
+				},
+			},
+			Instances: []*pb.InstanceInfo{
+				{
+					Instance: &pb.InstanceIdent{
+						ServiceId: "service1",
+						SubjectId: "subject1",
+						Instance:  0,
+					},
+					Uid:         329,
+					Priority:    12,
+					StoragePath: "storagePath1",
+					StatePath:   "statePath1",
+				},
+				{
+					Instance: &pb.InstanceIdent{
+						ServiceId: "service1",
+						SubjectId: "subject1",
+						Instance:  1,
+					},
+					Uid:         876,
+					Priority:    32,
+					StoragePath: "storagePath2",
+					StatePath:   "statePath2",
+				},
+				{
+					Instance: &pb.InstanceIdent{
+						ServiceId: "service2",
+						SubjectId: "subject1",
+						Instance:  0,
+					},
+					Uid:         543,
+					Priority:    29,
+					StoragePath: "storagePath3",
+					StatePath:   "statePath3",
+				},
+				{
+					Instance: &pb.InstanceIdent{
+						ServiceId: "service2",
+						SubjectId: "subject2",
+						Instance:  5,
+					},
+					Uid:         765,
+					Priority:    37,
+					StoragePath: "storagePath4",
+					StatePath:   "statePath4",
+				},
+			},
+		},
+	}
+
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer server.close()
+
+	serviceManager := &testServiceManager{}
+	layerManager := &testLayerManager{}
+	launcher := newTestLauncher()
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create UM client: %v", err)
+	}
+	defer client.Close()
+
+	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	for _, req := range data {
+		if err := server.stream.Send(&pb.SMIncomingMessages{
+			SMIncomingMessage: &pb.SMIncomingMessages_RunInstances{RunInstances: req},
+		}); err != nil {
+			t.Fatalf("Can't send request: %v", err)
+		}
+
+		if err := launcher.waitCall(); err != nil {
+			t.Fatalf("Error waiting call: %v", err)
+		}
+
+		services, layers, instances, forceRestart := convertRunInstancesReq(req)
+
+		if !reflect.DeepEqual(serviceManager.services, services) {
+			t.Errorf("Wrong services: %v", serviceManager.services)
+		}
+
+		if !reflect.DeepEqual(layerManager.layers, layers) {
+			t.Errorf("Wrong layers: %v", layerManager.layers)
+		}
+
+		if !reflect.DeepEqual(launcher.instances, instances) {
+			t.Errorf("Wrong instances: %v", launcher.instances)
+		}
+
+		if launcher.forceRestart != forceRestart {
+			t.Errorf("Wrong force restart value: %v", launcher.forceRestart)
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -672,6 +848,67 @@ func waitAndCheckLogs(receivedLogs <-chan *pb.SMOutgoingMessages_Log, testLogs [
 	}
 }
 
+func convertRunInstancesReq(req *pb.RunInstances) (
+	services []aostypes.ServiceInfo, layers []aostypes.LayerInfo, instances []aostypes.InstanceInfo, forceRestart bool,
+) {
+	services = make([]aostypes.ServiceInfo, len(req.Services))
+
+	for i, service := range req.Services {
+		services[i] = aostypes.ServiceInfo{
+			VersionInfo: aostypes.VersionInfo{
+				AosVersion:    service.VersionInfo.AosVersion,
+				VendorVersion: service.VersionInfo.VendorVersion,
+				Description:   service.VersionInfo.Description,
+			},
+			ID:         service.ServiceId,
+			ProviderID: service.ProviderId,
+			GID:        service.Gid,
+			URL:        service.Url,
+			Sha256:     service.Sha256,
+			Sha512:     service.Sha512,
+			Size:       service.Size,
+		}
+	}
+
+	layers = make([]aostypes.LayerInfo, len(req.Layers))
+
+	for i, layer := range req.Layers {
+		layers[i] = aostypes.LayerInfo{
+			VersionInfo: aostypes.VersionInfo{
+				AosVersion:    layer.VersionInfo.AosVersion,
+				VendorVersion: layer.VersionInfo.VendorVersion,
+				Description:   layer.VersionInfo.Description,
+			},
+			ID:     layer.LayerId,
+			Digest: layer.Digest,
+			URL:    layer.Url,
+			Sha256: layer.Sha256,
+			Sha512: layer.Sha512,
+			Size:   layer.Size,
+		}
+	}
+
+	instances = make([]aostypes.InstanceInfo, len(req.Instances))
+
+	for i, instance := range req.Instances {
+		instances[i] = aostypes.InstanceInfo{
+			InstanceIdent: aostypes.InstanceIdent{
+				ServiceID: instance.Instance.ServiceId,
+				SubjectID: instance.Instance.SubjectId,
+				Instance:  uint64(instance.Instance.Instance),
+			},
+			UID:         instance.Uid,
+			Priority:    instance.Priority,
+			StoragePath: instance.StoragePath,
+			StatePath:   instance.StatePath,
+		}
+	}
+
+	forceRestart = req.ForceRestart
+
+	return services, layers, instances, forceRestart
+}
+
 /***********************************************************************************************************************
  * Interfaces
  **********************************************************************************************************************/
@@ -708,4 +945,53 @@ func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudpr
 
 func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
 	return alerts.alertsChannel
+}
+
+func (processor *testServiceManager) ProcessDesiredServices(services []aostypes.ServiceInfo) error {
+	processor.services = services
+
+	return nil
+}
+
+func (processor *testLayerManager) ProcessDesiredLayers(layers []aostypes.LayerInfo) error {
+	processor.layers = layers
+
+	return nil
+}
+
+func newTestLauncher() *testLauncher {
+	return &testLauncher{callChannel: make(chan struct{}, 1)}
+}
+
+func (launcher *testLauncher) RunInstances(instances []aostypes.InstanceInfo, forceRestart bool) error {
+	launcher.instances = instances
+	launcher.forceRestart = forceRestart
+
+	launcher.callChannel <- struct{}{}
+
+	return nil
+}
+
+func (launcher *testLauncher) RuntimeStatusChannel() <-chan launcher.RuntimeStatus {
+	return nil
+}
+
+func (launcher *testLauncher) OverrideEnvVars(
+	envVarsInfo []cloudprotocol.EnvVarsInstanceInfo,
+) ([]cloudprotocol.EnvVarsInstanceStatus, error) {
+	return nil, nil
+}
+
+func (launcher *testLauncher) CloudConnection(connected bool) error {
+	return nil
+}
+
+func (launcher *testLauncher) waitCall() error {
+	select {
+	case <-launcher.callChannel:
+		return nil
+
+	case <-time.After(5 * time.Second):
+		return aoserrors.New("wait call timeout")
+	}
 }
