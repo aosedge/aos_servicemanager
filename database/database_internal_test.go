@@ -826,6 +826,32 @@ func TestEnvVars(t *testing.T) {
 	}
 }
 
+func TestOnlineTime(t *testing.T) {
+	onlineTime, err := db.GetOnlineTime()
+	if err != nil {
+		t.Fatalf("Can't get default online time: %v", err)
+	}
+
+	if onlineTime.IsZero() {
+		t.Errorf("Wrong default online time: %v", onlineTime)
+	}
+
+	setOnlineTime := time.Now().Add(24 * time.Hour)
+
+	if err = db.SetOnlineTime(setOnlineTime); err != nil {
+		t.Fatalf("Can't set online time: %v", err)
+	}
+
+	getOnlineTime, err := db.GetOnlineTime()
+	if err != nil {
+		t.Errorf("Can't get online time: %v", err)
+	}
+
+	if !setOnlineTime.Equal(getOnlineTime) {
+		t.Errorf("Wrong got online time: %v", getOnlineTime)
+	}
+}
+
 func TestMigrationToV1(t *testing.T) {
 	migrationDB := path.Join(tmpDir, "test_migration.db")
 	mergedMigrationDir := path.Join(tmpDir, "mergedMigration")
