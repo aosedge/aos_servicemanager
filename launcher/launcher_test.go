@@ -1267,11 +1267,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 }
 
 func TestOverrideEnvVars(t *testing.T) {
-	defaultTTLPeriod := launcher.CheckTLLsPeriod
+	defaultTTLPeriod := launcher.CheckTTLsPeriod
 
-	launcher.CheckTLLsPeriod = 1 * time.Second
+	launcher.CheckTTLsPeriod = 1 * time.Second
 
-	t.Cleanup(func() { launcher.CheckTLLsPeriod = defaultTTLPeriod })
+	t.Cleanup(func() { launcher.CheckTTLsPeriod = defaultTTLPeriod })
 
 	type instanceEnvVars struct {
 		aostypes.InstanceIdent

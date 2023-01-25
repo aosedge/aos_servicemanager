@@ -207,8 +207,8 @@ var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint
 var (
 	// RuntimeDir specifies directory where instance runtime spec is stored.
 	RuntimeDir = "/run/aos/runtime"
-	// CheckTLLsPeriod specified period different TTL timers are checked with.
-	CheckTLLsPeriod = 1 * time.Hour
+	// CheckTTLsPeriod specifies period different TTL timers are checked with.
+	CheckTTLsPeriod = 1 * time.Hour
 )
 
 /***********************************************************************************************************************
@@ -323,7 +323,7 @@ func (launcher *Launcher) handleChannels(ctx context.Context) {
 		case instances := <-launcher.instanceRunner.InstanceStatusChannel():
 			launcher.updateInstancesStatuses(instances)
 
-		case <-time.After(CheckTLLsPeriod):
+		case <-time.After(CheckTTLsPeriod):
 			launcher.Lock()
 			launcher.updateInstancesEnvVars()
 			launcher.Unlock()
