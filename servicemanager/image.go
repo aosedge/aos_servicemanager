@@ -27,7 +27,6 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
@@ -50,56 +49,12 @@ const blobsFolder = "blobs"
  * Types
  **********************************************************************************************************************/
 
-// ImageParts struct with pathes for image parts.
+// ImageParts struct with paths for image parts.
 type ImageParts struct {
 	ImageConfigPath   string
 	ServiceConfigPath string
 	ServiceFSPath     string
 	LayersDigest      []string
-}
-
-// ServiceDevice struct with service divices rules.
-type ServiceDevice struct {
-	Name        string `json:"name"`
-	Permissions string `json:"permissions"`
-}
-
-// ServiceDevice service quotas representation.
-type ServiceQuotas struct {
-	CPULimit      *uint64 `json:"cpuLimit,omitempty"`
-	RAMLimit      *uint64 `json:"ramLimit,omitempty"`
-	PIDsLimit     *uint64 `json:"pidsLimit,omitempty"`
-	NoFileLimit   *uint64 `json:"noFileLimit,omitempty"`
-	TmpLimit      *uint64 `json:"tmpLimit,omitempty"`
-	StateLimit    *uint64 `json:"stateLimit,omitempty"`
-	StorageLimit  *uint64 `json:"storageLimit,omitempty"`
-	UploadSpeed   *uint64 `json:"uploadSpeed,omitempty"`
-	DownloadSpeed *uint64 `json:"downloadSpeed,omitempty"`
-	UploadLimit   *uint64 `json:"uploadLimit,omitempty"`
-	DownloadLimit *uint64 `json:"downloadLimit,omitempty"`
-}
-
-// RunParameters service startup parameters.
-type RunParameters struct {
-	StartInterval   aostypes.Duration `json:"startInterval,omitempty"`
-	StartBurst      uint              `json:"startBurst,omitempty"`
-	RestartInterval aostypes.Duration `json:"restartInterval,omitempty"`
-}
-
-// ServiceConfig Aos service configuration.
-type ServiceConfig struct {
-	Created            time.Time                    `json:"created"`
-	Author             string                       `json:"author"`
-	Hostname           *string                      `json:"hostname,omitempty"`
-	Sysctl             map[string]string            `json:"sysctl,omitempty"`
-	ServiceTTL         *uint64                      `json:"serviceTtl,omitempty"`
-	Quotas             ServiceQuotas                `json:"quotas"`
-	AllowedConnections map[string]struct{}          `json:"allowedConnections,omitempty"`
-	Devices            []ServiceDevice              `json:"devices,omitempty"`
-	Resources          []string                     `json:"resources,omitempty"`
-	Permissions        map[string]map[string]string `json:"permissions,omitempty"`
-	AlertRules         *aostypes.AlertRules         `json:"alertRules,omitempty"`
-	RunParameters      RunParameters                `json:"runParameters,omitempty"`
 }
 
 type serviceManifest struct {
@@ -134,7 +89,7 @@ func validateUnpackedImage(installDir string) (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		var tmpServiceConfig ServiceConfig
+		var tmpServiceConfig aostypes.ServiceConfig
 
 		if err = json.Unmarshal(byteValue, &tmpServiceConfig); err != nil {
 			return aoserrors.Errorf("invalid Aos service config: %v", err)
