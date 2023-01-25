@@ -194,14 +194,8 @@ var (
 	UnmountFunc = fs.Umount
 )
 
-var (
-	// ErrNotExist not exist instance error.
-	ErrNotExist = errors.New("instance not exist")
-	// ErrNoRuntimeStatus no current runtime status error.
-	ErrNoRuntimeStatus = errors.New("no runtime status")
-)
-
-var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
+// ErrNotExist not exist instance error.
+var ErrNotExist = errors.New("instance not exist")
 
 //nolint:gochecknoglobals // used to be overridden in unit tests
 var (
@@ -210,6 +204,8 @@ var (
 	// CheckTTLsPeriod specifies period different TTL timers are checked with.
 	CheckTTLsPeriod = 1 * time.Hour
 )
+
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
 
 /***********************************************************************************************************************
  * Public
