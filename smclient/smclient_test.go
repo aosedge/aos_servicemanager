@@ -59,6 +59,7 @@ type testServer struct {
 	alertChannel      chan *pb.Alert
 	monitoringChannel chan *pb.SMOutgoingMessages_NodeMonitoring
 	logChannel        chan *pb.SMOutgoingMessages_Log
+	envVarsChannel    chan *pb.SMOutgoingMessages_OverrideEnvVarStatus
 	pb.UnimplementedSMServiceServer
 }
 
@@ -90,8 +91,10 @@ type testLayerManager struct {
 }
 
 type testLauncher struct {
-	instances    []aostypes.InstanceInfo
-	forceRestart bool
+	instances     []aostypes.InstanceInfo
+	forceRestart  bool
+	envVarsInfo   []cloudprotocol.EnvVarsInstanceInfo
+	envVarsStatus []cloudprotocol.EnvVarsInstanceStatus
 
 	callChannel chan struct{}
 }
@@ -366,7 +369,7 @@ func TestLogsNotification(t *testing.T) {
 		t.Fatalf("Can't get instance crash log: %v", err)
 	}
 
-	if err := waitAndCheckLogs(server.logChannel, logProvider.testLogs); err != nil {
+	if err := server.waitAndCheckLogs(logProvider.testLogs); err != nil {
 		t.Fatalf("Incorrect logs: %v", err)
 	}
 }
@@ -747,6 +750,106 @@ func TestRunInstances(t *testing.T) {
 	}
 }
 
+func TestOverrideEnvVars(t *testing.T) {
+	type testData struct {
+		req    *pb.OverrideEnvVars
+		status []cloudprotocol.EnvVarsInstanceStatus
+	}
+
+	data := []testData{
+		{
+			req:    &pb.OverrideEnvVars{},
+			status: []cloudprotocol.EnvVarsInstanceStatus{},
+		},
+		{
+			req: &pb.OverrideEnvVars{EnvVars: []*pb.OverrideInstanceEnvVar{
+				{
+					Instance: &pb.InstanceIdent{ServiceId: "service1", SubjectId: "subject1", Instance: 2},
+					Vars: []*pb.EnvVarInfo{
+						{VarId: "varID1", Variable: "var1", Ttl: timestamppb.Now()},
+						{VarId: "varID2", Variable: "var2", Ttl: timestamppb.Now()},
+						{VarId: "varID3", Variable: "var3", Ttl: timestamppb.Now()},
+					},
+				},
+				{
+					Instance: &pb.InstanceIdent{ServiceId: "service2", SubjectId: "subject3", Instance: 0},
+					Vars: []*pb.EnvVarInfo{
+						{VarId: "varID4", Variable: "var4", Ttl: timestamppb.Now()},
+						{VarId: "varID5", Variable: "var5", Ttl: timestamppb.Now()},
+					},
+				},
+				{
+					Instance: &pb.InstanceIdent{ServiceId: "service3", Instance: -1},
+					Vars: []*pb.EnvVarInfo{
+						{VarId: "varID6", Variable: "var6", Ttl: timestamppb.Now()},
+					},
+				},
+			}},
+			status: []cloudprotocol.EnvVarsInstanceStatus{
+				{
+					InstanceFilter: cloudprotocol.NewInstanceFilter("service1", "subject1", -1),
+					Statuses: []cloudprotocol.EnvVarStatus{
+						{ID: "varID1"},
+						{ID: "varID2", Error: "error2"},
+					},
+				},
+				{
+					InstanceFilter: cloudprotocol.NewInstanceFilter("service2", "subject3", 2),
+					Statuses: []cloudprotocol.EnvVarStatus{
+						{ID: "varID3", Error: "error3"},
+						{ID: "varID4", Error: "error4"},
+					},
+				},
+			},
+		},
+	}
+
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer server.close()
+
+	launcher := newTestLauncher()
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create UM client: %v", err)
+	}
+	defer client.Close()
+
+	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	for _, item := range data {
+		launcher.envVarsStatus = item.status
+
+		if err := server.stream.Send(&pb.SMIncomingMessages{
+			SMIncomingMessage: &pb.SMIncomingMessages_OverrideEnvVars{OverrideEnvVars: item.req},
+		}); err != nil {
+			t.Fatalf("Can't send request: %v", err)
+		}
+
+		if err := launcher.waitCall(); err != nil {
+			t.Fatalf("Error waiting call: %v", err)
+		}
+
+		envVars := convertEnvVarsReq(item.req)
+
+		if !reflect.DeepEqual(launcher.envVarsInfo, envVars) {
+			t.Errorf("Wrong env vars: %v", launcher.envVarsInfo)
+		}
+
+		if err := server.waitEnvVarsStatus(item.status); err != nil {
+			t.Errorf("Wait override env status error: %v", err)
+		}
+	}
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -757,6 +860,7 @@ func newTestServer(url string) (server *testServer, err error) {
 		alertChannel:      make(chan *pb.Alert, 10),
 		monitoringChannel: make(chan *pb.SMOutgoingMessages_NodeMonitoring, 10),
 		logChannel:        make(chan *pb.SMOutgoingMessages_Log, 10),
+		envVarsChannel:    make(chan *pb.SMOutgoingMessages_OverrideEnvVarStatus, 10),
 	}
 
 	listener, err := net.Listen("tcp", url)
@@ -822,16 +926,19 @@ func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) error
 
 		case *pb.SMOutgoingMessages_Alert:
 			server.alertChannel <- data.Alert
+
+		case *pb.SMOutgoingMessages_OverrideEnvVarStatus:
+			server.envVarsChannel <- data
 		}
 	}
 }
 
-func waitAndCheckLogs(receivedLogs <-chan *pb.SMOutgoingMessages_Log, testLogs []testLogData) error {
+func (server *testServer) waitAndCheckLogs(testLogs []testLogData) error {
 	var currentIndex int
 
 	for {
 		select {
-		case logData := <-receivedLogs:
+		case logData := <-server.logChannel:
 			if !proto.Equal(logData.Log, &testLogs[currentIndex].expectedPBLog) {
 				return aoserrors.New("received log doesn't match sent log")
 			}
@@ -845,6 +952,34 @@ func waitAndCheckLogs(receivedLogs <-chan *pb.SMOutgoingMessages_Log, testLogs [
 		case <-time.After(5 * time.Second):
 			return aoserrors.New("timeout")
 		}
+	}
+}
+
+func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstanceStatus) error {
+	select {
+	case data := <-server.envVarsChannel:
+		receivedStatus := make([]cloudprotocol.EnvVarsInstanceStatus, len(data.OverrideEnvVarStatus.EnvVarsStatus))
+
+		for i, envVarStatus := range data.OverrideEnvVarStatus.EnvVarsStatus {
+			receivedStatus[i] = cloudprotocol.EnvVarsInstanceStatus{
+				InstanceFilter: cloudprotocol.NewInstanceFilter(
+					envVarStatus.Instance.ServiceId, envVarStatus.Instance.SubjectId, envVarStatus.Instance.Instance),
+				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.VarsStatus)),
+			}
+
+			for j, s := range envVarStatus.VarsStatus {
+				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{ID: s.VarId, Error: s.Error}
+			}
+		}
+
+		if !reflect.DeepEqual(receivedStatus, status) {
+			return aoserrors.New("wrong env vars status")
+		}
+
+		return nil
+
+	case <-time.After(5 * time.Second):
+		return aoserrors.New("wait env vars status timeout")
 	}
 }
 
@@ -907,6 +1042,30 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 	forceRestart = req.ForceRestart
 
 	return services, layers, instances, forceRestart
+}
+
+func convertEnvVarsReq(req *pb.OverrideEnvVars) []cloudprotocol.EnvVarsInstanceInfo {
+	envVars := make([]cloudprotocol.EnvVarsInstanceInfo, len(req.EnvVars))
+
+	for i, envVar := range req.EnvVars {
+		envVars[i] = cloudprotocol.EnvVarsInstanceInfo{
+			InstanceFilter: cloudprotocol.NewInstanceFilter(
+				envVar.Instance.ServiceId, envVar.Instance.SubjectId, envVar.Instance.Instance),
+			EnvVars: make([]cloudprotocol.EnvVarInfo, len(envVar.Vars)),
+		}
+
+		for j, v := range envVar.Vars {
+			envVars[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: v.VarId, Variable: v.Variable}
+
+			if v.Ttl != nil {
+				t := v.Ttl.AsTime()
+
+				envVars[i].EnvVars[j].TTL = &t
+			}
+		}
+	}
+
+	return envVars
 }
 
 /***********************************************************************************************************************
@@ -979,7 +1138,11 @@ func (launcher *testLauncher) RuntimeStatusChannel() <-chan launcher.RuntimeStat
 func (launcher *testLauncher) OverrideEnvVars(
 	envVarsInfo []cloudprotocol.EnvVarsInstanceInfo,
 ) ([]cloudprotocol.EnvVarsInstanceStatus, error) {
-	return nil, nil
+	launcher.envVarsInfo = envVarsInfo
+
+	launcher.callChannel <- struct{}{}
+
+	return launcher.envVarsStatus, nil
 }
 
 func (launcher *testLauncher) CloudConnection(connected bool) error {
