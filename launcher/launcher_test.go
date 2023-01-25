@@ -125,7 +125,7 @@ type testMounter struct {
 type serviceConfigs struct {
 	gid           uint32
 	imageConfig   *imagespec.Image
-	serviceConfig *servicemanager.ServiceConfig
+	serviceConfig *aostypes.ServiceConfig
 	layerDigests  []string
 }
 
@@ -593,17 +593,17 @@ func TestRuntimeSpec(t *testing.T) {
 					Env:        []string{"env1=val1", "env2=val2", "env3=val3"},
 				},
 			},
-			serviceConfig: &servicemanager.ServiceConfig{
+			serviceConfig: &aostypes.ServiceConfig{
 				Hostname: newString("testHostName"),
 				Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
-				Quotas: servicemanager.ServiceQuotas{
+				Quotas: aostypes.ServiceQuotas{
 					CPULimit:    newUint64(42),
 					RAMLimit:    newUint64(1024),
 					PIDsLimit:   newUint64(10),
 					NoFileLimit: newUint64(3),
 					TmpLimit:    newUint64(512),
 				},
-				Devices: []servicemanager.ServiceDevice{
+				Devices: []aostypes.ServiceDevice{
 					{Name: "input", Permissions: "r"},
 					{Name: "video", Permissions: "rw"},
 					{Name: "sound", Permissions: "rwm"},
@@ -991,11 +991,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 					ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
 				},
 			},
-			serviceConfig: &servicemanager.ServiceConfig{
+			serviceConfig: &aostypes.ServiceConfig{
 				Hostname:           newString("host1"),
 				Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
 				AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
-				Quotas: servicemanager.ServiceQuotas{
+				Quotas: aostypes.ServiceQuotas{
 					DownloadSpeed: newUint64(4096),
 					UploadSpeed:   newUint64(8192),
 					DownloadLimit: newUint64(16384),
@@ -1004,7 +1004,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 					StateLimit:    newUint64(1024),
 				},
 				Resources: []string{"resource0", "resource1", "resource2"},
-				Devices:   []servicemanager.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
+				Devices:   []aostypes.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
 				AlertRules: &aostypes.AlertRules{
 					RAM: &aostypes.AlertRuleParam{
 						MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
@@ -2298,8 +2298,8 @@ func TestResourceAlerts(t *testing.T) {
 
 	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
 		"service0": {
-			serviceConfig: &servicemanager.ServiceConfig{
-				Devices: []servicemanager.ServiceDevice{
+			serviceConfig: &aostypes.ServiceConfig{
+				Devices: []aostypes.ServiceDevice{
 					{Name: "device0", Permissions: "rw"},
 				},
 			},

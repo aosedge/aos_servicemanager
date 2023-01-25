@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
@@ -32,7 +33,7 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	serviceConfig *servicemanager.ServiceConfig
+	serviceConfig *aostypes.ServiceConfig
 	imageConfig   *imagespec.Image
 	err           error
 }
