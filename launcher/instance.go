@@ -81,9 +81,6 @@ func (instance *runtimeInstanceInfo) setRunStatus(runStatus runner.InstanceStatu
 }
 
 func (launcher *Launcher) instanceFailed(instance *runtimeInstanceInfo, err error) {
-	launcher.runMutex.Lock()
-	defer launcher.runMutex.Unlock()
-
 	log.WithFields(instanceLogFields(instance, nil)).Errorf("Instance failed: %v", err)
 
 	instance.runStatus.State = cloudprotocol.InstanceStateFailed

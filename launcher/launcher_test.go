@@ -67,6 +67,8 @@ const (
 	statesDir         = "states"
 )
 
+const defaultStatusTimeout = 5 * time.Second
+
 var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TERM=xterm"}
 
 /***********************************************************************************************************************
@@ -75,8 +77,9 @@ var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 
 type testStorage struct {
 	sync.RWMutex
-	instances map[string]launcher.InstanceInfo
-	envVars   []cloudprotocol.EnvVarsInstanceInfo
+	instances  map[string]launcher.InstanceInfo
+	envVars    []cloudprotocol.EnvVarsInstanceInfo
+	onlineTime time.Time
 }
 
 type testServiceProvider struct {
@@ -305,8 +308,8 @@ func TestRunInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -331,7 +334,8 @@ func TestRunInstances(t *testing.T) {
 			RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item)},
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+			runtimeStatus, defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
@@ -355,8 +359,8 @@ func TestUpdateInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -385,9 +389,9 @@ func TestUpdateInstances(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -398,14 +402,14 @@ func TestUpdateInstances(t *testing.T) {
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
 		},
-		err: []error{errors.New("error0"), errors.New("error1")}, // nolint:goerr113
+		err: []error{errors.New("error0"), errors.New("error1")}, //nolint:goerr113
 	}
 
 	instanceRunner.statusChannel <- createRunStatus(storage, changedItem)
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), launcher.RuntimeStatus{
 		UpdateStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(changedItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 }
@@ -449,8 +453,8 @@ func TestRestartInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -489,7 +493,7 @@ func TestRestartInstances(t *testing.T) {
 		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
 	}
 
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -497,7 +501,7 @@ func TestRestartInstances(t *testing.T) {
 		t.Errorf("Can't stop instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -645,8 +649,8 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -749,9 +753,9 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), launcher.RuntimeStatus{
 		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1082,8 +1086,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1099,9 +1103,9 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1226,8 +1230,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't stop instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1592,9 +1596,8 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 
@@ -1610,9 +1613,9 @@ func TestOverrideEnvVars(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 
@@ -1692,9 +1695,9 @@ func TestRestartStoredInstancesOnStart(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 }
@@ -2133,8 +2136,8 @@ func TestInstancePriorities(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -2167,7 +2170,8 @@ func TestInstancePriorities(t *testing.T) {
 			oldStorageInstances[instanceID] = instance
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+			runtimeStatus, defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
@@ -2299,8 +2303,8 @@ func TestResourceAlerts(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -2325,13 +2329,170 @@ func TestResourceAlerts(t *testing.T) {
 			RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item.testItem)},
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus,
+			defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
 		if err = compareDeviceAllocateAlerts(item.alerts, alertSender.alerts); err != nil {
 			t.Errorf("Compare device allocation alerts error: %v", err)
 		}
+	}
+}
+
+func TestOfflineTimeout(t *testing.T) {
+	launcher.CheckTTLsPeriod = 1 * time.Second
+
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	item := testItem{
+		services: []serviceInfo{
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service0"},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service1"},
+				serviceConfig: &aostypes.ServiceConfig{
+					OfflineTTL: aostypes.Duration{Duration: 5 * time.Second},
+				},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service2"},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service3"},
+				serviceConfig: &aostypes.ServiceConfig{
+					OfflineTTL: aostypes.Duration{Duration: 10 * time.Second},
+				},
+			},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+		},
+	}
+
+	if err = serviceProvider.installServices(item.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err := testLauncher.CloudConnection(true); err != nil {
+		t.Errorf("Can't set cloud connection: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(item.instances, false); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item)},
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Should not be stopped instance during max offline timeout (> 15 sec)
+
+	select {
+	case <-testLauncher.RuntimeStatusChannel():
+		t.Error("Unexpected runtime status")
+
+	case <-time.After(20 * time.Second):
+	}
+
+	// Set cloud connection offline
+
+	if err := testLauncher.CloudConnection(false); err != nil {
+		t.Errorf("Can't set cloud connection: %v", err)
+	}
+
+	errOfflineTimeout := errors.New("offline timeout") //nolint:goerr113
+
+	// We should receive offline timeout status from service1 instances first
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{UpdateStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, 20*time.Second); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Then we should receive offline timeout status from service3 instances
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{UpdateStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, 20*time.Second); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Check offline timeout after launcher restart
+
+	testLauncher.Close()
+
+	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 }
 
@@ -2407,6 +2568,22 @@ func (storage *testStorage) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVa
 	defer storage.Unlock()
 
 	storage.envVars = envVarsInfo
+
+	return nil
+}
+
+func (storage *testStorage) GetOnlineTime() (time.Time, error) {
+	storage.Lock()
+	defer storage.Unlock()
+
+	return storage.onlineTime, nil
+}
+
+func (storage *testStorage) SetOnlineTime(onlineTime time.Time) error {
+	storage.Lock()
+	defer storage.Unlock()
+
+	storage.onlineTime = onlineTime
 
 	return nil
 }
@@ -3035,14 +3212,16 @@ loop2:
 	return true
 }
 
-func checkRuntimeStatus(refStatus launcher.RuntimeStatus, statusChannel <-chan launcher.RuntimeStatus) error {
+func checkRuntimeStatus(statusChannel <-chan launcher.RuntimeStatus,
+	refStatus launcher.RuntimeStatus, timeout time.Duration,
+) error {
 	select {
 	case runtimeStatus := <-statusChannel:
 		if err := compareRuntimeStatus(refStatus, runtimeStatus); err != nil {
 			return err
 		}
 
-	case <-time.After(5 * time.Second):
+	case <-time.After(timeout):
 		return aoserrors.New("Wait for runtime status timeout")
 	}
 
