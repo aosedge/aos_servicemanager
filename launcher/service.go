@@ -19,6 +19,7 @@ package launcher
 
 import (
 	"errors"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
@@ -39,12 +40,20 @@ type serviceInfo struct {
 }
 
 /***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var errOfflineTimeout = errors.New("offline timeout")
+
+/***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
 func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
+
+	now := time.Now()
 
 	launcher.currentServices = make(map[string]*serviceInfo)
 
@@ -63,6 +72,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 
 		if service.err == nil {
 			service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo)
+		}
+
+		if service.serviceConfig.OfflineTTL.Duration != 0 &&
+			launcher.onlineTime.Add(service.serviceConfig.OfflineTTL.Duration).Before(now) {
+			service.err = errOfflineTimeout
 		}
 
 		if service.err == nil {
