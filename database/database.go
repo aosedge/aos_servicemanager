@@ -240,6 +240,20 @@ func (db *Database) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstan
 	return db.executeQuery("UPDATE config SET envvars = ?", string(rowVars))
 }
 
+// GetOnlineTime returns previously stored online time.
+func (db *Database) GetOnlineTime() (onlineTime time.Time, err error) {
+	if err = db.getDataFromQuery("SELECT onlineTime FROM config", &onlineTime); err != nil {
+		return time.Time{}, err
+	}
+
+	return onlineTime, nil
+}
+
+// SetOnlineTime sets online time.
+func (db *Database) SetOnlineTime(onlineTime time.Time) error {
+	return db.executeQuery("UPDATE config SET onlineTime = ?", onlineTime)
+}
+
 // AddLayer add layer to layers table.
 func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
 	return db.executeQuery("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -524,7 +538,8 @@ func (db *Database) createConfigTable() (err error) {
 		`CREATE TABLE config (
 			operationVersion INTEGER,
 			cursor TEXT,
-			envvars TEXT)`); err != nil {
+			envvars TEXT,
+			onlineTime TIMESTAMP)`); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -532,7 +547,8 @@ func (db *Database) createConfigTable() (err error) {
 		`INSERT INTO config (
 			operationVersion,
 			cursor,
-			envvars) values(?, ?, ?)`, launcher.OperationVersion, "", ""); err != nil {
+			envvars,
+			onlineTime) values(?, ?, ?, ?)`, launcher.OperationVersion, "", "", time.Now()); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

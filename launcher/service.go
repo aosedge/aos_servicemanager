@@ -19,8 +19,10 @@ package launcher
 
 import (
 	"errors"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
@@ -32,10 +34,16 @@ import (
 
 type serviceInfo struct {
 	servicemanager.ServiceInfo
-	serviceConfig *servicemanager.ServiceConfig
+	serviceConfig *aostypes.ServiceConfig
 	imageConfig   *imagespec.Image
 	err           error
 }
+
+/***********************************************************************************************************************
+ * Vars
+ **********************************************************************************************************************/
+
+var errOfflineTimeout = errors.New("offline timeout")
 
 /***********************************************************************************************************************
  * Private
@@ -44,6 +52,8 @@ type serviceInfo struct {
 func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 	launcher.runMutex.Lock()
 	defer launcher.runMutex.Unlock()
+
+	now := time.Now()
 
 	launcher.currentServices = make(map[string]*serviceInfo)
 
@@ -62,6 +72,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 
 		if service.err == nil {
 			service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo)
+		}
+
+		if service.serviceConfig.OfflineTTL.Duration != 0 &&
+			launcher.onlineTime.Add(service.serviceConfig.OfflineTTL.Duration).Before(now) {
+			service.err = errOfflineTimeout
 		}
 
 		if service.err == nil {

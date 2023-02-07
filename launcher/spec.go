@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aoscloud/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
@@ -116,7 +117,7 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 	spec.ociSpec.Linux.Resources.CPU.Quota = &cpuQuota
 }
 
-func (spec *runtimeSpec) applyServiceConfig(config *servicemanager.ServiceConfig) error {
+func (spec *runtimeSpec) applyServiceConfig(config *aostypes.ServiceConfig) error {
 	if config.Hostname != nil {
 		spec.ociSpec.Hostname = *config.Hostname
 	}
@@ -398,7 +399,7 @@ func (spec *runtimeSpec) setRootfs(rootfsPath string) {
 	spec.ociSpec.Root = &runtimespec.Root{Path: rootfsPath, Readonly: false}
 }
 
-func (spec *runtimeSpec) setDevices(devices []servicemanager.ServiceDevice) error {
+func (spec *runtimeSpec) setDevices(devices []aostypes.ServiceDevice) error {
 	const numDeviceFields = 2
 
 	for _, device := range devices {
@@ -504,13 +505,13 @@ func (launcher *Launcher) getImageConfig(service servicemanager.ServiceInfo) (*i
 	return &imageConfig, nil
 }
 
-func (launcher *Launcher) getServiceConfig(service servicemanager.ServiceInfo) (*servicemanager.ServiceConfig, error) {
+func (launcher *Launcher) getServiceConfig(service servicemanager.ServiceInfo) (*aostypes.ServiceConfig, error) {
 	imageParts, err := launcher.serviceProvider.GetImageParts(service)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	var serviceConfig servicemanager.ServiceConfig
+	var serviceConfig aostypes.ServiceConfig
 
 	if imageParts.ServiceConfigPath != "" {
 		if err = getJSONFromFile(

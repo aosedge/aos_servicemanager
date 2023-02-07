@@ -30,7 +30,7 @@ import (
 	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
 	"github.com/aoscloud/aos_common/utils/fs"
-	"github.com/bwesterb/go-xentop"
+	"github.com/aoscloud/aos_common/utils/xentop"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
@@ -60,7 +60,7 @@ const capacityAlertProcessorElements = 5
  **********************************************************************************************************************/
 
 type SystemUsageProvider interface {
-	RunCmd(ctx context.Context)
+	CacheSystemInfos()
 	FillSystemInfo(instanceID string, instance *instanceMonitoring) error
 }
 
@@ -145,8 +145,7 @@ type instanceMonitoring struct {
 }
 
 type xenSystemUsage struct {
-	sync.Mutex
-	systemData map[string]xentop.Line
+	systemInfos map[string]xentop.SystemInfo
 }
 
 type hostSystemUsage struct{}
@@ -347,8 +346,6 @@ func (monitor *ResourceMonitor) StopInstanceMonitor(instanceID string) error {
  **********************************************************************************************************************/
 
 func (monitor *ResourceMonitor) run(ctx context.Context) {
-	monitor.sourceSystemUsage.RunCmd(ctx)
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -362,6 +359,7 @@ func (monitor *ResourceMonitor) run(ctx context.Context) {
 
 		case <-monitor.pollTimer.C:
 			monitor.Lock()
+			monitor.sourceSystemUsage.CacheSystemInfos()
 			monitor.getCurrentSystemData()
 			monitor.getCurrentInstanceData()
 			monitor.processAlerts()
@@ -613,44 +611,28 @@ func (monitor *ResourceMonitor) processAlerts() {
 	}
 }
 
-func (xen *xenSystemUsage) RunCmd(ctx context.Context) {
-	lines := make(chan xentop.Line, 1)
-	errs := make(chan error, 1)
+func (xen *xenSystemUsage) CacheSystemInfos() {
+	instanceInfos, err := xentop.GetSystemInfos()
+	if err != nil {
+		log.Errorf("Can't get system infos: %v", err)
 
-	go xentop.XenTop(lines, errs)
+		return
+	}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case err := <-errs:
-				log.Errorf("Can't get line: %v", err)
-
-			case line := <-lines:
-				xen.Lock()
-				xen.systemData[line.Name] = line
-				xen.Unlock()
-			}
-		}
-	}()
+	xen.systemInfos = instanceInfos
 }
 
 func (xen *xenSystemUsage) FillSystemInfo(instanceID string, instance *instanceMonitoring) error {
-	xen.Lock()
-	defer xen.Unlock()
-
-	systemInfo, ok := xen.systemData[instanceID]
+	systemInfo, ok := xen.systemInfos[instanceID]
 	if ok {
-		instance.monitoringData.CPU = uint64(systemInfo.CpuFraction)
+		instance.monitoringData.CPU = uint64(systemInfo.CPUFraction)
 		instance.monitoringData.RAM = uint64(systemInfo.Memory) * 1024 // nolint:gomnd
 	}
 
 	return nil
 }
 
-func (host *hostSystemUsage) RunCmd(ctx context.Context) {
+func (host *hostSystemUsage) CacheSystemInfos() {
 }
 
 func (host *hostSystemUsage) FillSystemInfo(instanceID string, instance *instanceMonitoring) error {
@@ -812,9 +794,7 @@ func prepareInstanceAlertItem(
 
 func getSourceSystemUsage(source string) SystemUsageProvider {
 	if source == "xentop" {
-		return &xenSystemUsage{
-			systemData: make(map[string]xentop.Line),
-		}
+		return &xenSystemUsage{}
 	}
 
 	return &hostSystemUsage{}

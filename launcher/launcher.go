@@ -77,6 +77,8 @@ type Storage interface {
 	GetAllInstances() ([]InstanceInfo, error)
 	GetOverrideEnvVars() ([]cloudprotocol.EnvVarsInstanceInfo, error)
 	SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVarsInstanceInfo) error
+	GetOnlineTime() (time.Time, error)
+	SetOnlineTime(t time.Time) error
 }
 
 // ServiceProvider service provider.
@@ -174,6 +176,8 @@ type Launcher struct {
 	currentInstances       map[string]*runtimeInstanceInfo
 	currentServices        map[string]*serviceInfo
 	currentEnvVars         []cloudprotocol.EnvVarsInstanceInfo
+	onlineTime             time.Time
+	isCloudOnline          bool
 }
 
 /***********************************************************************************************************************
@@ -194,22 +198,18 @@ var (
 	UnmountFunc = fs.Umount
 )
 
-var (
-	// ErrNotExist not exist instance error.
-	ErrNotExist = errors.New("instance not exist")
-	// ErrNoRuntimeStatus no current runtime status error.
-	ErrNoRuntimeStatus = errors.New("no runtime status")
-)
-
-var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
+// ErrNotExist not exist instance error.
+var ErrNotExist = errors.New("instance not exist")
 
 //nolint:gochecknoglobals // used to be overridden in unit tests
 var (
 	// RuntimeDir specifies directory where instance runtime spec is stored.
 	RuntimeDir = "/run/aos/runtime"
-	// CheckTLLsPeriod specified period different TTL timers are checked with.
-	CheckTLLsPeriod = 1 * time.Hour
+	// CheckTTLsPeriod specifies period different TTL timers are checked with.
+	CheckTTLsPeriod = 1 * time.Hour
 )
+
+var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint:gochecknoglobals // const
 
 /***********************************************************************************************************************
  * Public
@@ -245,6 +245,10 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 
 	if err = os.MkdirAll(RuntimeDir, 0o755); err != nil {
 		return nil, aoserrors.Wrap(err)
+	}
+
+	if launcher.onlineTime, err = launcher.storage.GetOnlineTime(); err != nil {
+		log.Errorf("Can't get online time: %v", err)
 	}
 
 	if launcher.currentEnvVars, err = launcher.storage.GetOverrideEnvVars(); err != nil {
@@ -313,6 +317,28 @@ func (launcher *Launcher) RuntimeStatusChannel() <-chan RuntimeStatus {
 	return launcher.runtimeStatusChannel
 }
 
+// CloudConnection sets cloud connection status.
+func (launcher *Launcher) CloudConnection(connected bool) error {
+	launcher.Lock()
+	defer launcher.Unlock()
+
+	log.WithField("connected", connected).Debug("Cloud connection changed")
+
+	defer func() {
+		launcher.isCloudOnline = connected
+	}()
+
+	if connected || launcher.isCloudOnline {
+		launcher.onlineTime = time.Now()
+
+		if err := launcher.storage.SetOnlineTime(launcher.onlineTime); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
@@ -323,9 +349,10 @@ func (launcher *Launcher) handleChannels(ctx context.Context) {
 		case instances := <-launcher.instanceRunner.InstanceStatusChannel():
 			launcher.updateInstancesStatuses(instances)
 
-		case <-time.After(CheckTLLsPeriod):
+		case <-time.After(CheckTTLsPeriod):
 			launcher.Lock()
 			launcher.updateInstancesEnvVars()
+			launcher.updateOfflineTimeouts()
 			launcher.Unlock()
 
 		case <-ctx.Done():
@@ -575,6 +602,9 @@ func (launcher *Launcher) doStartAction(instance *runtimeInstanceInfo) {
 	launcher.actionHandler.Execute(instance.InstanceID, func(instanceID string) (err error) {
 		defer func() {
 			if err != nil {
+				launcher.runMutex.Lock()
+				defer launcher.runMutex.Unlock()
+
 				launcher.instanceFailed(instance, err)
 			}
 		}()
@@ -724,7 +754,7 @@ func (launcher *Launcher) startInstance(instance *runtimeInstanceInfo) error {
 		}
 
 		instance.service = service
-		instance.runStatus = runner.InstanceStatus{}
+		instance.runStatus = runner.InstanceStatus{InstanceID: instance.InstanceID}
 
 		return nil
 	}(); err != nil {
@@ -809,9 +839,13 @@ func (launcher *Launcher) sendRunInstancesStatuses() {
 func (launcher *Launcher) stopCurrentInstances() {
 	stopInstances := make([]*runtimeInstanceInfo, 0, len(launcher.currentInstances))
 
+	launcher.runMutex.Lock()
+
 	for _, instance := range launcher.currentInstances {
 		stopInstances = append(stopInstances, instance)
 	}
+
+	launcher.runMutex.Unlock()
 
 	launcher.stopInstances(stopInstances)
 }
@@ -1111,6 +1145,60 @@ newInstancesLoop:
 	}
 
 	return runningInstances
+}
+
+func (launcher *Launcher) getOfflineTimeoutInstances() []*runtimeInstanceInfo {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	now := time.Now()
+	instances := make([]*runtimeInstanceInfo, 0)
+
+	for _, instance := range launcher.currentInstances {
+		if instance.service.serviceConfig.OfflineTTL.Duration != 0 &&
+			launcher.onlineTime.Add(instance.service.serviceConfig.OfflineTTL.Duration).Before(now) &&
+			!errors.Is(instance.runStatus.Err, errOfflineTimeout) {
+			instances = append(instances, instance)
+		}
+	}
+
+	return instances
+}
+
+func (launcher *Launcher) setOfflineInstancesStatus(instances []*runtimeInstanceInfo) {
+	launcher.runMutex.Lock()
+	defer launcher.runMutex.Unlock()
+
+	updateInstancesStatus := &InstancesStatus{Instances: make([]cloudprotocol.InstanceStatus, 0, len(instances))}
+
+	for _, instance := range instances {
+		launcher.currentInstances[instance.InstanceID] = instance
+		launcher.instanceFailed(instance, errOfflineTimeout)
+
+		updateInstancesStatus.Instances = append(updateInstancesStatus.Instances, instance.getCloudStatus())
+	}
+
+	launcher.runtimeStatusChannel <- RuntimeStatus{UpdateStatus: updateInstancesStatus}
+}
+
+func (launcher *Launcher) updateOfflineTimeouts() {
+	if launcher.isCloudOnline {
+		launcher.onlineTime = time.Now()
+
+		if err := launcher.storage.SetOnlineTime(launcher.onlineTime); err != nil {
+			log.Errorf("Can't set online time: %v", err)
+		}
+
+		return
+	}
+
+	instances := launcher.getOfflineTimeoutInstances()
+	if len(instances) == 0 {
+		return
+	}
+
+	launcher.stopInstances(instances)
+	launcher.setOfflineInstancesStatus(instances)
 }
 
 func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error) cloudprotocol.AlertItem {

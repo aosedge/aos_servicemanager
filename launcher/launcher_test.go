@@ -67,6 +67,8 @@ const (
 	statesDir         = "states"
 )
 
+const defaultStatusTimeout = 5 * time.Second
+
 var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TERM=xterm"}
 
 /***********************************************************************************************************************
@@ -75,13 +77,14 @@ var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 
 type testStorage struct {
 	sync.RWMutex
-	instances map[string]launcher.InstanceInfo
-	envVars   []cloudprotocol.EnvVarsInstanceInfo
+	instances  map[string]launcher.InstanceInfo
+	envVars    []cloudprotocol.EnvVarsInstanceInfo
+	onlineTime time.Time
 }
 
 type testServiceProvider struct {
-	services map[string]servicemanager.ServiceInfo
-	configs  map[string]serviceConfigs
+	services     map[string]servicemanager.ServiceInfo
+	layerDigests map[string][]string
 }
 
 type testLayerProvider struct {
@@ -122,10 +125,11 @@ type testMounter struct {
 	mounts map[string]mountInfo
 }
 
-type serviceConfigs struct {
+type serviceInfo struct {
+	aostypes.ServiceInfo
 	gid           uint32
 	imageConfig   *imagespec.Image
-	serviceConfig *servicemanager.ServiceConfig
+	serviceConfig *aostypes.ServiceConfig
 	layerDigests  []string
 }
 
@@ -136,7 +140,7 @@ type mountInfo struct {
 }
 
 type testItem struct {
-	services  []aostypes.ServiceInfo
+	services  []serviceInfo
 	layers    []aostypes.LayerInfo
 	instances []aostypes.InstanceInfo
 	err       []error
@@ -207,10 +211,10 @@ func TestRunInstances(t *testing.T) {
 	data := []testItem{
 		// start from scratch
 		{
-			services: []aostypes.ServiceInfo{
-				{ID: "service0"},
-				{ID: "service1"},
-				{ID: "service2"},
+			services: []serviceInfo{
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -220,10 +224,10 @@ func TestRunInstances(t *testing.T) {
 		},
 		// start the same instances
 		{
-			services: []aostypes.ServiceInfo{
-				{ID: "service0"},
-				{ID: "service1"},
-				{ID: "service2"},
+			services: []serviceInfo{
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -233,10 +237,10 @@ func TestRunInstances(t *testing.T) {
 		},
 		// stop and start some instances
 		{
-			services: []aostypes.ServiceInfo{
-				{ID: "service0"},
-				{ID: "service2"},
-				{ID: "service3"},
+			services: []serviceInfo{
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service3"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -246,10 +250,10 @@ func TestRunInstances(t *testing.T) {
 		},
 		// new service version
 		{
-			services: []aostypes.ServiceInfo{
-				{ID: "service0", VersionInfo: aostypes.VersionInfo{AosVersion: 1}},
-				{ID: "service2"},
-				{ID: "service3"},
+			services: []serviceInfo{
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service0", VersionInfo: aostypes.VersionInfo{AosVersion: 1}}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service3"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -259,17 +263,17 @@ func TestRunInstances(t *testing.T) {
 		},
 		// start error
 		{
-			services: []aostypes.ServiceInfo{
-				{ID: "service0"},
-				{ID: "service1"},
-				{ID: "service2"},
+			services: []serviceInfo{
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 0}},
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject1", Instance: 0}},
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject1", Instance: 0}},
 			},
-			err: []error{errors.New("error1"), errors.New("error2")}, // nolint:goerr113
+			err: []error{errors.New("error1"), errors.New("error2")}, //nolint:goerr113
 		},
 		// stop all instances
 		{},
@@ -280,7 +284,7 @@ func TestRunInstances(t *testing.T) {
 	runningInstances := make(map[string]runner.InstanceStatus)
 
 	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(
 		func(instanceID string) runner.InstanceStatus {
@@ -304,8 +308,8 @@ func TestRunInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -330,7 +334,8 @@ func TestRunInstances(t *testing.T) {
 			RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item)},
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+			runtimeStatus, defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
@@ -342,7 +347,7 @@ func TestRunInstances(t *testing.T) {
 
 func TestUpdateInstances(t *testing.T) {
 	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(nil, nil)
 
@@ -354,16 +359,16 @@ func TestUpdateInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"},
-			{ID: "service1"},
-			{ID: "service2"},
+		services: []serviceInfo{
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -384,9 +389,9 @@ func TestUpdateInstances(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -397,14 +402,14 @@ func TestUpdateInstances(t *testing.T) {
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
 		},
-		err: []error{errors.New("error0"), errors.New("error1")}, // nolint:goerr113
+		err: []error{errors.New("error0"), errors.New("error1")}, //nolint:goerr113
 	}
 
 	instanceRunner.statusChannel <- createRunStatus(storage, changedItem)
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), launcher.RuntimeStatus{
 		UpdateStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(changedItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 }
@@ -417,7 +422,7 @@ func TestRestartInstances(t *testing.T) {
 
 	restartMap := make(map[string]startStopCount)
 
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(
 		func(instanceID string) runner.InstanceStatus {
@@ -448,16 +453,16 @@ func TestRestartInstances(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"},
-			{ID: "service1"},
-			{ID: "service2"},
+		services: []serviceInfo{
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -488,7 +493,7 @@ func TestRestartInstances(t *testing.T) {
 		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
 	}
 
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -496,7 +501,7 @@ func TestRestartInstances(t *testing.T) {
 		t.Errorf("Can't stop instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -522,7 +527,7 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(nil), newTestLayerProvider(), newTestRunner(nil, nil),
+		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
 		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
 		newTestAlertSender())
 	if err != nil {
@@ -581,38 +586,7 @@ func TestHostFSDir(t *testing.T) {
 }
 
 func TestRuntimeSpec(t *testing.T) {
-	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
-		"service0": {
-			gid: 3456,
-			imageConfig: &imagespec.Image{
-				OS: "linux",
-				Config: imagespec.ImageConfig{
-					Entrypoint: []string{"entry1", "entry2", "entry3"},
-					Cmd:        []string{"cmd1", "cmd2", "cmd3"},
-					WorkingDir: "/working/dir",
-					Env:        []string{"env1=val1", "env2=val2", "env3=val3"},
-				},
-			},
-			serviceConfig: &servicemanager.ServiceConfig{
-				Hostname: newString("testHostName"),
-				Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
-				Quotas: servicemanager.ServiceQuotas{
-					CPULimit:    newUint64(42),
-					RAMLimit:    newUint64(1024),
-					PIDsLimit:   newUint64(10),
-					NoFileLimit: newUint64(3),
-					TmpLimit:    newUint64(512),
-				},
-				Devices: []servicemanager.ServiceDevice{
-					{Name: "input", Permissions: "r"},
-					{Name: "video", Permissions: "rw"},
-					{Name: "sound", Permissions: "rwm"},
-				},
-				Resources:   []string{"resource1", "resource2", "resource3"},
-				Permissions: map[string]map[string]string{"perm1": {"key1": "val1"}},
-			},
-		},
-	})
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
@@ -620,8 +594,38 @@ func TestRuntimeSpec(t *testing.T) {
 	testRegistrar := newTestRegistrar()
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"},
+		services: []serviceInfo{
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service0"},
+				gid:         3456,
+				imageConfig: &imagespec.Image{
+					OS: "linux",
+					Config: imagespec.ImageConfig{
+						Entrypoint: []string{"entry1", "entry2", "entry3"},
+						Cmd:        []string{"cmd1", "cmd2", "cmd3"},
+						WorkingDir: "/working/dir",
+						Env:        []string{"env1=val1", "env2=val2", "env3=val3"},
+					},
+				},
+				serviceConfig: &aostypes.ServiceConfig{
+					Hostname: newString("testHostName"),
+					Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
+					Quotas: aostypes.ServiceQuotas{
+						CPULimit:    newUint64(42),
+						RAMLimit:    newUint64(1024),
+						PIDsLimit:   newUint64(10),
+						NoFileLimit: newUint64(3),
+						TmpLimit:    newUint64(512),
+					},
+					Devices: []aostypes.ServiceDevice{
+						{Name: "input", Permissions: "r"},
+						{Name: "video", Permissions: "rw"},
+						{Name: "sound", Permissions: "rwm"},
+					},
+					Resources:   []string{"resource1", "resource2", "resource3"},
+					Permissions: map[string]map[string]string{"perm1": {"key1": "val1"}},
+				},
+			},
 		},
 		instances: []aostypes.InstanceInfo{
 			{
@@ -645,8 +649,8 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -749,9 +753,9 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), launcher.RuntimeStatus{
 		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -765,8 +769,8 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't get instance runtime spec: %v", err)
 	}
 
-	imageConfig := serviceProvider.configs[runItem.services[0].ID].imageConfig
-	serviceConfig := serviceProvider.configs[runItem.services[0].ID].serviceConfig
+	imageConfig := runItem.services[0].imageConfig
+	serviceConfig := runItem.services[0].serviceConfig
 
 	// Check terminal is false
 
@@ -981,61 +985,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	layerDigest1, layerDigest2, layerDigest3, layerDigest4 := uuid.NewString(), uuid.NewString(),
 		uuid.NewString(), uuid.NewString()
 
-	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
-		"service0": {
-			gid:          3456,
-			layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
-			imageConfig: &imagespec.Image{
-				OS: "linux",
-				Config: imagespec.ImageConfig{
-					ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
-				},
-			},
-			serviceConfig: &servicemanager.ServiceConfig{
-				Hostname:           newString("host1"),
-				Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
-				AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
-				Quotas: servicemanager.ServiceQuotas{
-					DownloadSpeed: newUint64(4096),
-					UploadSpeed:   newUint64(8192),
-					DownloadLimit: newUint64(16384),
-					UploadLimit:   newUint64(32768),
-					StorageLimit:  newUint64(2048),
-					StateLimit:    newUint64(1024),
-				},
-				Resources: []string{"resource0", "resource1", "resource2"},
-				Devices:   []servicemanager.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
-				AlertRules: &aostypes.AlertRules{
-					RAM: &aostypes.AlertRuleParam{
-						MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
-						MinThreshold: 10, MaxThreshold: 100,
-					},
-					CPU: &aostypes.AlertRuleParam{
-						MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
-						MinThreshold: 20, MaxThreshold: 200,
-					},
-					UsedDisks: []aostypes.PartitionAlertRuleParam{
-						{
-							Name: "storage",
-							AlertRuleParam: aostypes.AlertRuleParam{
-								MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
-								MinThreshold: 30, MaxThreshold: 300,
-							},
-						},
-					},
-					InTraffic: &aostypes.AlertRuleParam{
-						MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
-						MinThreshold: 40, MaxThreshold: 400,
-					},
-					OutTraffic: &aostypes.AlertRuleParam{
-						MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
-						MinThreshold: 50, MaxThreshold: 500,
-					},
-				},
-			},
-		},
-	})
-
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
@@ -1057,8 +1007,60 @@ func TestRuntimeEnvironment(t *testing.T) {
 	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2"})
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"},
+		services: []serviceInfo{
+			{
+				ServiceInfo:  aostypes.ServiceInfo{ID: "service0"},
+				gid:          3456,
+				layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
+				imageConfig: &imagespec.Image{
+					OS: "linux",
+					Config: imagespec.ImageConfig{
+						ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
+					},
+				},
+				serviceConfig: &aostypes.ServiceConfig{
+					Hostname:           newString("host1"),
+					Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
+					AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
+					Quotas: aostypes.ServiceQuotas{
+						DownloadSpeed: newUint64(4096),
+						UploadSpeed:   newUint64(8192),
+						DownloadLimit: newUint64(16384),
+						UploadLimit:   newUint64(32768),
+						StorageLimit:  newUint64(2048),
+						StateLimit:    newUint64(1024),
+					},
+					Resources: []string{"resource0", "resource1", "resource2"},
+					Devices:   []aostypes.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
+					AlertRules: &aostypes.AlertRules{
+						RAM: &aostypes.AlertRuleParam{
+							MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
+							MinThreshold: 10, MaxThreshold: 100,
+						},
+						CPU: &aostypes.AlertRuleParam{
+							MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
+							MinThreshold: 20, MaxThreshold: 200,
+						},
+						UsedDisks: []aostypes.PartitionAlertRuleParam{
+							{
+								Name: "storage",
+								AlertRuleParam: aostypes.AlertRuleParam{
+									MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
+									MinThreshold: 30, MaxThreshold: 300,
+								},
+							},
+						},
+						InTraffic: &aostypes.AlertRuleParam{
+							MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
+							MinThreshold: 40, MaxThreshold: 400,
+						},
+						OutTraffic: &aostypes.AlertRuleParam{
+							MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
+							MinThreshold: 50, MaxThreshold: 500,
+						},
+					},
+				},
+			},
 		},
 		layers: []aostypes.LayerInfo{
 			{Digest: layerDigest1}, {Digest: layerDigest2}, {Digest: layerDigest3}, {Digest: layerDigest4},
@@ -1084,8 +1086,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1101,9 +1103,9 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1125,8 +1127,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Error("Instance should be registered to network")
 	}
 
-	serviceConfig := serviceProvider.configs["service0"].serviceConfig
-	imageConfig := serviceProvider.configs["service0"].imageConfig
+	serviceConfig := runItem.services[0].serviceConfig
+	imageConfig := runItem.services[0].imageConfig
 
 	if !compareNetParams(netParams, networkmanager.NetworkParams{
 		InstanceIdent:      instance.InstanceIdent,
@@ -1162,7 +1164,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 	if !reflect.DeepEqual(monitorPrams, resourcemonitor.ResourceMonitorParams{
 		InstanceIdent: instance.InstanceIdent,
 		UID:           int(instance.UID),
-		GID:           int(serviceProvider.configs["service0"].gid),
+		GID:           int(runItem.services[0].gid),
 		AlertRules:    serviceConfig.AlertRules,
 		Partitions: []resourcemonitor.PartitionParam{
 			{
@@ -1228,8 +1230,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		t.Fatalf("Can't stop instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -1267,11 +1269,11 @@ func TestRuntimeEnvironment(t *testing.T) {
 }
 
 func TestOverrideEnvVars(t *testing.T) {
-	defaultTTLPeriod := launcher.CheckTLLsPeriod
+	defaultTTLPeriod := launcher.CheckTTLsPeriod
 
-	launcher.CheckTLLsPeriod = 1 * time.Second
+	launcher.CheckTTLsPeriod = 1 * time.Second
 
-	t.Cleanup(func() { launcher.CheckTLLsPeriod = defaultTTLPeriod })
+	t.Cleanup(func() { launcher.CheckTTLsPeriod = defaultTTLPeriod })
 
 	type instanceEnvVars struct {
 		aostypes.InstanceIdent
@@ -1572,9 +1574,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"},
-		},
+		services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}}},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
@@ -1584,7 +1584,7 @@ func TestOverrideEnvVars(t *testing.T) {
 		},
 	}
 
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 
@@ -1596,9 +1596,8 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 
@@ -1614,9 +1613,9 @@ func TestOverrideEnvVars(t *testing.T) {
 		t.Fatalf("Can't run instances: %v", err)
 	}
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 
@@ -1659,11 +1658,13 @@ func TestOverrideEnvVars(t *testing.T) {
 
 func TestRestartStoredInstancesOnStart(t *testing.T) {
 	storage := newTestStorage()
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 
 	runItem := testItem{
-		services: []aostypes.ServiceInfo{
-			{ID: "service0"}, {ID: "service1"}, {ID: "service2"},
+		services: []serviceInfo{
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -1694,9 +1695,9 @@ func TestRestartStoredInstancesOnStart(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{
-		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)},
-	}, testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(runItem)}},
+		defaultStatusTimeout); err != nil {
 		t.Fatalf("Check runtime status error: %v", err)
 	}
 }
@@ -1726,9 +1727,7 @@ func TestInstancePriorities(t *testing.T) {
 		// start from scratch
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1758,9 +1757,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 4 to the highest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1802,9 +1799,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 8 to the lowest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1828,9 +1823,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 1 to priority 500
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1864,9 +1857,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the highest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1912,9 +1903,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the lowest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1941,9 +1930,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the middle priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1981,9 +1968,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the highest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2010,9 +1995,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the lowest priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2037,9 +2020,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the middle priority
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2062,9 +2043,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Change instance 3 priority to the same order
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
-				},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2077,7 +2056,7 @@ func TestInstancePriorities(t *testing.T) {
 					instancePriority(8, 100),
 					instancePriority(9, 200),
 				},
-				err: []error{nil, nil, nil, errors.New("some error")}, // nolint:goerr113
+				err: []error{nil, nil, nil, errors.New("some error")}, //nolint:goerr113
 			},
 			startedInstances: []aostypes.InstanceInfo{
 				instancePriority(3, 350),
@@ -2093,8 +2072,8 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the middle priority and there is not successfully started instance
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{
-					{ID: service},
+				services: []serviceInfo{
+					{ServiceInfo: aostypes.ServiceInfo{ID: service}},
 				},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(1, 500),
@@ -2129,7 +2108,7 @@ func TestInstancePriorities(t *testing.T) {
 		oldStorageInstances map[string]launcher.InstanceInfo
 	)
 
-	serviceProvider := newTestServiceProvider(nil)
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	instanceRunner := newTestRunner(
@@ -2157,8 +2136,8 @@ func TestInstancePriorities(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -2191,7 +2170,8 @@ func TestInstancePriorities(t *testing.T) {
 			oldStorageInstances[instanceID] = instance
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+			runtimeStatus, defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
@@ -2213,12 +2193,19 @@ func TestResourceAlerts(t *testing.T) {
 		alerts []cloudprotocol.DeviceAllocateAlert
 	}
 
+	serviceConfig := &aostypes.ServiceConfig{Devices: []aostypes.ServiceDevice{{Name: "device0", Permissions: "rw"}}}
+
 	data := []testAlertItem{
 		// Try to allocate device3 (shared count 1) by 3 instances. Instance with index 0 should allocate the device as
 		// it has higher priority.
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{{ID: "service0"}},
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ID: "service0"},
+						serviceConfig: serviceConfig,
+					},
+				},
 				instances: []aostypes.InstanceInfo{
 					{
 						InstanceIdent: aostypes.InstanceIdent{
@@ -2252,7 +2239,12 @@ func TestResourceAlerts(t *testing.T) {
 		// it has higher priority.
 		{
 			testItem: testItem{
-				services: []aostypes.ServiceInfo{{ID: "service0"}},
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ID: "service0"},
+						serviceConfig: serviceConfig,
+					},
+				},
 				instances: []aostypes.InstanceInfo{
 					{
 						InstanceIdent: aostypes.InstanceIdent{
@@ -2296,15 +2288,7 @@ func TestResourceAlerts(t *testing.T) {
 		},
 	}
 
-	serviceProvider := newTestServiceProvider(map[string]serviceConfigs{
-		"service0": {
-			serviceConfig: &servicemanager.ServiceConfig{
-				Devices: []servicemanager.ServiceDevice{
-					{Name: "device0", Permissions: "rw"},
-				},
-			},
-		},
-	})
+	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	resourceManager := newTestResourceManager()
 	alertSender := newTestAlertSender()
@@ -2319,8 +2303,8 @@ func TestResourceAlerts(t *testing.T) {
 	}
 	defer testLauncher.Close()
 
-	if err = checkRuntimeStatus(launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}},
-		testLauncher.RuntimeStatusChannel()); err != nil {
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
 
@@ -2345,13 +2329,170 @@ func TestResourceAlerts(t *testing.T) {
 			RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item.testItem)},
 		}
 
-		if err = checkRuntimeStatus(runtimeStatus, testLauncher.RuntimeStatusChannel()); err != nil {
+		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus,
+			defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
 		if err = compareDeviceAllocateAlerts(item.alerts, alertSender.alerts); err != nil {
 			t.Errorf("Compare device allocation alerts error: %v", err)
 		}
+	}
+}
+
+func TestOfflineTimeout(t *testing.T) {
+	launcher.CheckTTLsPeriod = 1 * time.Second
+
+	serviceProvider := newTestServiceProvider()
+	storage := newTestStorage()
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	item := testItem{
+		services: []serviceInfo{
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service0"},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service1"},
+				serviceConfig: &aostypes.ServiceConfig{
+					OfflineTTL: aostypes.Duration{Duration: 5 * time.Second},
+				},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service2"},
+			},
+			{
+				ServiceInfo: aostypes.ServiceInfo{ID: "service3"},
+				serviceConfig: &aostypes.ServiceConfig{
+					OfflineTTL: aostypes.Duration{Duration: 10 * time.Second},
+				},
+			},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+		},
+	}
+
+	if err = serviceProvider.installServices(item.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err := testLauncher.CloudConnection(true); err != nil {
+		t.Errorf("Can't set cloud connection: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(item.instances, false); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(item)},
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(), runtimeStatus, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Should not be stopped instance during max offline timeout (> 15 sec)
+
+	select {
+	case <-testLauncher.RuntimeStatusChannel():
+		t.Error("Unexpected runtime status")
+
+	case <-time.After(20 * time.Second):
+	}
+
+	// Set cloud connection offline
+
+	if err := testLauncher.CloudConnection(false); err != nil {
+		t.Errorf("Can't set cloud connection: %v", err)
+	}
+
+	errOfflineTimeout := errors.New("offline timeout") //nolint:goerr113
+
+	// We should receive offline timeout status from service1 instances first
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{UpdateStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, 20*time.Second); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Then we should receive offline timeout status from service3 instances
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{UpdateStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, 20*time.Second); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	// Check offline timeout after launcher restart
+
+	testLauncher.Close()
+
+	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
+		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{
+			Instances: createInstancesStatuses(testItem{
+				instances: []aostypes.InstanceInfo{
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "subject0", Instance: 2}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service3", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
+					{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "subject0", Instance: 0}},
+				},
+				err: []error{
+					errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout, errOfflineTimeout,
+				},
+			}),
+		}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
 	}
 }
 
@@ -2431,6 +2572,22 @@ func (storage *testStorage) SetOverrideEnvVars(envVarsInfo []cloudprotocol.EnvVa
 	return nil
 }
 
+func (storage *testStorage) GetOnlineTime() (time.Time, error) {
+	storage.Lock()
+	defer storage.Unlock()
+
+	return storage.onlineTime, nil
+}
+
+func (storage *testStorage) SetOnlineTime(onlineTime time.Time) error {
+	storage.Lock()
+	defer storage.Unlock()
+
+	storage.onlineTime = onlineTime
+
+	return nil
+}
+
 func (storage *testStorage) fromTestItem(item testItem) {
 	storage.Lock()
 	defer storage.Unlock()
@@ -2451,12 +2608,8 @@ func (storage *testStorage) fromTestItem(item testItem) {
  * testServiceProvider
  **********************************************************************************************************************/
 
-func newTestServiceProvider(configs map[string]serviceConfigs) *testServiceProvider {
-	if configs == nil {
-		configs = make(map[string]serviceConfigs)
-	}
-
-	return &testServiceProvider{configs: configs}
+func newTestServiceProvider() *testServiceProvider {
+	return &testServiceProvider{}
 }
 
 func (provider *testServiceProvider) GetServiceInfo(serviceID string) (servicemanager.ServiceInfo, error) {
@@ -2479,7 +2632,7 @@ func (provider *testServiceProvider) GetImageParts(
 		ImageConfigPath:   filepath.Join(service.ImagePath, imageConfigFile),
 		ServiceConfigPath: filepath.Join(service.ImagePath, serviceConfigFile),
 		ServiceFSPath:     filepath.Join(service.ImagePath, instanceRootFS),
-		LayersDigest:      provider.configs[service.ServiceID].layerDigests,
+		LayersDigest:      provider.layerDigests[service.ServiceID],
 	}, nil
 }
 
@@ -2487,12 +2640,13 @@ func (provider *testServiceProvider) ValidateService(service servicemanager.Serv
 	return nil
 }
 
-func (provider *testServiceProvider) installServices(services []aostypes.ServiceInfo) error {
+func (provider *testServiceProvider) installServices(services []serviceInfo) error {
 	if err := os.RemoveAll(filepath.Join(tmpDir, servicesDir)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	provider.services = make(map[string]servicemanager.ServiceInfo)
+	provider.layerDigests = map[string][]string{}
 
 	for _, service := range services {
 		servicePath := filepath.Join(tmpDir, servicesDir, service.ID)
@@ -2502,8 +2656,10 @@ func (provider *testServiceProvider) installServices(services []aostypes.Service
 			ServiceID:       service.ID,
 			ServiceProvider: service.ProviderID,
 			ImagePath:       servicePath,
-			GID:             provider.configs[service.ID].gid,
+			GID:             service.gid,
 		}
+
+		provider.layerDigests[service.ID] = service.layerDigests
 
 		if err := os.MkdirAll(filepath.Join(servicePath, instanceRootFS), 0o755); err != nil {
 			return aoserrors.Wrap(err)
@@ -2511,8 +2667,8 @@ func (provider *testServiceProvider) installServices(services []aostypes.Service
 
 		imageConfig := &imagespec.Image{OS: "linux"}
 
-		if provider.configs[service.ID].imageConfig != nil {
-			imageConfig = provider.configs[service.ID].imageConfig
+		if service.imageConfig != nil {
+			imageConfig = service.imageConfig
 		}
 
 		if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, imageConfigFile),
@@ -2520,9 +2676,9 @@ func (provider *testServiceProvider) installServices(services []aostypes.Service
 			return err
 		}
 
-		if provider.configs[service.ID].serviceConfig != nil {
+		if service.serviceConfig != nil {
 			if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, serviceConfigFile),
-				provider.configs[service.ID].serviceConfig); err != nil {
+				service.serviceConfig); err != nil {
 				return err
 			}
 		}
@@ -3056,14 +3212,16 @@ loop2:
 	return true
 }
 
-func checkRuntimeStatus(refStatus launcher.RuntimeStatus, statusChannel <-chan launcher.RuntimeStatus) error {
+func checkRuntimeStatus(statusChannel <-chan launcher.RuntimeStatus,
+	refStatus launcher.RuntimeStatus, timeout time.Duration,
+) error {
 	select {
 	case runtimeStatus := <-statusChannel:
 		if err := compareRuntimeStatus(refStatus, runtimeStatus); err != nil {
 			return err
 		}
 
-	case <-time.After(5 * time.Second):
+	case <-time.After(timeout):
 		return aoserrors.New("Wait for runtime status timeout")
 	}
 

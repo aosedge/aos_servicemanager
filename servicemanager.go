@@ -237,9 +237,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.client, err = smclient.New(cfg, sm.iam.GetNodeID(), sm.iam.GetNodeType(), sm.iam, sm.serviceMgr, sm.layerMgr,
-		sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging, sm.cryptoContext,
-		sm.monitor.GetSystemInfo(), false); err != nil {
+	if sm.client, err = smclient.New(cfg, smclient.NodeDescription{
+		NodeID:     sm.iam.GetNodeID(),
+		NodeType:   sm.iam.GetNodeType(),
+		SystemInfo: sm.monitor.GetSystemInfo(),
+	}, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging,
+		sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
