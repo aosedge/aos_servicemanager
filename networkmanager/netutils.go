@@ -38,7 +38,7 @@ func getNetworkRoutes() (routeIPList []netlink.Route, err error) {
 		return nil, aoserrors.Errorf("could not create netlink handle on initial namespace: %v", err)
 	}
 
-	defer initNl.Delete()
+	defer initNl.Close()
 
 	routeIPList, err = initNl.RouteList(nil, netlink.FAMILY_V4)
 	if err != nil {
