@@ -439,8 +439,9 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 
 	for i, pbInstance := range runInstances.Instances {
 		instances[i] = aostypes.InstanceInfo{
-			InstanceIdent: pbconvert.NewInstanceIdentFromPB(pbInstance.Instance),
-			UID:           pbInstance.Uid, Priority: pbInstance.Priority,
+			InstanceIdent:     pbconvert.NewInstanceIdentFromPB(pbInstance.Instance),
+			NetworkParameters: pbconvert.NewNetworkParametersFromPB(pbInstance.NetworkParameters),
+			UID:               pbInstance.Uid, Priority: pbInstance.Priority,
 			StoragePath: pbInstance.StoragePath, StatePath: pbInstance.StatePath,
 		}
 	}
