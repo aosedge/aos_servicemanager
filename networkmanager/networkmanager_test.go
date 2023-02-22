@@ -181,11 +181,6 @@ func TestBaseNetwork(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
 
 	manager, err := networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil)
 	if err != nil {
@@ -195,7 +190,9 @@ func TestBaseNetwork(t *testing.T) {
 
 	plugins := createPlugins([]string{
 		createBridgePlugin(tmpDir + `/`),
-		createFirewallPlugin("", ""), createDNSPlugin(),
+		createFirewallPlugin("", ""),
+		createDNSPlugin(),
+		createVlanPlugin(1),
 	})
 
 	if _, err := manager.GetInstanceIP("instance0", "network0"); err == nil {
@@ -209,6 +206,11 @@ func TestBaseNetwork(t *testing.T) {
 		Hostname:           "myhost",
 		HostsFilePath:      hostsPath,
 		ResolvConfFilePath: resolvConfPath,
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+			VlanID: 1,
+		},
 	}); err != nil {
 		t.Fatalf("Can't add instance to network: %s", err)
 	}
@@ -267,7 +269,7 @@ func TestBaseNetwork(t *testing.T) {
 	}
 
 	if string(cniInterface.networkConfig.Bytes) != plugins {
-		t.Errorf("Wrong network config: %s", string(cniInterface.networkConfig.Bytes))
+		t.Errorf("Wrong network config: %s expected %s ", string(cniInterface.networkConfig.Bytes), plugins)
 	}
 
 	ip, err := manager.GetInstanceIP("instance0", "network0")
@@ -294,6 +296,10 @@ func TestFirewallPlugin(t *testing.T) {
 			params: networkmanager.NetworkParams{
 				ExposedPorts:       []string{"900"},
 				AllowedConnections: []string{"instance0" + "/900"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
@@ -305,6 +311,10 @@ func TestFirewallPlugin(t *testing.T) {
 			params: networkmanager.NetworkParams{
 				ExposedPorts:       []string{"800"},
 				AllowedConnections: []string{"instance0" + "/800"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
@@ -317,11 +327,6 @@ func TestFirewallPlugin(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
 
 	manager, err := networkmanager.New(&config.Config{}, nil)
 	if err != nil {
@@ -350,6 +355,10 @@ func TestBandwithPlugin(t *testing.T) {
 			params: networkmanager.NetworkParams{
 				IngressKbit: 1200,
 				EgressKbit:  1200,
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
@@ -362,6 +371,10 @@ func TestBandwithPlugin(t *testing.T) {
 			params: networkmanager.NetworkParams{
 				IngressKbit: 400,
 				EgressKbit:  300,
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
@@ -375,11 +388,6 @@ func TestBandwithPlugin(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
 
 	manager, err := networkmanager.New(&config.Config{}, nil)
 	if err != nil {
@@ -411,6 +419,10 @@ func TestDNSPluginPositive(t *testing.T) {
 					SubjectID: "user1",
 					ServiceID: "service0",
 				},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				hosts: []string{
@@ -427,6 +439,10 @@ func TestDNSPluginPositive(t *testing.T) {
 					SubjectID: "user1",
 					ServiceID: "service0",
 				},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 				Hostname: "myHost",
 			},
 			dnsParam: testDNSParam{
@@ -438,6 +454,10 @@ func TestDNSPluginPositive(t *testing.T) {
 		{
 			params: networkmanager.NetworkParams{
 				Hostname: "myHost1.domain",
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				hosts:              []string{"myHost1.domain", "myHost1.domain.network0"},
@@ -454,6 +474,10 @@ func TestDNSPluginPositive(t *testing.T) {
 				},
 				Hostname: "myHost2",
 				Aliases:  []string{"alias1", "alias2.domain", "alias3"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				hosts: []string{
@@ -470,6 +494,10 @@ func TestDNSPluginPositive(t *testing.T) {
 					Instance:  0,
 					SubjectID: "user1",
 					ServiceID: "service0",
+				},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
 				},
 			},
 			dnsParam: testDNSParam{
@@ -489,6 +517,10 @@ func TestDNSPluginPositive(t *testing.T) {
 				},
 				Hostname: "myHost2.domain",
 				Aliases:  []string{"alias1.domain", "alias2", "alias3"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				hosts: []string{
@@ -504,11 +536,6 @@ func TestDNSPluginPositive(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
 
 	manager, err := networkmanager.New(&config.Config{}, nil)
 	if err != nil {
@@ -553,6 +580,10 @@ func TestDNSPluginNegative(t *testing.T) {
 					SubjectID: "user1",
 					ServiceID: "service0",
 				},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				networkID:     "network0",
@@ -567,6 +598,10 @@ func TestDNSPluginNegative(t *testing.T) {
 					ServiceID: "service0",
 				},
 				Hostname: "myHost",
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				networkID:     "network0",
@@ -581,6 +616,10 @@ func TestDNSPluginNegative(t *testing.T) {
 					ServiceID: "service0",
 				},
 				Aliases: []string{"alias1", "alias2", "alias3"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				networkID:     "network1",
@@ -596,6 +635,10 @@ func TestDNSPluginNegative(t *testing.T) {
 				},
 				Hostname: "myHost",
 				Aliases:  []string{"alias1"},
+				NetworkParameters: aostypes.NetworkParameters{
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+				},
 			},
 			dnsParam: testDNSParam{
 				networkID:     "network1",
@@ -607,11 +650,6 @@ func TestDNSPluginNegative(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
 
 	manager, err := networkmanager.New(&config.Config{}, nil)
 	if err != nil {
@@ -684,6 +722,10 @@ func TestTrafficMonitoring(t *testing.T) {
 	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
 		DownloadLimit: 300,
 		UploadLimit:   300,
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
 	}); err != nil {
 		t.Fatalf("Can't add instance to network: %s", err)
 	}
@@ -737,6 +779,10 @@ func TestTrafficMonitoring(t *testing.T) {
 	if err := manager.AddInstanceToNetwork("instance1", "network0", networkmanager.NetworkParams{
 		DownloadLimit: 40,
 		UploadLimit:   40,
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
 	}); err != nil {
 		t.Fatalf("Can't add instance to network: %s", err)
 	}
@@ -794,7 +840,7 @@ func TestTrafficMonitoring(t *testing.T) {
 	}
 
 	if err := manager.SetTrafficPeriod(networkmanager.YearPeriod + 1); err == nil {
-		t.Error("Should be an error: incorrect traffic period period")
+		t.Error("Should be an error: incorrect traffic period")
 	}
 
 	if err := manager.RemoveInstanceFromNetwork("instance1", "network0"); err != nil {
@@ -833,6 +879,10 @@ func TestTrafficMonitoring(t *testing.T) {
 	if err := manager.AddInstanceToNetwork("instance2", "network0", networkmanager.NetworkParams{
 		DownloadLimit: 40,
 		UploadLimit:   40,
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
 	}); err == nil {
 		t.Fatalf("Should be error: can't add instance to network")
 	}
@@ -875,23 +925,30 @@ func TestAddNetworkFail(t *testing.T) {
 
 	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
 		ExposedPorts: []string{"800/9000/10000"},
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
 	}); err == nil {
 		t.Error("Should be error: can't add instance to network")
 	}
 
 	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
 		AllowedConnections: []string{"instance0" + "/800/900/1000"},
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
 	}); err == nil {
 		t.Error("Should be error: can't add instance to network")
 	}
 
-	networkmanager.GetIPSubnet = getIPSubnet
-
-	defer func() {
-		networkmanager.GetIPSubnet = nil
-	}()
-
-	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{}); err != nil {
+	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
+		NetworkParameters: aostypes.NetworkParameters{
+			IP:     "172.17.0.1",
+			Subnet: "172.17.0.0/16",
+		},
+	}); err != nil {
 		t.Fatalf("Can't add instance to network: %s", err)
 	}
 
@@ -1007,7 +1064,7 @@ func createBridgePlugin(dataDir string) string {
 		"hairpinMode": true,
 		"ipam": {
 			"rangeStart": "172.17.0.1",
-			"rangeEnd": "172.17.255.254",
+			"rangeEnd": "172.17.0.1",
 			"subnet": "172.17.0.0/16",
 			"Name": "",
 			"type": "host-local",
@@ -1032,6 +1089,10 @@ func createBandwithPlugin(in, out int) string {
 		`{"type":"bandwidth","ingressRate":%d,"ingressBurst":12800,"egressRate":%d,"egressBurst":12800}`, in, out)
 }
 
+func createVlanPlugin(vlanID int) string {
+	return fmt.Sprintf(`{"type":"aos-vlan","vlanId":%d,"master":"br-network0","ifName":"vlan-network0"}`, vlanID)
+}
+
 func createFirewallPlugin(inPort, outPort string) string {
 	str := removeSpaces(`{
 		"type": "aos-firewall",
@@ -1048,16 +1109,6 @@ func createFirewallPlugin(inPort, outPort string) string {
 	}
 
 	return str + "}"
-}
-
-func getIPAddressRange(subnetwork *net.IPNet) (ipLowNetRange net.IP, ipHighNetRange net.IP) {
-	return net.ParseIP("172.17.0.1"), net.ParseIP("172.17.255.254")
-}
-
-func getIPSubnet(networkID string) (allocIPNet *net.IPNet, err error) {
-	_, ipnet, err := net.ParseCIDR("172.17.0.0/16")
-
-	return ipnet, aoserrors.Wrap(err)
 }
 
 func (c *testCNIInterface) AddNetworkList(ctx context.Context, list *cni.NetworkConfigList, rt *cni.RuntimeConf) (
@@ -1271,8 +1322,6 @@ func (iptables *testIPTablesInterface) waitUpdateIptablesCache() {
 }
 
 func setup() (err error) {
-	networkmanager.GetIPAddressRange = getIPAddressRange
-
 	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
 		return aoserrors.Wrap(err)
 	}
