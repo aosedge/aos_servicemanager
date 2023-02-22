@@ -49,6 +49,7 @@ import (
 
 const (
 	bridgePrefix                  = "br-"
+	vlanPrefix                    = "vlan-"
 	instanceIfName                = "eth0"
 	pathToNetNs                   = "/run/netns"
 	cniBinPath                    = "/opt/cni/bin"
@@ -138,6 +139,13 @@ type aosDNSNetConf struct {
 	MultiDomain  bool            `json:"multiDomain,omitempty"`
 	DomainName   string          `json:"domainName,omitempty"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
+}
+
+type vlanNetConf struct {
+	Type   string `json:"type"`
+	VlanID int    `json:"vlanId"`
+	Master string `json:"master"`
+	IfName string `json:"ifName"`
 }
 
 type inputAccessConfig struct {
@@ -634,6 +642,10 @@ func (manager *NetworkManager) postNetworkClear(networkID string) error {
 		return aoserrors.Wrap(err)
 	}
 
+	if err := removeVlanInterface(networkID); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	return nil
 }
 
@@ -864,6 +876,21 @@ func getDNSPluginConfig(networkID string) (config json.RawMessage, err error) {
 	return config, nil
 }
 
+func getVlanPluginConfig(networkID, brName string, vlanID uint64) (config json.RawMessage, err error) {
+	vlan := &vlanNetConf{
+		Type:   "aos-vlan",
+		VlanID: int(vlanID),
+		Master: brName,
+		IfName: vlanPrefix + networkID,
+	}
+
+	if config, err = json.Marshal(vlan); err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	return config, nil
+}
+
 func getRuntimeNetConfig(instanceID, networkID string) (
 	networkingConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf,
 ) {
@@ -922,6 +949,17 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 	}
 
 	networkConfig.Plugins = append(networkConfig.Plugins, dnsConfig)
+
+	// Vlan
+
+	if params.VlanID > 0 {
+		vlanConfig, err := getVlanPluginConfig(networkID, bridgePrefix+networkID, params.VlanID)
+		if err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		networkConfig.Plugins = append(networkConfig.Plugins, vlanConfig)
+	}
 
 	networkConfigBytes, err := json.Marshal(networkConfig)
 	if err != nil {
