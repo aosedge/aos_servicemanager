@@ -145,11 +145,8 @@ func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitorin
 	// We have to count only interned traffic.  Skip local sub networks and netns
 	// bridge network from traffic count.
 	skipNetworks := []string{
-		"127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12",
-	}
-
-	for _, bridgeSubnet := range predefinedPrivateNetworks {
-		skipNetworks = append(skipNetworks, bridgeSubnet.ipSubNet)
+		"127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12", "172.17.0.0/16", "172.18.0.0/16",
+		"172.19.0.0/16", "172.20.0.0/14", "172.24.0.0/14", "172.28.0.0/14",
 	}
 
 	monitor.skipAddresses = strings.Join(skipNetworks, ",")

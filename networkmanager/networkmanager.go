@@ -72,7 +72,6 @@ type netInstanceData struct {
 type NetworkManager struct {
 	sync.RWMutex
 	cniInterface      cni.CNI
-	ipamSubnetwork    *ipSubnetwork
 	hosts             []aostypes.Host
 	networkDir        string
 	trafficMonitoring *trafficMonitoring
@@ -82,6 +81,7 @@ type NetworkManager struct {
 // NetworkParams network parameters set for instance.
 type NetworkParams struct {
 	aostypes.InstanceIdent
+	aostypes.NetworkParameters
 	Hostname           string
 	Aliases            []string
 	IngressKbit        uint64
@@ -160,13 +160,9 @@ var skipNetworkFileNames = []string{"lock", "last_reserved_ip.0"}
 
 var errTrafficMonitorDisable = errors.New("traffic monitoring is disabled")
 
-// These global variables are used to be able to mocking the functionality of networking in tests.
+// CNIPlugins this global variable is used to be able to mocking the functionality of networking in tests.
 // nolint:gochecknoglobals
-var (
-	CNIPlugins        cni.CNI
-	GetIPSubnet       func(networkID string) (allocIPNet *net.IPNet, err error)
-	GetIPAddressRange = getIPAddressRange
-)
+var CNIPlugins cni.CNI
 
 /***********************************************************************************************************************
  * Public
@@ -186,14 +182,6 @@ func New(cfg *config.Config, trafficStorage TrafficStorage) (manager *NetworkMan
 
 	if manager.cniInterface = CNIPlugins; manager.cniInterface == nil {
 		manager.cniInterface = cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cniDir, nil)
-	}
-
-	if GetIPSubnet == nil {
-		GetIPSubnet = manager.getIPSubnet
-	}
-
-	if manager.ipamSubnetwork, err = newIPam(); err != nil {
-		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = manager.deleteAllNetworks(); err != nil {
@@ -235,16 +223,11 @@ func (manager *NetworkManager) GetNetnsPath(instanceID string) (pathToNetNS stri
 }
 
 // AddInstanceToNetwork adds instance to network.
-func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string, params NetworkParams) error {
+func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string, params NetworkParams) (err error) {
 	log.WithFields(log.Fields{"instanceID": instanceID, "networkID": networkID}).Debug("Add instance to network")
 
 	if manager.isInstanceInNetwork(instanceID, networkID) {
 		return aoserrors.Errorf("Instance %s already in the network %s", instanceID, networkID)
-	}
-
-	ipSubnet, err := GetIPSubnet(networkID)
-	if err != nil {
-		return err
 	}
 
 	manager.addInstanceNetworkToCache(instanceID, networkID)
@@ -269,7 +252,7 @@ func (manager *NetworkManager) AddInstanceToNetwork(instanceID, networkID string
 		}
 	}()
 
-	netConfig, runtimeConfig, hosts, err := manager.prepareCNIConfig(instanceID, networkID, ipSubnet, params)
+	netConfig, runtimeConfig, hosts, err := manager.prepareCNIConfig(instanceID, networkID, params)
 	if err != nil {
 		return err
 	}
@@ -486,31 +469,15 @@ func (manager *NetworkManager) addNetwork(
 	return result.DNS.Nameservers, result.IPs[0].Address.IP.String(), nil
 }
 
-func (manager *NetworkManager) getIPSubnet(networkID string) (allocIPNet *net.IPNet, err error) {
-	manager.Lock()
-	defer manager.Unlock()
-
-	ipSubnet, exist := manager.ipamSubnetwork.tryToGetExistIPNetFromPool(networkID)
-	if !exist {
-		if ipSubnet, err = checkExistNetInterface(bridgePrefix + networkID); err != nil {
-			if ipSubnet, _, err = manager.ipamSubnetwork.requestIPNetPool(networkID); err != nil {
-				return nil, aoserrors.Wrap(err)
-			}
-		}
-	}
-
-	return ipSubnet, nil
-}
-
 func (manager *NetworkManager) prepareCNIConfig(
-	instanceID, networkID string, ipSubnet *net.IPNet, params NetworkParams) (
+	instanceID, networkID string, params NetworkParams) (
 	netConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf, hosts []string, err error,
 ) {
 	if hosts, err = manager.prepareHostnameList(networkID, params); err != nil {
 		return nil, nil, nil, err
 	}
 
-	if netConfig, err = prepareNetworkConfigList(manager.networkDir, instanceID, networkID, ipSubnet, params); err != nil {
+	if netConfig, err = prepareNetworkConfigList(manager.networkDir, instanceID, networkID, params); err != nil {
 		return nil, nil, nil, aoserrors.Wrap(err)
 	}
 
@@ -663,8 +630,6 @@ func (manager *NetworkManager) removeInstanceFromNetwork(instanceID, networkID s
 }
 
 func (manager *NetworkManager) postNetworkClear(networkID string) error {
-	manager.ipamSubnetwork.releaseIPNetPool(networkID)
-
 	if err := removeBridgeInterface(networkID); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -776,8 +741,12 @@ func readInstanceIDFromFile(pathToInstanceID string) (instanceID string, err err
 	return cniInstanceInfo[0], nil
 }
 
-func getBridgePluginConfig(networkDir, networkID string, subnetwork *net.IPNet) (config json.RawMessage, err error) {
-	minIPRange, maxIPRange := GetIPAddressRange(subnetwork)
+func getBridgePluginConfig(networkDir, networkID string, subnet string, ip string) (config json.RawMessage, err error) {
+	_, ipSubnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 
 	configBridge := &bridgeNetConf{
@@ -790,9 +759,9 @@ func getBridgePluginConfig(networkDir, networkID string, subnetwork *net.IPNet) 
 			DataDir: networkDir,
 			Type:    "host-local",
 			Range: &allocator.Range{
-				RangeStart: minIPRange,
-				RangeEnd:   maxIPRange,
-				Subnet:     types.IPNet(*subnetwork),
+				RangeStart: net.ParseIP(ip),
+				RangeEnd:   net.ParseIP(ip),
+				Subnet:     types.IPNet(*ipSubnet),
 			},
 			Routes: []*types.Route{
 				{
@@ -912,14 +881,13 @@ func getRuntimeNetConfig(instanceID, networkID string) (
 	return networkingConfig, runtimeConfig
 }
 
-func prepareNetworkConfigList(networkDir, instanceID, networkID string, subnetwork *net.IPNet,
-	params NetworkParams,
+func prepareNetworkConfigList(networkDir, instanceID, networkID string, params NetworkParams,
 ) (cniNetworkConfig *cni.NetworkConfigList, err error) {
 	networkConfig := cniNetwork{Name: networkID, CNIVersion: cniVersion}
 
 	// Bridge
 
-	bridgeConfig, err := getBridgePluginConfig(networkDir, networkID, subnetwork)
+	bridgeConfig, err := getBridgePluginConfig(networkDir, networkID, params.Subnet, params.IP)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
