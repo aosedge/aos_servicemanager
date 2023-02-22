@@ -45,6 +45,23 @@ func removeBridgeInterface(spID string) (err error) {
 	return nil
 }
 
+func removeVlanInterface(spID string) (err error) {
+	vlan, err := netlink.LinkByName(vlanPrefix + spID)
+	if err != nil {
+		return nil // nolint:nilerr
+	}
+
+	if err = netlink.LinkSetDown(vlan); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = netlink.LinkDel(vlan); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
 func createNetNS(name string) (err error) {
 	if _, err = os.Stat(path.Join(pathToNetNs, name)); os.IsNotExist(err) {
 		runtime.LockOSThread()
