@@ -642,6 +642,7 @@ func (launcher *Launcher) setupNetwork(instance *runtimeInstanceInfo) (err error
 		HostsFilePath:      filepath.Join(networkFilesDir, "etc", "hosts"),
 		ResolvConfFilePath: filepath.Join(networkFilesDir, "etc", "resolv.conf"),
 		Hosts:              launcher.config.Hosts,
+		NetworkParameters:  instance.NetworkParameters,
 	}
 
 	resourceHosts, err := launcher.getHostsFromResources(instance.service.serviceConfig.Resources)
