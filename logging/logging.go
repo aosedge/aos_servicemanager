@@ -301,7 +301,7 @@ func (instance *Logging) getInstanceCrashLog(request getLogRequest) (err error) 
 	}
 
 	if crashTime == 0 {
-		return nil
+		return aoserrors.New("no instance crash found")
 	}
 
 	if err = journal.AddDisjunction(); err != nil {
