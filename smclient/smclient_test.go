@@ -655,6 +655,11 @@ func TestRunInstances(t *testing.T) {
 						SubjectId: "subject1",
 						Instance:  0,
 					},
+					NetworkParameters: &pb.NetworkParameters{
+						Ip:     "172.17.0.1",
+						Subnet: "172.17.0.0/16",
+						VlanId: 1,
+					},
 					Uid:         329,
 					Priority:    12,
 					StoragePath: "storagePath1",
@@ -665,6 +670,11 @@ func TestRunInstances(t *testing.T) {
 						ServiceId: "service1",
 						SubjectId: "subject1",
 						Instance:  1,
+					},
+					NetworkParameters: &pb.NetworkParameters{
+						Ip:     "172.17.0.2",
+						Subnet: "172.17.0.0/16",
+						VlanId: 1,
 					},
 					Uid:         876,
 					Priority:    32,
@@ -677,6 +687,11 @@ func TestRunInstances(t *testing.T) {
 						SubjectId: "subject1",
 						Instance:  0,
 					},
+					NetworkParameters: &pb.NetworkParameters{
+						Ip:     "172.17.0.3",
+						Subnet: "172.17.0.0/16",
+						VlanId: 1,
+					},
 					Uid:         543,
 					Priority:    29,
 					StoragePath: "storagePath3",
@@ -687,6 +702,11 @@ func TestRunInstances(t *testing.T) {
 						ServiceId: "service2",
 						SubjectId: "subject2",
 						Instance:  5,
+					},
+					NetworkParameters: &pb.NetworkParameters{
+						Ip:     "172.17.0.4",
+						Subnet: "172.17.0.0/16",
+						VlanId: 1,
 					},
 					Uid:         765,
 					Priority:    37,
@@ -742,7 +762,7 @@ func TestRunInstances(t *testing.T) {
 		}
 
 		if !reflect.DeepEqual(launcher.instances, instances) {
-			t.Errorf("Wrong instances: %v", launcher.instances)
+			t.Errorf("Wrong instances: %v expected %v", launcher.instances, instances)
 		}
 
 		if launcher.forceRestart != forceRestart {
@@ -1092,6 +1112,11 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 				ServiceID: instance.Instance.ServiceId,
 				SubjectID: instance.Instance.SubjectId,
 				Instance:  uint64(instance.Instance.Instance),
+			},
+			NetworkParameters: aostypes.NetworkParameters{
+				IP:     instance.NetworkParameters.Ip,
+				Subnet: instance.NetworkParameters.Subnet,
+				VlanID: instance.NetworkParameters.VlanId,
 			},
 			UID:         instance.Uid,
 			Priority:    instance.Priority,
