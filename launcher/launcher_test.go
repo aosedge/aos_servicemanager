@@ -2180,7 +2180,7 @@ func TestInstancePriorities(t *testing.T) {
 		}
 
 		if !compareArrays(len(stoppedInstances), len(item.stoppedInstances), func(index1, index2 int) bool {
-			return stoppedInstances[index1] == item.stoppedInstances[index2]
+			return instanceInfoEqual(stoppedInstances[index1], item.stoppedInstances[index2])
 		}) {
 			t.Errorf("Wrong stopped instances: %v", stoppedInstances)
 		}
@@ -3246,7 +3246,7 @@ func checkInstancesByPriority(compInstances, refInstances []aostypes.InstanceInf
 			refPriorityInstances := refInstances[startPriorityIndex:i]
 
 			if !compareArrays(len(compPriorityInstances), len(refPriorityInstances), func(index1, index2 int) bool {
-				return compPriorityInstances[index1] == refPriorityInstances[index2]
+				return instanceInfoEqual(compPriorityInstances[index1], refPriorityInstances[index2])
 			}) {
 				return aoserrors.New("instance priorities mismatch")
 			}
@@ -3733,4 +3733,8 @@ func compareDeviceAllocateAlerts(alerts1, alerts2 []cloudprotocol.DeviceAllocate
 	}
 
 	return nil
+}
+
+func instanceInfoEqual(info1, info2 aostypes.InstanceInfo) bool {
+	return reflect.DeepEqual(info1, info2)
 }

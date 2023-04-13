@@ -441,7 +441,7 @@ runInstancesLoop:
 
 			if currentInstance.service != nil &&
 				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion &&
-				currentInstance.InstanceInfo.InstanceInfo == runInstance.InstanceInfo &&
+				instanceInfoEqual(currentInstance.InstanceInfo.InstanceInfo, runInstance.InstanceInfo) &&
 				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive &&
 				currentInstance.Priority >= maxStartPriority && !maxPriorityIncreased {
 				currentInstances = append(currentInstances[:i], currentInstances[i+1:]...)
@@ -1108,7 +1108,7 @@ newInstancesLoop:
 		for i, curInstance := range curInstances {
 			if curInstance.InstanceIdent == newInstance.InstanceIdent {
 				// Update instance if parameters are changed
-				if curInstance.InstanceInfo != newInstance {
+				if !instanceInfoEqual(curInstance.InstanceInfo, newInstance) {
 					curInstance.InstanceInfo = newInstance
 
 					if err := launcher.storage.UpdateInstance(curInstance); err != nil {
@@ -1212,4 +1212,34 @@ func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error
 			Message:       err.Error(),
 		},
 	}
+}
+
+func instanceInfoEqual(info1, info2 aostypes.InstanceInfo) bool {
+	if info1.InstanceIdent != info2.InstanceIdent ||
+		info1.NetworkParameters.Subnet != info2.NetworkParameters.Subnet ||
+		info1.NetworkParameters.IP != info2.NetworkParameters.IP ||
+		info1.NetworkParameters.VlanID != info2.NetworkParameters.VlanID ||
+		info1.UID != info2.UID ||
+		info1.Priority != info2.Priority ||
+		info1.StoragePath != info2.StoragePath ||
+		info1.StatePath != info2.StatePath {
+		return false
+	}
+
+	if len(info1.NetworkParameters.DNSServers) != len(info2.NetworkParameters.DNSServers) {
+		return false
+	}
+
+next:
+	for _, dns1 := range info1.NetworkParameters.DNSServers {
+		for _, dns2 := range info2.NetworkParameters.DNSServers {
+			if dns1 == dns2 {
+				continue next
+			}
+		}
+
+		return false
+	}
+
+	return true
 }
