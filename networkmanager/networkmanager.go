@@ -135,10 +135,11 @@ type aosFirewallNetConf struct {
 }
 
 type aosDNSNetConf struct {
-	Type         string          `json:"type"`
-	MultiDomain  bool            `json:"multiDomain,omitempty"`
-	DomainName   string          `json:"domainName,omitempty"`
-	Capabilities map[string]bool `json:"capabilities,omitempty"`
+	Type          string          `json:"type"`
+	MultiDomain   bool            `json:"multiDomain,omitempty"`
+	DomainName    string          `json:"domainName,omitempty"`
+	RemoteServers []string        `json:"remoteServers,omitempty"`
+	Capabilities  map[string]bool `json:"capabilities,omitempty"`
 }
 
 type vlanNetConf struct {
@@ -861,12 +862,13 @@ func getBandwidthPluginConfig(ingressKbit, egressKbit uint64) (config json.RawMe
 	return config, nil
 }
 
-func getDNSPluginConfig(networkID string) (config json.RawMessage, err error) {
+func getDNSPluginConfig(networkID string, dnsServers []string) (config json.RawMessage, err error) {
 	configDNS := &aosDNSNetConf{
-		Type:         "dnsname",
-		MultiDomain:  true,
-		DomainName:   networkID,
-		Capabilities: map[string]bool{"aliases": true},
+		Type:          "dnsname",
+		MultiDomain:   true,
+		DomainName:    networkID,
+		RemoteServers: dnsServers,
+		Capabilities:  map[string]bool{"aliases": true},
 	}
 
 	if config, err = json.Marshal(configDNS); err != nil {
@@ -943,7 +945,7 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 
 	// DNS
 
-	dnsConfig, err := getDNSPluginConfig(networkID)
+	dnsConfig, err := getDNSPluginConfig(networkID, params.DNSServers)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
