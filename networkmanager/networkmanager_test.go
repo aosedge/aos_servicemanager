@@ -207,9 +207,10 @@ func TestBaseNetwork(t *testing.T) {
 		HostsFilePath:      hostsPath,
 		ResolvConfFilePath: resolvConfPath,
 		NetworkParameters: aostypes.NetworkParameters{
-			IP:     "172.17.0.1",
-			Subnet: "172.17.0.0/16",
-			VlanID: 1,
+			IP:         "172.17.0.1",
+			Subnet:     "172.17.0.0/16",
+			VlanID:     1,
+			DNSServers: []string{"10.10.2.1"},
 		},
 	}); err != nil {
 		t.Fatalf("Can't add instance to network: %s", err)
@@ -297,8 +298,9 @@ func TestFirewallPlugin(t *testing.T) {
 				ExposedPorts:       []string{"900"},
 				AllowedConnections: []string{"instance0" + "/900"},
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:     "172.17.0.1",
-					Subnet: "172.17.0.0/16",
+					IP:         "172.17.0.1",
+					Subnet:     "172.17.0.0/16",
+					DNSServers: []string{"10.10.2.1"},
 				},
 			},
 			networkConfig: createPlugins([]string{
@@ -312,8 +314,9 @@ func TestFirewallPlugin(t *testing.T) {
 				ExposedPorts:       []string{"800"},
 				AllowedConnections: []string{"instance0" + "/800"},
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:     "172.17.0.1",
-					Subnet: "172.17.0.0/16",
+					IP:         "172.17.0.1",
+					Subnet:     "172.17.0.0/16",
+					DNSServers: []string{"10.10.2.1"},
 				},
 			},
 			networkConfig: createPlugins([]string{
@@ -356,8 +359,9 @@ func TestBandwithPlugin(t *testing.T) {
 				IngressKbit: 1200,
 				EgressKbit:  1200,
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:     "172.17.0.1",
-					Subnet: "172.17.0.0/16",
+					IP:         "172.17.0.1",
+					Subnet:     "172.17.0.0/16",
+					DNSServers: []string{"10.10.2.1"},
 				},
 			},
 			networkConfig: createPlugins([]string{
@@ -372,8 +376,9 @@ func TestBandwithPlugin(t *testing.T) {
 				IngressKbit: 400,
 				EgressKbit:  300,
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:     "172.17.0.1",
-					Subnet: "172.17.0.0/16",
+					IP:         "172.17.0.1",
+					Subnet:     "172.17.0.0/16",
+					DNSServers: []string{"10.10.2.1"},
 				},
 			},
 			networkConfig: createPlugins([]string{
@@ -1081,7 +1086,12 @@ func createBridgePlugin(dataDir string) string {
 }
 
 func createDNSPlugin() string {
-	return `{"type":"dnsname","multiDomain":true,"domainName":"network0","capabilities":{"aliases":true}}`
+	return removeSpaces(`{
+		"type":"dnsname",
+		"multiDomain":true,
+		"domainName":"network0",
+		"remoteServers":["10.10.2.1"],
+		"capabilities":{"aliases":true}}`)
 }
 
 func createBandwithPlugin(in, out int) string {
