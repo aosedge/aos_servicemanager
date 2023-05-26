@@ -1019,9 +1019,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 					},
 				},
 				serviceConfig: &aostypes.ServiceConfig{
-					Hostname:           newString("host1"),
-					Permissions:        map[string]map[string]string{"perm1": {"key1": "val1"}},
-					AllowedConnections: map[string]struct{}{"connection0": {}, "connection1": {}, "connection2": {}},
+					Hostname:    newString("host1"),
+					Permissions: map[string]map[string]string{"perm1": {"key1": "val1"}},
 					Quotas: aostypes.ServiceQuotas{
 						DownloadSpeed: newUint64(4096),
 						UploadSpeed:   newUint64(8192),
@@ -1135,7 +1134,6 @@ func TestRuntimeEnvironment(t *testing.T) {
 		Hostname:           *serviceConfig.Hostname,
 		Hosts:              resourceHosts,
 		ExposedPorts:       convertMapToStringList(imageConfig.Config.ExposedPorts),
-		AllowedConnections: convertMapToStringList(serviceConfig.AllowedConnections),
 		HostsFilePath:      filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "hosts"),
 		ResolvConfFilePath: filepath.Join(launcher.RuntimeDir, instance.InstanceID, "mounts", "etc", "resolv.conf"),
 		IngressKbit:        *serviceConfig.Quotas.DownloadSpeed,
@@ -2180,7 +2178,7 @@ func TestInstancePriorities(t *testing.T) {
 		}
 
 		if !compareArrays(len(stoppedInstances), len(item.stoppedInstances), func(index1, index2 int) bool {
-			return instanceInfoEqual(stoppedInstances[index1], item.stoppedInstances[index2])
+			return reflect.DeepEqual(stoppedInstances[index1], item.stoppedInstances[index2])
 		}) {
 			t.Errorf("Wrong stopped instances: %v", stoppedInstances)
 		}
@@ -3246,7 +3244,7 @@ func checkInstancesByPriority(compInstances, refInstances []aostypes.InstanceInf
 			refPriorityInstances := refInstances[startPriorityIndex:i]
 
 			if !compareArrays(len(compPriorityInstances), len(refPriorityInstances), func(index1, index2 int) bool {
-				return instanceInfoEqual(compPriorityInstances[index1], refPriorityInstances[index2])
+				return reflect.DeepEqual(compPriorityInstances[index1], refPriorityInstances[index2])
 			}) {
 				return aoserrors.New("instance priorities mismatch")
 			}
@@ -3635,12 +3633,6 @@ func compareNetParams(p1, p2 networkmanager.NetworkParams) bool {
 		return false
 	}
 
-	if !compareArrays(len(p1.AllowedConnections), len(p2.AllowedConnections), func(index1, index2 int) bool {
-		return p1.AllowedConnections[index1] == p2.AllowedConnections[index2]
-	}) {
-		return false
-	}
-
 	if p1.HostsFilePath != p2.HostsFilePath {
 		return false
 	}
@@ -3733,8 +3725,4 @@ func compareDeviceAllocateAlerts(alerts1, alerts2 []cloudprotocol.DeviceAllocate
 	}
 
 	return nil
-}
-
-func instanceInfoEqual(info1, info2 aostypes.InstanceInfo) bool {
-	return reflect.DeepEqual(info1, info2)
 }
