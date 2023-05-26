@@ -678,12 +678,6 @@ func (launcher *Launcher) setupNetwork(instance *runtimeInstanceInfo) (err error
 		params.ExposedPorts = append(params.ExposedPorts, key)
 	}
 
-	params.AllowedConnections = make([]string, 0, len(instance.service.serviceConfig.AllowedConnections))
-
-	for key := range instance.service.serviceConfig.AllowedConnections {
-		params.AllowedConnections = append(params.AllowedConnections, key)
-	}
-
 	if !slices.Contains(launcher.config.RunnerFeatures, runxRunner) {
 		if err := launcher.networkManager.AddInstanceToNetwork(
 			instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
@@ -1226,15 +1220,31 @@ func instanceInfoEqual(info1, info2 aostypes.InstanceInfo) bool {
 		return false
 	}
 
-	if len(info1.NetworkParameters.DNSServers) != len(info2.NetworkParameters.DNSServers) {
+	return networkParametersEqual(info1.NetworkParameters, info2.NetworkParameters)
+}
+
+func networkParametersEqual(params1, params2 aostypes.NetworkParameters) bool {
+	if len(params1.DNSServers) != len(params2.DNSServers) ||
+		len(params1.FirewallRules) != len(params2.FirewallRules) {
 		return false
 	}
 
 next:
-	for _, dns1 := range info1.NetworkParameters.DNSServers {
-		for _, dns2 := range info2.NetworkParameters.DNSServers {
+	for _, dns1 := range params1.DNSServers {
+		for _, dns2 := range params2.DNSServers {
 			if dns1 == dns2 {
 				continue next
+			}
+		}
+
+		return false
+	}
+
+nextRule:
+	for _, rule1 := range params1.FirewallRules {
+		for _, rule2 := range params2.FirewallRules {
+			if rule1 == rule2 {
+				continue nextRule
 			}
 		}
 
