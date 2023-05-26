@@ -86,6 +86,11 @@ type testServiceManager struct {
 	services []aostypes.ServiceInfo
 }
 
+type testNetworkUpdates struct {
+	updates     []aostypes.NetworkParameters
+	callChannel chan struct{}
+}
+
 type testLayerManager struct {
 	layers []aostypes.LayerInfo
 }
@@ -137,7 +142,7 @@ func TestSMRegistration(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
-		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
+		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -174,7 +179,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	client, err := smclient.New(&config.Config{
 		CMServerURL: serverURL, RemoteNode: true, RunnerFeatures: []string{"crun"},
 	}, smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
-		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, true)
+		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -285,7 +290,7 @@ func TestLogsNotification(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, true)
+		nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -387,7 +392,7 @@ func TestAlertNotifications(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, nil, nil, testAlerts, nil, nil, nil, true)
+		nil, nil, nil, nil, nil, testAlerts, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -734,7 +739,7 @@ func TestRunInstances(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, true)
+		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -769,9 +774,84 @@ func TestRunInstances(t *testing.T) {
 			t.Errorf("Wrong instances: %v expected %v", launcher.instances, instances)
 		}
 
+		if !reflect.DeepEqual(launcher.instances, instances) {
+			t.Errorf("Wrong instances: %v expected %v", launcher.instances, instances)
+		}
+
 		if launcher.forceRestart != forceRestart {
 			t.Errorf("Wrong force restart value: %v", launcher.forceRestart)
 		}
+	}
+}
+
+func TestNetworkUpdate(t *testing.T) {
+	data := &pb.UpdateNetworks{
+		Networks: []*pb.NetworkParameters{
+			{
+				Subnet:    "172.17.0.0/16",
+				Ip:        "172.17.0.1",
+				VlanId:    1,
+				NetworkId: "net1",
+			},
+			{
+				Subnet:    "172.18.0.0/16",
+				Ip:        "172.18.0.1",
+				VlanId:    2,
+				NetworkId: "net2",
+			},
+		},
+	}
+
+	expected := []aostypes.NetworkParameters{
+		{
+			Subnet:    "172.17.0.0/16",
+			IP:        "172.17.0.1",
+			VlanID:    1,
+			NetworkID: "net1",
+		},
+		{
+			Subnet:    "172.18.0.0/16",
+			IP:        "172.18.0.1",
+			VlanID:    2,
+			NetworkID: "net2",
+		},
+	}
+
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer server.close()
+
+	netManager := &testNetworkUpdates{
+		callChannel: make(chan struct{}, 1),
+	}
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
+		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
+		nil, nil, nil, nil, nil, nil, nil, nil, netManager, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create UM client: %v", err)
+	}
+	defer client.Close()
+
+	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	if err := server.stream.Send(&pb.SMIncomingMessages{
+		SMIncomingMessage: &pb.SMIncomingMessages_UpdateNetworks{UpdateNetworks: data},
+	}); err != nil {
+		t.Fatalf("Can't send request: %v", err)
+	}
+
+	if err := netManager.waitCall(); err != nil {
+		t.Fatalf("Error waiting call: %v", err)
+	}
+
+	if !reflect.DeepEqual(netManager.updates, expected) {
+		t.Errorf("Wrong networks: %v", netManager.updates)
 	}
 }
 
@@ -840,7 +920,7 @@ func TestOverrideEnvVars(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -887,7 +967,7 @@ func TestCloudConnection(t *testing.T) {
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
 		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -1118,10 +1198,11 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 				Instance:  uint64(instance.Instance.Instance),
 			},
 			NetworkParameters: aostypes.NetworkParameters{
-				IP:         instance.NetworkParameters.Ip,
-				Subnet:     instance.NetworkParameters.Subnet,
-				VlanID:     instance.NetworkParameters.VlanId,
-				DNSServers: instance.NetworkParameters.DnsServers,
+				IP:            instance.NetworkParameters.Ip,
+				Subnet:        instance.NetworkParameters.Subnet,
+				VlanID:        instance.NetworkParameters.VlanId,
+				DNSServers:    instance.NetworkParameters.DnsServers,
+				FirewallRules: []aostypes.FirewallRule{},
 			},
 			UID:         instance.Uid,
 			Priority:    instance.Priority,
@@ -1207,6 +1288,23 @@ func (processor *testLayerManager) ProcessDesiredLayers(layers []aostypes.LayerI
 	processor.layers = layers
 
 	return nil
+}
+
+func (networkmanager *testNetworkUpdates) UpdateNetworks(networkParameters []aostypes.NetworkParameters) error {
+	networkmanager.updates = networkParameters
+	networkmanager.callChannel <- struct{}{}
+
+	return nil
+}
+
+func (networkmanager *testNetworkUpdates) waitCall() error {
+	select {
+	case <-networkmanager.callChannel:
+		return nil
+
+	case <-time.After(5 * time.Second):
+		return aoserrors.New("wait call timeout")
+	}
 }
 
 func newTestLauncher() *testLauncher {
