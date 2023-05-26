@@ -104,7 +104,6 @@ type NetworkParams struct {
 	IngressKbit        uint64
 	EgressKbit         uint64
 	ExposedPorts       []string
-	AllowedConnections []string
 	Hosts              []aostypes.Host
 	DNSSevers          []string
 	HostsFilePath      string
@@ -164,9 +163,10 @@ type inputAccessConfig struct {
 }
 
 type outputAccessConfig struct {
-	UUID     string `json:"uuid"`
-	Port     string `json:"port"`
-	Protocol string `json:"protocol"`
+	DstIP   string `json:"dstIp"`
+	DstPort string `json:"dstPort"`
+	Proto   string `json:"proto"`
+	SrcIP   string `json:"srcIp"`
 }
 
 /***********************************************************************************************************************
@@ -827,7 +827,7 @@ func getBridgePluginConfig(networkDir, networkID string, subnet string, ip strin
 	return config, nil
 }
 
-func getFirewallPluginConfig(instanceID string, exposedPorts, allowedConnections []string) (
+func getFirewallPluginConfig(instanceID string, exposedPorts []string, firewallRules []aostypes.FirewallRule) (
 	config json.RawMessage, err error,
 ) {
 	aosFirewall := &aosFirewallNetConf{
@@ -852,16 +852,12 @@ func getFirewallPluginConfig(instanceID string, exposedPorts, allowedConnections
 		aosFirewall.InputAccess = append(aosFirewall.InputAccess, input)
 	}
 
-	// AllowedConnections format instance-UUID/port/protocol
-	for _, allowConn := range allowedConnections {
-		connConf := strings.Split(allowConn, "/")
-		if len(connConf) > allowedConnectionsExpectedLen || len(connConf) < 2 {
-			return nil, aoserrors.Errorf("unsupported AllowedConnections format %s", connConf)
-		}
-
-		output := outputAccessConfig{UUID: connConf[0], Port: connConf[1], Protocol: "tcp"}
-		if len(connConf) == allowedConnectionsExpectedLen {
-			output.Protocol = connConf[2]
+	for _, rule := range firewallRules {
+		output := outputAccessConfig{
+			DstIP:   rule.DstIP,
+			DstPort: rule.DstPort,
+			Proto:   rule.Proto,
+			SrcIP:   rule.SrcIP,
 		}
 
 		aosFirewall.OutputAccess = append(aosFirewall.OutputAccess, output)
@@ -946,7 +942,7 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 
 	// Firewall
 
-	firewallConfig, err := getFirewallPluginConfig(instanceID, params.ExposedPorts, params.AllowedConnections)
+	firewallConfig, err := getFirewallPluginConfig(instanceID, params.ExposedPorts, params.NetworkParameters.FirewallRules)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
