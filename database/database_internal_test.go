@@ -613,6 +613,11 @@ func TestInstances(t *testing.T) {
 					ServiceID: "someServiceID" + strconv.Itoa(i),
 					SubjectID: testSubjectID, Instance: uint64(i),
 				},
+				NetworkParameters: aostypes.NetworkParameters{
+					NetworkID: "someNetworkID" + strconv.Itoa(i),
+					Subnet:    "someSubnet" + strconv.Itoa(i),
+					IP:        "someIP" + strconv.Itoa(i),
+				},
 				StoragePath: fmt.Sprintf("Storage_%d", i),
 				StatePath:   fmt.Sprintf("State_%d", i),
 				UID:         uint32(i + 100),
@@ -632,12 +637,18 @@ func TestInstances(t *testing.T) {
 					ServiceID: testServiceID,
 					SubjectID: "someSubject" + strconv.Itoa(i), Instance: uint64(i),
 				},
+				NetworkParameters: aostypes.NetworkParameters{
+					NetworkID: "serviceNetworkID" + strconv.Itoa(i),
+					Subnet:    "serviceSubnet" + strconv.Itoa(i),
+					IP:        "serviceIP" + strconv.Itoa(i),
+				},
 				StoragePath: fmt.Sprintf("Storage_%d", i),
 				StatePath:   fmt.Sprintf("State_%d", i),
 				UID:         uint32(i + 200),
 			},
 			InstanceID: uuid.New().String(),
 		}
+
 		if err := db.AddInstance(serviceInstance); err != nil {
 			t.Fatalf("Can't add instance to DB %v", err)
 		}
@@ -711,6 +722,53 @@ func TestInstances(t *testing.T) {
 
 	if err = db.RemoveInstance(testInstanceInfo.InstanceID); err != nil {
 		t.Errorf("Can't remove instance: %v", err)
+	}
+}
+
+func TestNetworks(t *testing.T) {
+	networkParameters := []aostypes.NetworkParameters{
+		{
+			NetworkID: "testNetworkID",
+			Subnet:    "testSubnet",
+			IP:        "testIP",
+		},
+		{
+			NetworkID: "testNetworkID2",
+			Subnet:    "testSubnet2",
+			IP:        "testIP2",
+		},
+	}
+
+	for _, data := range networkParameters {
+		if err := db.AddNetworkInfo(data); err != nil {
+			t.Fatalf("Can't add network to DB: %v", err)
+		}
+	}
+
+	// Test get all networks
+	allResults, err := db.GetNetworksInfo()
+	if err != nil {
+		t.Fatalf("Can't get all networks from DB: %v", err)
+	}
+
+	if !reflect.DeepEqual(allResults, networkParameters) {
+		t.Error("Incorrect get all networks result")
+	}
+
+	if err := db.RemoveNetworkInfo("testNetworkID"); err != nil {
+		t.Errorf("Can't remove network: %v", err)
+	}
+
+	networkParameters = networkParameters[1:]
+
+	// Test get all networks
+	allResults, err = db.GetNetworksInfo()
+	if err != nil {
+		t.Fatalf("Can't get all networks from DB: %v", err)
+	}
+
+	if !reflect.DeepEqual(allResults, networkParameters) {
+		t.Error("Incorrect get all networks result")
 	}
 }
 
