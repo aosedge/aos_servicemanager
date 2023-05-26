@@ -48,13 +48,6 @@ const (
  * Types
  **********************************************************************************************************************/
 
-// TrafficStorage provides API to create, remove or access monitoring data.
-type TrafficStorage interface {
-	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
-	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
-	RemoveTrafficMonitorData(chain string) (err error)
-}
-
 type trafficChains struct {
 	inChain  string
 	outChain string
@@ -80,7 +73,7 @@ type trafficMonitoring struct {
 	trafficMap          map[string]*trafficData
 	instanceChainsMap   map[string]*trafficChains
 	iptablesFilterCache []string
-	trafficStorage      TrafficStorage
+	trafficStorage      Storage
 	pollTimer           *time.Ticker
 	cancelFunction      context.CancelFunc
 }
@@ -120,7 +113,7 @@ var UpdateIptablesCachePeriod = 1 * time.Minute
  * Private
  **********************************************************************************************************************/
 
-func newTrafficMonitor(trafficStorage TrafficStorage) (monitor *trafficMonitoring, err error) {
+func newTrafficMonitor(trafficStorage Storage) (monitor *trafficMonitoring, err error) {
 	monitor = &trafficMonitoring{
 		trafficPeriod:  DayPeriod,
 		trafficStorage: trafficStorage,

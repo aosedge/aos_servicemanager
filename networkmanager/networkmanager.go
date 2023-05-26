@@ -19,16 +19,16 @@
 package networkmanager
 
 import (
-	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
@@ -48,21 +48,33 @@ import (
  **********************************************************************************************************************/
 
 const (
-	bridgePrefix                  = "br-"
-	vlanPrefix                    = "vlan-"
-	instanceIfName                = "eth0"
-	pathToNetNs                   = "/run/netns"
-	cniBinPath                    = "/opt/cni/bin"
-	cniVersion                    = "0.4.0"
-	adminChainPrefix              = "INSTANCE_"
-	burstLen                      = uint64(12800)
-	exposePortConfigExpectedLen   = 2
-	allowedConnectionsExpectedLen = 3
+	bridgePrefix                 = "br-"
+	vlanPrefix                   = "vlan-"
+	instanceIfName               = "eth0"
+	pathToNetNs                  = "/run/netns"
+	cniBinPath                   = "/opt/cni/bin"
+	cniVersion                   = "0.4.0"
+	adminChainPrefix             = "INSTANCE_"
+	burstLen                     = uint64(12800)
+	exposePortConfigExpectedLen  = 2
+	countRetryVlanNameGeneration = 10
 )
 
 /***********************************************************************************************************************
- * Types
- **********************************************************************************************************************/
+* Types
+**********************************************************************************************************************/
+
+type Storage interface {
+	// storage for network info
+	RemoveNetworkInfo(networkID string) error
+	AddNetworkInfo(aostypes.NetworkParameters) error
+	GetNetworksInfo() ([]aostypes.NetworkParameters, error)
+
+	// storage for network traffic monitoring
+	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
+	GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error)
+	RemoveTrafficMonitorData(chain string) (err error)
+}
 
 type netInstanceData struct {
 	instanceIP string
@@ -77,6 +89,10 @@ type NetworkManager struct {
 	networkDir        string
 	trafficMonitoring *trafficMonitoring
 	instancesData     map[string]map[string]netInstanceData
+	providerNetworks  map[string]aostypes.NetworkParameters
+	vlanIfNames       map[string]string
+
+	storage Storage
 }
 
 // NetworkParams network parameters set for instance.
@@ -142,13 +158,6 @@ type aosDNSNetConf struct {
 	Capabilities  map[string]bool `json:"capabilities,omitempty"`
 }
 
-type vlanNetConf struct {
-	Type   string `json:"type"`
-	VlanID int    `json:"vlanId"`
-	Master string `json:"master"`
-	IfName string `json:"ifName"`
-}
-
 type inputAccessConfig struct {
 	Port     string `json:"port"`
 	Protocol string `json:"protocol"`
@@ -164,10 +173,11 @@ type outputAccessConfig struct {
  * Vars
  **********************************************************************************************************************/
 
-// nolint:gochecknoglobals
-var skipNetworkFileNames = []string{"lock", "last_reserved_ip.0"}
-
 var errTrafficMonitorDisable = errors.New("traffic monitoring is disabled")
+
+// CreateVlan this global variable is used to be able to mocking the functionality of networking in tests.
+// nolint:gochecknoglobals
+var CreateVlan = createVlan
 
 // CNIPlugins this global variable is used to be able to mocking the functionality of networking in tests.
 // nolint:gochecknoglobals
@@ -178,39 +188,49 @@ var CNIPlugins cni.CNI
  **********************************************************************************************************************/
 
 // New creates network manager instance.
-func New(cfg *config.Config, trafficStorage TrafficStorage) (manager *NetworkManager, err error) {
+func New(cfg *config.Config, storage Storage) (manager *NetworkManager, err error) {
 	log.Debug("Create network manager")
 
 	cniDir := path.Join(cfg.WorkingDir, "cni")
 
 	manager = &NetworkManager{
-		hosts:         cfg.Hosts,
-		networkDir:    path.Join(cniDir, "networks"),
-		instancesData: make(map[string]map[string]netInstanceData),
+		hosts:            cfg.Hosts,
+		networkDir:       path.Join(cniDir, "networks"),
+		instancesData:    make(map[string]map[string]netInstanceData),
+		providerNetworks: make(map[string]aostypes.NetworkParameters),
+		vlanIfNames:      make(map[string]string),
+		storage:          storage,
 	}
 
 	if manager.cniInterface = CNIPlugins; manager.cniInterface == nil {
 		manager.cniInterface = cni.NewCNIConfigWithCacheDir([]string{cniBinPath}, cniDir, nil)
 	}
 
-	if err = manager.deleteAllNetworks(); err != nil {
-		log.Errorf("Can't delete all networks: %s", err)
+	networksInfo, err := storage.GetNetworksInfo()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	if len(networksInfo) > 0 {
+		if _, err := manager.createNetwork(networksInfo); err != nil {
+			log.Errorf("Can't create networks: %v", err)
+		}
+	}
+
+	if err := os.RemoveAll(manager.networkDir); err != nil {
+		return nil, aoserrors.Wrap(err)
 	}
 
 	if err = os.RemoveAll(cniDir); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
 
-	if trafficStorage != nil {
-		manager.trafficMonitoring, err = newTrafficMonitor(trafficStorage)
-		if err != nil {
-			return manager, err
-		}
-
-		manager.trafficMonitoring.runUpdateIptables()
-	} else {
-		log.Warn("Can't initialize traffic monitoring: storage is nil")
+	manager.trafficMonitoring, err = newTrafficMonitor(storage)
+	if err != nil {
+		return manager, err
 	}
+
+	manager.trafficMonitoring.runUpdateIptables()
 
 	return manager, nil
 }
@@ -229,6 +249,28 @@ func (manager *NetworkManager) Close() error {
 // GetNetnsPath get path to instance network namespace.
 func (manager *NetworkManager) GetNetnsPath(instanceID string) (pathToNetNS string) {
 	return path.Join(pathToNetNs, instanceID)
+}
+
+// UpdateNetworks updates networks.
+func (manager *NetworkManager) UpdateNetworks(networkParameters []aostypes.NetworkParameters) error {
+	log.Debug("Update networks")
+
+	if err := manager.removeNetworks(networkParameters); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	newNetworkParameters, err := manager.createNetwork(networkParameters)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	for _, network := range newNetworkParameters {
+		if err := manager.storage.AddNetworkInfo(network); err != nil {
+			return aoserrors.Wrap(err)
+		}
+	}
+
+	return nil
 }
 
 // AddInstanceToNetwork adds instance to network.
@@ -390,6 +432,103 @@ func (manager *NetworkManager) SetTrafficPeriod(period int) error {
  * Private
  **********************************************************************************************************************/
 
+func (manager *NetworkManager) removeNetworks(networkParameters []aostypes.NetworkParameters) error {
+	manager.Lock()
+	defer manager.Unlock()
+
+next:
+	for _, existNetworkParameter := range manager.providerNetworks {
+		for _, networkParameter := range networkParameters {
+			if existNetworkParameter.NetworkID == networkParameter.NetworkID {
+				continue next
+			}
+		}
+
+		log.Infof("Removing network: %s", existNetworkParameter.NetworkID)
+
+		if _, ok := manager.instancesData[existNetworkParameter.NetworkID]; !ok {
+			log.Infof("Network %s is empty", existNetworkParameter.NetworkID)
+
+			if err := manager.clearNetwork(existNetworkParameter.NetworkID); err != nil {
+				return err
+			}
+		}
+
+		delete(manager.providerNetworks, existNetworkParameter.NetworkID)
+
+		if err := manager.storage.RemoveNetworkInfo(existNetworkParameter.NetworkID); err != nil {
+			return aoserrors.Wrap(err)
+		}
+
+		log.WithFields(log.Fields{
+			"networkID": existNetworkParameter.NetworkID,
+		}).Debug("Network has been removed")
+	}
+
+	return nil
+}
+
+func (manager *NetworkManager) createNetwork(
+	networkParameters []aostypes.NetworkParameters,
+) (newNetworkParameters []aostypes.NetworkParameters, err error) {
+	manager.Lock()
+	defer manager.Unlock()
+
+	for _, networkParameter := range networkParameters {
+		if existParameters, ok := manager.providerNetworks[networkParameter.NetworkID]; ok &&
+			existParameters.IP == networkParameter.IP {
+			continue
+		}
+
+		var vlanIfname string
+
+	next:
+		for i := 0; i < countRetryVlanNameGeneration; i++ {
+			vlanName, err := randomVlanName()
+			if err != nil {
+				return nil, err
+			}
+
+			for _, existingVlanName := range manager.vlanIfNames {
+				if existingVlanName == vlanName {
+					continue next
+				}
+			}
+
+			vlanIfname = vlanName
+
+			break
+		}
+
+		if vlanIfname == "" {
+			return nil, errors.New("failed to generate vlan name")
+		}
+
+		manager.vlanIfNames[networkParameter.NetworkID] = vlanIfname
+
+		if err := CreateVlan(Vlan{
+			vlanID: int(networkParameter.VlanID),
+			bridge: bridgePrefix + networkParameter.NetworkID,
+			ifName: vlanIfname,
+			ip:     networkParameter.IP,
+			subnet: networkParameter.Subnet,
+		}); err != nil {
+			return nil, err
+		}
+
+		manager.providerNetworks[networkParameter.NetworkID] = networkParameter
+
+		newNetworkParameters = append(newNetworkParameters, networkParameter)
+
+		log.WithFields(log.Fields{
+			"networkID": networkParameter.NetworkID,
+			"IP":        networkParameter.IP,
+		}).Debug("Network has been created")
+	}
+
+	return newNetworkParameters, nil
+}
+
 func (manager *NetworkManager) updateInstanceNetworkCache(
 	instanceID, networkID, instanceIP string, hosts []string,
 ) error {
@@ -427,7 +566,7 @@ func (manager *NetworkManager) deleteInstanceNetworkFromCache(instanceID, networ
 	delete(manager.instancesData[networkID], instanceID)
 	networkEmpty := len(manager.instancesData[networkID]) == 0
 
-	if networkEmpty {
+	if _, ok := manager.providerNetworks[networkID]; networkEmpty && !ok {
 		return manager.clearNetwork(networkID)
 	}
 
@@ -497,29 +636,6 @@ func (manager *NetworkManager) prepareCNIConfig(
 	return netConfig, manager.prepareRuntimeConfig(instanceID, networkID, hosts), hosts, nil
 }
 
-func (manager *NetworkManager) deleteAllNetworks() error {
-	log.Debug("Delete all networks")
-
-	filesNetworkID, err := ioutil.ReadDir(manager.networkDir)
-	if err != nil {
-		return nil // nolint:nilerr
-	}
-
-	for _, networkIDFile := range filesNetworkID {
-		if networkErr := manager.deleteNetworkInstances(networkIDFile.Name()); networkErr != nil {
-			log.Errorf("Can't delete network: %s", err)
-
-			if err == nil {
-				err = networkErr
-			}
-		}
-	}
-
-	os.RemoveAll(manager.networkDir)
-
-	return aoserrors.Wrap(err)
-}
-
 func (manager *NetworkManager) isInstanceInNetwork(instanceID, networkID string) (status bool) {
 	manager.RLock()
 	defer manager.RUnlock()
@@ -533,66 +649,23 @@ func (manager *NetworkManager) isInstanceInNetwork(instanceID, networkID string)
 	return false
 }
 
-func (manager *NetworkManager) deleteNetworkInstances(networkID string) error {
-	log.WithFields(log.Fields{"networkID": networkID}).Debug("Delete network instances")
-
-	networkDir := path.Join(manager.networkDir, networkID)
-
-	if _, err := os.Stat(networkDir); err != nil {
-		log.WithFields(log.Fields{"networkID": networkID}).Warn("Network doesn't exist")
-		return nil // nolint:nilerr
-	}
-
-	filesInstanceID, err := ioutil.ReadDir(networkDir)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-skip:
-	for _, instanceIDFile := range filesInstanceID {
-		for _, skipFile := range skipNetworkFileNames {
-			if instanceIDFile.Name() == skipFile {
-				continue skip
-			}
-		}
-
-		if netErr := manager.tryRemoveInstanceFromNetwork(instanceIDFile.Name(), networkID); netErr != nil {
-			if err == nil {
-				err = netErr
-			}
-		}
-	}
-
-	if clearErr := manager.clearNetwork(networkID); clearErr != nil && err == nil {
-		err = clearErr
-	}
-
-	return err
-}
-
-func (manager *NetworkManager) tryRemoveInstanceFromNetwork(instanceFileName, networkID string) error {
-	instanceID, err := readInstanceIDFromFile(path.Join(manager.networkDir, networkID, instanceFileName))
-	if err != nil {
-		return nil // nolint:nilerr
-	}
-
-	if err := manager.removeInstanceFromNetwork(instanceID, networkID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
 func (manager *NetworkManager) clearNetwork(networkID string) error {
 	log.WithFields(log.Fields{"networkID": networkID}).Debug("Clear network")
 
-	networkDir := path.Join(manager.networkDir, networkID)
-
-	if err := manager.postNetworkClear(networkID); err != nil {
+	if err := removeInterface(bridgePrefix + networkID); err != nil {
 		return err
 	}
 
-	os.RemoveAll(networkDir)
+	vlanIfname, ok := manager.vlanIfNames[networkID]
+	if ok {
+		if err := removeInterface(vlanIfname); err != nil {
+			return err
+		}
+
+		delete(manager.vlanIfNames, networkID)
+	}
+
+	os.RemoveAll(path.Join(manager.networkDir, networkID))
 
 	return nil
 }
@@ -634,18 +707,6 @@ func (manager *NetworkManager) removeInstanceFromNetwork(instanceID, networkID s
 	}
 
 	log.WithFields(log.Fields{"instanceID": instanceID}).Debug("Instance successfully removed from network")
-
-	return nil
-}
-
-func (manager *NetworkManager) postNetworkClear(networkID string) error {
-	if err := removeBridgeInterface(networkID); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err := removeVlanInterface(networkID); err != nil {
-		return aoserrors.Wrap(err)
-	}
 
 	return nil
 }
@@ -727,31 +788,6 @@ func tryAppendDomainNameToHostname(hosts []string, networkID string) []string {
 	}
 
 	return hosts
-}
-
-func readInstanceIDFromFile(pathToInstanceID string) (instanceID string, err error) {
-	f, err := os.Open(pathToInstanceID)
-	if err != nil {
-		return "", aoserrors.Wrap(err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-
-	var cniInstanceInfo []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != instanceIfName {
-			cniInstanceInfo = append(cniInstanceInfo, line)
-		}
-	}
-
-	if len(cniInstanceInfo) != 1 {
-		return "", aoserrors.Errorf("incorrect file content. There should be a container ID and a network interface name")
-	}
-
-	return cniInstanceInfo[0], nil
 }
 
 func getBridgePluginConfig(networkDir, networkID string, subnet string, ip string) (config json.RawMessage, err error) {
@@ -878,21 +914,6 @@ func getDNSPluginConfig(networkID string, dnsServers []string) (config json.RawM
 	return config, nil
 }
 
-func getVlanPluginConfig(networkID, brName string, vlanID uint64) (config json.RawMessage, err error) {
-	vlan := &vlanNetConf{
-		Type:   "aos-vlan",
-		VlanID: int(vlanID),
-		Master: brName,
-		IfName: vlanPrefix + networkID,
-	}
-
-	if config, err = json.Marshal(vlan); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
-	return config, nil
-}
-
 func getRuntimeNetConfig(instanceID, networkID string) (
 	networkingConfig *cni.NetworkConfigList, runtimeConfig *cni.RuntimeConf,
 ) {
@@ -952,17 +973,6 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 
 	networkConfig.Plugins = append(networkConfig.Plugins, dnsConfig)
 
-	// Vlan
-
-	if params.VlanID > 0 {
-		vlanConfig, err := getVlanPluginConfig(networkID, bridgePrefix+networkID, params.VlanID)
-		if err != nil {
-			return nil, aoserrors.Wrap(err)
-		}
-
-		networkConfig.Plugins = append(networkConfig.Plugins, vlanConfig)
-	}
-
 	networkConfigBytes, err := json.Marshal(networkConfig)
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
@@ -973,4 +983,13 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 	}
 
 	return cniNetworkConfig, nil
+}
+
+func randomVlanName() (string, error) {
+	b := make([]byte, 4) //nolint:gomnd
+	if _, err := rand.Read(b); err != nil {
+		return "", aoserrors.Wrap(err)
+	}
+
+	return fmt.Sprintf("%s%x", vlanPrefix, b), nil
 }
