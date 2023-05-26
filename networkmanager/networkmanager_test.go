@@ -43,6 +43,12 @@ import (
 )
 
 /***********************************************************************************************************************
+ * Consts
+ **********************************************************************************************************************/
+
+const expectedNetworksCount = 2
+
+/***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
 
@@ -84,10 +90,13 @@ type trafficData struct {
 	currentValue uint64
 }
 
-type testTrafficStorage struct {
+type testStorage struct {
 	chains             map[string]trafficData
 	disableSaveTraffic bool
 	disableLoadTraffic bool
+	netData            map[string]aostypes.NetworkParameters
+	chanAddNetwork     chan struct{}
+	chanRemoveNetwork  chan struct{}
 }
 
 type iptablesData struct {
@@ -100,6 +109,10 @@ type testIPTablesInterface struct {
 	chain                         map[string]iptablesData
 	trafficLimitCounter           uint64
 	notifyIptablesCacheUpdate     chan struct{}
+}
+
+type testVlanCreate struct {
+	createVlanCh chan struct{}
 }
 
 /***********************************************************************************************************************
@@ -144,7 +157,7 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestDeleteAllNetwork(t *testing.T) {
+func TestDeleteAllPreviousCNIDir(t *testing.T) {
 	// need to test cleaning networking at startup
 	networkDir := path.Join(tmpDir, "cni", "networks", "network0")
 
@@ -158,9 +171,10 @@ func TestDeleteAllNetwork(t *testing.T) {
 		t.Fatalf("Can't write network instance data: %s", err)
 	}
 
+	storage := testStorage{chains: make(map[string]trafficData)}
 	networkmanager.CNIPlugins = &testCNIInterface{}
 
-	manager, err := networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil)
+	manager, err := networkmanager.New(&config.Config{WorkingDir: tmpDir}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -181,8 +195,9 @@ func TestBaseNetwork(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{WorkingDir: tmpDir}, nil)
+	manager, err := networkmanager.New(&config.Config{WorkingDir: tmpDir}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -190,9 +205,8 @@ func TestBaseNetwork(t *testing.T) {
 
 	plugins := createPlugins([]string{
 		createBridgePlugin(tmpDir + `/`),
-		createFirewallPlugin("", ""),
+		createFirewallPlugin("", nil),
 		createDNSPlugin(),
-		createVlanPlugin(1),
 	})
 
 	if _, err := manager.GetInstanceIP("instance0", "network0"); err == nil {
@@ -295,33 +309,57 @@ func TestFirewallPlugin(t *testing.T) {
 	testData := []testPluginsData{
 		{
 			params: networkmanager.NetworkParams{
-				ExposedPorts:       []string{"900"},
-				AllowedConnections: []string{"instance0" + "/900"},
+				ExposedPorts: []string{"900"},
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:         "172.17.0.1",
-					Subnet:     "172.17.0.0/16",
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+					FirewallRules: []aostypes.FirewallRule{
+						{
+							Proto:   "tcp",
+							DstPort: "80",
+							DstIP:   "172.18.0.2",
+							SrcIP:   "172.17.0.1",
+						},
+					},
 					DNSServers: []string{"10.10.2.1"},
 				},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("900", "900"),
+				createFirewallPlugin("900", &aostypes.FirewallRule{
+					Proto:   "tcp",
+					DstPort: "80",
+					DstIP:   "172.18.0.2",
+					SrcIP:   "172.17.0.1",
+				}),
 				createDNSPlugin(),
 			}),
 		},
 		{
 			params: networkmanager.NetworkParams{
-				ExposedPorts:       []string{"800"},
-				AllowedConnections: []string{"instance0" + "/800"},
 				NetworkParameters: aostypes.NetworkParameters{
-					IP:         "172.17.0.1",
-					Subnet:     "172.17.0.0/16",
+					IP:     "172.17.0.1",
+					Subnet: "172.17.0.0/16",
+					FirewallRules: []aostypes.FirewallRule{
+						{
+							Proto:   "tcp",
+							DstPort: "10001",
+							DstIP:   "172.19.0.2",
+							SrcIP:   "172.17.0.1",
+						},
+					},
 					DNSServers: []string{"10.10.2.1"},
 				},
+				ExposedPorts: []string{"800"},
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("800", "800"),
+				createFirewallPlugin("800", &aostypes.FirewallRule{
+					Proto:   "tcp",
+					DstPort: "10001",
+					DstIP:   "172.19.0.2",
+					SrcIP:   "172.17.0.1",
+				}),
 				createDNSPlugin(),
 			}),
 		},
@@ -330,8 +368,9 @@ func TestFirewallPlugin(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{}, nil)
+	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -366,7 +405,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("", ""),
+				createFirewallPlugin("", nil),
 				createBandwithPlugin(1200000, 1200000),
 				createDNSPlugin(),
 			}),
@@ -383,7 +422,7 @@ func TestBandwithPlugin(t *testing.T) {
 			},
 			networkConfig: createPlugins([]string{
 				createBridgePlugin(""),
-				createFirewallPlugin("", ""),
+				createFirewallPlugin("", nil),
 				createBandwithPlugin(400000, 300000),
 				createDNSPlugin(),
 			}),
@@ -393,8 +432,9 @@ func TestBandwithPlugin(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{}, nil)
+	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -412,6 +452,95 @@ func TestBandwithPlugin(t *testing.T) {
 		if err := manager.RemoveInstanceFromNetwork("instance0", "network0"); err != nil {
 			t.Fatalf("Can't remove instance from network: %s", err)
 		}
+	}
+}
+
+func TestUpdateNetwork(t *testing.T) {
+	networkParameters := []aostypes.NetworkParameters{
+		{
+			VlanID:    10,
+			NetworkID: "network0",
+			IP:        "172.17.0.1",
+			Subnet:    "172.17.0.0/16",
+		},
+		{
+			VlanID:    11,
+			NetworkID: "network1",
+			IP:        "172.18.0.1",
+			Subnet:    "172.18.0.0/16",
+		},
+	}
+
+	cniInterface := &testCNIInterface{}
+
+	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{
+		chains:            make(map[string]trafficData),
+		netData:           make(map[string]aostypes.NetworkParameters),
+		chanRemoveNetwork: make(chan struct{}, expectedNetworksCount),
+		chanAddNetwork:    make(chan struct{}, expectedNetworksCount),
+	}
+
+	vlanCreator := &testVlanCreate{
+		createVlanCh: make(chan struct{}, expectedNetworksCount),
+	}
+
+	networkmanager.CreateVlan = vlanCreator.createVlan
+
+	manager, err := networkmanager.New(&config.Config{}, &storage)
+	if err != nil {
+		t.Fatalf("Can't create network manager: %v", err)
+	}
+	defer manager.Close()
+
+	if err := manager.UpdateNetworks(networkParameters); err != nil {
+		t.Fatalf("Can't update networks: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-vlanCreator.createVlanCh:
+		case <-time.After(time.Second):
+			t.Fatalf("Can't create vlan")
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-storage.chanAddNetwork:
+		case <-time.After(time.Second):
+			t.Fatalf("Can't add network")
+		}
+
+		select {
+		case <-storage.chanRemoveNetwork:
+			t.Fatal("Network should not be removed")
+		case <-time.After(time.Second):
+		}
+	}
+
+	networkParameters = networkParameters[1:]
+
+	if err := manager.UpdateNetworks(networkParameters); err != nil {
+		t.Fatalf("Can't update networks: %s", err)
+	}
+
+	select {
+	case <-vlanCreator.createVlanCh:
+		t.Fatal("Vlan should not be created")
+	case <-time.After(time.Second):
+	}
+
+	select {
+	case <-storage.chanAddNetwork:
+		t.Fatal("Network should not be added")
+	case <-time.After(time.Second):
+	}
+
+	select {
+	case <-storage.chanRemoveNetwork:
+	case <-time.After(time.Second):
+		t.Fatal("Network should be removed")
 	}
 }
 
@@ -541,8 +670,9 @@ func TestDNSPluginPositive(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{}, nil)
+	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -655,8 +785,9 @@ func TestDNSPluginNegative(t *testing.T) {
 	cniInterface := &testCNIInterface{}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{}, nil)
+	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -678,7 +809,7 @@ func TestDNSPluginNegative(t *testing.T) {
 func TestTrafficMonitoring(t *testing.T) {
 	networkmanager.CNIPlugins = &testCNIInterface{}
 
-	storage := testTrafficStorage{chains: make(map[string]trafficData)}
+	storage := testStorage{chains: make(map[string]trafficData)}
 
 	iptableInterface := &testIPTablesInterface{
 		disableResetMonitoringTraffic: true,
@@ -902,8 +1033,9 @@ func TestAddNetworkFail(t *testing.T) {
 	}
 
 	networkmanager.CNIPlugins = cniInterface
+	storage := testStorage{chains: make(map[string]trafficData)}
 
-	manager, err := networkmanager.New(&config.Config{}, nil)
+	manager, err := networkmanager.New(&config.Config{}, &storage)
 	if err != nil {
 		t.Fatalf("Can't create network manager: %s", err)
 	}
@@ -930,16 +1062,6 @@ func TestAddNetworkFail(t *testing.T) {
 
 	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
 		ExposedPorts: []string{"800/9000/10000"},
-		NetworkParameters: aostypes.NetworkParameters{
-			IP:     "172.17.0.1",
-			Subnet: "172.17.0.0/16",
-		},
-	}); err == nil {
-		t.Error("Should be error: can't add instance to network")
-	}
-
-	if err := manager.AddInstanceToNetwork("instance0", "network0", networkmanager.NetworkParams{
-		AllowedConnections: []string{"instance0" + "/800/900/1000"},
 		NetworkParameters: aostypes.NetworkParameters{
 			IP:     "172.17.0.1",
 			Subnet: "172.17.0.0/16",
@@ -976,25 +1098,13 @@ func TestAddNetworkFail(t *testing.T) {
 	if err := manager.RemoveInstanceFromNetwork("instance0", "network0"); err != nil {
 		t.Fatalf("Can't remove instance from network: %v", err)
 	}
-
-	if _, _, err := manager.GetSystemTraffic(); err == nil {
-		t.Error("Should be an error: traffic monitoring is disabled")
-	}
-
-	if _, _, err := manager.GetInstanceTraffic("instance0"); err == nil {
-		t.Error("Should be an error: traffic monitoring is disabled")
-	}
-
-	if err := manager.SetTrafficPeriod(networkmanager.MinutePeriod); err == nil {
-		t.Error("Should be an error: traffic monitoring is disabled")
-	}
 }
 
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
-func (storage *testTrafficStorage) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) error {
+func (storage *testStorage) SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) error {
 	if storage.disableSaveTraffic {
 		return aoserrors.New("problem to save traffic")
 	}
@@ -1004,7 +1114,7 @@ func (storage *testTrafficStorage) SetTrafficMonitorData(chain string, timestamp
 	return nil
 }
 
-func (storage *testTrafficStorage) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
+func (storage *testStorage) GetTrafficMonitorData(chain string) (timestamp time.Time, value uint64, err error) {
 	if storage.disableLoadTraffic {
 		return timestamp, 0, aoserrors.New("problem to load traffic")
 	}
@@ -1017,7 +1127,7 @@ func (storage *testTrafficStorage) GetTrafficMonitorData(chain string) (timestam
 	return data.lastUpdate, data.currentValue, nil
 }
 
-func (storage *testTrafficStorage) RemoveTrafficMonitorData(chain string) error {
+func (storage *testStorage) RemoveTrafficMonitorData(chain string) error {
 	if _, ok := storage.chains[chain]; !ok {
 		return networkmanager.ErrEntryNotExist
 	}
@@ -1025,6 +1135,28 @@ func (storage *testTrafficStorage) RemoveTrafficMonitorData(chain string) error 
 	delete(storage.chains, chain)
 
 	return nil
+}
+
+func (storage *testStorage) RemoveNetworkInfo(networkID string) error {
+	delete(storage.netData, networkID)
+	storage.chanRemoveNetwork <- struct{}{}
+
+	return nil
+}
+
+func (storage *testStorage) AddNetworkInfo(networkInfo aostypes.NetworkParameters) error {
+	storage.netData[networkInfo.NetworkID] = networkInfo
+	storage.chanAddNetwork <- struct{}{}
+
+	return nil
+}
+
+func (storage *testStorage) GetNetworksInfo() (netInfos []aostypes.NetworkParameters, err error) {
+	for _, netInfo := range storage.netData {
+		netInfos = append(netInfos, netInfo)
+	}
+
+	return netInfos, nil
 }
 
 func createPlugins(plugins []string) string {
@@ -1099,11 +1231,7 @@ func createBandwithPlugin(in, out int) string {
 		`{"type":"bandwidth","ingressRate":%d,"ingressBurst":12800,"egressRate":%d,"egressBurst":12800}`, in, out)
 }
 
-func createVlanPlugin(vlanID int) string {
-	return fmt.Sprintf(`{"type":"aos-vlan","vlanId":%d,"master":"br-network0","ifName":"vlan-network0"}`, vlanID)
-}
-
-func createFirewallPlugin(inPort, outPort string) string {
+func createFirewallPlugin(inPort string, netParams *aostypes.FirewallRule) string {
 	str := removeSpaces(`{
 		"type": "aos-firewall",
 		"uuid": "instance0",
@@ -1114,8 +1242,9 @@ func createFirewallPlugin(inPort, outPort string) string {
 		str += fmt.Sprintf(`,"inputAccess":[{"port":"%s","protocol":"tcp"}]`, inPort)
 	}
 
-	if outPort != "" {
-		str += fmt.Sprintf(`,"outputAccess":[{"uuid":"instance0","port":"%s","protocol":"tcp"}]`, outPort)
+	if netParams != nil {
+		str += fmt.Sprintf(`,"outputAccess":[{"dstIp":"%s","dstPort":"%s","proto":"%s","srcIp":"%s"}]`,
+			netParams.DstIP, netParams.DstPort, netParams.Proto, netParams.SrcIP)
 	}
 
 	return str + "}"
@@ -1347,4 +1476,10 @@ func removeSpaces(str string) string {
 
 		return r
 	}, str)
+}
+
+func (vlan *testVlanCreate) createVlan(vlanConf networkmanager.Vlan) error {
+	vlan.createVlanCh <- struct{}{}
+
+	return nil
 }
