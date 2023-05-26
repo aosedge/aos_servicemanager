@@ -242,7 +242,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		NodeType:   sm.iam.GetNodeType(),
 		SystemInfo: sm.monitor.GetSystemInfo(),
 	}, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging,
-		sm.cryptoContext, false); err != nil {
+		sm.network, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
