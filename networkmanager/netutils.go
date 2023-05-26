@@ -28,8 +28,8 @@ import (
 	"github.com/vishvananda/netns"
 )
 
-func removeBridgeInterface(spID string) (err error) {
-	br, err := netlink.LinkByName(bridgePrefix + spID)
+func removeInterface(ifName string) error {
+	br, err := netlink.LinkByName(ifName)
 	if err != nil {
 		return nil // nolint:nilerr
 	}
@@ -39,23 +39,6 @@ func removeBridgeInterface(spID string) (err error) {
 	}
 
 	if err = netlink.LinkDel(br); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	return nil
-}
-
-func removeVlanInterface(spID string) (err error) {
-	vlan, err := netlink.LinkByName(vlanPrefix + spID)
-	if err != nil {
-		return nil // nolint:nilerr
-	}
-
-	if err = netlink.LinkSetDown(vlan); err != nil {
-		return aoserrors.Wrap(err)
-	}
-
-	if err = netlink.LinkDel(vlan); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
