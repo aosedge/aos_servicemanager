@@ -64,6 +64,7 @@ const (
 * Types
 **********************************************************************************************************************/
 
+// Storage interface for network manager.
 type Storage interface {
 	// storage for network info
 	RemoveNetworkInfo(networkID string) error

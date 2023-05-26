@@ -322,18 +322,28 @@ func (db *Database) SetLayerCached(digest string, cached bool) (err error) {
 
 // AddInstance adds instance information to db.
 func (db *Database) AddInstance(instance launcher.InstanceInfo) error {
-	return db.executeQuery("INSERT INTO instances values(?, ?, ?, ?, ?, ?, ?, ?)",
+	network, err := json.Marshal(instance.NetworkParameters)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return db.executeQuery("INSERT INTO instances values(?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		instance.InstanceID, instance.ServiceID, instance.SubjectID, instance.Instance, instance.UID,
-		instance.Priority, instance.StoragePath, instance.StatePath)
+		instance.Priority, instance.StoragePath, instance.StatePath, network)
 }
 
 // UpdateInstance updates instance information in db.
 func (db *Database) UpdateInstance(instance launcher.InstanceInfo) (err error) {
+	network, err := json.Marshal(instance.NetworkParameters)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
 	if err = db.executeQuery(
 		`UPDATE instances SET serviceID = ?, subjectID = ?, instance = ?, uid = ?, priority = ?, storagePath = ?,
-		statePath = ? WHERE instanceID = ?`,
+		statePath = ?, network = ? WHERE instanceID = ?`,
 		instance.ServiceID, instance.SubjectID, instance.Instance, instance.UID, instance.Priority,
-		instance.StoragePath, instance.StatePath, instance.InstanceID); errors.Is(err, errNotExist) {
+		instance.StoragePath, instance.StatePath, network, instance.InstanceID); errors.Is(err, errNotExist) {
 		return aoserrors.Wrap(launcher.ErrNotExist)
 	}
 
@@ -382,15 +392,7 @@ func (db *Database) GetInstanceInfoByID(
 
 // GetAllInstances returns all instance.
 func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err error) {
-	return getFromQuery(
-		db,
-		"SELECT * FROM instances",
-		func(instance *launcher.InstanceInfo) []any {
-			return []any{
-				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-				&instance.Priority, &instance.StoragePath, &instance.StatePath,
-			}
-		})
+	return db.getInstancesFromQuery("SELECT * FROM instances")
 }
 
 // GetInstanceIDs returns instance ids by filter.
@@ -405,25 +407,59 @@ func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instanc
 		instanceFiler = fmt.Sprintf(" AND instance = %d", *filter.Instance)
 	}
 
-	serviceInstances, err := getFromQuery(
-		db,
-		fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
-			*filter.ServiceID, subjectFiler, instanceFiler),
-		func(instance *launcher.InstanceInfo) []any {
-			return []any{
-				&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-				&instance.Priority, &instance.StoragePath, &instance.StatePath,
-			}
-		})
+	instanceInfos, err := db.getInstancesFromQuery(fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
+		*filter.ServiceID, subjectFiler, instanceFiler))
 	if err != nil {
-		return instances, aoserrors.Wrap(err)
+		return nil, aoserrors.Wrap(err)
 	}
 
-	for _, value := range serviceInstances {
+	for _, value := range instanceInfos {
 		instances = append(instances, value.InstanceID)
 	}
 
 	return instances, nil
+}
+
+// AddNetworkInfo adds network information to db.
+func (db *Database) AddNetworkInfo(networkInfo aostypes.NetworkParameters) error {
+	return db.executeQuery("INSERT INTO network values(?, ?, ?, ?)",
+		networkInfo.NetworkID, networkInfo.IP, networkInfo.Subnet, networkInfo.VlanID)
+}
+
+// RemoveNetworkInfo removes network information from db.
+func (db *Database) RemoveNetworkInfo(networkID string) (err error) {
+	if err = db.executeQuery("DELETE FROM network WHERE networkID = ?", networkID); errors.Is(err, errNotExist) {
+		return nil
+	}
+
+	return err
+}
+
+// GetNetworkInfo returns networks information.
+func (db *Database) GetNetworksInfo() ([]aostypes.NetworkParameters, error) {
+	rows, err := db.sql.Query("SELECT * FROM network")
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	var networks []aostypes.NetworkParameters
+
+	for rows.Next() {
+		var networkInfo aostypes.NetworkParameters
+
+		if err = rows.Scan(&networkInfo.NetworkID, &networkInfo.IP, &networkInfo.Subnet, &networkInfo.VlanID); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		networks = append(networks, networkInfo)
+	}
+
+	return networks, nil
 }
 
 // Close closes database.
@@ -487,6 +523,10 @@ func newDatabase(name string, migrationPath string, mergedMigrationPath string, 
 		}
 	}
 
+	if err := db.createNetworkTable(); err != nil {
+		return db, aoserrors.Wrap(err)
+	}
+
 	if err := db.createConfigTable(); err != nil {
 		return db, aoserrors.Wrap(err)
 	}
@@ -520,6 +560,17 @@ func (db *Database) isTableExist(name string) (result bool, err error) {
 	result = rows.Next()
 
 	return result, aoserrors.Wrap(rows.Err())
+}
+
+func (db *Database) createNetworkTable() (err error) {
+	log.Info("Create network table")
+
+	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS network (networkID TEXT NOT NULL PRIMARY KEY,
+                                                              ip TEXT,
+                                                              subnet TEXT,
+                                                              vlanID INTEGER)`)
+
+	return aoserrors.Wrap(err)
 }
 
 func (db *Database) createConfigTable() (err error) {
@@ -610,7 +661,8 @@ func (db *Database) createInstancesTable() (err error) {
 																uid INTEGER,
 																priority INTEGER,
 																storagePath TEXT,
-																statePath TEXT)`)
+																statePath TEXT,
+																network BLOB)`)
 
 	return aoserrors.Wrap(err)
 }
@@ -625,6 +677,40 @@ func (db *Database) removeAllTrafficMonitor() (err error) {
 	_, err = db.sql.Exec("DELETE FROM trafficmonitor")
 
 	return aoserrors.Wrap(err)
+}
+
+func (db *Database) getInstancesFromQuery(
+	query string, args ...interface{},
+) (instances []launcher.InstanceInfo, err error) {
+	rows, err := db.sql.Query(query, args...)
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return nil, aoserrors.Wrap(rows.Err())
+	}
+
+	for rows.Next() {
+		var (
+			instance launcher.InstanceInfo
+			network  []byte
+		)
+
+		if err = rows.Scan(&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
+			&instance.Priority, &instance.StoragePath, &instance.StatePath, &network); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		if err = json.Unmarshal(network, &instance.NetworkParameters); err != nil {
+			return nil, aoserrors.Wrap(err)
+		}
+
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
 }
 
 func (db *Database) executeQuery(query string, args ...interface{}) error {
@@ -660,13 +746,19 @@ func (db *Database) getInstanceInfoFromQuery(
 	}
 	defer stmt.Close()
 
+	var network []byte
+
 	if err := stmt.QueryRow(args...).Scan(
 		&instance.InstanceID, &instance.ServiceID, &instance.SubjectID, &instance.Instance, &instance.UID,
-		&instance.Priority, &instance.StoragePath, &instance.StatePath); err != nil {
+		&instance.Priority, &instance.StoragePath, &instance.StatePath, &network); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return instance, aoserrors.Wrap(launcher.ErrNotExist)
 		}
 
+		return instance, aoserrors.Wrap(err)
+	}
+
+	if err = json.Unmarshal(network, &instance.NetworkParameters); err != nil {
 		return instance, aoserrors.Wrap(err)
 	}
 
