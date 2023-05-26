@@ -70,6 +70,7 @@ type SMClient struct {
 	unitConfigProcessor  UnitConfigProcessor
 	monitoringProvider   MonitoringDataProvider
 	logsProvider         LogsProvider
+	networkManager       NetworkProvider
 	runtimeStatusChannel <-chan launcher.RuntimeStatus
 	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    <-chan cloudprotocol.NodeMonitoringData
@@ -120,6 +121,10 @@ type AlertsProvider interface {
 	GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem)
 }
 
+type NetworkProvider interface {
+	UpdateNetworks(networkParameters []aostypes.NetworkParameters) error
+}
+
 // MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
 	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.NodeMonitoringData)
@@ -147,12 +152,13 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 func New(config *config.Config, nodeDescription NodeDescription, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
 	unitConfigProcessor UnitConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
-	logsProvider LogsProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
+	logsProvider LogsProvider, networkManager NetworkProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
 		config: config, nodeDescription: nodeDescription, servicesProcessor: servicesProcessor,
 		layersProcessor: layersProcessor, launcher: launcher, unitConfigProcessor: unitConfigProcessor,
-		monitoringProvider: monitoringProvider, logsProvider: logsProvider, closeChannel: make(chan struct{}, 1),
+		monitoringProvider: monitoringProvider, logsProvider: logsProvider,
+		networkManager: networkManager, closeChannel: make(chan struct{}, 1),
 	}
 
 	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
@@ -341,6 +347,9 @@ func (client *SMClient) processMessages() (err error) {
 		case *pb.SMIncomingMessages_RunInstances:
 			client.processRunInstances(data.RunInstances)
 
+		case *pb.SMIncomingMessages_UpdateNetworks:
+			client.processUpdateNetworks(data.UpdateNetworks)
+
 		case *pb.SMIncomingMessages_SystemLogRequest:
 			client.processGetSystemLogRequest(data.SystemLogRequest)
 
@@ -397,6 +406,23 @@ func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 		SMOutgoingMessage: &pb.SMOutgoingMessages_UnitConfigStatus{UnitConfigStatus: status},
 	}); err != nil {
 		log.Errorf("Can't send unit config status: %v", err)
+	}
+}
+
+func (client *SMClient) processUpdateNetworks(updateNetworks *pb.UpdateNetworks) {
+	networkParameters := make([]aostypes.NetworkParameters, len(updateNetworks.Networks))
+
+	for i, network := range updateNetworks.Networks {
+		networkParameters[i] = aostypes.NetworkParameters{
+			Subnet:    network.Subnet,
+			IP:        network.Ip,
+			VlanID:    network.VlanId,
+			NetworkID: network.NetworkId,
+		}
+	}
+
+	if err := client.networkManager.UpdateNetworks(networkParameters); err != nil {
+		log.Errorf("Can't update networks: %v", err)
 	}
 }
 
