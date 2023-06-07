@@ -7,7 +7,7 @@ replace github.com/ThalesIgnite/crypto11 => github.com/aoscloud/crypto11 v1.0.3-
 replace github.com/coreos/go-iptables => github.com/aoscloud/go-iptables v0.0.0-20220926113402-e57055a8a459
 
 require (
-	github.com/aoscloud/aos_common v0.0.0-20230606145233-fcb073b0b2e6
+	github.com/aoscloud/aos_common v0.0.0-20230607132225-c5f6da51dcf4
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.2.0
 	github.com/coreos/go-iptables v0.6.0
@@ -26,7 +26,7 @@ require (
 	github.com/vishvananda/netns v0.0.4
 	golang.org/x/exp v0.0.0-20230206171751-46f607a40771
 	golang.org/x/mod v0.6.0
-	golang.org/x/sys v0.4.0
+	golang.org/x/sys v0.5.0
 	google.golang.org/grpc v1.52.3
 	google.golang.org/protobuf v1.28.1
 )
@@ -57,7 +57,7 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/net v0.5.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
+	golang.org/x/net v0.7.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/genproto v0.0.0-20221118155620-16455021b5e6 // indirect
 )
