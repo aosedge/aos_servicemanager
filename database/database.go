@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aoscloud/aos_common/aoserrors"
@@ -397,18 +398,29 @@ func (db *Database) GetAllInstances() (instances []launcher.InstanceInfo, err er
 
 // GetInstanceIDs returns instance ids by filter.
 func (db *Database) GetInstanceIDs(filter cloudprotocol.InstanceFilter) (instances []string, err error) {
-	var subjectFiler, instanceFiler string
+	var (
+		conditionList []string
+		whereOperator string
+	)
+
+	if filter.ServiceID != nil {
+		conditionList = append(conditionList, fmt.Sprintf("serviceID = \"%s\"", *filter.ServiceID))
+	}
 
 	if filter.SubjectID != nil {
-		subjectFiler = fmt.Sprintf(" AND subjectID = \"%s\"", *filter.SubjectID)
+		conditionList = append(conditionList, fmt.Sprintf("subjectID = \"%s\"", *filter.SubjectID))
 	}
 
 	if filter.Instance != nil {
-		instanceFiler = fmt.Sprintf(" AND instance = %d", *filter.Instance)
+		conditionList = append(conditionList, fmt.Sprintf("instance = %d", *filter.Instance))
 	}
 
-	instanceInfos, err := db.getInstancesFromQuery(fmt.Sprintf("SELECT * FROM instances WHERE serviceID = \"%s\"%s%s",
-		*filter.ServiceID, subjectFiler, instanceFiler))
+	if len(conditionList) > 0 {
+		whereOperator = "WHERE"
+	}
+
+	instanceInfos, err := db.getInstancesFromQuery(fmt.Sprintf("SELECT * FROM instances %s %s", whereOperator,
+		strings.Join(conditionList, " AND ")))
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
