@@ -828,6 +828,10 @@ func TestInstancesID(t *testing.T) {
 			filter:      cloudprotocol.NewInstanceFilter("TestSevrID", "", -1),
 			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1", "TestSevrID_TestSubID1_0"},
 		},
+		{
+			filter:      cloudprotocol.NewInstanceFilter("", "TestSubID", -1),
+			expectedIds: []string{"TestSevrID_TestSubID_0", "TestSevrID_TestSubID_1", "TestSevrID2_TestSubID_0"},
+		},
 	}
 
 	for _, value := range data {
