@@ -63,6 +63,8 @@ github.com/anexia-it/fsquota v0.1.3/go.mod h1:XkcUA9mQoL+AZ8j9XHB9Hi/g3xzt2nBW1C
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/aoscloud/aos_common v0.0.0-20230607132225-c5f6da51dcf4 h1:wEfe1QF8Bsj+wmpK5kj45axhj/sf0w/mbiqIPoqzETg=
 github.com/aoscloud/aos_common v0.0.0-20230607132225-c5f6da51dcf4/go.mod h1:fpxs7GLEsl87n8gwXmS9n6HT6tkS3waA4AldQBx/2gI=
+github.com/aoscloud/aos_common v0.0.0-20230616142529-14a5d44d4312 h1:06IpR7vTRyp/XN3Hm5E7BwtRT0gWttLTJMrAbm6DLDs=
+github.com/aoscloud/aos_common v0.0.0-20230616142529-14a5d44d4312/go.mod h1:nz+71SPxSewJXOYrEcR5eDBYS6oW4Yn2cAKKTZrQ/o0=
 github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f h1:1CPr+UrVduUABuDLGzsKaz7Dp8Nu6zSfp8WqR5TiH0I=
 github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f/go.mod h1:ILDKtnCKiQ7zRoNxcp36Y1ZR8LBPmR2E23+wTQe/MlE=
 github.com/aoscloud/go-iptables v0.0.0-20220926113402-e57055a8a459 h1:waEdgAkKbfvw3jdm48JE2alGao183EqHdcCIv2PLCfk=
@@ -480,8 +482,8 @@ github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3I
 github.com/opencontainers/image-spec v1.0.1/go.mod h1:BtxoFyWECRxE4U/7sNtV5W15zMzWCbyJoFRP3s7yZA0=
 github.com/opencontainers/image-spec v1.0.2 h1:9yCKha/T5XdGtO0q9Q9a6T5NUCsTn/DrBg0D7ufOcFM=
 github.com/opencontainers/image-spec v1.0.2/go.mod h1:BtxoFyWECRxE4U/7sNtV5W15zMzWCbyJoFRP3s7yZA0=
-github.com/opencontainers/runc v1.1.4 h1:nRCz/8sKg6K6jgYAFLDlXzPeITBZJyX28DBVhWD+5dg=
-github.com/opencontainers/runc v1.1.4/go.mod h1:1J5XiS+vdZ3wCyZybsuxXZWGrgSr8fFJHLXuG2PsnNg=
+github.com/opencontainers/runc v1.1.5 h1:L44KXEpKmfWDcS02aeGm8QNTFXTo2D+8MYGDIJ/GDEs=
+github.com/opencontainers/runc v1.1.5/go.mod h1:1J5XiS+vdZ3wCyZybsuxXZWGrgSr8fFJHLXuG2PsnNg=
 github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417 h1:3snG66yBm59tKhhSPQrQ/0bCrv1LQbKt40LnUPiUxdc=
 github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/C5hL+LL3ko9hs6T5lQ0=
 github.com/opencontainers/selinux v1.10.0/go.mod h1:2i0OySw99QjzBBQByd1Gr9gSjvuho1lHsJxIJ3gGbJI=
