@@ -19,7 +19,6 @@ package iamclient_test
 
 import (
 	"context"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
@@ -99,7 +98,7 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	tmpDir, err = ioutil.TempDir("", "iam_")
+	tmpDir, err = os.MkdirTemp("", "iam_")
 	if err != nil {
 		log.Fatalf("Error create temporary dir: %v", err)
 	}
@@ -373,10 +372,9 @@ func (server *testServer) findSecret(instance aostypes.InstanceIdent) (secret st
 func randomString() string {
 	secret := make([]byte, secretLength)
 
-	rand.Seed(time.Now().UnixNano())
-
 	for i := range secret {
-		secret[i] = secretSymbols[rand.Intn(len(secretSymbols))] // nolint:gosec
+		//nolint:gosec
+		secret[i] = secretSymbols[rand.New(rand.NewSource(time.Now().UnixNano())).Intn(len(secretSymbols))]
 	}
 
 	return string(secret)

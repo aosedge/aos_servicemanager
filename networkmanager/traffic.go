@@ -99,14 +99,16 @@ var (
 )
 
 // These global variables are used to be able to mocking the functionality in tests.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var (
 	IsSamePeriod = isSamePeriod
 	IPTables     IPTablesInterface
 )
 
 // UpdateIptablesCachePeriod is used to be able to mocking the functionality of networking in tests.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var UpdateIptablesCachePeriod = 1 * time.Minute
 
 /***********************************************************************************************************************

@@ -22,7 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -312,7 +312,7 @@ func TestRemoteDownloadLayer(t *testing.T) {
 	}
 	defer sm.Close()
 
-	fileServerDir, err := ioutil.TempDir("", "sm_fileserver")
+	fileServerDir, err := os.MkdirTemp("", "sm_fileserver")
 	if err != nil {
 		t.Fatalf("Error create temporary dir: %s", err)
 	}
@@ -882,7 +882,7 @@ func (storage *testServiceStorage) SetServiceCached(serviceID string, aosVersion
 ***********************************************************************************************************************/
 
 func setup() (err error) {
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
+	if tmpDir, err = os.MkdirTemp("", "aos_"); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -898,7 +898,7 @@ func cleanup() {
 func prepareService(
 	testContent, serviceID string, aosVersion uint64, servicelayerSize int64,
 ) (serviceInfo aostypes.ServiceInfo, err error) {
-	imageDir, err := ioutil.TempDir("", "aos_")
+	imageDir, err := os.MkdirTemp("", "aos_")
 	if err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
@@ -952,7 +952,7 @@ func prepareService(
 		return serviceInfo, aoserrors.Wrap(err)
 	}
 
-	imageFile, err := ioutil.TempFile("", "aos_")
+	imageFile, err := os.CreateTemp("", "aos_")
 	if err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
@@ -1000,7 +1000,7 @@ func generateFsLayer(imgFolder, rootfs string) (digest digest.Digest, err error)
 	}
 	defer file.Close()
 
-	byteValue, err := ioutil.ReadAll(file)
+	byteValue, err := io.ReadAll(file)
 	if err != nil {
 		return digest, aoserrors.Wrap(err)
 	}

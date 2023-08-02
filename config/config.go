@@ -20,7 +20,7 @@ package config
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path"
 	"time"
 
@@ -94,22 +94,22 @@ type Config struct {
 
 // New creates new config object.
 func New(fileName string) (config *Config, err error) {
-	raw, err := ioutil.ReadFile(fileName)
+	raw, err := os.ReadFile(fileName)
 	if err != nil {
 		return config, aoserrors.Wrap(err)
 	}
 
 	config = &Config{
-		ServiceTTLDays:            30,                                            // nolint:gomnd
-		LayerTTLDays:              30,                                            // nolint:gomnd
-		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, // nolint:gomnd
+		ServiceTTLDays:            30,                                            //nolint:gomnd
+		LayerTTLDays:              30,                                            //nolint:gomnd
+		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, //nolint:gomnd
 		Monitoring: resourcemonitor.Config{
 			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
 			PollPeriod: aostypes.Duration{Duration: 10 * time.Second},
 		},
 		Logging: Logging{
-			MaxPartSize:  524288, // nolint:gomnd
-			MaxPartCount: 20,     // nolint:gomnd
+			MaxPartSize:  524288, //nolint:gomnd
+			MaxPartCount: 20,     //nolint:gomnd
 		},
 		JournalAlerts: journalalerts.Config{
 			SystemAlertPriority:  defaultSystemAlertPriority,

@@ -19,7 +19,6 @@ package whiteouts_test
 
 import (
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +57,7 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
+	if tmpDir, err = os.MkdirTemp("", "aos_"); err != nil {
 		log.Fatalf("Error create tmp folder: %v", err)
 	}
 
@@ -127,7 +126,7 @@ func TestConvertWhiteouts(t *testing.T) {
 			t.Fatalf("Can't create dir: %v", err)
 		}
 
-		if err := ioutil.WriteFile(data.file, []byte{}, 0o600); err != nil {
+		if err := os.WriteFile(data.file, []byte{}, 0o600); err != nil {
 			t.Fatalf("Can't create whiteout file: %v", err)
 		}
 	}

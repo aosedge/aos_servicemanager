@@ -21,7 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"os"
 	"path"
@@ -167,7 +167,7 @@ func TestDeleteAllPreviousCNIDir(t *testing.T) {
 
 	instanceCNIPath := path.Join(networkDir, "instance0")
 
-	if err := ioutil.WriteFile(instanceCNIPath, []byte("instance0"), 0o600); err != nil {
+	if err := os.WriteFile(instanceCNIPath, []byte("instance0"), 0o600); err != nil {
 		t.Fatalf("Can't write network instance data: %s", err)
 	}
 
@@ -1184,7 +1184,7 @@ func readFromFile(path string) (content string, err error) {
 		}
 	}()
 
-	b, err := ioutil.ReadAll(file)
+	b, err := io.ReadAll(file)
 	if err != nil {
 		return "", aoserrors.Wrap(err)
 	}
@@ -1461,7 +1461,7 @@ func (iptables *testIPTablesInterface) waitUpdateIptablesCache() {
 }
 
 func setup() (err error) {
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
+	if tmpDir, err = os.MkdirTemp("", "aos_"); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
