@@ -177,11 +177,13 @@ type outputAccessConfig struct {
 var errTrafficMonitorDisable = errors.New("traffic monitoring is disabled")
 
 // CreateVlan this global variable is used to be able to mocking the functionality of networking in tests.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var CreateVlan = createVlan
 
 // CNIPlugins this global variable is used to be able to mocking the functionality of networking in tests.
-// nolint:gochecknoglobals
+//
+//nolint:gochecknoglobals
 var CNIPlugins cni.CNI
 
 /***********************************************************************************************************************

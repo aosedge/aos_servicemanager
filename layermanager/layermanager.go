@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,11 +54,13 @@ const (
 var ErrNotExist = errors.New("layer does not exist")
 
 // NewSpaceAllocator space allocator constructor.
-// nolint:gochecknoglobals // used for unit test mock
+//
+//nolint:gochecknoglobals // used for unit test mock
 var NewSpaceAllocator = spaceallocator.New
 
 // RemoveCachedLayersPeriod global variable is used to be able to mocking the layers TTL functionality in test.
-// nolint:gochecknoglobals // used for unit test mock
+//
+//nolint:gochecknoglobals // used for unit test mock
 var RemoveCachedLayersPeriod = 24 * time.Hour
 
 /***********************************************************************************************************************
@@ -460,7 +461,7 @@ func (layermanager *LayerManager) removeDamagedLayerFolders() error {
 		}
 	}
 
-	algorithms, err := ioutil.ReadDir(layermanager.layersDir)
+	algorithms, err := os.ReadDir(layermanager.layersDir)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -468,7 +469,7 @@ func (layermanager *LayerManager) removeDamagedLayerFolders() error {
 	for _, algorithm := range algorithms {
 		algorithmPath := filepath.Join(layermanager.layersDir, algorithm.Name())
 
-		digests, err := ioutil.ReadDir(algorithmPath)
+		digests, err := os.ReadDir(algorithmPath)
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
@@ -549,7 +550,7 @@ func (layermanager *LayerManager) extractPackageByURL(
 
 	var byteValue []byte
 
-	if byteValue, err = ioutil.ReadFile(filepath.Join(extractDir, layerOCIDescriptor)); err != nil {
+	if byteValue, err = os.ReadFile(filepath.Join(extractDir, layerOCIDescriptor)); err != nil {
 		return layerDescriptor, nil, aoserrors.Wrap(err)
 	}
 

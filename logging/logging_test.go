@@ -21,7 +21,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -659,7 +659,7 @@ func checkReceivedLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog, fro
 				return
 			}
 
-			data, err := ioutil.ReadAll(zr)
+			data, err := io.ReadAll(zr)
 			if err != nil {
 				t.Errorf("gzip error: %s", err)
 				return

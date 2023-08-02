@@ -22,7 +22,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"os"
 
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
@@ -32,7 +32,7 @@ import (
  * Vars
  **********************************************************************************************************************/
 
-// nolint:gochecknoglobals
+//nolint:gochecknoglobals
 var defaultContent = []aostypes.Host{
 	{IP: "127.0.0.1", Hostname: "localhost"},
 	{IP: "::1", Hostname: "localhost ip6-localhost ip6-loopback"},
@@ -59,8 +59,8 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		return aoserrors.Wrap(err)
 	}
 
-	// nolint:gosec // To fix application to access the host file, the file permissions must be 644
-	if err = ioutil.WriteFile(hostsFilePath, content.Bytes(), 0o644); err != nil {
+	//nolint:gosec // To fix application to access the host file, the file permissions must be 644
+	if err = os.WriteFile(hostsFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -78,8 +78,8 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 		return aoserrors.Wrap(err)
 	}
 
-	// nolint:gosec // To fix application to access the resolve file, the file permissions must be 644
-	if err = ioutil.WriteFile(resolvCongFilePath, content.Bytes(), 0o644); err != nil {
+	//nolint:gosec // To fix application to access the resolve file, the file permissions must be 644
+	if err = os.WriteFile(resolvCongFilePath, content.Bytes(), 0o644); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

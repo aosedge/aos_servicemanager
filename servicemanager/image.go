@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"sort"
@@ -83,7 +82,7 @@ func validateUnpackedImage(installDir string) (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		byteValue, err := ioutil.ReadFile(path.Join(
+		byteValue, err := os.ReadFile(path.Join(
 			installDir, blobsFolder, string(manifest.AosService.Digest.Algorithm()), manifest.AosService.Digest.Hex()))
 		if err != nil {
 			return aoserrors.Wrap(err)
@@ -127,7 +126,7 @@ func validateUnpackedImage(installDir string) (err error) {
 }
 
 func getImageManifest(installDir string) (manifest *serviceManifest, err error) {
-	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
+	manifestJSON, err := os.ReadFile(path.Join(installDir, manifestFileName))
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
@@ -147,7 +146,7 @@ func saveImageManifest(manifest *serviceManifest, installDir string) (err error)
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(path.Join(installDir, manifestFileName), manifestData, 0o600); err != nil {
+	if err = os.WriteFile(path.Join(installDir, manifestFileName), manifestData, 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -238,7 +237,7 @@ func updateRootFSDigestInManifest(installDir string, digest digest.Digest) (err 
 }
 
 func getManifestChecksum(installDir string) (digest []byte, err error) {
-	manifestJSON, err := ioutil.ReadFile(path.Join(installDir, manifestFileName))
+	manifestJSON, err := os.ReadFile(path.Join(installDir, manifestFileName))
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
