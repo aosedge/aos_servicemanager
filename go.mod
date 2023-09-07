@@ -35,7 +35,7 @@ require (
 	github.com/ThalesIgnite/crypto11 v0.0.0-00010101000000-000000000000 // indirect
 	github.com/anexia-it/fsquota v0.1.3 // indirect
 	github.com/cavaliergopher/grab/v3 v3.0.1 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
+	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/docker/docker v17.12.1-ce+incompatible // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
