@@ -74,9 +74,11 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 			service.serviceConfig, service.err = launcher.getServiceConfig(service.ServiceInfo)
 		}
 
-		if service.serviceConfig.OfflineTTL.Duration != 0 &&
-			launcher.onlineTime.Add(service.serviceConfig.OfflineTTL.Duration).Before(now) {
-			service.err = errOfflineTimeout
+		if service.err == nil {
+			if service.serviceConfig.OfflineTTL.Duration != 0 &&
+				launcher.onlineTime.Add(service.serviceConfig.OfflineTTL.Duration).Before(now) {
+				service.err = errOfflineTimeout
+			}
 		}
 
 		if service.err == nil {
