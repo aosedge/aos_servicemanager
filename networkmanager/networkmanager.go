@@ -449,7 +449,8 @@ next:
 
 		log.Infof("Removing network: %s", existNetworkParameter.NetworkID)
 
-		if _, ok := manager.instancesData[existNetworkParameter.NetworkID]; !ok {
+		instances, ok := manager.instancesData[existNetworkParameter.NetworkID]
+		if !ok || len(instances) == 0 {
 			log.Infof("Network %s is empty", existNetworkParameter.NetworkID)
 
 			if err := manager.clearNetwork(existNetworkParameter.NetworkID); err != nil {
@@ -654,6 +655,8 @@ func (manager *NetworkManager) isInstanceInNetwork(instanceID, networkID string)
 
 func (manager *NetworkManager) clearNetwork(networkID string) error {
 	log.WithFields(log.Fields{"networkID": networkID}).Debug("Clear network")
+
+	delete(manager.instancesData, networkID)
 
 	if err := removeInterface(bridgePrefix + networkID); err != nil {
 		return err
