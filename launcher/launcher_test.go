@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3097,7 +3096,7 @@ func (sender *testAlertSender) SendAlert(alertItem cloudprotocol.AlertItem) {
  **********************************************************************************************************************/
 
 func setup() (err error) {
-	tmpDir, err = ioutil.TempDir("", "sm_")
+	tmpDir, err = os.MkdirTemp("", "sm_")
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -3339,7 +3338,7 @@ func writeConfig(fileName string, config interface{}) error {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = ioutil.WriteFile(fileName, data, 0o600); err != nil {
+	if err = os.WriteFile(fileName, data, 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -3567,7 +3566,7 @@ groupLoop:
 }
 
 func getInstanceRuntimeSpec(instanceID string) (runtimespec.Spec, error) {
-	runtimeData, err := ioutil.ReadFile(filepath.Join(launcher.RuntimeDir, instanceID, runtimeConfigFile))
+	runtimeData, err := os.ReadFile(filepath.Join(launcher.RuntimeDir, instanceID, runtimeConfigFile))
 	if err != nil {
 		return runtimespec.Spec{}, aoserrors.Wrap(err)
 	}

@@ -21,7 +21,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"reflect"
@@ -71,7 +70,7 @@ func init() {
 func TestMain(m *testing.M) {
 	var err error
 
-	tmpDir, err = ioutil.TempDir("", "sm_")
+	tmpDir, err = os.MkdirTemp("", "sm_")
 	if err != nil {
 		log.Fatalf("Error create temporary dir: %s", err)
 	}

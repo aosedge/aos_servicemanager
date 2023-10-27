@@ -20,7 +20,6 @@ package resourcemanager
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"reflect"
@@ -513,7 +512,7 @@ func TestUpdateErrorUnitConfig(t *testing.T) {
  **********************************************************************************************************************/
 
 func setup() (err error) {
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
+	if tmpDir, err = os.MkdirTemp("", "aos_"); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -705,7 +704,7 @@ func createEmptyUnitConfigJSON() (configJSON string) {
 }
 
 func writeTestUnitConfigFile(content string) (err error) {
-	if err := ioutil.WriteFile(path.Join(tmpDir, "aos_unit.cfg"), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(path.Join(tmpDir, "aos_unit.cfg"), []byte(content), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 

@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
@@ -101,11 +100,13 @@ var (
 )
 
 // NewSpaceAllocator space allocator constructor.
-// nolint:gochecknoglobals // used for unit test mock
+//
+//nolint:gochecknoglobals // used for unit test mock
 var NewSpaceAllocator = spaceallocator.New
 
 // RemoveCachedServicesPeriod global variable is used to be able to mocking the services TTL functionality in test.
-// nolint:gochecknoglobals // used for unit test mock
+//
+//nolint:gochecknoglobals // used for unit test mock
 var RemoveCachedServicesPeriod = 24 * time.Hour
 
 /***********************************************************************************************************************
@@ -556,7 +557,7 @@ func (sm *ServiceManager) removeDamagedServiceFolders(services []ServiceInfo) er
 		}
 	}
 
-	files, err := ioutil.ReadDir(sm.servicesDir)
+	files, err := os.ReadDir(sm.servicesDir)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -629,7 +630,7 @@ func (sm *ServiceManager) extractPackageByURL(
 		return "", 0, nil, aoserrors.Wrap(err)
 	}
 
-	imagePath, err = ioutil.TempDir(sm.servicesDir, "")
+	imagePath, err = os.MkdirTemp(sm.servicesDir, "")
 	if err != nil {
 		return "", 0, nil, aoserrors.Wrap(err)
 	}

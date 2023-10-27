@@ -31,7 +31,7 @@ import (
 func removeInterface(ifName string) error {
 	br, err := netlink.LinkByName(ifName)
 	if err != nil {
-		return nil // nolint:nilerr
+		return nil //nolint:nilerr
 	}
 
 	if err = netlink.LinkSetDown(br); err != nil {

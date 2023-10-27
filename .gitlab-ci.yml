@@ -1,11 +1,13 @@
+image: golang:1.20
+
 stages:
   - build
   - test
   - dependency
 
-after_script:  
-   - cd $CI_PROJECT_DIR
-   - sudo ./ci/cleanup.sh
+after_script:
+  - cd $CI_PROJECT_DIR
+  - sudo ./ci/cleanup.sh
 
 build:
   tags:
@@ -41,11 +43,11 @@ test:
     - sm_ci
   stage: test
   script:
-    - sudo iptables -P FORWARD ACCEPT    
+    - sudo iptables -P FORWARD ACCEPT
     - echo "-------   Run Unit tests   -------"
     - sudo -E /usr/local/go/bin/go test $(/usr/local/go/bin/go list ./... | grep -v "/vendor") -p=1 -failfast -v -coverprofile .testCoverage.txt
     - /usr/local/go/bin/go tool cover -func=.testCoverage.txt
-    - sudo rm .testCoverage.txt    
+    - sudo rm .testCoverage.txt
 
 test_crun:
   tags:
@@ -58,8 +60,8 @@ test_crun:
 whitesource:
   only:
     refs:
-     - master
-     - develop
+      - master
+      - develop
   tags:
     - sm_ci
   stage: dependency

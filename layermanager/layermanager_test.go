@@ -23,7 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -357,7 +357,7 @@ func TestRemoteDownloadLayer(t *testing.T) {
 		t.Fatalf("Can't create layer: %v", err)
 	}
 
-	fileServerDir, err := ioutil.TempDir("", "layers_fileserver")
+	fileServerDir, err := os.MkdirTemp("", "layers_fileserver")
 	if err != nil {
 		t.Fatalf("Error create temporary dir: %v", err)
 	}
@@ -632,7 +632,7 @@ func (infoProvider *testLayerStorage) SetLayerTimestamp(digest string, timestamp
  **********************************************************************************************************************/
 
 func setup() (err error) {
-	if tmpDir, err = ioutil.TempDir("", "aos_"); err != nil {
+	if tmpDir, err = os.MkdirTemp("", "aos_"); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -684,7 +684,7 @@ func createLayer(
 	}
 	defer file.Close()
 
-	byteValue, err := ioutil.ReadAll(file)
+	byteValue, err := io.ReadAll(file)
 	if err != nil {
 		return layerInfo, aoserrors.Wrap(err)
 	}

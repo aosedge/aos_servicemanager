@@ -1,13 +1,13 @@
 module github.com/aoscloud/aos_servicemanager
 
-go 1.18
+go 1.20
 
 replace github.com/ThalesIgnite/crypto11 => github.com/aoscloud/crypto11 v1.0.3-0.20220217163524-ddd0ace39e6f
 
 replace github.com/coreos/go-iptables => github.com/aoscloud/go-iptables v0.0.0-20220926113402-e57055a8a459
 
 require (
-	github.com/aoscloud/aos_common v0.0.0-20230616142529-14a5d44d4312
+	github.com/aoscloud/aos_common v0.0.0-20230802082015-dd58afc4ed81
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.2.0
 	github.com/coreos/go-iptables v0.6.0

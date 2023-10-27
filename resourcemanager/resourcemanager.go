@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +148,7 @@ func (resourcemanager *ResourceManager) UpdateUnitConfig(configJSON, version str
 		return aoserrors.Wrap(err)
 	}
 
-	if err := ioutil.WriteFile(resourcemanager.unitConfigFile, dataToWrite, 0o600); err != nil {
+	if err := os.WriteFile(resourcemanager.unitConfigFile, dataToWrite, 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -362,7 +361,7 @@ func (resourcemanager *ResourceManager) loadUnitConfiguration() (err error) {
 
 	resourcemanager.unitConfig = unitConfig{}
 
-	byteValue, err := ioutil.ReadFile(resourcemanager.unitConfigFile)
+	byteValue, err := os.ReadFile(resourcemanager.unitConfigFile)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}

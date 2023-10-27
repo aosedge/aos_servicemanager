@@ -21,7 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"os/signal"
 	"path"
@@ -89,7 +89,7 @@ type journalHook struct {
  **********************************************************************************************************************/
 
 // GitSummary provided by govvv at compile-time.
-var GitSummary = "Unknown" // nolint:gochecknoglobals
+var GitSummary = "Unknown" //nolint:gochecknoglobals
 
 /***********************************************************************************************************************
  * Init
@@ -130,7 +130,7 @@ func cleanup(cfg *config.Config, dbFile string) {
 	}
 }
 
-// nolint
+//nolint:funlen
 func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	defer func() {
 		if err != nil {
@@ -352,14 +352,14 @@ func main() {
 
 	// Show version
 	if *showVersion {
-		fmt.Printf("Version: %s\n", GitSummary) // nolint:forbidigo // logs aren't initialized
+		fmt.Printf("Version: %s\n", GitSummary) //nolint:forbidigo // logs aren't initialized
 		return
 	}
 
 	// Set log output
 	if *useJournal {
 		log.AddHook(newJournalHook())
-		log.SetOutput(ioutil.Discard)
+		log.SetOutput(io.Discard)
 	} else {
 		log.SetOutput(os.Stdout)
 	}
