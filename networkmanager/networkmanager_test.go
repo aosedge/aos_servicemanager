@@ -94,7 +94,7 @@ type testStorage struct {
 	chains             map[string]trafficData
 	disableSaveTraffic bool
 	disableLoadTraffic bool
-	netData            map[string]aostypes.NetworkParameters
+	netData            map[string]networkmanager.NetworkParameters
 	chanAddNetwork     chan struct{}
 	chanRemoveNetwork  chan struct{}
 }
@@ -476,7 +476,7 @@ func TestUpdateNetwork(t *testing.T) {
 	networkmanager.CNIPlugins = cniInterface
 	storage := testStorage{
 		chains:            make(map[string]trafficData),
-		netData:           make(map[string]aostypes.NetworkParameters),
+		netData:           make(map[string]networkmanager.NetworkParameters),
 		chanRemoveNetwork: make(chan struct{}, expectedNetworksCount),
 		chanAddNetwork:    make(chan struct{}, expectedNetworksCount),
 	}
@@ -1144,14 +1144,14 @@ func (storage *testStorage) RemoveNetworkInfo(networkID string) error {
 	return nil
 }
 
-func (storage *testStorage) AddNetworkInfo(networkInfo aostypes.NetworkParameters) error {
+func (storage *testStorage) AddNetworkInfo(networkInfo networkmanager.NetworkParameters) error {
 	storage.netData[networkInfo.NetworkID] = networkInfo
 	storage.chanAddNetwork <- struct{}{}
 
 	return nil
 }
 
-func (storage *testStorage) GetNetworksInfo() (netInfos []aostypes.NetworkParameters, err error) {
+func (storage *testStorage) GetNetworksInfo() (netInfos []networkmanager.NetworkParameters, err error) {
 	for _, netInfo := range storage.netData {
 		netInfos = append(netInfos, netInfo)
 	}
