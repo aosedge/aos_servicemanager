@@ -37,6 +37,7 @@ import (
 
 	"github.com/aoscloud/aos_servicemanager/launcher"
 	"github.com/aoscloud/aos_servicemanager/layermanager"
+	"github.com/aoscloud/aos_servicemanager/networkmanager"
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
 )
 
@@ -725,16 +726,20 @@ func TestInstances(t *testing.T) {
 }
 
 func TestNetworks(t *testing.T) {
-	networkParameters := []aostypes.NetworkParameters{
+	networkParameters := []networkmanager.NetworkParameters{
 		{
-			NetworkID: "testNetworkID",
-			Subnet:    "testSubnet",
-			IP:        "testIP",
+			NetworkID:  "testNetworkID",
+			Subnet:     "testSubnet",
+			IP:         "testIP",
+			VlanID:     1,
+			VlanIfName: "testVlanIfName",
 		},
 		{
-			NetworkID: "testNetworkID2",
-			Subnet:    "testSubnet2",
-			IP:        "testIP2",
+			NetworkID:  "testNetworkID2",
+			Subnet:     "testSubnet2",
+			IP:         "testIP2",
+			VlanID:     2,
+			VlanIfName: "testVlanIfName2",
 		},
 	}
 
