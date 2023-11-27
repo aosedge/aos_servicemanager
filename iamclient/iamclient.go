@@ -161,9 +161,11 @@ func (client *Client) GetCertificate(certType string) (certURL, keyURL string, e
 		return "", "", aoserrors.Wrap(err)
 	}
 
-	log.WithFields(log.Fields{"certURL": response.CertUrl, "keyURL": response.KeyUrl}).Debug("Certificate info")
+	log.WithFields(log.Fields{
+		"certURL": response.GetCertUrl(), "keyURL": response.GetKeyUrl(),
+	}).Debug("Certificate info")
 
-	return response.CertUrl, response.KeyUrl, nil
+	return response.GetCertUrl(), response.GetKeyUrl(), nil
 }
 
 // RegisterInstance registers new service instance with permissions and create secret.
@@ -190,7 +192,7 @@ func (client *Client) RegisterInstance(
 		return "", aoserrors.Wrap(err)
 	}
 
-	return response.Secret, nil
+	return response.GetSecret(), nil
 }
 
 // UnregisterInstance unregisters service instance.
@@ -229,9 +231,9 @@ func (client *Client) GetPermissions(
 	}
 
 	return aostypes.InstanceIdent{
-		ServiceID: response.Instance.ServiceId,
-		SubjectID: response.Instance.SubjectId, Instance: response.Instance.Instance,
-	}, response.Permissions.Permissions, nil
+		ServiceID: response.GetInstance().GetServiceId(),
+		SubjectID: response.GetInstance().GetSubjectId(), Instance: response.GetInstance().GetInstance(),
+	}, response.GetPermissions().GetPermissions(), nil
 }
 
 // Close closes IAM client.
@@ -264,11 +266,11 @@ func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
 	}
 
 	log.WithFields(log.Fields{
-		"nodeID":   response.NodeId,
-		"nodeType": response.NodeType,
+		"nodeID":   response.GetNodeId(),
+		"nodeType": response.GetNodeType(),
 	}).Debug("Get node Info")
 
-	return response.NodeId, response.NodeType, nil
+	return response.GetNodeId(), response.GetNodeType(), nil
 }
 
 func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {

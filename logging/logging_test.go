@@ -39,6 +39,17 @@ import (
 )
 
 /***********************************************************************************************************************
+ * Consts
+ **********************************************************************************************************************/
+
+const (
+	aosServiceCGroup      = "_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/"
+	systemdUnitExt        = ".service"
+	aosServicePrefix      = "aos-service@"
+	aosServiceSlicePrefix = "/system.slice/system-aos@service.slice/"
+)
+
+/***********************************************************************************************************************
  * Init
  **********************************************************************************************************************/
 
@@ -91,7 +102,7 @@ func TestGetServiceLog(t *testing.T) {
 		from           = time.Now()
 		instanceFilter = cloudprotocol.NewInstanceFilter("logservice0", "subject0", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
-		unitName       = "aos-service@" + instanceID + ".service"
+		unitName       = aosServicePrefix + instanceID + systemdUnitExt
 		till           = from.Add(5 * time.Second)
 	)
 
@@ -110,8 +121,8 @@ func TestGetServiceLog(t *testing.T) {
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
 	etalonMatches := []string{
-		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + unitName,
-		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + instanceID,
+		aosServiceCGroup + unitName,
+		aosServiceCGroup + instanceID,
 	}
 
 	if err = testJournal.isMatchesEqual(etalonMatches); err != nil {
@@ -230,16 +241,16 @@ func TestGetServiceCrashLog(t *testing.T) {
 	var (
 		instanceFilter = cloudprotocol.NewInstanceFilter("logservice3", "subject3", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
-		unitName       = "aos-service@" + instanceID + ".service"
+		unitName       = aosServicePrefix + instanceID + systemdUnitExt
 		from           = time.Now()
 		till           = from.Add(2 * time.Second)
 	)
 
-	testJournal.addMessage("Started", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
-	testJournal.addMessage("somelog1", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
-	testJournal.addMessage("somelog2", unitName, "/system.slice/system-aos@service.slice/"+instanceID, "2")
+	testJournal.addMessage("Started", unitName, aosServiceSlicePrefix+unitName, "2")
+	testJournal.addMessage("somelog1", unitName, aosServiceSlicePrefix+unitName, "2")
+	testJournal.addMessage("somelog2", unitName, aosServiceSlicePrefix+instanceID, "2")
 	testJournal.addMessage("somelog3", unitName, "", "2")
-	testJournal.addMessage("process exited", unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
+	testJournal.addMessage("process exited", unitName, aosServiceSlicePrefix+unitName, "2")
 
 	if err := logging.GetInstanceCrashLog(cloudprotocol.RequestLog{
 		Filter: cloudprotocol.LogFilter{
@@ -252,8 +263,8 @@ func TestGetServiceCrashLog(t *testing.T) {
 	checkReceivedLog(t, logging.GetLogsDataChannel(), &from, &till)
 
 	etalonMatches := []string{
-		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + unitName,
-		"_SYSTEMD_CGROUP=/system.slice/system-aos\\x2dservice.slice/" + instanceID,
+		aosServiceCGroup + unitName,
+		aosServiceCGroup + instanceID,
 		"UNIT=" + unitName,
 	}
 
@@ -291,7 +302,7 @@ func TestMaxPartCountLog(t *testing.T) {
 	var (
 		instanceFilter = cloudprotocol.NewInstanceFilter("logservice4", "subject4", 0)
 		instanceID     = instanceProvider.addFilter(instanceFilter)
-		unitName       = "aos-service@" + instanceID + ".service"
+		unitName       = aosServicePrefix + instanceID + systemdUnitExt
 		from           = time.Now()
 		till           = from.Add(20 * time.Second)
 	)
@@ -384,7 +395,7 @@ func TestLogErrorCases(t *testing.T) {
 	var (
 		instanceFilter = cloudprotocol.NewInstanceFilter("logservice5", "subject5", 0)
 		faultTime      = time.Time{}
-		unitName       = "aos-service@" + instanceProvider.addFilter(instanceFilter) + ".service"
+		unitName       = aosServicePrefix + instanceProvider.addFilter(instanceFilter) + systemdUnitExt
 	)
 
 	if err = loggingInstance.GetInstanceLog(cloudprotocol.RequestLog{

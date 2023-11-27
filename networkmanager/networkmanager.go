@@ -68,7 +68,7 @@ const (
 type Storage interface {
 	// storage for network info
 	RemoveNetworkInfo(networkID string) error
-	AddNetworkInfo(NetworkParameters) error
+	AddNetworkInfo(info NetworkParameters) error
 	GetNetworksInfo() ([]NetworkParameters, error)
 
 	// storage for network traffic monitoring

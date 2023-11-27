@@ -532,7 +532,7 @@ func TestAlertNotifications(t *testing.T) {
 		receivedAlert.Timestamp = nil
 
 		if !proto.Equal(receivedAlert, &testAlertItems[i].expectedAlert) {
-			t.Errorf("Incorrect log item %s", receivedAlert.Tag)
+			t.Errorf("Incorrect log item %s", receivedAlert.GetTag())
 		}
 	}
 
@@ -1079,7 +1079,7 @@ func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) error
 			return aoserrors.Wrap(err)
 		}
 
-		switch data := message.SMOutgoingMessage.(type) {
+		switch data := message.GetSMOutgoingMessage().(type) {
 		case *pb.SMOutgoingMessages_NodeConfiguration:
 			server.registerChannel <- data.NodeConfiguration
 
@@ -1123,17 +1123,19 @@ func (server *testServer) waitAndCheckLogs(testLogs []testLogData) error {
 func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstanceStatus) error {
 	select {
 	case data := <-server.envVarsChannel:
-		receivedStatus := make([]cloudprotocol.EnvVarsInstanceStatus, len(data.OverrideEnvVarStatus.EnvVarsStatus))
+		receivedStatus := make([]cloudprotocol.EnvVarsInstanceStatus, len(data.OverrideEnvVarStatus.GetEnvVarsStatus()))
 
-		for i, envVarStatus := range data.OverrideEnvVarStatus.EnvVarsStatus {
+		for i, envVarStatus := range data.OverrideEnvVarStatus.GetEnvVarsStatus() {
 			receivedStatus[i] = cloudprotocol.EnvVarsInstanceStatus{
 				InstanceFilter: cloudprotocol.NewInstanceFilter(
-					envVarStatus.Instance.ServiceId, envVarStatus.Instance.SubjectId, envVarStatus.Instance.Instance),
-				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.VarsStatus)),
+					envVarStatus.GetInstance().GetServiceId(),
+					envVarStatus.GetInstance().GetSubjectId(),
+					envVarStatus.GetInstance().GetInstance()),
+				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.GetVarsStatus())),
 			}
 
-			for j, s := range envVarStatus.VarsStatus {
-				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{ID: s.VarId, Error: s.Error}
+			for j, s := range envVarStatus.GetVarsStatus() {
+				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{ID: s.GetVarId(), Error: s.GetError()}
 			}
 		}
 
@@ -1151,86 +1153,86 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 func convertRunInstancesReq(req *pb.RunInstances) (
 	services []aostypes.ServiceInfo, layers []aostypes.LayerInfo, instances []aostypes.InstanceInfo, forceRestart bool,
 ) {
-	services = make([]aostypes.ServiceInfo, len(req.Services))
+	services = make([]aostypes.ServiceInfo, len(req.GetServices()))
 
-	for i, service := range req.Services {
+	for i, service := range req.GetServices() {
 		services[i] = aostypes.ServiceInfo{
 			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    service.VersionInfo.AosVersion,
-				VendorVersion: service.VersionInfo.VendorVersion,
-				Description:   service.VersionInfo.Description,
+				AosVersion:    service.GetVersionInfo().GetAosVersion(),
+				VendorVersion: service.GetVersionInfo().GetVendorVersion(),
+				Description:   service.GetVersionInfo().GetDescription(),
 			},
-			ID:         service.ServiceId,
-			ProviderID: service.ProviderId,
-			GID:        service.Gid,
-			URL:        service.Url,
-			Sha256:     service.Sha256,
-			Sha512:     service.Sha512,
-			Size:       service.Size,
+			ID:         service.GetServiceId(),
+			ProviderID: service.GetProviderId(),
+			GID:        service.GetGid(),
+			URL:        service.GetUrl(),
+			Sha256:     service.GetSha256(),
+			Sha512:     service.GetSha512(),
+			Size:       service.GetSize(),
 		}
 	}
 
-	layers = make([]aostypes.LayerInfo, len(req.Layers))
+	layers = make([]aostypes.LayerInfo, len(req.GetLayers()))
 
-	for i, layer := range req.Layers {
+	for i, layer := range req.GetLayers() {
 		layers[i] = aostypes.LayerInfo{
 			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    layer.VersionInfo.AosVersion,
-				VendorVersion: layer.VersionInfo.VendorVersion,
-				Description:   layer.VersionInfo.Description,
+				AosVersion:    layer.GetVersionInfo().GetAosVersion(),
+				VendorVersion: layer.GetVersionInfo().GetVendorVersion(),
+				Description:   layer.GetVersionInfo().GetDescription(),
 			},
-			ID:     layer.LayerId,
-			Digest: layer.Digest,
-			URL:    layer.Url,
-			Sha256: layer.Sha256,
-			Sha512: layer.Sha512,
-			Size:   layer.Size,
+			ID:     layer.GetLayerId(),
+			Digest: layer.GetDigest(),
+			URL:    layer.GetUrl(),
+			Sha256: layer.GetSha256(),
+			Sha512: layer.GetSha512(),
+			Size:   layer.GetSize(),
 		}
 	}
 
-	instances = make([]aostypes.InstanceInfo, len(req.Instances))
+	instances = make([]aostypes.InstanceInfo, len(req.GetInstances()))
 
-	for i, instance := range req.Instances {
+	for i, instance := range req.GetInstances() {
 		instances[i] = aostypes.InstanceInfo{
 			InstanceIdent: aostypes.InstanceIdent{
-				ServiceID: instance.Instance.ServiceId,
-				SubjectID: instance.Instance.SubjectId,
-				Instance:  uint64(instance.Instance.Instance),
+				ServiceID: instance.GetInstance().GetServiceId(),
+				SubjectID: instance.GetInstance().GetSubjectId(),
+				Instance:  uint64(instance.GetInstance().GetInstance()),
 			},
 			NetworkParameters: aostypes.NetworkParameters{
-				IP:            instance.NetworkParameters.Ip,
-				Subnet:        instance.NetworkParameters.Subnet,
-				VlanID:        instance.NetworkParameters.VlanId,
-				DNSServers:    instance.NetworkParameters.DnsServers,
+				IP:            instance.GetNetworkParameters().GetIp(),
+				Subnet:        instance.GetNetworkParameters().GetSubnet(),
+				VlanID:        instance.GetNetworkParameters().GetVlanId(),
+				DNSServers:    instance.GetNetworkParameters().GetDnsServers(),
 				FirewallRules: []aostypes.FirewallRule{},
 			},
-			UID:         instance.Uid,
-			Priority:    instance.Priority,
-			StoragePath: instance.StoragePath,
-			StatePath:   instance.StatePath,
+			UID:         instance.GetUid(),
+			Priority:    instance.GetPriority(),
+			StoragePath: instance.GetStoragePath(),
+			StatePath:   instance.GetStatePath(),
 		}
 	}
 
-	forceRestart = req.ForceRestart
+	forceRestart = req.GetForceRestart()
 
 	return services, layers, instances, forceRestart
 }
 
 func convertEnvVarsReq(req *pb.OverrideEnvVars) []cloudprotocol.EnvVarsInstanceInfo {
-	envVars := make([]cloudprotocol.EnvVarsInstanceInfo, len(req.EnvVars))
+	envVars := make([]cloudprotocol.EnvVarsInstanceInfo, len(req.GetEnvVars()))
 
-	for i, envVar := range req.EnvVars {
+	for i, envVar := range req.GetEnvVars() {
 		envVars[i] = cloudprotocol.EnvVarsInstanceInfo{
 			InstanceFilter: cloudprotocol.NewInstanceFilter(
-				envVar.Instance.ServiceId, envVar.Instance.SubjectId, envVar.Instance.Instance),
-			EnvVars: make([]cloudprotocol.EnvVarInfo, len(envVar.Vars)),
+				envVar.GetInstance().GetServiceId(), envVar.GetInstance().GetSubjectId(), envVar.GetInstance().GetInstance()),
+			EnvVars: make([]cloudprotocol.EnvVarInfo, len(envVar.GetVars())),
 		}
 
-		for j, v := range envVar.Vars {
-			envVars[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: v.VarId, Variable: v.Variable}
+		for j, v := range envVar.GetVars() {
+			envVars[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: v.GetVarId(), Variable: v.GetVariable()}
 
-			if v.Ttl != nil {
-				t := v.Ttl.AsTime()
+			if v.GetTtl() != nil {
+				t := v.GetTtl().AsTime()
 
 				envVars[i].EnvVars[j].TTL = &t
 			}

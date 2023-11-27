@@ -88,7 +88,7 @@ type LayerManager struct {
 
 // LayerStorage provides API to add, remove or access layer information.
 type LayerStorage interface {
-	AddLayer(LayerInfo) error
+	AddLayer(layer LayerInfo) error
 	DeleteLayerByDigest(digest string) error
 	GetLayersInfo() ([]LayerInfo, error)
 	GetLayerInfoByDigest(digest string) (LayerInfo, error)
