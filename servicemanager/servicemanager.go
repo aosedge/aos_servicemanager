@@ -58,7 +58,7 @@ const tmpRootFSDir = "tmprootfs"
 type ServiceStorage interface {
 	GetAllServiceVersions(serviceID string) ([]ServiceInfo, error)
 	GetServices() ([]ServiceInfo, error)
-	AddService(ServiceInfo) error
+	AddService(info ServiceInfo) error
 	RemoveService(serviceID string, aosVersion uint64) error
 	SetServiceCached(serviceID string, aosVersion uint64, cached bool) error
 }
