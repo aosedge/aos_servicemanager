@@ -32,6 +32,7 @@ import (
 	"github.com/aoscloud/aos_common/aoserrors"
 	"github.com/aoscloud/aos_common/aostypes"
 	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aoscloud/aos_common/migration"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
@@ -923,27 +924,31 @@ func TestMigrationToV1(t *testing.T) {
 	mergedMigrationDir := path.Join(tmpDir, "mergedMigration")
 
 	if err := os.MkdirAll(mergedMigrationDir, 0o755); err != nil {
-		t.Fatalf("Error creating merged migration dir: %s", err)
+		t.Fatalf("Error creating merged migration dir: %v", err)
 	}
 
 	defer func() {
 		if err := os.RemoveAll(mergedMigrationDir); err != nil {
-			t.Fatalf("Error removing merged migration dir: %s", err)
+			t.Fatalf("Error removing merged migration dir: %v", err)
+		}
+
+		if err := os.RemoveAll(migrationDB); err != nil {
+			t.Fatalf("Error removing migration db: %v", err)
 		}
 	}()
 
 	if err := createDatabaseV0(migrationDB); err != nil {
-		t.Fatalf("Can't create initial database %s", err)
+		t.Fatalf("Can't create initial database %v", err)
 	}
 
 	// Migration upward
 	db, err := newDatabase(migrationDB, "migration", mergedMigrationDir, 1)
 	if err != nil {
-		t.Fatalf("Can't create database: %s", err)
+		t.Fatalf("Can't create database: %v", err)
 	}
 
 	if err = isDatabaseVer1(db.sql); err != nil {
-		t.Fatalf("Error checking db version: %s", err)
+		t.Fatalf("Error checking db version: %v", err)
 	}
 
 	db.Close()
@@ -951,11 +956,58 @@ func TestMigrationToV1(t *testing.T) {
 	// Migration downward
 	db, err = newDatabase(migrationDB, "migration", mergedMigrationDir, 0)
 	if err != nil {
-		t.Fatalf("Can't create database: %s", err)
+		t.Fatalf("Can't create database: %v", err)
 	}
 
 	if err = isDatabaseVer0(db.sql); err != nil {
-		t.Fatalf("Error checking db version: %s", err)
+		t.Fatalf("Error checking db version: %v", err)
+	}
+
+	db.Close()
+}
+
+func TestMigrationToV7(t *testing.T) {
+	migrationDB := path.Join(tmpDir, "test_migration.db")
+	mergedMigrationDir := path.Join(tmpDir, "mergedMigration")
+
+	if err := os.MkdirAll(mergedMigrationDir, 0o755); err != nil {
+		t.Fatalf("Error creating merged migration dir: %v", err)
+	}
+
+	defer func() {
+		if err := os.RemoveAll(mergedMigrationDir); err != nil {
+			t.Fatalf("Error removing merged migration dir: %v", err)
+		}
+
+		if err := os.RemoveAll(migrationDB); err != nil {
+			t.Fatalf("Error removing migration db: %v", err)
+		}
+	}()
+
+	if err := createDatabaseV6(migrationDB, mergedMigrationDir); err != nil {
+		t.Fatalf("Can't create initial database %v", err)
+	}
+
+	// Migration upward
+	db, err := newDatabase(migrationDB, "migration", mergedMigrationDir, 7)
+	if err != nil {
+		t.Fatalf("Can't create database: %v", err)
+	}
+
+	if err = isDatabaseVer7(db.sql); err != nil {
+		t.Fatalf("Error checking db version: %v", err)
+	}
+
+	db.Close()
+
+	// Migration downward
+	db, err = newDatabase(migrationDB, "migration", mergedMigrationDir, 6)
+	if err != nil {
+		t.Fatalf("Can't create database: %v", err)
+	}
+
+	if err = isDatabaseVer6(db.sql); err != nil {
+		t.Fatalf("Error checking db version: %v", err)
 	}
 
 	db.Close()
@@ -1036,6 +1088,95 @@ func createDatabaseV0(name string) (err error) {
 															 vendorVersion TEXT,
 															 description TEXT,
 															 aosVersion INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	return nil
+}
+
+func createDatabaseV6(name string, mergedMigrationPath string) (err error) {
+	sqlite, err := sql.Open("sqlite3", fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=%s&_sync=%s",
+		name, busyTimeout, journalMode, syncMode))
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer sqlite.Close()
+
+	if _, err = sqlite.Exec(
+		`CREATE TABLE config (
+			operationVersion INTEGER,
+			cursor TEXT,
+			envvars TEXT,
+			onlineTime TIMESTAMP)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(
+		`INSERT INTO config (
+			operationVersion,
+			cursor,
+			envvars,
+			onlineTime) values(?, ?, ?, ?)`, launcher.OperationVersion, "", "", time.Now()); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL ,
+                                                                  aosVersion INTEGER,
+                                                                  providerID TEXT,
+                                                                  description TEXT,
+                                                                  imagePath TEXT,
+                                                                  manifestDigest BLOB,
+                                                                  cached INTEGER,
+                                                                  timestamp TIMESTAMP,
+                                                                  size INTEGER,
+                                                                  GID INTEGER,
+                                                                  PRIMARY KEY(id, aosVersion))`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS trafficmonitor (chain TEXT NOT NULL PRIMARY KEY,
+                                                                        time TIMESTAMP,
+                                                                        value INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS layers (digest TEXT NOT NULL PRIMARY KEY,
+                                                                layerId TEXT,
+                                                                path TEXT,
+                                                                osVersion TEXT,
+                                                                vendorVersion TEXT,
+                                                                description TEXT,
+                                                                aosVersion INTEGER,
+                                                                timestamp TIMESTAMP,
+                                                                cached INTEGER,
+                                                                size INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS instances (instanceID TEXT NOT NULL PRIMARY KEY,
+                                                                   serviceID TEXT,
+                                                                   subjectID TEXT,
+                                                                   instance INTEGER,
+                                                                   uid INTEGER,
+                                                                   priority INTEGER,
+                                                                   storagePath TEXT,
+                                                                   statePath TEXT,
+                                                                   network BLOB)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if _, err = sqlite.Exec(`CREATE TABLE IF NOT EXISTS network (networkID TEXT NOT NULL PRIMARY KEY,
+                                                                 ip TEXT,
+                                                                 subnet TEXT,
+                                                                 vlanID INTEGER)`); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = migration.MergeMigrationFiles("migration", mergedMigrationPath); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if err = migration.SetDatabaseVersion(sqlite, "migration", 6); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -1136,6 +1277,64 @@ func isDatabaseVer0(sqlite *sql.DB) (err error) {
 	}
 
 	if count != 0 {
+		return errNotExist
+	}
+
+	return nil
+}
+
+func isDatabaseVer6(sqlite *sql.DB) (err error) {
+	rows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('network') WHERE name='vlanIfName'")
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return aoserrors.Wrap(rows.Err())
+	}
+
+	if !rows.Next() {
+		return errNotExist
+	}
+
+	count := 0
+
+	if err = rows.Scan(&count); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count != 0 {
+		return aoserrors.Errorf("vlanIfName column should not exist")
+	}
+
+	return nil
+}
+
+func isDatabaseVer7(sqlite *sql.DB) (err error) {
+	rows, err := sqlite.Query(
+		"SELECT COUNT(*) AS CNTREC FROM pragma_table_info('network') WHERE name='vlanIfName'")
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+	defer rows.Close()
+
+	if rows.Err() != nil {
+		return aoserrors.Wrap(rows.Err())
+	}
+
+	if !rows.Next() {
+		return errNotExist
+	}
+
+	count := 0
+
+	if err = rows.Scan(&count); err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if count == 0 {
 		return errNotExist
 	}
 
