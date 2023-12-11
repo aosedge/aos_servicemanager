@@ -40,6 +40,7 @@ import (
 	"github.com/google/uuid"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/config"
@@ -815,8 +816,13 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
 	}
 
+	cpuCount, err := cpu.Counts(true)
+	if err != nil {
+		t.Fatalf("Can't get cpu count: %v", err)
+	}
+
 	if *runtimeSpec.Linux.Resources.CPU.Quota !=
-		int64(*serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)/100) {
+		int64(*serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(cpuCount)/100) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
