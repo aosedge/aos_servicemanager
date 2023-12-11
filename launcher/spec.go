@@ -35,6 +35,7 @@ import (
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aoscloud/aos_servicemanager/servicemanager"
@@ -110,7 +111,14 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 		spec.ociSpec.Linux.Resources.CPU = &runtimespec.LinuxCPU{}
 	}
 
-	cpuQuota := int64((defaultCPUPeriod * (cpuLimit)) / 100) //nolint:gomnd // Translate to percents
+	cpuCount, err := cpu.Counts(true)
+	if err != nil {
+		log.Errorf("Can't get cpu count: %v", err)
+
+		cpuCount = 1
+	}
+
+	cpuQuota := int64((defaultCPUPeriod * (cpuLimit) * uint64(cpuCount)) / 100) //nolint:gomnd // Translate to percents
 	cpuPeriod := defaultCPUPeriod
 
 	spec.ociSpec.Linux.Resources.CPU.Period = &cpuPeriod
