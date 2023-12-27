@@ -68,8 +68,8 @@ const (
 type Storage interface {
 	// storage for network info
 	RemoveNetworkInfo(networkID string) error
-	AddNetworkInfo(aostypes.NetworkParameters) error
-	GetNetworksInfo() ([]aostypes.NetworkParameters, error)
+	AddNetworkInfo(info NetworkParameters) error
+	GetNetworksInfo() ([]NetworkParameters, error)
 
 	// storage for network traffic monitoring
 	SetTrafficMonitorData(chain string, timestamp time.Time, value uint64) (err error)
@@ -90,10 +90,19 @@ type NetworkManager struct {
 	networkDir        string
 	trafficMonitoring *trafficMonitoring
 	instancesData     map[string]map[string]netInstanceData
-	providerNetworks  map[string]aostypes.NetworkParameters
+	providerNetworks  map[string]NetworkParameters
 	vlanIfNames       map[string]string
 
 	storage Storage
+}
+
+// NetworkParameters network parameters set for service provider.
+type NetworkParameters struct {
+	NetworkID  string
+	Subnet     string
+	IP         string
+	VlanID     uint64
+	VlanIfName string
 }
 
 // NetworkParams network parameters set for instance.
@@ -200,7 +209,7 @@ func New(cfg *config.Config, storage Storage) (manager *NetworkManager, err erro
 		hosts:            cfg.Hosts,
 		networkDir:       path.Join(cniDir, "networks"),
 		instancesData:    make(map[string]map[string]netInstanceData),
-		providerNetworks: make(map[string]aostypes.NetworkParameters),
+		providerNetworks: make(map[string]NetworkParameters),
 		vlanIfNames:      make(map[string]string),
 		storage:          storage,
 	}
@@ -262,7 +271,18 @@ func (manager *NetworkManager) UpdateNetworks(networkParameters []aostypes.Netwo
 		return aoserrors.Wrap(err)
 	}
 
-	newNetworkParameters, err := manager.createNetwork(networkParameters)
+	netParameters := make([]NetworkParameters, len(networkParameters))
+
+	for i, networkParameter := range networkParameters {
+		netParameters[i] = NetworkParameters{
+			NetworkID: networkParameter.NetworkID,
+			Subnet:    networkParameter.Subnet,
+			IP:        networkParameter.IP,
+			VlanID:    networkParameter.VlanID,
+		}
+	}
+
+	newNetworkParameters, err := manager.createNetwork(netParameters)
 	if err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -473,8 +493,8 @@ next:
 }
 
 func (manager *NetworkManager) createNetwork(
-	networkParameters []aostypes.NetworkParameters,
-) (newNetworkParameters []aostypes.NetworkParameters, err error) {
+	networkParameters []NetworkParameters,
+) (newNetworkParameters []NetworkParameters, err error) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -484,28 +504,14 @@ func (manager *NetworkManager) createNetwork(
 			continue
 		}
 
-		var vlanIfname string
+		vlanIfname := networkParameter.VlanIfName
 
-	next:
-		for i := 0; i < countRetryVlanNameGeneration; i++ {
-			vlanName, err := randomVlanName()
-			if err != nil {
+		if vlanIfname == "" {
+			if vlanIfname, err = manager.generateVlanName(); err != nil {
 				return nil, err
 			}
 
-			for _, existingVlanName := range manager.vlanIfNames {
-				if existingVlanName == vlanName {
-					continue next
-				}
-			}
-
-			vlanIfname = vlanName
-
-			break
-		}
-
-		if vlanIfname == "" {
-			return nil, errors.New("failed to generate vlan name")
+			networkParameter.VlanIfName = vlanIfname
 		}
 
 		manager.vlanIfNames[networkParameter.NetworkID] = vlanIfname
@@ -531,6 +537,26 @@ func (manager *NetworkManager) createNetwork(
 	}
 
 	return newNetworkParameters, nil
+}
+
+func (manager *NetworkManager) generateVlanName() (string, error) {
+next:
+	for i := 0; i < countRetryVlanNameGeneration; i++ {
+		vlanName, err := randomVlanName()
+		if err != nil {
+			return "", err
+		}
+
+		for _, existingVlanName := range manager.vlanIfNames {
+			if existingVlanName == vlanName {
+				continue next
+			}
+		}
+
+		return vlanName, nil
+	}
+
+	return "", errors.New("failed to generate vlan name")
 }
 
 func (manager *NetworkManager) updateInstanceNetworkCache(

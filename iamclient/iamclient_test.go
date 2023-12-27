@@ -304,7 +304,7 @@ func (server *testServer) RegisterInstance(
 ) (rsp *pb.RegisterInstanceResponse, err error) {
 	rsp = &pb.RegisterInstanceResponse{}
 
-	instanceIdent := pbToInstanceIdent(req.Instance)
+	instanceIdent := pbToInstanceIdent(req.GetInstance())
 
 	if secret := server.findSecret(instanceIdent); secret != "" {
 		return rsp, aoserrors.New("service is already registered")
@@ -314,8 +314,8 @@ func (server *testServer) RegisterInstance(
 	rsp.Secret = secret
 
 	permissions := make(map[string]map[string]string)
-	for key, value := range req.Permissions {
-		permissions[key] = value.Permissions
+	for key, value := range req.GetPermissions() {
+		permissions[key] = value.GetPermissions()
 	}
 
 	server.permissionsCache[secret] = servicePermissions{instanceIdent: instanceIdent, permissions: permissions}
@@ -328,7 +328,7 @@ func (server *testServer) UnregisterInstance(
 ) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
 
-	secret := server.findSecret(pbToInstanceIdent(req.Instance))
+	secret := server.findSecret(pbToInstanceIdent(req.GetInstance()))
 	if secret == "" {
 		return rsp, aoserrors.New("service is not registered ")
 	}
@@ -343,12 +343,12 @@ func (server *testServer) GetPermissions(
 ) (rsp *pb.PermissionsResponse, err error) {
 	rsp = &pb.PermissionsResponse{}
 
-	funcServersPermissions, ok := server.permissionsCache[req.Secret]
+	funcServersPermissions, ok := server.permissionsCache[req.GetSecret()]
 	if !ok {
 		return rsp, aoserrors.New("secret not found")
 	}
 
-	permissions, ok := funcServersPermissions.permissions[req.FunctionalServerId]
+	permissions, ok := funcServersPermissions.permissions[req.GetFunctionalServerId()]
 	if !ok {
 		return rsp, aoserrors.New("permissions for functional server not found")
 	}
@@ -386,6 +386,6 @@ func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
 
 func pbToInstanceIdent(ident *pb.InstanceIdent) aostypes.InstanceIdent {
 	return aostypes.InstanceIdent{
-		ServiceID: ident.ServiceId, SubjectID: ident.SubjectId, Instance: ident.Instance,
+		ServiceID: ident.GetServiceId(), SubjectID: ident.GetSubjectId(), Instance: ident.GetInstance(),
 	}
 }

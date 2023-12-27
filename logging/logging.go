@@ -52,7 +52,7 @@ const (
 
 // InstanceIDProvider provides instances ID.
 type InstanceIDProvider interface {
-	GetInstanceIDs(cloudprotocol.InstanceFilter) ([]string, error)
+	GetInstanceIDs(ids cloudprotocol.InstanceFilter) ([]string, error)
 }
 
 // Logging instance.

@@ -334,7 +334,7 @@ func (client *SMClient) processMessages() (err error) {
 			return aoserrors.Wrap(err)
 		}
 
-		switch data := message.SMIncomingMessage.(type) {
+		switch data := message.GetSMIncomingMessage().(type) {
 		case *pb.SMIncomingMessages_GetUnitConfigStatus:
 			client.processGetUnitConfigStatus()
 
@@ -384,7 +384,7 @@ func (client *SMClient) processGetUnitConfigStatus() {
 func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
-	if err := client.unitConfigProcessor.CheckUnitConfig(check.UnitConfig, check.VendorVersion); err != nil {
+	if err := client.unitConfigProcessor.CheckUnitConfig(check.GetUnitConfig(), check.GetVendorVersion()); err != nil {
 		status.Error = err.Error()
 	}
 
@@ -398,7 +398,7 @@ func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
-	if err := client.unitConfigProcessor.UpdateUnitConfig(config.UnitConfig, config.VendorVersion); err != nil {
+	if err := client.unitConfigProcessor.UpdateUnitConfig(config.GetUnitConfig(), config.GetVendorVersion()); err != nil {
 		status.Error = err.Error()
 	}
 
@@ -410,14 +410,14 @@ func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 }
 
 func (client *SMClient) processUpdateNetworks(updateNetworks *pb.UpdateNetworks) {
-	networkParameters := make([]aostypes.NetworkParameters, len(updateNetworks.Networks))
+	networkParameters := make([]aostypes.NetworkParameters, len(updateNetworks.GetNetworks()))
 
-	for i, network := range updateNetworks.Networks {
+	for i, network := range updateNetworks.GetNetworks() {
 		networkParameters[i] = aostypes.NetworkParameters{
-			Subnet:    network.Subnet,
-			IP:        network.Ip,
-			VlanID:    network.VlanId,
-			NetworkID: network.NetworkId,
+			Subnet:    network.GetSubnet(),
+			IP:        network.GetIp(),
+			VlanID:    network.GetVlanId(),
+			NetworkID: network.GetNetworkId(),
 		}
 	}
 
@@ -427,16 +427,18 @@ func (client *SMClient) processUpdateNetworks(updateNetworks *pb.UpdateNetworks)
 }
 
 func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
-	services := make([]aostypes.ServiceInfo, len(runInstances.Services))
+	services := make([]aostypes.ServiceInfo, len(runInstances.GetServices()))
 
-	for i, pbService := range runInstances.Services {
+	for i, pbService := range runInstances.GetServices() {
 		services[i] = aostypes.ServiceInfo{
 			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    pbService.VersionInfo.AosVersion,
-				VendorVersion: pbService.VersionInfo.VendorVersion, Description: pbService.VersionInfo.Description,
+				AosVersion:    pbService.GetVersionInfo().GetAosVersion(),
+				VendorVersion: pbService.GetVersionInfo().GetVendorVersion(),
+				Description:   pbService.GetVersionInfo().GetDescription(),
 			},
-			ID: pbService.ServiceId, ProviderID: pbService.ProviderId, URL: pbService.Url, GID: pbService.Gid,
-			Sha256: pbService.Sha256, Sha512: pbService.Sha512, Size: pbService.Size,
+			ID: pbService.GetServiceId(), ProviderID: pbService.GetProviderId(),
+			URL: pbService.GetUrl(), GID: pbService.GetGid(),
+			Sha256: pbService.GetSha256(), Sha512: pbService.GetSha512(), Size: pbService.GetSize(),
 		}
 	}
 
@@ -444,16 +446,17 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 		log.Errorf("Can't process desired services list %v", err)
 	}
 
-	layers := make([]aostypes.LayerInfo, len(runInstances.Layers))
+	layers := make([]aostypes.LayerInfo, len(runInstances.GetLayers()))
 
-	for i, pbLayer := range runInstances.Layers {
+	for i, pbLayer := range runInstances.GetLayers() {
 		layers[i] = aostypes.LayerInfo{
 			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    pbLayer.VersionInfo.AosVersion,
-				VendorVersion: pbLayer.VersionInfo.VendorVersion, Description: pbLayer.VersionInfo.Description,
+				AosVersion:    pbLayer.GetVersionInfo().GetAosVersion(),
+				VendorVersion: pbLayer.GetVersionInfo().GetVendorVersion(),
+				Description:   pbLayer.GetVersionInfo().GetDescription(),
 			},
-			ID: pbLayer.LayerId, Digest: pbLayer.Digest, URL: pbLayer.Url,
-			Sha256: pbLayer.Sha256, Sha512: pbLayer.Sha512, Size: pbLayer.Size,
+			ID: pbLayer.GetLayerId(), Digest: pbLayer.GetDigest(), URL: pbLayer.GetUrl(),
+			Sha256: pbLayer.GetSha256(), Sha512: pbLayer.GetSha512(), Size: pbLayer.GetSize(),
 		}
 	}
 
@@ -461,37 +464,37 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 		log.Errorf("Can't process desired layer list %v", err)
 	}
 
-	instances := make([]aostypes.InstanceInfo, len(runInstances.Instances))
+	instances := make([]aostypes.InstanceInfo, len(runInstances.GetInstances()))
 
-	for i, pbInstance := range runInstances.Instances {
+	for i, pbInstance := range runInstances.GetInstances() {
 		instances[i] = aostypes.InstanceInfo{
-			InstanceIdent:     pbconvert.NewInstanceIdentFromPB(pbInstance.Instance),
-			NetworkParameters: pbconvert.NewNetworkParametersFromPB(pbInstance.NetworkParameters),
-			UID:               pbInstance.Uid, Priority: pbInstance.Priority,
-			StoragePath: pbInstance.StoragePath, StatePath: pbInstance.StatePath,
+			InstanceIdent:     pbconvert.NewInstanceIdentFromPB(pbInstance.GetInstance()),
+			NetworkParameters: pbconvert.NewNetworkParametersFromPB(pbInstance.GetNetworkParameters()),
+			UID:               pbInstance.GetUid(), Priority: pbInstance.GetPriority(),
+			StoragePath: pbInstance.GetStoragePath(), StatePath: pbInstance.GetStatePath(),
 		}
 	}
 
-	if err := client.launcher.RunInstances(instances, runInstances.ForceRestart); err != nil {
+	if err := client.launcher.RunInstances(instances, runInstances.GetForceRestart()); err != nil {
 		log.Errorf("Can't run instances: %v", err)
 	}
 }
 
 func (client *SMClient) processGetSystemLogRequest(logRequest *pb.SystemLogRequest) {
-	getSystemLogRequest := cloudprotocol.RequestLog{LogID: logRequest.LogId}
+	getSystemLogRequest := cloudprotocol.RequestLog{LogID: logRequest.GetLogId()}
 
 	getSystemLogRequest.Filter.From, getSystemLogRequest.Filter.Till = getFromTillTimeFromPB(
-		logRequest.From, logRequest.Till)
+		logRequest.GetFrom(), logRequest.GetTill())
 
 	client.logsProvider.GetSystemLog(getSystemLogRequest)
 }
 
 func (client *SMClient) processGetInstanceLogRequest(instanceLogRequest *pb.InstanceLogRequest) {
-	getInstanceLogRequest := cloudprotocol.RequestLog{LogID: instanceLogRequest.LogId}
+	getInstanceLogRequest := cloudprotocol.RequestLog{LogID: instanceLogRequest.GetLogId()}
 
 	getInstanceLogRequest.Filter.From, getInstanceLogRequest.Filter.Till = getFromTillTimeFromPB(
-		instanceLogRequest.From, instanceLogRequest.Till)
-	getInstanceLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.Instance)
+		instanceLogRequest.GetFrom(), instanceLogRequest.GetTill())
+	getInstanceLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.GetInstance())
 
 	if err := client.logsProvider.GetInstanceLog(getInstanceLogRequest); err != nil {
 		log.Errorf("Can't get instance log: %v", err)
@@ -499,11 +502,11 @@ func (client *SMClient) processGetInstanceLogRequest(instanceLogRequest *pb.Inst
 }
 
 func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.InstanceCrashLogRequest) {
-	getInstanceCrashLogRequest := cloudprotocol.RequestLog{LogID: logrequest.LogId}
+	getInstanceCrashLogRequest := cloudprotocol.RequestLog{LogID: logrequest.GetLogId()}
 
 	getInstanceCrashLogRequest.Filter.From, getInstanceCrashLogRequest.Filter.Till = getFromTillTimeFromPB(
-		logrequest.From, logrequest.Till)
-	getInstanceCrashLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(logrequest.Instance)
+		logrequest.GetFrom(), logrequest.GetTill())
+	getInstanceCrashLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(logrequest.GetInstance())
 
 	if err := client.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest); err != nil {
 		log.Errorf("Can't get instance crash log: %v", err)
@@ -511,19 +514,19 @@ func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.Instanc
 }
 
 func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
-	envVarsInfo := make([]cloudprotocol.EnvVarsInstanceInfo, len(envVars.EnvVars))
+	envVarsInfo := make([]cloudprotocol.EnvVarsInstanceInfo, len(envVars.GetEnvVars()))
 
-	for i, pbEnvVar := range envVars.EnvVars {
+	for i, pbEnvVar := range envVars.GetEnvVars() {
 		envVarsInfo[i] = cloudprotocol.EnvVarsInstanceInfo{
-			InstanceFilter: getInstanceFilterFromPB(pbEnvVar.Instance),
-			EnvVars:        make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.Vars)),
+			InstanceFilter: getInstanceFilterFromPB(pbEnvVar.GetInstance()),
+			EnvVars:        make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.GetVars())),
 		}
 
-		for j, envVar := range pbEnvVar.Vars {
-			envVarsInfo[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: envVar.VarId, Variable: envVar.Variable}
+		for j, envVar := range pbEnvVar.GetVars() {
+			envVarsInfo[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: envVar.GetVarId(), Variable: envVar.GetVariable()}
 
-			if envVar.Ttl != nil {
-				localTime := envVar.Ttl.AsTime()
+			if envVar.GetTtl() != nil {
+				localTime := envVar.GetTtl().AsTime()
 				envVarsInfo[i].EnvVars[j].TTL = &localTime
 			}
 		}
@@ -568,7 +571,7 @@ func (client *SMClient) processNodeMonitoringData() {
 }
 
 func (client *SMClient) processConnectionStatus(status *pb.ConnectionStatus) {
-	if err := client.launcher.CloudConnection(status.CloudStatus == pb.ConnectionEnum_CONNECTED); err != nil {
+	if err := client.launcher.CloudConnection(status.GetCloudStatus() == pb.ConnectionEnum_CONNECTED); err != nil {
 		log.Errorf("Can't set cloud connection: %v", err)
 	}
 }
@@ -765,12 +768,12 @@ func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
 func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {
 	filter.ServiceID = &ident.ServiceId
 
-	if ident.SubjectId != "" {
+	if ident.GetSubjectId() != "" {
 		filter.SubjectID = &ident.SubjectId
 	}
 
-	if ident.Instance != -1 {
-		instance := (uint64)(ident.Instance)
+	if ident.GetInstance() != -1 {
+		instance := (uint64)(ident.GetInstance())
 
 		filter.Instance = &instance
 	}
@@ -856,7 +859,7 @@ func getPBResourceValidateAlertFromPayload(payload interface{}) (*pb.Alert_Resou
 			ErrorMsg: resAlertData.Errors,
 		}
 
-		pbResAlert.Errors = append(pbResAlert.Errors, &pbResAlertElement)
+		pbResAlert.Errors = append(pbResAlert.GetErrors(), &pbResAlertElement)
 	}
 
 	return &pb.Alert_ResourceValidateAlert{ResourceValidateAlert: &pbResAlert}, nil
