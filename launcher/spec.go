@@ -544,8 +544,6 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 	spec.bindHostDirs(launcher.config.WorkingDir)
 	spec.setNamespacePath(runtimespec.NetworkNamespace, launcher.networkManager.GetNetnsPath(instance.InstanceID))
 	spec.mergeEnv(createAosEnvVars(instance))
-	instance.overrideEnvVars = launcher.getInstanceEnvVars(instance.InstanceInfo)
-	spec.mergeEnv(instance.overrideEnvVars)
 
 	if instance.StatePath != "" {
 		absStatePath := launcher.getAbsStatePath(instance.StatePath)
@@ -582,6 +580,9 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 	if err := spec.applyServiceConfig(instance.service.serviceConfig); err != nil {
 		return nil, err
 	}
+
+	instance.overrideEnvVars = launcher.getInstanceEnvVars(instance.InstanceInfo)
+	spec.mergeEnv(instance.overrideEnvVars)
 
 	fileName := filepath.Join(instance.runtimeDir, runtimeConfigFile)
 
