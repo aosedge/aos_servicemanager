@@ -9,7 +9,7 @@ replace github.com/coreos/go-iptables => github.com/aoscloud/go-iptables v0.0.0-
 replace github.com/anexia-it/fsquota => github.com/aoscloud/fsquota v0.0.0-20231127111317-842d831105a7
 
 require (
-	github.com/aoscloud/aos_common v0.0.0-20240229163820-8da83091bc41
+	github.com/aoscloud/aos_common v0.0.0-20240409092038-4c73ccbde411
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
 	github.com/coreos/go-iptables v0.6.0
@@ -20,7 +20,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.18
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2
-	github.com/opencontainers/runc v1.1.10
+	github.com/opencontainers/runc v1.1.12
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
@@ -31,14 +31,14 @@ require (
 	golang.org/x/mod v0.10.0
 	golang.org/x/sys v0.15.0
 	google.golang.org/grpc v1.59.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 )
 
 require (
 	github.com/ThalesIgnite/crypto11 v0.0.0-00010101000000-000000000000 // indirect
 	github.com/anexia-it/fsquota v0.0.0-00010101000000-000000000000 // indirect
 	github.com/cavaliergopher/grab/v3 v3.0.1 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
+	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/golang-migrate/migrate/v4 v4.16.2 // indirect
@@ -52,6 +52,7 @@ require (
 	github.com/safchain/ethtool v0.3.0 // indirect
 	github.com/seccomp/libseccomp-golang v0.9.2-0.20220502022130-f33da4d89646 // indirect
 	github.com/speijnik/go-errortree v1.0.1 // indirect
+	github.com/stefanberger/go-pkcs11uri v0.0.0-20230803200340-78284954bff6 // indirect
 	github.com/thales-e-security/pool v0.0.2 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
