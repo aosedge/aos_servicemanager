@@ -47,6 +47,8 @@ import (
 
 const defaultCPUPeriod uint64 = 100000
 
+const cgroupsPath = "/system.slice/system-aos\\x2dservice.slice/"
+
 const (
 	envAosServiceID     = "AOS_SERVICE_ID"
 	envAosSubjectID     = "AOS_SUBJECT_ID"
@@ -539,6 +541,7 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 
 	spec.ociSpec.Process.Args = nil
 	spec.ociSpec.Process.Terminal = false
+	spec.ociSpec.Linux.CgroupsPath = cgroupsPath + instance.InstanceID
 
 	spec.setRootfs(filepath.Join(instance.runtimeDir, instanceRootFS))
 	spec.bindHostDirs(launcher.config.WorkingDir)
