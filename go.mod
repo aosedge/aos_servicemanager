@@ -9,7 +9,7 @@ replace github.com/coreos/go-iptables => github.com/aoscloud/go-iptables v0.0.0-
 replace github.com/anexia-it/fsquota => github.com/aoscloud/fsquota v0.0.0-20231127111317-842d831105a7
 
 require (
-	github.com/aoscloud/aos_common v0.0.0-20240409092038-4c73ccbde411
+	github.com/aoscloud/aos_common v0.0.0-20240521092209-a7ee24167d4b
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
 	github.com/coreos/go-iptables v0.6.0
@@ -29,7 +29,7 @@ require (
 	github.com/vishvananda/netns v0.0.4
 	golang.org/x/exp v0.0.0-20230315142452-642cacee5cc0
 	golang.org/x/mod v0.10.0
-	golang.org/x/sys v0.15.0
+	golang.org/x/sys v0.18.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.33.0
 )
@@ -58,8 +58,8 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
-	golang.org/x/net v0.17.0 // indirect
+	golang.org/x/crypto v0.21.0 // indirect
+	golang.org/x/net v0.23.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
 )
