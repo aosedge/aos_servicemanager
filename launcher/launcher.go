@@ -293,9 +293,7 @@ func (launcher *Launcher) RunInstances(instances []aostypes.InstanceInfo, forceR
 		log.Debug("Run instances")
 	}
 
-	launcher.runInstances(launcher.getRunningInstances(instances))
-
-	return nil
+	return launcher.runInstances(launcher.getRunningInstances(instances))
 }
 
 // OverrideEnvVars overrides service instance environment variables.
@@ -389,7 +387,14 @@ func (launcher *Launcher) updateInstancesStatuses(instances []runner.InstanceSta
 	}
 }
 
-func (launcher *Launcher) runInstances(runInstances []InstanceInfo) {
+func (launcher *Launcher) runInstances(runInstances []InstanceInfo) error {
+	launcher.runMutex.Lock()
+	if launcher.runInstancesInProgress {
+		launcher.runMutex.Unlock()
+
+		return aoserrors.Errorf("run instances in progress")
+	}
+
 	defer func() {
 		launcher.runMutex.Lock()
 		defer launcher.runMutex.Unlock()
@@ -398,7 +403,6 @@ func (launcher *Launcher) runInstances(runInstances []InstanceInfo) {
 		launcher.sendRunInstancesStatuses()
 	}()
 
-	launcher.runMutex.Lock()
 	launcher.runInstancesInProgress = true
 	launcher.runMutex.Unlock()
 
@@ -408,6 +412,8 @@ func (launcher *Launcher) runInstances(runInstances []InstanceInfo) {
 
 	launcher.stopInstances(stopInstances)
 	launcher.startInstances(startInstances)
+
+	return nil
 }
 
 func (launcher *Launcher) calculateInstances(
@@ -1084,9 +1090,8 @@ func (launcher *Launcher) restartStoredInstances() error {
 	launcher.runMutex.Unlock()
 
 	launcher.stopCurrentInstances()
-	launcher.runInstances(currentInstances)
 
-	return nil
+	return launcher.runInstances(currentInstances)
 }
 
 func (launcher *Launcher) getRunningInstances(instances []aostypes.InstanceInfo) []InstanceInfo {
