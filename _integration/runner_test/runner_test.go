@@ -207,9 +207,9 @@ func TestRunParameters(t *testing.T) {
 	}
 
 	defaultParameters := runner.RunParameters{
-		StartInterval:   1 * time.Second,
+		StartInterval:   5 * time.Second,
 		StartBurst:      3,
-		RestartInterval: 100 * time.Millisecond,
+		RestartInterval: 1 * time.Second,
 	}
 
 	runParameters, err := getRunParameters("id1")
@@ -225,12 +225,12 @@ func TestRunParameters(t *testing.T) {
 		t.Errorf("Can't stop service: %v", err)
 	}
 
-	// Check other run parameters
+	// // Check other run parameters
 
 	testData := []runner.RunParameters{
 		{StartInterval: 5 * time.Second, StartBurst: 5, RestartInterval: 1 * time.Second},
-		{StartInterval: 500 * time.Millisecond, StartBurst: 1, RestartInterval: 2 * time.Hour},
-		{StartInterval: 1500 * time.Microsecond, StartBurst: 2, RestartInterval: 50 * time.Millisecond},
+		{StartInterval: 2 * time.Second, StartBurst: 1, RestartInterval: 2 * time.Hour},
+		{StartInterval: 3 * time.Second, StartBurst: 2, RestartInterval: 50 * time.Second},
 	}
 
 	for _, testParams := range testData {
