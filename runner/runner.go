@@ -39,9 +39,9 @@ import (
 const unitStatusChannelSize = 10
 
 const (
-	defaultStartInterval   = 1 * time.Second
+	defaultStartInterval   = 5 * time.Second
 	defaultStartBurst      = 3
-	defaultRestartInterval = 100 * time.Millisecond
+	defaultRestartInterval = 1 * time.Second
 	startTimeoutMultiplier = 1.2
 )
 
@@ -154,6 +154,12 @@ func (runner *Runner) StartInstance(instanceID, runtimeDir string, params RunPar
 
 		runner.Unlock()
 	}()
+
+	log.WithFields(log.Fields{
+		"StartInterval":   params.StartInterval,
+		"StartBurst":      params.StartBurst,
+		"RestartInterval": params.RestartInterval,
+	}).Debug("Start service instance")
 
 	if params.StartInterval == 0 {
 		params.StartInterval = defaultStartInterval
