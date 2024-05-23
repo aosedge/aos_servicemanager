@@ -343,11 +343,14 @@ func unitStatusToInstanceStatus(unitStatus *dbus.UnitStatus) (runnerStatus Insta
 }
 
 func unitStateToInstanceState(uintStatus string) string {
-	if uintStatus == cloudprotocol.InstanceStateActive {
+	switch uintStatus {
+	case cloudprotocol.InstanceStateActive:
 		return cloudprotocol.InstanceStateActive
+	case cloudprotocol.InstanceStateInactive:
+		return cloudprotocol.InstanceStateInactive
+	default:
+		return cloudprotocol.InstanceStateFailed
 	}
-
-	return cloudprotocol.InstanceStateFailed
 }
 
 // isUnitStatusChanged returns true if the provided UnitStatus objects
