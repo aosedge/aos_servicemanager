@@ -230,6 +230,12 @@ func (runner *Runner) StopInstance(instanceID string) (err error) {
 		}
 	}
 
+	if resetErr := runner.systemd.ResetFailedUnitContext(context.Background(), unitName); resetErr != nil {
+		if !strings.Contains(resetErr.Error(), errNotLoaded) && err == nil {
+			err = aoserrors.Wrap(resetErr)
+		}
+	}
+
 	if removeErr := runner.removeRunParameters(
 		fmt.Sprintf(systemdUnitNameTemplate, instanceID)); removeErr != nil && err != nil {
 		err = removeErr
