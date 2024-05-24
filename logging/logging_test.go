@@ -380,17 +380,21 @@ func TestLogErrorCases(t *testing.T) {
 		Filter: cloudprotocol.LogFilter{
 			InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
 		},
-	}); err == nil {
-		t.Error("should be error: no instance ids for log request")
+	}); err != nil {
+		t.Error("should be empty response when no instance ids")
 	}
+
+	checkEmptyLog(t, loggingInstance.GetLogsDataChannel())
 
 	if err := loggingInstance.GetInstanceCrashLog(cloudprotocol.RequestLog{
 		Filter: cloudprotocol.LogFilter{
 			InstanceFilter: cloudprotocol.NewInstanceFilter("noService", "", -1),
 		},
-	}); err == nil {
-		t.Error("should be error: no instance ids for log request")
+	}); err != nil {
+		t.Error("should be empty response when no instance ids")
 	}
+
+	checkEmptyLog(t, loggingInstance.GetLogsDataChannel())
 
 	var (
 		instanceFilter = cloudprotocol.NewInstanceFilter("logservice5", "subject5", 0)
