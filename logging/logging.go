@@ -121,6 +121,14 @@ func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestLog) error 
 		return err
 	}
 
+	if len(logRequest.instanceIDs) == 0 {
+		log.WithField("logID", request.LogID).Debug("No instance ids for log request")
+
+		instance.sendEmptyResponse(request.LogID)
+
+		return nil
+	}
+
 	go func() {
 		if err := instance.getLog(logRequest); err != nil {
 			log.Errorf("Can't get instanace logs: %s", err)
@@ -141,6 +149,14 @@ func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestLog) e
 		instance.sendErrorResponse(err.Error(), request.LogID)
 
 		return err
+	}
+
+	if len(logRequest.instanceIDs) == 0 {
+		log.WithField("logID", request.LogID).Debug("No instance ids for log request")
+
+		instance.sendEmptyResponse(request.LogID)
+
+		return nil
 	}
 
 	go func() {
@@ -301,7 +317,14 @@ func (instance *Logging) getInstanceCrashLog(request getLogRequest) (err error) 
 	}
 
 	if crashTime == 0 {
-		return aoserrors.New("no instance crash found")
+		log.WithFields(log.Fields{
+			"logID":       request.logID,
+			"instanceIDs": request.instanceIDs,
+		}).Debug("No instance crash found")
+
+		instance.sendEmptyResponse(request.logID)
+
+		return nil
 	}
 
 	if err = journal.AddDisjunction(); err != nil {
@@ -420,6 +443,19 @@ func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	instance.logChannel <- response
 }
 
+func (instance *Logging) sendEmptyResponse(logID string) {
+	log.Debug("Send empty log")
+
+	var part uint64 = 1
+
+	instance.logChannel <- cloudprotocol.PushLog{
+		LogID:      logID,
+		PartsCount: part,
+		Part:       part,
+		Content:    []byte{},
+	}
+}
+
 func (instance *Logging) addServiceCgroupFilter(journal JournalInterface, instanceIDs []string) (err error) {
 	for _, instanceID := range instanceIDs {
 		// for supporting cgroup v1
@@ -464,10 +500,6 @@ func (instance *Logging) prepareInstanceLogRequest(
 	instances, err := instance.instanceProvider.GetInstanceIDs(request.Filter.InstanceFilter)
 	if err != nil {
 		return logRequest, aoserrors.Wrap(err)
-	}
-
-	if len(instances) == 0 {
-		return logRequest, aoserrors.New("no instance ids for log request")
 	}
 
 	return getLogRequest{
