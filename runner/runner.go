@@ -259,18 +259,20 @@ func (runner *Runner) monitorUnitStates() {
 
 			runner.RLock()
 
-			for _, unitStatus := range changes {
-				if unitStatus == nil {
+			for unitName, unitStatus := range changes {
+				startChan, ok := runner.runningUnits[unitName]
+				if !ok {
 					continue
 				}
 
-				startChan, ok := runner.runningUnits[unitStatus.Name]
-				if ok {
-					if startChan != nil {
-						startChan <- *unitStatus
-					} else {
-						instancesStatus = append(instancesStatus, unitStatusToInstanceStatus(unitStatus))
-					}
+				if unitStatus == nil {
+					unitStatus = &dbus.UnitStatus{Name: unitName, ActiveState: cloudprotocol.InstanceStateInactive}
+				}
+
+				if startChan != nil {
+					startChan <- *unitStatus
+				} else {
+					instancesStatus = append(instancesStatus, unitStatusToInstanceStatus(unitStatus))
 				}
 			}
 
