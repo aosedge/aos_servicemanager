@@ -89,7 +89,7 @@ func TestValidUnitConfiguration(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestEmptyResourcesConfig(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestInvalidUnitConfiguration(t *testing.T) {
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestInvalidUnitConfiguration(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGetDeviceInfo(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestGetResourceInfo(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAllocateAndReleaseDevices(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestAllocateLimitedDevice(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestGetDeviceInstances(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestReleaseDevices(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestReleaseDevices(t *testing.T) {
 }
 
 func TestNotExistUnitConfig(t *testing.T) {
-	rm, err := New("mainType", path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestInvalidVersionUnitConfig(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestGetUnitConfigStatus(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestUpdateUnitConfig(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestUpdateErrorUnitConfig(t *testing.T) {
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestGetNodeConfig(t *testing.T) {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
