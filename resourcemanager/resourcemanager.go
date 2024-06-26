@@ -52,7 +52,6 @@ const (
 type ResourceManager struct {
 	sync.Mutex
 
-	nodeType          string
 	allocatedDevices  map[string][]string
 	hostDevices       []string
 	hostGroups        []string
@@ -85,11 +84,10 @@ var ErrNoAvailableDevice = errors.New("no device available")
  **********************************************************************************************************************/
 
 // New creates new resource manager object.
-func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
+func New(unitConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
-		nodeType:          nodeType,
 		unitConfigFile:    unitConfigFile,
 		alertSender:       alertSender,
 		nodeConfigChannel: make(chan cloudprotocol.NodeConfig, 1),
@@ -405,10 +403,6 @@ func (resourcemanager *ResourceManager) loadUnitConfiguration() (err error) {
 }
 
 func (resourcemanager *ResourceManager) validateUnitConfig(config cloudprotocol.NodeConfig) (err error) {
-	if config.NodeType != resourcemanager.nodeType {
-		return aoserrors.New("invalid node type")
-	}
-
 	if err = resourcemanager.validateDevices(config.Devices); err != nil {
 		return aoserrors.Wrap(err)
 	}
