@@ -56,18 +56,8 @@ func createConfigFile() (err error) {
 	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
-		"sendPeriod": "5m",
 		"pollPeriod": "1s",
-		"ram": {
-			"minTimeout": "10s",
-			"minThreshold": 10,
-			"maxThreshold": 150
-		},
-		"outTraffic": {
-			"minTimeout": "20s",
-			"minThreshold": 10,
-			"maxThreshold": 150
-		}
+		"averageWindow": "5m"
 	},
 	"logging": {
 		"maxPartSize": 1024,
@@ -296,20 +286,12 @@ func TestGetMonitoringConfig(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Monitoring.SendPeriod.Duration != 5*time.Minute {
-		t.Errorf("Wrong send period value: %s", config.Monitoring.SendPeriod)
-	}
-
 	if config.Monitoring.PollPeriod.Duration != 1*time.Second {
 		t.Errorf("Wrong poll period value: %s", config.Monitoring.PollPeriod)
 	}
 
-	if config.Monitoring.RAM.MinTimeout.Duration != 10*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
-	}
-
-	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.OutTraffic.MinTimeout.Duration)
+	if config.Monitoring.AverageWindow.Duration != 5*time.Minute {
+		t.Errorf("Wrong average window value: %s", config.Monitoring.AverageWindow)
 	}
 }
 
