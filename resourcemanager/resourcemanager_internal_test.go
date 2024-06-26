@@ -82,7 +82,7 @@ func TestMain(m *testing.M) {
  **********************************************************************************************************************/
 
 func TestValidUnitConfiguration(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestUnavailableResources(t *testing.T) {
 }
 
 func TestGetDeviceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestGetDeviceInfo(t *testing.T) {
 }
 
 func TestGetResourceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -209,7 +209,7 @@ func TestGetResourceInfo(t *testing.T) {
 }
 
 func TestAllocateAndReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -236,7 +236,7 @@ func TestAllocateAndReleaseDevices(t *testing.T) {
 }
 
 func TestAllocateUnavailableDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -251,7 +251,7 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 }
 
 func TestReleaseNotAllocatedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
@@ -281,7 +281,7 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 }
 
 func TestAllocateLimitedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -310,7 +310,7 @@ func TestAllocateLimitedDevice(t *testing.T) {
 }
 
 func TestGetDeviceInstances(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -364,7 +364,7 @@ func TestGetDeviceInstances(t *testing.T) {
 }
 
 func TestReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -439,7 +439,7 @@ func TestInvalidVersionUnitConfig(t *testing.T) {
 }
 
 func TestGetUnitConfigStatus(t *testing.T) {
-	vendorVersion := "2.1"
+	vendorVersion := "2.1.0"
 
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(vendorVersion)); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
@@ -461,7 +461,7 @@ func TestGetUnitConfigStatus(t *testing.T) {
 }
 
 func TestUpdateUnitConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
 	}
 
@@ -470,7 +470,7 @@ func TestUpdateUnitConfig(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	newVendorVersion := "2.0"
+	newVendorVersion := "2.0.0"
 
 	if err = rm.UpdateUnitConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
 		t.Fatalf("Can't update unit config: %v", err)
@@ -487,7 +487,7 @@ func TestUpdateUnitConfig(t *testing.T) {
 }
 
 func TestUpdateErrorUnitConfig(t *testing.T) {
-	currentConfigVersion := "1.0"
+	currentConfigVersion := "1.0.0"
 
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(currentConfigVersion)); err != nil {
 		t.Fatalf("Can't write unit config: %v", err)
@@ -543,7 +543,7 @@ func cleanup() (err error) {
 func createWrongVersionUnitConfigJSON() (configJSON string) {
 	return `{
 	"formatVersion": 256,
-	"version": "1.0",
+	"version": "1.0.0",
 	"devices": [
 		{
 			"name": "random",
@@ -706,7 +706,7 @@ func createInvalidUnitConfigJSON() (configJSON string) {
 
 func createEmptyUnitConfigJSON() (configJSON string) {
 	return `{
-		"vendorVersion": "1.0",
+		"vendorVersion": "1.0.0",
 		"nodeType": "mainType",
 		"devices": []
 }`
