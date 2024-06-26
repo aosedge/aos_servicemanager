@@ -111,12 +111,12 @@ func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemana
 	return resourcemanager, nil
 }
 
-// GetUnitConfigInfo returns unit config info.
-func (resourcemanager *ResourceManager) GetUnitConfigInfo() (version string) {
+// GetUnitConfigStatus returns unit config status.
+func (resourcemanager *ResourceManager) GetUnitConfigStatus() (version string, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.unitConfig.Version
+	return resourcemanager.unitConfig.Version, resourcemanager.unitConfigError
 }
 
 // CheckUnitConfig checks unit config.
