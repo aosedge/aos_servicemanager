@@ -31,6 +31,7 @@ import (
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
+	semver "github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -286,7 +287,17 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
 func (resourcemanager *ResourceManager) checkUnitConfig(configJSON, version string) error {
 	nodeConfig := cloudprotocol.NodeConfig{}
 
-	if version == resourcemanager.unitConfig.Version {
+	newVer, err := semver.NewVersion(version)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	curVer, err := semver.NewVersion(resourcemanager.unitConfig.Version)
+	if err != nil {
+		return aoserrors.Wrap(err)
+	}
+
+	if !newVer.GreaterThan(curVer) {
 		return aoserrors.New("invalid vendor version")
 	}
 
