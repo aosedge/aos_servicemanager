@@ -18,6 +18,7 @@
 package resourcemanager
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,8 +26,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
@@ -514,6 +517,87 @@ func TestUpdateErrorUnitConfig(t *testing.T) {
 	}
 
 	testAlertSender.checkAlert(t)
+}
+
+func TestGetNodeConfig(t *testing.T) {
+	nodeConfig := cloudprotocol.NodeConfig{
+		NodeType: "mainType",
+		Devices: []cloudprotocol.DeviceInfo{
+			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
+			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
+		},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: 1.0, Mem: 2.0, Storage: 3.0},
+		Resources: []cloudprotocol.ResourceInfo{
+			{Name: "bluetooth", Groups: []string{"bluetooth"}},
+			{Name: "wifi", Groups: []string{"wifi-group"}},
+		},
+	}
+	unitConfig := unitConfig{
+		Version:    "1.0.0",
+		NodeConfig: nodeConfig,
+	}
+
+	configJSON, err := json.Marshal(unitConfig)
+	if err != nil {
+		t.Fatalf("Can't marshal unit config: %v", err)
+	}
+
+	if err := writeTestUnitConfigFile(string(configJSON)); err != nil {
+		t.Fatalf("Can't write unit config: %v", err)
+	}
+
+	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %v", err)
+	}
+
+	getNodeConfig, err := rm.GetNodeConfig()
+	if err != nil {
+		t.Fatalf("Can't get node config: %v", err)
+	}
+
+	if !reflect.DeepEqual(getNodeConfig, nodeConfig) {
+		t.Errorf("Wrong node config: %v", getNodeConfig)
+	}
+
+	newNodeConfig := cloudprotocol.NodeConfig{
+		NodeType: "mainType",
+		Devices: []cloudprotocol.DeviceInfo{
+			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
+			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
+			{Name: "input", SharedCount: 2, HostDevices: []string{"/dev/input/by-path"}},
+		},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: 1.0, Mem: 2.0, Storage: 3.0},
+		Resources: []cloudprotocol.ResourceInfo{
+			{Name: "bluetooth", Groups: []string{"bluetooth"}},
+			{Name: "wifi", Groups: []string{"wifi-group"}},
+			{Name: "system-dbus", Mounts: []cloudprotocol.FileSystemMount{
+				{
+					Destination: "/var/run/dbus/system_bus_socket", Type: "bind",
+					Source: "/var/run/dbus/system_bus_socket", Options: []string{"rw", "bind"},
+				},
+			}},
+		},
+	}
+
+	newConfigJSON, err := json.Marshal(newNodeConfig)
+	if err != nil {
+		t.Fatalf("Can't marshal node config: %v", err)
+	}
+
+	if err = rm.UpdateUnitConfig(string(newConfigJSON), "2.0.0"); err != nil {
+		t.Fatalf("Can't update unit config: %v", err)
+	}
+
+	select {
+	case nodeConfig := <-rm.NodeConfigChangedChannel():
+		if !reflect.DeepEqual(nodeConfig, newNodeConfig) {
+			t.Errorf("Wrong node config: %v", nodeConfig)
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Fatal("Can't wait for unit config update")
+	}
 }
 
 /***********************************************************************************************************************
