@@ -103,7 +103,7 @@ func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemana
 	resourcemanager.allocatedDevices = make(map[string][]string)
 
 	if err = resourcemanager.loadUnitConfiguration(); err != nil {
-		log.Errorf("Unit configuration error: %s", err)
+		log.Errorf("Unit configuration error: %v", err)
 	}
 
 	log.WithField("version", resourcemanager.unitConfig.Version).Debug("Unit config version")
@@ -399,7 +399,7 @@ func (resourcemanager *ResourceManager) validateDevices(devices []cloudprotocol.
 			if !contains(resourcemanager.hostDevices, hostDevice) {
 				err := aoserrors.Errorf("device %s is not present on system", hostDevice)
 
-				log.Errorf("Device validation error: %s", err)
+				log.Errorf("Device validation error: %v", err)
 
 				deviceAlert.Errors = append(deviceAlert.Errors, cloudprotocol.ErrorInfo{Message: err.Error()})
 			}
@@ -410,7 +410,7 @@ func (resourcemanager *ResourceManager) validateDevices(devices []cloudprotocol.
 			if !contains(resourcemanager.hostGroups, group) {
 				err := aoserrors.Errorf("%s group is not present on system", group)
 
-				log.Errorf("Device validation error: %s", err)
+				log.Errorf("Device validation error: %v", err)
 
 				deviceAlert.Errors = append(deviceAlert.Errors, cloudprotocol.ErrorInfo{Message: err.Error()})
 			}

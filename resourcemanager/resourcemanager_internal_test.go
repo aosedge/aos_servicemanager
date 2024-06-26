@@ -65,13 +65,13 @@ func init() {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
+		log.Fatalf("Error setting up: %v", err)
 	}
 
 	ret := m.Run()
 
 	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
+		log.Fatalf("Error cleaning up: %v", err)
 	}
 
 	os.Exit(ret)
@@ -83,44 +83,44 @@ func TestMain(m *testing.M) {
 
 func TestValidUnitConfiguration(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %s", err)
+		t.Errorf("Unit config error: %v", err)
 	}
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
 	if err := writeTestUnitConfigFile(createEmptyUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %s", err)
+		t.Errorf("Unit config error: %v", err)
 	}
 }
 
 func TestInvalidUnitConfiguration(t *testing.T) {
 	if err := writeTestUnitConfigFile(createInvalidUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err == nil {
@@ -133,7 +133,7 @@ func TestInvalidUnitConfiguration(t *testing.T) {
 func TestUnavailableResources(t *testing.T) {
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err == nil {
@@ -147,18 +147,18 @@ func TestUnavailableResources(t *testing.T) {
 
 func TestGetDeviceInfo(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// request standalone device
 	deviceInfo, err := rm.GetDeviceInfo("random")
 	if err != nil {
-		t.Fatalf("Can't get device info: %s", err)
+		t.Fatalf("Can't get device info: %v", err)
 	}
 
 	if !reflect.DeepEqual(deviceInfo, cloudprotocol.DeviceInfo{
@@ -176,17 +176,17 @@ func TestGetDeviceInfo(t *testing.T) {
 
 func TestGetResourceInfo(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	resourceInfo, err := rm.GetResourceInfo("system-dbus")
 	if err != nil {
-		t.Errorf("Can't get resource inf: %s", err)
+		t.Errorf("Can't get resource inf: %v", err)
 	}
 
 	if !reflect.DeepEqual(resourceInfo, cloudprotocol.ResourceInfo{
@@ -210,39 +210,39 @@ func TestGetResourceInfo(t *testing.T) {
 
 func TestAllocateAndReleaseDevices(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("random", "instance0"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("random", "instance1"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.ReleaseDevice("random", "instance0"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 
 	if err = rm.ReleaseDevice("random", "instance1"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 }
 
 func TestAllocateUnavailableDevice(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("some_unavailable_device", "instance0"); err == nil {
@@ -257,11 +257,11 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	// release not allocated device
@@ -276,32 +276,32 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 
 	// release correct device for proper instance
 	if err = rm.ReleaseDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't release device: %s", err)
+		t.Errorf("Can't release device: %v", err)
 	}
 }
 
 func TestAllocateLimitedDevice(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// only two instances can use this device
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	// allocate again, should be ignored as already allocated
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance1"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance2"); !errors.Is(err, ErrNoAvailableDevice) {
@@ -311,12 +311,12 @@ func TestAllocateLimitedDevice(t *testing.T) {
 
 func TestGetDeviceInstances(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// get instances of non existing device
@@ -331,13 +331,13 @@ func TestGetDeviceInstances(t *testing.T) {
 
 	for _, instance := range expectedInstances {
 		if err = rm.AllocateDevice("random", instance); err != nil {
-			t.Fatalf("Can't allocate device: %s", err)
+			t.Fatalf("Can't allocate device: %v", err)
 		}
 	}
 
 	instances, err := rm.GetDeviceInstances("random")
 	if err != nil {
-		t.Fatalf("Can't get device instances: %s", err)
+		t.Fatalf("Can't get device instances: %v", err)
 	}
 
 	if !reflect.DeepEqual(instances, expectedInstances) {
@@ -348,12 +348,12 @@ func TestGetDeviceInstances(t *testing.T) {
 
 	for _, instance := range expectedInstances[1:4] {
 		if err = rm.ReleaseDevice("random", instance); err != nil {
-			t.Fatalf("Can't release device: %s", err)
+			t.Fatalf("Can't release device: %v", err)
 		}
 	}
 
 	if instances, err = rm.GetDeviceInstances("random"); err != nil {
-		t.Fatalf("Can't get device instances: %s", err)
+		t.Fatalf("Can't get device instances: %v", err)
 	}
 
 	expectedInstances = append(expectedInstances[:1], expectedInstances[4:]...)
@@ -365,26 +365,26 @@ func TestGetDeviceInstances(t *testing.T) {
 
 func TestReleaseDevices(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	allocateDevices := []string{"random", "null", "input", "stdin"}
 
 	for _, device := range allocateDevices {
 		if err = rm.AllocateDevice(device, "instance0"); err != nil {
-			t.Fatalf("Can't allocate device: %s", err)
+			t.Fatalf("Can't allocate device: %v", err)
 		}
 	}
 
 	for _, device := range allocateDevices {
 		instances, err := rm.GetDeviceInstances(device)
 		if err != nil {
-			t.Fatalf("Can't get device instances: %s", err)
+			t.Fatalf("Can't get device instances: %v", err)
 		}
 
 		if len(instances) == 0 {
@@ -397,13 +397,13 @@ func TestReleaseDevices(t *testing.T) {
 	}
 
 	if err = rm.ReleaseDevices("instance0"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 
 	for _, device := range allocateDevices {
 		instances, err := rm.GetDeviceInstances(device)
 		if err != nil {
-			t.Fatalf("Can't get device instances: %s", err)
+			t.Fatalf("Can't get device instances: %v", err)
 		}
 
 		if len(instances) > 0 {
@@ -415,7 +415,7 @@ func TestReleaseDevices(t *testing.T) {
 func TestNotExistUnitConfig(t *testing.T) {
 	rm, err := New("mainType", path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err == nil {
@@ -425,12 +425,12 @@ func TestNotExistUnitConfig(t *testing.T) {
 
 func TestInvalidVersionUnitConfig(t *testing.T) {
 	if err := writeTestUnitConfigFile(createWrongVersionUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.unitConfigError; err == nil {
@@ -438,39 +438,38 @@ func TestInvalidVersionUnitConfig(t *testing.T) {
 	}
 }
 
-func TestGetUnitConfigInfo(t *testing.T) {
+func TestGetUnitConfigStatus(t *testing.T) {
 	vendorVersion := "2.1"
 
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(vendorVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	version := rm.GetUnitConfigInfo()
-
 	if version != vendorVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong unit config version: %v", version)
 	}
 }
 
 func TestUpdateUnitConfig(t *testing.T) {
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	newVendorVersion := "2.0"
 
 	if err = rm.UpdateUnitConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
-		t.Fatalf("Can't update unit config: %s", err)
+		t.Fatalf("Can't update unit config: %v", err)
 	}
 
 	version := rm.GetUnitConfigInfo()
@@ -484,14 +483,14 @@ func TestUpdateErrorUnitConfig(t *testing.T) {
 	currentConfigVersion := "1.0"
 
 	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(currentConfigVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+		t.Fatalf("Can't write unit config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
 	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.UpdateUnitConfig(createInvalidUnitConfigJSON(), "3.5"); err == nil {
@@ -524,7 +523,7 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	if err := os.RemoveAll(tmpDir); err != nil {
-		log.Errorf("Can't remove tmp dir: %s", err)
+		log.Errorf("Can't remove tmp dir: %v", err)
 	}
 
 	return nil
@@ -736,7 +735,7 @@ func (sender *alertSender) checkAlert(t *testing.T) {
 
 	for _, errInfo := range sender.alert[0].Errors {
 		if !strings.Contains(errInfo.Message, "is not present on system") {
-			t.Errorf("Wrong alert error message: %s", errInfo.Message)
+			t.Errorf("Wrong alert error message: %v", errInfo.Message)
 		}
 	}
 }
