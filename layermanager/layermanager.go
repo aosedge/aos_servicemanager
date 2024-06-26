@@ -97,9 +97,9 @@ type LayerStorage interface {
 
 // LayerInfo layer information.
 type LayerInfo struct {
-	aostypes.VersionInfo
 	Digest    string
 	LayerID   string
+	Version   string
 	Path      string
 	OSVersion string
 	Timestamp time.Time
@@ -266,9 +266,9 @@ func (layermanager *LayerManager) installLayer(
 	layerInfo aostypes.LayerInfo,
 ) (err error) {
 	log.WithFields(log.Fields{
-		"id":         layerInfo.ID,
-		"aosVersion": layerInfo.AosVersion,
-		"digest":     layerInfo.Digest,
+		"id":      layerInfo.LayerID,
+		"version": layerInfo.Version,
+		"digest":  layerInfo.Digest,
 	}).Debug("Install layer")
 
 	extractLayerDir := filepath.Join(layermanager.extractDir, layerInfo.Digest)
@@ -307,9 +307,9 @@ func (layermanager *LayerManager) installLayer(
 			releaseAllocatedSpace(storeLayerPath, spaceLayer)
 
 			log.WithFields(log.Fields{
-				"id":         layerInfo.ID,
-				"aosVersion": layerInfo.AosVersion,
-				"digest":     layerInfo.Digest,
+				"id":      layerInfo.LayerID,
+				"version": layerInfo.Version,
+				"digest":  layerInfo.Digest,
 			}).Errorf("Can't install layer: %s", err)
 
 			return
@@ -331,21 +331,21 @@ func (layermanager *LayerManager) installLayer(
 	}
 
 	if err = layermanager.layerStorage.AddLayer(LayerInfo{
-		LayerID:     layerInfo.ID,
-		Digest:      layerInfo.Digest,
-		Path:        storeLayerPath,
-		OSVersion:   osVersion,
-		Size:        uint64(layerDescriptor.Size),
-		VersionInfo: layerInfo.VersionInfo,
-		Timestamp:   time.Now().UTC(),
+		LayerID:   layerInfo.LayerID,
+		Digest:    layerInfo.Digest,
+		Version:   layerInfo.Version,
+		Path:      storeLayerPath,
+		OSVersion: osVersion,
+		Size:      uint64(layerDescriptor.Size),
+		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
-		"id":         layerInfo.ID,
-		"aosVersion": layerInfo.AosVersion,
-		"digest":     layerInfo.Digest,
+		"id":      layerInfo.LayerID,
+		"version": layerInfo.Version,
+		"digest":  layerInfo.Digest,
 	}).Info("Layer successfully installed")
 
 	return nil
@@ -528,7 +528,6 @@ func (layermanager *LayerManager) extractPackageByURL(
 
 	if err = image.CheckFileInfo(context.Background(), sourceFile, image.FileInfo{
 		Sha256: layerInfo.Sha256,
-		Sha512: layerInfo.Sha512,
 		Size:   layerInfo.Size,
 	}); err != nil {
 		return layerDescriptor, nil, aoserrors.Wrap(err)
