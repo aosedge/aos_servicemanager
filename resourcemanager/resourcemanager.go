@@ -52,14 +52,15 @@ const (
 type ResourceManager struct {
 	sync.Mutex
 
-	nodeType         string
-	allocatedDevices map[string][]string
-	hostDevices      []string
-	hostGroups       []string
-	unitConfigFile   string
-	unitConfig       unitConfig
-	unitConfigError  error
-	alertSender      AlertSender
+	nodeType          string
+	allocatedDevices  map[string][]string
+	hostDevices       []string
+	hostGroups        []string
+	unitConfigFile    string
+	unitConfig        unitConfig
+	unitConfigError   error
+	alertSender       AlertSender
+	nodeConfigChannel chan cloudprotocol.NodeConfig
 }
 
 // AlertSender provides alert sender interface.
@@ -88,9 +89,10 @@ func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemana
 	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
-		nodeType:       nodeType,
-		unitConfigFile: unitConfigFile,
-		alertSender:    alertSender,
+		nodeType:          nodeType,
+		unitConfigFile:    unitConfigFile,
+		alertSender:       alertSender,
+		nodeConfigChannel: make(chan cloudprotocol.NodeConfig, 1),
 	}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
@@ -155,6 +157,8 @@ func (resourcemanager *ResourceManager) UpdateUnitConfig(configJSON, version str
 	if err := resourcemanager.loadUnitConfiguration(); err != nil {
 		return aoserrors.Wrap(err)
 	}
+
+	resourcemanager.nodeConfigChannel <- resourcemanager.unitConfig.NodeConfig
 
 	log.WithField("version", resourcemanager.unitConfig.Version).Debug("Update unit configuration")
 
@@ -278,6 +282,19 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
 	}
 
 	return instances, nil
+}
+
+// GetNodeConfig returns node configuration.
+func (resourcemanager *ResourceManager) GetNodeConfig() (cloudprotocol.NodeConfig, error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	return resourcemanager.unitConfig.NodeConfig, nil
+}
+
+// NodeConfigChangedChannel returns node config changed channel.
+func (resourcemanager *ResourceManager) NodeConfigChangedChannel() <-chan cloudprotocol.NodeConfig {
+	return resourcemanager.nodeConfigChannel
 }
 
 /***********************************************************************************************************************
