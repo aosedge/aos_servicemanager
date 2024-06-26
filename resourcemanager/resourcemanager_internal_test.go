@@ -450,7 +450,11 @@ func TestGetUnitConfigStatus(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	version := rm.GetUnitConfigInfo()
+	version, err := rm.GetUnitConfigStatus()
+	if err != nil {
+		t.Errorf("Unit config status error: %v", err)
+	}
+
 	if version != vendorVersion {
 		t.Errorf("Wrong unit config version: %v", version)
 	}
@@ -472,7 +476,10 @@ func TestUpdateUnitConfig(t *testing.T) {
 		t.Fatalf("Can't update unit config: %v", err)
 	}
 
-	version := rm.GetUnitConfigInfo()
+	version, err := rm.GetUnitConfigStatus()
+	if err != nil {
+		t.Errorf("Unit config status error: %v", err)
+	}
 
 	if version != newVendorVersion {
 		t.Errorf("Wrong unit config version: %s", version)
@@ -497,7 +504,11 @@ func TestUpdateErrorUnitConfig(t *testing.T) {
 		t.Errorf("Update should fail")
 	}
 
-	version := rm.GetUnitConfigInfo()
+	version, err := rm.GetUnitConfigStatus()
+	if err != nil {
+		t.Errorf("Unit config status error: %v", err)
+	}
+
 	if version != currentConfigVersion {
 		t.Errorf("Wrong unit config version: %s", version)
 	}
