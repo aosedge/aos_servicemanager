@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	"github.com/aosedge/aos_common/aoserrors"
-	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
@@ -37,7 +36,7 @@ import (
  **********************************************************************************************************************/
 
 type alertSender struct {
-	alert cloudprotocol.ResourceValidateAlert
+	alert []cloudprotocol.ResourceValidateAlert
 }
 
 /***********************************************************************************************************************
@@ -162,7 +161,7 @@ func TestGetDeviceInfo(t *testing.T) {
 		t.Fatalf("Can't get device info: %s", err)
 	}
 
-	if !reflect.DeepEqual(deviceInfo, aostypes.DeviceInfo{
+	if !reflect.DeepEqual(deviceInfo, cloudprotocol.DeviceInfo{
 		Name: "random", SharedCount: 0, Groups: []string{"root"},
 		HostDevices: []string{"/dev/random"},
 	}) {
@@ -190,9 +189,9 @@ func TestGetResourceInfo(t *testing.T) {
 		t.Errorf("Can't get resource inf: %s", err)
 	}
 
-	if !reflect.DeepEqual(resourceInfo, aostypes.ResourceInfo{
+	if !reflect.DeepEqual(resourceInfo, cloudprotocol.ResourceInfo{
 		Name: "system-dbus",
-		Mounts: []aostypes.FileSystemMount{{
+		Mounts: []cloudprotocol.FileSystemMount{{
 			Destination: "/var/run/dbus/system_bus_socket",
 			Options:     []string{"rw", "bind"},
 			Source:      "/var/run/dbus/system_bus_socket",
@@ -534,7 +533,7 @@ func cleanup() (err error) {
 func createWrongVersionUnitConfigJSON() (configJSON string) {
 	return `{
 	"formatVersion": 256,
-	"vendorVersion": "1.0",
+	"version": "1.0",
 	"devices": [
 		{
 			"name": "random",
@@ -559,7 +558,7 @@ func createWrongVersionUnitConfigJSON() (configJSON string) {
 
 func createTestUnitConfigJSON(version string) (configJSON string) {
 	return fmt.Sprintf(`{
-	"vendorVersion": "%s",
+	"version": "%s",
 	"nodeType": "mainType",
 	"devices": [
 		{
@@ -717,27 +716,27 @@ func (sender *alertSender) SendAlert(alert cloudprotocol.AlertItem) {
 		return
 	}
 
-	sender.alert = resourceValidateAlert
+	sender.alert = append(sender.alert, resourceValidateAlert)
 }
 
 func (sender *alertSender) checkAlert(t *testing.T) {
 	t.Helper()
 
-	if len(sender.alert.ResourcesErrors) != 1 {
-		t.Fatalf("Wrong resources errors count: %d", len(sender.alert.ResourcesErrors))
+	if len(sender.alert) != 1 {
+		t.Fatalf("Wrong resources errors count: %d", len(sender.alert))
 	}
 
-	if sender.alert.ResourcesErrors[0].Name != "some_not_existed_device" {
-		t.Errorf("Wrong alert device name: %s", sender.alert.ResourcesErrors[0].Name)
+	if sender.alert[0].Name != "some_not_existed_device" {
+		t.Errorf("Wrong alert device name: %s", sender.alert[0].Name)
 	}
 
-	if len(sender.alert.ResourcesErrors[0].Errors) != 2 {
-		t.Errorf("Wrong alert errors count: %d", len(sender.alert.ResourcesErrors[0].Errors))
+	if len(sender.alert[0].Errors) != 2 {
+		t.Errorf("Wrong alert errors count: %d", len(sender.alert[0].Errors))
 	}
 
-	for _, errMessage := range sender.alert.ResourcesErrors[0].Errors {
-		if !strings.Contains(errMessage, "is not present on system") {
-			t.Errorf("Wrong alert error message: %s", errMessage)
+	for _, errInfo := range sender.alert[0].Errors {
+		if !strings.Contains(errInfo.Message, "is not present on system") {
+			t.Errorf("Wrong alert error message: %s", errInfo.Message)
 		}
 	}
 }
