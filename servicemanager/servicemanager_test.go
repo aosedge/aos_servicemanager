@@ -63,7 +63,7 @@ const (
 	kilobyte           = uint64(1 << 10)
 	megabyte           = uint64(1 << 20)
 	errorAddServiceID  = "errorAddServiceID"
-	errorGetServicID   = "errorGetServicID"
+	errorGetServiceID  = "errorGetServiceID"
 	blobsFolder        = "blobs"
 	defaultServiceSize = int64(2 * kilobyte)
 )
@@ -89,7 +89,7 @@ type testAllocator struct {
 
 type expectedService struct {
 	serviceID string
-	version   uint64
+	version   string
 }
 
 type testSpace struct {
@@ -100,6 +100,13 @@ type testSpace struct {
 type testOutdatedItem struct {
 	id   string
 	size uint64
+}
+
+type testServiceInfo struct {
+	serviceID      string
+	serviceContent string
+	serviceSize    uint64
+	version        string
 }
 
 /***********************************************************************************************************************
@@ -164,21 +171,16 @@ func TestInstallService(t *testing.T) {
 
 	services := make(map[string][]aostypes.ServiceInfo)
 
-	generateService := []struct {
-		serviceID      string
-		serviceContent string
-		serviceSize    uint64
-		version        int
-	}{
-		{serviceID: "service1", serviceContent: "service1", serviceSize: 2 * kilobyte, version: 1},
-		{serviceID: "service2", serviceContent: "service2", serviceSize: 1 * kilobyte, version: 1},
-		{serviceID: "service2", serviceContent: "service2.2", serviceSize: 2 * kilobyte, version: 2},
-		{serviceID: "service3", serviceContent: "service2", serviceSize: 3 * kilobyte, version: 1},
+	generateService := []testServiceInfo{
+		{serviceID: "service1", serviceContent: "service1", serviceSize: 2 * kilobyte, version: "1.0.0"},
+		{serviceID: "service2", serviceContent: "service2", serviceSize: 1 * kilobyte, version: "1.0.0"},
+		{serviceID: "service2", serviceContent: "service2.2", serviceSize: 2 * kilobyte, version: "2.0.0"},
+		{serviceID: "service3", serviceContent: "service2", serviceSize: 3 * kilobyte, version: "1.0.0"},
 	}
 
 	for _, service := range generateService {
 		serviceInfo, err := prepareService(
-			service.serviceContent, service.serviceID, uint64(service.version), int64(service.serviceSize))
+			service.serviceContent, service.serviceID, service.version, int64(service.serviceSize))
 		if err != nil {
 			t.Fatalf("Can't prepare service: %v", err)
 		}
@@ -194,60 +196,60 @@ func TestInstallService(t *testing.T) {
 	}{
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 			installedServices: []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			},
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service2", version: 2},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service2", version: "2.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 			installedServices: []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service2", version: 2},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service2", version: "2.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			},
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 			installedServices: []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			},
 			removedServices: []expectedService{
-				{serviceID: "service2", version: 1},
-				{serviceID: "service2", version: 2},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
 			},
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 2},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "2.0.0"},
 			}),
 			installedServices: []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service2", version: 2},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service2", version: "2.0.0"},
 			},
 			removedServices: []expectedService{
-				{serviceID: "service3", version: 1},
+				{serviceID: "service3", version: "1.0.0"},
 			},
 			restoreServices: []expectedService{
-				{serviceID: "service2", version: 1},
-				{serviceID: "service2", version: 2},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service2", version: "2.0.0"},
 			},
 		},
 	}
@@ -261,7 +263,7 @@ func TestInstallService(t *testing.T) {
 		for _, installService := range tCase.installedServices {
 			for _, storeService := range serviceStorage.Services {
 				if installService.serviceID == storeService.ServiceID &&
-					installService.version == storeService.AosVersion {
+					installService.version == storeService.Version {
 					continue nextInstallService
 				}
 			}
@@ -273,7 +275,7 @@ func TestInstallService(t *testing.T) {
 		for _, removeService := range tCase.removedServices {
 			for _, storeService := range serviceStorage.Services {
 				if removeService.serviceID == storeService.ServiceID &&
-					removeService.version == storeService.AosVersion && storeService.Cached {
+					removeService.version == storeService.Version && storeService.Cached {
 					continue nextRemoveService
 				}
 			}
@@ -285,7 +287,7 @@ func TestInstallService(t *testing.T) {
 		for _, restoreService := range tCase.restoreServices {
 			for _, storeService := range serviceStorage.Services {
 				if restoreService.serviceID == storeService.ServiceID &&
-					restoreService.version == storeService.AosVersion && !storeService.Cached {
+					restoreService.version == storeService.Version && !storeService.Cached {
 					continue nextRestoreService
 				}
 			}
@@ -318,7 +320,7 @@ func TestRemoteDownloadLayer(t *testing.T) {
 	}
 
 	serviceInfo, err := prepareService(
-		"Service content", "service1", 1, defaultServiceSize)
+		"Service content", "service1", "1.0.0", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare service: %v", err)
 	}
@@ -376,7 +378,7 @@ func TestImageParts(t *testing.T) {
 
 	serviceID := "testService0"
 
-	serviceInfo, err := prepareService("Service content", serviceID, 1, defaultServiceSize)
+	serviceInfo, err := prepareService("Service content", serviceID, "1.0.0", defaultServiceSize)
 	if err != nil {
 		t.Fatalf("Can't prepare test service: %s", err)
 	}
@@ -431,7 +433,7 @@ func TestValidateService(t *testing.T) {
 
 	serviceID := "testServiceValidate"
 
-	service, err := prepareService("Service content", serviceID, 1, defaultServiceSize)
+	service, err := prepareService("Service content", serviceID, "1.0.0", defaultServiceSize)
 	if err != nil {
 		t.Errorf("Can't prepare test service: %s", err)
 	}
@@ -471,20 +473,15 @@ func TestAllocateMemoryInstallService(t *testing.T) {
 
 	services := make(map[string][]aostypes.ServiceInfo)
 
-	generateService := []struct {
-		serviceID      string
-		serviceContent string
-		serviceSize    uint64
-		version        int
-	}{
-		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: 1},
-		{serviceID: "service2", serviceContent: "service2", serviceSize: 520 * kilobyte, version: 1},
-		{serviceID: "service3", serviceContent: "service2", serviceSize: 600 * kilobyte, version: 1},
+	generateService := []testServiceInfo{
+		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: "1.0.0"},
+		{serviceID: "service2", serviceContent: "service2", serviceSize: 520 * kilobyte, version: "1.0.0"},
+		{serviceID: "service3", serviceContent: "service2", serviceSize: 600 * kilobyte, version: "1.0.0"},
 	}
 
 	for _, service := range generateService {
 		serviceInfo, err := prepareService(
-			service.serviceContent, service.serviceID, uint64(service.version), int64(service.serviceSize))
+			service.serviceContent, service.serviceID, service.version, int64(service.serviceSize))
 		if err != nil {
 			t.Fatalf("Can't prepare service: %v", err)
 		}
@@ -498,24 +495,24 @@ func TestAllocateMemoryInstallService(t *testing.T) {
 	}{
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
 			}),
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service2", version: 1},
+				{serviceID: "service2", version: "1.0.0"},
 			}),
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service2", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 			processDesiredError: spaceallocator.ErrNoSpace,
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service3", version: 1},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 		},
 	}
@@ -547,20 +544,15 @@ func TestCachedServiceOnStart(t *testing.T) {
 
 	services := make(map[string][]aostypes.ServiceInfo)
 
-	generateService := []struct {
-		serviceID      string
-		serviceContent string
-		serviceSize    uint64
-		version        int
-	}{
-		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: 1},
-		{serviceID: "service2", serviceContent: "service2", serviceSize: 256 * kilobyte, version: 1},
-		{serviceID: "service3", serviceContent: "service3", serviceSize: 300 * kilobyte, version: 1},
+	generateService := []testServiceInfo{
+		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: "1.0.0"},
+		{serviceID: "service2", serviceContent: "service2", serviceSize: 256 * kilobyte, version: "1.0.0"},
+		{serviceID: "service3", serviceContent: "service3", serviceSize: 300 * kilobyte, version: "1.0.0"},
 	}
 
 	for _, service := range generateService {
 		serviceInfo, err := prepareService(
-			service.serviceContent, service.serviceID, uint64(service.version), int64(service.serviceSize))
+			service.serviceContent, service.serviceID, service.version, int64(service.serviceSize))
 		if err != nil {
 			t.Fatalf("Can't prepare service: %v", err)
 		}
@@ -575,22 +567,22 @@ func TestCachedServiceOnStart(t *testing.T) {
 	}{
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
 			}),
-			useServiceID: expectedService{serviceID: "service1", version: 1},
+			useServiceID: expectedService{serviceID: "service1", version: "1.0.0"},
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service2", version: 1},
-				{serviceID: "service3", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service2", version: "1.0.0"},
+				{serviceID: "service3", version: "1.0.0"},
 			}),
 			processDesiredError: spaceallocator.ErrNoSpace,
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service2", version: 1},
+				{serviceID: "service2", version: "1.0.0"},
 			}),
 		},
 	}
@@ -613,8 +605,8 @@ func TestCachedServiceOnStart(t *testing.T) {
 	}
 
 	if err := sm.ProcessDesiredServices(getDesiredServices(services, []expectedService{
-		{serviceID: "service2", version: 1},
-		{serviceID: "service3", version: 1},
+		{serviceID: "service2", version: "1.0.0"},
+		{serviceID: "service3", version: "1.0.0"},
 	})); err != nil {
 		t.Errorf("Can't process desired service: %v", err)
 	}
@@ -657,20 +649,15 @@ func TestRemoveServiceVersionOnInstall(t *testing.T) {
 
 	services := make(map[string][]aostypes.ServiceInfo)
 
-	generateService := []struct {
-		serviceID      string
-		serviceContent string
-		serviceSize    uint64
-		version        int
-	}{
-		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: 1},
-		{serviceID: "service1", serviceContent: "service2", serviceSize: 256 * kilobyte, version: 2},
-		{serviceID: "service1", serviceContent: "service3", serviceSize: 300 * kilobyte, version: 2},
+	generateService := []testServiceInfo{
+		{serviceID: "service1", serviceContent: "service1", serviceSize: 512 * kilobyte, version: "1.0.0"},
+		{serviceID: "service1", serviceContent: "service2", serviceSize: 256 * kilobyte, version: "2.0.0"},
+		{serviceID: "service1", serviceContent: "service3", serviceSize: 300 * kilobyte, version: "2.0.0"},
 	}
 
 	for _, service := range generateService {
 		serviceInfo, err := prepareService(
-			service.serviceContent, service.serviceID, uint64(service.version), int64(service.serviceSize))
+			service.serviceContent, service.serviceID, service.version, int64(service.serviceSize))
 		if err != nil {
 			t.Fatalf("Can't prepare service: %v", err)
 		}
@@ -684,22 +671,22 @@ func TestRemoveServiceVersionOnInstall(t *testing.T) {
 	}{
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
+				{serviceID: "service1", version: "1.0.0"},
 			}),
 			expectedServiceCount: 1,
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service1", version: 2},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service1", version: "2.0.0"},
 			}),
 			expectedServiceCount: 2,
 		},
 		{
 			desiredServices: getDesiredServices(services, []expectedService{
-				{serviceID: "service1", version: 1},
-				{serviceID: "service1", version: 2},
-				{serviceID: "service1", version: 3},
+				{serviceID: "service1", version: "1.0.0"},
+				{serviceID: "service1", version: "2.0.0"},
+				{serviceID: "service1", version: "3.0.0"},
 			}),
 			expectedServiceCount: 2,
 		},
@@ -710,7 +697,7 @@ func TestRemoveServiceVersionOnInstall(t *testing.T) {
 			t.Errorf("Can't process desired service: %v", err)
 		}
 
-		serviceVersions, err := serviceStorage.GetAllServiceVersions(tCase.desiredServices[0].ID)
+		serviceVersions, err := serviceStorage.GetAllServiceVersions(tCase.desiredServices[0].ServiceID)
 		if err != nil {
 			t.Fatalf("Can't get services version: %v", err)
 		}
@@ -812,7 +799,7 @@ func (space *testSpace) Release() error {
 func (storage *testServiceStorage) GetAllServiceVersions(
 	serviceID string,
 ) (service []servicemanager.ServiceInfo, err error) {
-	if serviceID == errorGetServicID {
+	if serviceID == errorGetServiceID {
 		return service, aoserrors.New("can't get service")
 	}
 
@@ -847,9 +834,9 @@ func (storage *testServiceStorage) AddService(service servicemanager.ServiceInfo
 	return err
 }
 
-func (storage *testServiceStorage) RemoveService(serviceID string, aosVersion uint64) error {
+func (storage *testServiceStorage) RemoveService(serviceID string, version string) error {
 	for i, outService := range storage.Services {
-		if outService.ServiceID == serviceID && outService.AosVersion == aosVersion {
+		if outService.ServiceID == serviceID && outService.Version == version {
 			storage.Services = append(storage.Services[:i], storage.Services[i+1:]...)
 
 			return nil
@@ -859,7 +846,7 @@ func (storage *testServiceStorage) RemoveService(serviceID string, aosVersion ui
 	return servicemanager.ErrNotExist
 }
 
-func (storage *testServiceStorage) SetServiceCached(serviceID string, aosVersion uint64, cached bool) (err error) {
+func (storage *testServiceStorage) SetServiceCached(serviceID string, version string, cached bool) (err error) {
 	var found bool
 
 	for i, serviceInfo := range storage.Services {
@@ -896,7 +883,7 @@ func cleanup() {
 }
 
 func prepareService(
-	testContent, serviceID string, aosVersion uint64, servicelayerSize int64,
+	testContent, serviceID string, version string, serviceLayerSize int64,
 ) (serviceInfo aostypes.ServiceInfo, err error) {
 	imageDir, err := os.MkdirTemp("", "aos_")
 	if err != nil {
@@ -915,7 +902,7 @@ func prepareService(
 		return serviceInfo, aoserrors.Wrap(err)
 	}
 
-	if err := file.Truncate(servicelayerSize); err != nil {
+	if err := file.Truncate(serviceLayerSize); err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
 
@@ -946,7 +933,7 @@ func prepareService(
 		return serviceInfo, aoserrors.Wrap(err)
 	}
 
-	if err := genarateImageManfest(
+	if err := generateImageManifest(
 		imageDir, &imgSpecDigestDigest, &aosSrvConfigDigest, &fsDigest,
 		serviceSize, []digest.Digest{imgAosLayerDigest}); err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
@@ -970,14 +957,11 @@ func prepareService(
 	}
 
 	return aostypes.ServiceInfo{
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: aosVersion,
-		},
-		ID:     serviceID,
-		URL:    "file://" + outputURL,
-		Sha256: fileInfo.Sha256,
-		Sha512: fileInfo.Sha512,
-		Size:   fileInfo.Size,
+		ServiceID: serviceID,
+		Version:   version,
+		URL:       "file://" + outputURL,
+		Sha256:    fileInfo.Sha256,
+		Size:      fileInfo.Size,
 	}, nil
 }
 
@@ -1039,7 +1023,7 @@ func generateAndSaveDigest(folder string, data []byte) (retDigest digest.Digest,
 	return retDigest, nil
 }
 
-func genarateImageManfest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest,
+func generateImageManifest(folderPath string, imgConfig, aosSrvConfig, rootfsLayer *digest.Digest,
 	rootfsLayerSize int64, srvLayers []digest.Digest,
 ) (err error) {
 	type serviceManifest struct {
@@ -1116,7 +1100,7 @@ func getDesiredServices(
 		}
 
 		for _, serviceInfo := range serviceInfos {
-			if serviceInfo.AosVersion == expectedService.version {
+			if serviceInfo.Version == expectedService.version {
 				desiredServices = append(desiredServices, serviceInfo)
 				break
 			}
