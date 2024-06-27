@@ -37,7 +37,7 @@ type MonitorController struct {
 	monitoringChannel chan cloudprotocol.NodeMonitoringData
 }
 
-// New creates new monitoringcontroller instance.
+// New creates new monitor controller instance.
 func New() (monitor *MonitorController, err error) {
 	monitor = &MonitorController{
 		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, monitoringChannelSize),
