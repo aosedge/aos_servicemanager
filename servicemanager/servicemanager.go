@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +42,7 @@ import (
 
 	"github.com/aosedge/aos_servicemanager/config"
 	"github.com/aosedge/aos_servicemanager/utils/whiteouts"
+	semver "github.com/hashicorp/go-version"
 )
 
 /***********************************************************************************************************************
@@ -193,6 +195,20 @@ func (sm *ServiceManager) GetServiceInfo(serviceID string) (serviceInfo ServiceI
 	if err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
+
+	sort.Slice(services, func(i, j int) bool {
+		ver1, err := semver.NewSemver(services[i].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		ver2, err := semver.NewSemver(services[j].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		return ver1.LessThan(ver2)
+	})
 
 	for _, service := range services {
 		if service.ServiceID == serviceID && !service.Cached {
