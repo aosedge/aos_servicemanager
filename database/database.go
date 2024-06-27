@@ -50,7 +50,7 @@ const (
 	syncMode    = "NORMAL"
 )
 
-const dbVersion = 6
+const dbVersion = 7
 
 /***********************************************************************************************************************
  * Vars
@@ -100,15 +100,15 @@ func (db *Database) SetOperationVersion(version uint64) error {
 
 // AddService adds new service.
 func (db *Database) AddService(service servicemanager.ServiceInfo) (err error) {
-	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		service.ServiceID, service.AosVersion, service.ServiceProvider, service.Description, service.ImagePath,
+	return db.executeQuery("INSERT INTO services values(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		service.ServiceID, service.Version, service.ServiceProvider, service.ImagePath,
 		service.ManifestDigest, service.Cached, service.Timestamp, service.Size, service.GID)
 }
 
 // RemoveService removes existing service.
-func (db *Database) RemoveService(serviceID string, aosVersion uint64) (err error) {
-	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND aosVersion = ?",
-		serviceID, aosVersion); errors.Is(err, errNotExist) {
+func (db *Database) RemoveService(serviceID string, version string) (err error) {
+	if err = db.executeQuery("DELETE FROM services WHERE id = ? AND version = ?",
+		serviceID, version); errors.Is(err, errNotExist) {
 		return nil
 	}
 
@@ -122,7 +122,7 @@ func (db *Database) GetServices() (services []servicemanager.ServiceInfo, err er
 		"SELECT * FROM services",
 		func(service *servicemanager.ServiceInfo) []any {
 			return []any{
-				&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+				&service.ServiceID, &service.Version, &service.ServiceProvider,
 				&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
 				&service.Size, &service.GID,
 			}
@@ -133,10 +133,10 @@ func (db *Database) GetServices() (services []servicemanager.ServiceInfo, err er
 func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.ServiceInfo, err error) {
 	if services, err = getFromQuery(
 		db,
-		"SELECT * FROM services WHERE id = ? ORDER BY aosVersion",
+		"SELECT * FROM services WHERE id = ?",
 		func(service *servicemanager.ServiceInfo) []any {
 			return []any{
-				&service.ServiceID, &service.AosVersion, &service.ServiceProvider, &service.Description,
+				&service.ServiceID, &service.Version, &service.ServiceProvider,
 				&service.ImagePath, &service.ManifestDigest, &service.Cached, &service.Timestamp,
 				&service.Size, &service.GID,
 			}
@@ -152,9 +152,9 @@ func (db *Database) GetAllServiceVersions(id string) (services []servicemanager.
 }
 
 // SetServiceCached sets cached status for the service.
-func (db *Database) SetServiceCached(serviceID string, aosVersion uint64, cached bool) (err error) {
-	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ? AND aosVersion = ?",
-		cached, serviceID, aosVersion); errors.Is(err, errNotExist) {
+func (db *Database) SetServiceCached(serviceID string, version string, cached bool) (err error) {
+	if err = db.executeQuery("UPDATE services SET cached = ? WHERE id = ? AND version = ?",
+		cached, serviceID, version); errors.Is(err, errNotExist) {
 		return servicemanager.ErrNotExist
 	}
 
@@ -257,9 +257,9 @@ func (db *Database) SetOnlineTime(onlineTime time.Time) error {
 
 // AddLayer add layer to layers table.
 func (db *Database) AddLayer(layer layermanager.LayerInfo) (err error) {
-	return db.executeQuery("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		layer.Digest, layer.LayerID, layer.Path, layer.OSVersion, layer.VendorVersion,
-		layer.Description, layer.AosVersion, layer.Timestamp, layer.Cached, layer.Size)
+	return db.executeQuery("INSERT INTO layers values(?, ?, ?, ?, ?, ?, ?, ?)",
+		layer.Digest, layer.LayerID, layer.Path, layer.OSVersion,
+		layer.Version, layer.Timestamp, layer.Cached, layer.Size)
 }
 
 // DeleteLayerByDigest remove layer from DB by digest.
@@ -278,8 +278,7 @@ func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err er
 		"SELECT * FROM layers",
 		func(layer *layermanager.LayerInfo) []any {
 			return []any{
-				&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
-				&layer.VendorVersion, &layer.Description, &layer.AosVersion, &layer.Timestamp,
+				&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion, &layer.Version, &layer.Timestamp,
 				&layer.Cached, &layer.Size,
 			}
 		})
@@ -288,9 +287,8 @@ func (db *Database) GetLayersInfo() (layersList []layermanager.LayerInfo, err er
 // GetLayerInfoByDigest returns layers information by layer digest.
 func (db *Database) GetLayerInfoByDigest(digest string) (layer layermanager.LayerInfo, err error) {
 	if err = db.getDataFromQuery(fmt.Sprintf("SELECT * FROM layers WHERE digest = \"%s\"", digest),
-		&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion,
-		&layer.VendorVersion, &layer.Description,
-		&layer.AosVersion, &layer.Timestamp, &layer.Cached, &layer.Size); err != nil {
+		&layer.Digest, &layer.LayerID, &layer.Path, &layer.OSVersion, &layer.Version, &layer.Timestamp, &layer.Cached,
+		&layer.Size); err != nil {
 		if errors.Is(err, errNotExist) {
 			return layer, layermanager.ErrNotExist
 		}
@@ -364,31 +362,31 @@ func (db *Database) RemoveInstance(instanceID string) (err error) {
 // GetInstanceInfoByID returns instance ident and service aos version by instanceID.
 func (db *Database) GetInstanceInfoByID(
 	instanceID string,
-) (ident aostypes.InstanceIdent, aosVersion uint64, err error) {
+) (ident aostypes.InstanceIdent, version string, err error) {
 	instance, err := db.getInstanceInfoFromQuery("SELECT * FROM instances WHERE instanceID = ?", instanceID)
 	if err != nil {
-		return ident, 0, aoserrors.Wrap(err)
+		return ident, "", aoserrors.Wrap(err)
 	}
 
 	stmt, err := db.sql.Prepare(
-		`SELECT aosVersion FROM services WHERE aosVersion = (SELECT MAX(aosVersion)
+		`SELECT version FROM services WHERE version = (SELECT MAX(version)
 		FROM services WHERE id = ?) AND id = ?`)
 	if err != nil {
-		return ident, 0, aoserrors.Wrap(err)
+		return ident, "", aoserrors.Wrap(err)
 	}
 	defer stmt.Close()
 
-	err = stmt.QueryRow(instance.ServiceID, instance.ServiceID).Scan(&aosVersion)
+	err = stmt.QueryRow(instance.ServiceID, instance.ServiceID).Scan(&version)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return ident, 0, servicemanager.ErrNotExist
+		return ident, "", servicemanager.ErrNotExist
 	}
 
 	if err != nil {
-		return ident, 0, aoserrors.Wrap(err)
+		return ident, "", aoserrors.Wrap(err)
 	}
 
-	return instance.InstanceIdent, aosVersion, nil
+	return instance.InstanceIdent, version, nil
 }
 
 // GetAllInstances returns all instance.
@@ -625,16 +623,15 @@ func (db *Database) createServiceTable() (err error) {
 	log.Info("Create service table")
 
 	_, err = db.sql.Exec(`CREATE TABLE IF NOT EXISTS services (id TEXT NOT NULL ,
-															   aosVersion INTEGER,
+															   version TEXT,
 															   providerID TEXT,
-															   description TEXT,
 															   imagePath TEXT,
 															   manifestDigest BLOB,
 															   cached INTEGER,
 															   timestamp TIMESTAMP,
 															   size INTEGER,
 															   GID INTEGER,
-															   PRIMARY KEY(id, aosVersion))`)
+															   PRIMARY KEY(id, version))`)
 
 	return aoserrors.Wrap(err)
 }
@@ -656,9 +653,7 @@ func (db *Database) createLayersTable() (err error) {
 															 layerId TEXT,
 															 path TEXT,
 															 osVersion TEXT,
-															 vendorVersion TEXT,
-															 description TEXT,
-															 aosVersion INTEGER,
+															 version TEXT,
 															 timestamp TIMESTAMP,
 															 cached INTEGER,
 															 size INTEGER)`)

@@ -101,10 +101,8 @@ func TestMain(m *testing.M) {
 
 func TestAddGetService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "service1",
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		ServiceID:       "service1",
+		Version:         "1.0.0",
 		ServiceProvider: "sp1",
 		ImagePath:       "to/service1",
 		Size:            30,
@@ -128,10 +126,8 @@ func TestAddGetService(t *testing.T) {
 	}
 
 	service2 := servicemanager.ServiceInfo{
-		ServiceID: "service2",
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		ServiceID:       "service2",
+		Version:         "1.0.0",
 		ServiceProvider: "sp1",
 		ImagePath:       "to/service1",
 		Size:            80,
@@ -155,7 +151,7 @@ func TestAddGetService(t *testing.T) {
 	}
 
 	service3 := service2
-	service3.AosVersion = 2
+	service3.Version = "2.0.0"
 
 	if err := db.AddService(service3); err != nil {
 		t.Errorf("Can't add service: %v", err)
@@ -205,10 +201,8 @@ func TestNotExistService(t *testing.T) {
 
 func TestRemoveService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "service1",
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		ServiceID:       "service1",
+		Version:         "1.0.0",
 		ServiceProvider: "sp1",
 		ImagePath:       "to/service1",
 	}
@@ -226,7 +220,7 @@ func TestRemoveService(t *testing.T) {
 		t.Error("service doesn't match stored one")
 	}
 
-	if err := db.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+	if err := db.RemoveService(service.ServiceID, service.Version); err != nil {
 		t.Errorf("Can't remove service: %v", err)
 	}
 
@@ -242,10 +236,8 @@ func TestRemoveService(t *testing.T) {
 
 func TestCachedService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "serviceCached",
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		ServiceID:       "serviceCached",
+		Version:         "1.0.0",
 		ServiceProvider: "sp1",
 		ImagePath:       "to/service1",
 		Cached:          false,
@@ -264,7 +256,7 @@ func TestCachedService(t *testing.T) {
 		t.Error("Unexpected services")
 	}
 
-	if err := db.SetServiceCached(service.ServiceID, service.AosVersion, true); err != nil {
+	if err := db.SetServiceCached(service.ServiceID, service.Version, true); err != nil {
 		t.Errorf("Can't set service cached: %v", err)
 	}
 
@@ -280,7 +272,7 @@ func TestCachedService(t *testing.T) {
 	}
 
 	service2 := service
-	service2.AosVersion = 2
+	service2.Version = "2.0.0"
 
 	if err := db.AddService(service2); err != nil {
 		t.Errorf("Can't add service: %v", err)
@@ -295,7 +287,7 @@ func TestCachedService(t *testing.T) {
 		t.Error("Unexpected services")
 	}
 
-	if err := db.SetServiceCached(service2.ServiceID, service2.AosVersion, true); err != nil {
+	if err := db.SetServiceCached(service2.ServiceID, service2.Version, true); err != nil {
 		t.Errorf("Can't set service cached: %v", err)
 	}
 
@@ -313,10 +305,8 @@ func TestCachedService(t *testing.T) {
 
 func TestSetTimestampService(t *testing.T) {
 	service := servicemanager.ServiceInfo{
-		ServiceID: "serviceTimestamp",
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		ServiceID:       "serviceTimestamp",
+		Version:         "1.0.0",
 		ServiceProvider: "sp1",
 		ImagePath:       "to/service1",
 		Timestamp:       time.Now().UTC(),
@@ -461,12 +451,8 @@ func TestMultiThread(t *testing.T) {
 func TestLayers(t *testing.T) {
 	layer1 := layermanager.LayerInfo{
 		Digest: "sha256:1", LayerID: "id1", Path: "path1", OSVersion: "1",
-		VersionInfo: aostypes.VersionInfo{
-			VendorVersion: "1.0",
-			Description:   "some layer 1",
-			AosVersion:    1,
-		},
-		Size: 40,
+		Version: "1.0.0",
+		Size:    40,
 	}
 
 	if err := db.AddLayer(layer1); err != nil {
@@ -483,12 +469,7 @@ func TestLayers(t *testing.T) {
 	}
 
 	layer2 := layermanager.LayerInfo{
-		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1",
-		VersionInfo: aostypes.VersionInfo{
-			VendorVersion: "2.0",
-			Description:   "some layer 2",
-			AosVersion:    2,
-		}, Size: 50,
+		Digest: "sha256:2", LayerID: "id2", Path: "path2", OSVersion: "1", Version: "2.0.0",
 	}
 
 	if err := db.AddLayer(layer2); err != nil {
@@ -505,13 +486,7 @@ func TestLayers(t *testing.T) {
 	}
 
 	layer3 := layermanager.LayerInfo{
-		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1",
-		VersionInfo: aostypes.VersionInfo{
-			VendorVersion: "1.0",
-			Description:   "some layer 3",
-			AosVersion:    3,
-		},
-		Size: 60,
+		Digest: "sha256:3", LayerID: "id3", Path: "path3", OSVersion: "1", Version: "2.0.0", Size: 60,
 	}
 
 	if err := db.AddLayer(layer3); err != nil {
@@ -594,8 +569,8 @@ func TestLayers(t *testing.T) {
 		t.Errorf("Count of layers in DB %d != 2", len(layers))
 	}
 
-	if layers[0].AosVersion != 1 {
-		t.Errorf("Layer AosVersion should be 1")
+	if layers[0].Version != "1.0.0" {
+		t.Errorf("Layer AosVersion should be 1.0.0")
 	}
 }
 
@@ -689,15 +664,13 @@ func TestInstances(t *testing.T) {
 	}
 
 	if err := db.AddService(servicemanager.ServiceInfo{
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
+		Version:   "1.0.0",
 		ServiceID: testServiceID,
 	}); err != nil {
 		t.Errorf("Can't add service: %v", err)
 	}
 
-	ident, aosVersion, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
+	ident, version, err := db.GetInstanceInfoByID(testInstanceInfo.InstanceID)
 	if err != nil {
 		t.Errorf("Can't get instance info: %v", err)
 	}
@@ -706,13 +679,13 @@ func TestInstances(t *testing.T) {
 		t.Error("Unexpected instance ident")
 	}
 
-	if aosVersion != 1 {
+	if version != "1.0.0" {
 		t.Error("Unexpected aos version")
 	}
 
 	// Negative test: update unavailable instance should be failed
 	if err := db.UpdateInstance(
-		launcher.InstanceInfo{InstanceID: "unavailbale"}); !errors.Is(err, launcher.ErrNotExist) {
+		launcher.InstanceInfo{InstanceID: "unavailable"}); !errors.Is(err, launcher.ErrNotExist) {
 		t.Error("Should be error: instance not exist")
 	}
 
@@ -861,21 +834,21 @@ func TestEnvVars(t *testing.T) {
 		t.Error("Returned env vars should be empty")
 	}
 
-	curentTime := time.Now().UTC()
+	currentTime := time.Now().UTC()
 
 	testEnvVars := []cloudprotocol.EnvVarsInstanceInfo{
 		{
 			InstanceFilter: cloudprotocol.NewInstanceFilter("id1", "s1", int64(1)),
-			EnvVars: []cloudprotocol.EnvVarInfo{
-				{ID: "varId1", Variable: "variable 1"},
-				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			Variables: []cloudprotocol.EnvVarInfo{
+				{Name: "var1", Value: "val1"},
+				{Name: "var2", Value: "val2", TTL: &currentTime},
 			},
 		},
 		{
 			InstanceFilter: cloudprotocol.NewInstanceFilter("id2", "", -1),
-			EnvVars: []cloudprotocol.EnvVarInfo{
-				{ID: "varId1", Variable: "variable 1"},
-				{ID: "varId2", Variable: "variable 2", TTL: &curentTime},
+			Variables: []cloudprotocol.EnvVarInfo{
+				{Name: "var1", Value: "val1"},
+				{Name: "var2", Value: "val2", TTL: &currentTime},
 			},
 		},
 	}
