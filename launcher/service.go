@@ -67,7 +67,7 @@ func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
 		if service.ServiceInfo, service.err = launcher.serviceProvider.GetServiceInfo(
 			instance.ServiceID); errors.Is(service.err, servicemanager.ErrNotExist) {
 			service.ServiceID = instance.ServiceID
-			service.AosVersion = 0
+			service.Version = ""
 		}
 
 		if service.err == nil {
