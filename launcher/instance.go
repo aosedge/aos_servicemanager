@@ -54,7 +54,7 @@ func (instance *runtimeInstanceInfo) getCloudStatus() cloudprotocol.InstanceStat
 	}
 
 	if instance.service != nil {
-		status.AosVersion = instance.service.AosVersion
+		status.ServiceVersion = instance.service.Version
 	}
 
 	if status.RunState == cloudprotocol.InstanceStateFailed {
