@@ -29,8 +29,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
@@ -38,7 +38,7 @@ import (
 	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aosedge/aos_servicemanager/servicemanager"
 )
 
 /***********************************************************************************************************************

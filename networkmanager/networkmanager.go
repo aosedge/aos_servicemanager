@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
 	cni "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -40,7 +40,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netns"
 
-	"github.com/aoscloud/aos_servicemanager/config"
+	"github.com/aosedge/aos_servicemanager/config"
 )
 
 /***********************************************************************************************************************

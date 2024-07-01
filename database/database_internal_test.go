@@ -29,17 +29,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	"github.com/aoscloud/aos_common/migration"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
+	"github.com/aosedge/aos_common/migration"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aoscloud/aos_servicemanager/launcher"
-	"github.com/aoscloud/aos_servicemanager/layermanager"
-	"github.com/aoscloud/aos_servicemanager/networkmanager"
-	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aosedge/aos_servicemanager/launcher"
+	"github.com/aosedge/aos_servicemanager/layermanager"
+	"github.com/aosedge/aos_servicemanager/networkmanager"
+	"github.com/aosedge/aos_servicemanager/servicemanager"
 )
 
 /***********************************************************************************************************************

@@ -19,7 +19,7 @@
 package alerts
 
 import (
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
 

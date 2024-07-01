@@ -21,11 +21,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/aoscloud/aos_servicemanager/servicemanager"
+	"github.com/aosedge/aos_servicemanager/servicemanager"
 )
 
 /***********************************************************************************************************************
