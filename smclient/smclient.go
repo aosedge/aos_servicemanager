@@ -24,12 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
-	pb "github.com/aoscloud/aos_common/api/servicemanager/v3"
-	"github.com/aoscloud/aos_common/utils/cryptutils"
-	"github.com/aoscloud/aos_common/utils/pbconvert"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
+	pb "github.com/aosedge/aos_common/api/servicemanager/v3"
+	"github.com/aosedge/aos_common/utils/cryptutils"
+	"github.com/aosedge/aos_common/utils/pbconvert"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -39,8 +39,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/launcher"
+	"github.com/aosedge/aos_servicemanager/config"
+	"github.com/aosedge/aos_servicemanager/launcher"
 )
 
 /***********************************************************************************************************************

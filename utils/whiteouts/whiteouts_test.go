@@ -23,11 +23,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aoserrors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/aoscloud/aos_servicemanager/utils/whiteouts"
+	"github.com/aosedge/aos_servicemanager/utils/whiteouts"
 )
 
 /***********************************************************************************************************************

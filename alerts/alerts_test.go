@@ -21,10 +21,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aoscloud/aos_servicemanager/alerts"
+	"github.com/aosedge/aos_servicemanager/alerts"
 )
 
 /***********************************************************************************************************************

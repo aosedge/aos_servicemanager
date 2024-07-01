@@ -26,15 +26,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
-	pb "github.com/aoscloud/aos_common/api/iamanager/v4"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
+	pb "github.com/aosedge/aos_common/api/iamanager/v4"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 
-	"github.com/aoscloud/aos_servicemanager/config"
-	"github.com/aoscloud/aos_servicemanager/iamclient"
+	"github.com/aosedge/aos_servicemanager/config"
+	"github.com/aosedge/aos_servicemanager/iamclient"
 )
 
 /***********************************************************************************************************************
