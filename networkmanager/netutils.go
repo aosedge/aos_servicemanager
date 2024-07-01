@@ -23,7 +23,7 @@ import (
 	"path"
 	"runtime"
 
-	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )

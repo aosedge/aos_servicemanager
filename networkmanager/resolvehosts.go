@@ -24,8 +24,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/aoscloud/aos_common/aoserrors"
-	"github.com/aoscloud/aos_common/aostypes"
+	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aostypes"
 )
 
 /***********************************************************************************************************************

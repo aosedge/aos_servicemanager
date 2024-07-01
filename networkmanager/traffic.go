@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aoscloud/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/coreos/go-iptables/iptables"
 	log "github.com/sirupsen/logrus"
 )

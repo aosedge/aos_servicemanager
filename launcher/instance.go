@@ -20,10 +20,10 @@ package launcher
 import (
 	"path/filepath"
 
-	"github.com/aoscloud/aos_common/api/cloudprotocol"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/aoscloud/aos_servicemanager/runner"
+	"github.com/aosedge/aos_servicemanager/runner"
 )
 
 /***********************************************************************************************************************
