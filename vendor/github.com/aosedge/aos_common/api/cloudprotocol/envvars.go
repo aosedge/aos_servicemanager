@@ -17,46 +17,55 @@
 
 package cloudprotocol
 
+import "time"
+
 /***********************************************************************************************************************
  * Consts
  **********************************************************************************************************************/
 
-// ProtocolVersion specifies supported protocol version.
-const ProtocolVersion = 6
+// EnvVars message types.
+const (
+	OverrideEnvVarsMessageType       = "overrideEnvVars"
+	OverrideEnvVarsStatusMessageType = "overrideEnvVarsStatus"
+)
 
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
 
-// ReceivedMessage structure for Aos incoming messages.
-type ReceivedMessage struct {
-	Header MessageHeader `json:"header"`
-	Data   []byte        `json:"data"`
+// EnvVarsInstanceInfo struct with envs and related service and user.
+type EnvVarsInstanceInfo struct {
+	InstanceFilter
+	Variables []EnvVarInfo `json:"variables"`
 }
 
-// Message structure for AOS messages.
-type Message struct {
-	Header MessageHeader `json:"header"`
-	Data   interface{}   `json:"data"`
+// EnvVarInfo env info with id and time to live.
+type EnvVarInfo struct {
+	Name  string     `json:"name"`
+	Value string     `json:"value"`
+	TTL   *time.Time `json:"ttl"`
 }
 
-// MessageHeader message header.
-type MessageHeader struct {
-	Version     uint64 `json:"version"`
-	SystemID    string `json:"systemId"`
-	MessageType string `json:"messageType"`
+// EnvVarsInstanceStatus struct with envs status and related service and user.
+type EnvVarsInstanceStatus struct {
+	InstanceFilter
+	Statuses []EnvVarStatus `json:"statuses"`
 }
 
-// ErrorInfo error information.
-type ErrorInfo struct {
-	AosCode  int    `json:"aosCode"`
-	ExitCode int    `json:"exitCode"`
-	Message  string `json:"message,omitempty"`
+// EnvVarStatus env status with error message.
+type EnvVarStatus struct {
+	Name      string     `json:"name"`
+	ErrorInfo *ErrorInfo `json:"error,omitempty"`
 }
 
-// InstanceFilter instance filter structure.
-type InstanceFilter struct {
-	ServiceID *string `json:"serviceId,omitempty"`
-	SubjectID *string `json:"subjectId,omitempty"`
-	Instance  *uint64 `json:"instance,omitempty"`
+// OverrideEnvVars request to override service environment variables.
+type OverrideEnvVars struct {
+	MessageType string                `json:"messageType"`
+	Items       []EnvVarsInstanceInfo `json:"items"`
+}
+
+// OverrideEnvVarsStatus override env status.
+type OverrideEnvVarsStatus struct {
+	MessageType string                  `json:"messageType"`
+	Statuses    []EnvVarsInstanceStatus `json:"statuses"`
 }
