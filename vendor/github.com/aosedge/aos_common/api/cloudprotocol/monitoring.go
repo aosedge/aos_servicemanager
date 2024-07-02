@@ -17,46 +17,38 @@
 
 package cloudprotocol
 
+import (
+	"github.com/aosedge/aos_common/aostypes"
+)
+
 /***********************************************************************************************************************
  * Consts
  **********************************************************************************************************************/
 
-// ProtocolVersion specifies supported protocol version.
-const ProtocolVersion = 6
+// MonitoringMessageType monitoring message type.
+const MonitoringMessageType = "monitoringData"
 
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
 
-// ReceivedMessage structure for Aos incoming messages.
-type ReceivedMessage struct {
-	Header MessageHeader `json:"header"`
-	Data   []byte        `json:"data"`
+// NodeMonitoringData node monitoring data.
+type NodeMonitoringData struct {
+	aostypes.MonitoringData
+	NodeID string                    `json:"nodeId"`
+	Items  []aostypes.MonitoringData `json:"items"`
 }
 
-// Message structure for AOS messages.
-type Message struct {
-	Header MessageHeader `json:"header"`
-	Data   interface{}   `json:"data"`
+// InstanceMonitoringData monitoring data for service.
+type InstanceMonitoringData struct {
+	aostypes.InstanceIdent
+	NodeID string                    `json:"nodeId"`
+	Items  []aostypes.MonitoringData `json:"items"`
 }
 
-// MessageHeader message header.
-type MessageHeader struct {
-	Version     uint64 `json:"version"`
-	SystemID    string `json:"systemId"`
-	MessageType string `json:"messageType"`
-}
-
-// ErrorInfo error information.
-type ErrorInfo struct {
-	AosCode  int    `json:"aosCode"`
-	ExitCode int    `json:"exitCode"`
-	Message  string `json:"message,omitempty"`
-}
-
-// InstanceFilter instance filter structure.
-type InstanceFilter struct {
-	ServiceID *string `json:"serviceId,omitempty"`
-	SubjectID *string `json:"subjectId,omitempty"`
-	Instance  *uint64 `json:"instance,omitempty"`
+// Monitoring monitoring message structure.
+type Monitoring struct {
+	MessageType      string                   `json:"messageType"`
+	Nodes            []NodeMonitoringData     `json:"nodes"`
+	ServiceInstances []InstanceMonitoringData `json:"serviceInstances"`
 }
