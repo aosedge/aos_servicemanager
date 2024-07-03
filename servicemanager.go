@@ -36,14 +36,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
 
-	"github.com/aosedge/aos_servicemanager/alerts"
 	"github.com/aosedge/aos_servicemanager/config"
 	"github.com/aosedge/aos_servicemanager/database"
 	"github.com/aosedge/aos_servicemanager/iamclient"
 	"github.com/aosedge/aos_servicemanager/launcher"
 	"github.com/aosedge/aos_servicemanager/layermanager"
 	"github.com/aosedge/aos_servicemanager/logging"
-	"github.com/aosedge/aos_servicemanager/monitorcontroller"
 	"github.com/aosedge/aos_servicemanager/networkmanager"
 	resource "github.com/aosedge/aos_servicemanager/resourcemanager"
 	"github.com/aosedge/aos_servicemanager/runner"
@@ -62,22 +60,20 @@ const dbFileName = "servicemanager.db"
  **********************************************************************************************************************/
 
 type serviceManager struct {
-	cryptoContext     *cryptutils.CryptoContext
-	journalAlerts     *journalalerts.JournalAlerts
-	alerts            *alerts.Alerts
-	cfg               *config.Config
-	db                *database.Database
-	launcher          *launcher.Launcher
-	resourcemanager   *resource.ResourceManager
-	logging           *logging.Logging
-	monitor           *resourcemonitor.ResourceMonitor
-	monitorController *monitorcontroller.MonitorController
-	network           *networkmanager.NetworkManager
-	iam               *iamclient.Client
-	client            *smclient.SMClient
-	layerMgr          *layermanager.LayerManager
-	serviceMgr        *servicemanager.ServiceManager
-	runner            *runner.Runner
+	cryptoContext   *cryptutils.CryptoContext
+	journalAlerts   *journalalerts.JournalAlerts
+	cfg             *config.Config
+	db              *database.Database
+	launcher        *launcher.Launcher
+	resourcemanager *resource.ResourceManager
+	logging         *logging.Logging
+	monitor         *resourcemonitor.ResourceMonitor
+	network         *networkmanager.NetworkManager
+	iam             *iamclient.Client
+	client          *smclient.SMClient
+	layerMgr        *layermanager.LayerManager
+	serviceMgr      *servicemanager.ServiceManager
+	runner          *runner.Runner
 }
 
 type journalHook struct {
@@ -192,35 +188,32 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.alerts, err = alerts.New(); err != nil {
+	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.alerts); err != nil {
+	nodeInfo, err := sm.iam.GetNodeInfo()
+	if err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
+	runners, err := nodeInfo.GetNodeRunners()
+	if err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.monitorController, err = monitorcontroller.New(); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
-	if !slices.Contains(cfg.RunnerFeatures, "runx") {
-		if sm.monitor, err = resourcemonitor.New(
-			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
-			return sm, aoserrors.Wrap(err)
-		}
-	} else {
-		if sm.monitor, err = resourcemonitor.New(
-			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, nil); err != nil {
+	if !slices.Contains(runners, "runx") {
+		if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 			return sm, aoserrors.Wrap(err)
 		}
 	}
 
-	if sm.resourcemanager, err = resource.New(sm.iam.GetNodeType(), cfg.UnitConfigFile, sm.alerts); err != nil {
+	if sm.monitor, err = resourcemonitor.New(
+		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.client, sm.client); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.resourcemanager, err = resource.New(cfg.UnitConfigFile, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -229,7 +222,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	if sm.launcher, err = launcher.New(cfg, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
-		sm.network, sm.iam, sm.monitor, sm.alerts); err != nil {
+		sm.network, sm.iam, sm.monitor, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -237,12 +230,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.client, err = smclient.New(cfg, smclient.NodeDescription{
-		NodeID:     sm.iam.GetNodeID(),
-		NodeType:   sm.iam.GetNodeType(),
-		SystemInfo: sm.monitor.GetSystemInfo(),
-	}, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging,
-		sm.network, sm.cryptoContext, false); err != nil {
+	if sm.client, err = smclient.New(cfg, sm.iam, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager,
+		sm.monitor, sm.logging, sm.network, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
