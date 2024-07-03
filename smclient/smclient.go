@@ -52,6 +52,11 @@ const (
 	cmReconnectTimeout = 10 * time.Second
 )
 
+const (
+	alertChannelSize      = 64
+	monitoringChannelSize = 64
+)
+
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
@@ -73,8 +78,8 @@ type SMClient struct {
 	logsProvider         LogsProvider
 	networkManager       NetworkProvider
 	runtimeStatusChannel <-chan launcher.RuntimeStatus
-	alertChannel         <-chan cloudprotocol.AlertItem
-	monitoringChannel    <-chan cloudprotocol.NodeMonitoringData
+	alertChannel         chan cloudprotocol.AlertItem
+	monitoringChannel    chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
 	runStatus            *launcher.InstancesStatus
 }
@@ -114,19 +119,13 @@ type InstanceLauncher interface {
 	CloudConnection(connected bool) error
 }
 
-// AlertsProvider alert data provider interface.
-type AlertsProvider interface {
-	GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem)
-}
-
 type NetworkProvider interface {
 	UpdateNetworks(networkParameters []aostypes.NetworkParameters) error
 }
 
 // MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
-	GetAverageMonitoring() (cloudprotocol.NodeMonitoringData, error)
-	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.NodeMonitoringData)
+	GetAverageMonitoring() (aostypes.NodeMonitoring, error)
 }
 
 // LogsProvider logs data provider interface.
@@ -150,14 +149,16 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 // New creates SM client fo communication with CM.
 func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
-	unitConfigProcessor UnitConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
+	unitConfigProcessor UnitConfigProcessor, monitoringProvider MonitoringDataProvider,
 	logsProvider LogsProvider, networkManager NetworkProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
 		config: config, servicesProcessor: servicesProcessor,
 		layersProcessor: layersProcessor, launcher: launcher, unitConfigProcessor: unitConfigProcessor,
 		monitoringProvider: monitoringProvider, logsProvider: logsProvider,
-		networkManager: networkManager, closeChannel: make(chan struct{}, 1),
+		networkManager: networkManager, alertChannel: make(chan cloudprotocol.AlertItem, alertChannelSize),
+		monitoringChannel: make(chan aostypes.NodeMonitoring, monitoringChannelSize),
+		closeChannel:      make(chan struct{}, 1),
 	}
 
 	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
@@ -175,19 +176,33 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 		cmClient.runtimeStatusChannel = launcher.RuntimeStatusChannel()
 	}
 
-	if alertsProvider != nil {
-		cmClient.alertChannel = alertsProvider.GetAlertsChannel()
-	}
-
-	if monitoringProvider != nil {
-		cmClient.monitoringChannel = monitoringProvider.GetMonitoringDataChannel()
-	}
-
 	if logsProvider != nil {
 		cmClient.logsChannel = logsProvider.GetLogsDataChannel()
 	}
 
 	return cmClient, nil
+}
+
+// SendAlert sends alert.
+func (client *SMClient) SendAlert(alert cloudprotocol.AlertItem) {
+	if len(client.alertChannel) >= cap(client.alertChannel) {
+		log.Warn("Skip alert, channel is full")
+
+		return
+	}
+
+	client.alertChannel <- alert
+}
+
+// SendMonitoringData sends monitoring data.
+func (client *SMClient) SendMonitoringData(monitoringData aostypes.NodeMonitoring) {
+	if len(client.monitoringChannel) >= cap(client.monitoringChannel) {
+		log.Warn("Skip sending monitoring data. Channel full.")
+
+		return
+	}
+
+	client.monitoringChannel <- monitoringData
 }
 
 // Close closes SM client.
@@ -384,9 +399,7 @@ func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
 	if err := client.unitConfigProcessor.CheckUnitConfig(check.GetUnitConfig(), check.GetVersion()); err != nil {
-		if err != nil {
-			status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
-		}
+		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
@@ -400,9 +413,7 @@ func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
 	if err := client.unitConfigProcessor.UpdateUnitConfig(config.GetUnitConfig(), config.GetVersion()); err != nil {
-		if err != nil {
-			status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
-		}
+		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
@@ -530,15 +541,15 @@ func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
 	for i, pbEnvVar := range envVars.GetEnvVars() {
 		envVarsInfo[i] = cloudprotocol.EnvVarsInstanceInfo{
 			InstanceFilter: pbconvert.InstanceFilterFromPB(pbEnvVar.GetInstanceFilter()),
-			EnvVars:        make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.GetVars())),
+			Variables:      make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.GetVariables())),
 		}
 
-		for j, envVar := range pbEnvVar.GetVars() {
-			envVarsInfo[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: envVar.GetVarId(), Variable: envVar.GetVariable()}
+		for j, envVar := range pbEnvVar.GetVariables() {
+			envVarsInfo[i].Variables[j] = cloudprotocol.EnvVarInfo{Name: envVar.GetName(), Value: envVar.GetValue()}
 
 			if envVar.GetTtl() != nil {
 				localTime := envVar.GetTtl().AsTime()
-				envVarsInfo[i].EnvVars[j].TTL = &localTime
+				envVarsInfo[i].Variables[j].TTL = &localTime
 			}
 		}
 	}
@@ -554,12 +565,12 @@ func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
 		for i, status := range envVarsStatuses {
 			statuses.EnvVarsStatus[i] = &pb.EnvVarInstanceStatus{
 				InstanceFilter: pbconvert.InstanceFilterToPB(status.InstanceFilter),
-				VarsStatus:     make([]*pb.EnvVarStatus, len(status.Statuses)),
+				Statuses:       make([]*pb.EnvVarStatus, len(status.Statuses)),
 			}
 
 			for j, varStatus := range status.Statuses {
-				statuses.EnvVarsStatus[i].VarsStatus[j] = &pb.EnvVarStatus{
-					VarId: varStatus.ID, Error: pbconvert.ErrorInfoToPB(varStatus.ErrorInfo),
+				statuses.EnvVarsStatus[i].Statuses[j] = &pb.EnvVarStatus{
+					Name: varStatus.Name, Error: pbconvert.ErrorInfoToPB(varStatus.ErrorInfo),
 				}
 			}
 		}
@@ -583,7 +594,7 @@ func (client *SMClient) processAverageMonitoringData() {
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
 			SMOutgoingMessage: &pb.SMOutgoingMessages_AverageMonitoring{
-				AverageMonitoring: cloudprotocolAverageMonitoringToPB(averageMonitoring),
+				AverageMonitoring: averageMonitoringToPB(averageMonitoring),
 			},
 		}); err != nil {
 		log.Errorf("Can't send average monitoring: %v ", err)
@@ -630,7 +641,7 @@ func (client *SMClient) handleChannels() {
 			if err := client.stream.Send(
 				&pb.SMOutgoingMessages{
 					SMOutgoingMessage: &pb.SMOutgoingMessages_InstantMonitoring{
-						InstantMonitoring: cloudprotocolInstantMonitoringToPB(monitoringData),
+						InstantMonitoring: instantMonitoringToPB(monitoringData),
 					},
 				}); err != nil {
 				log.Errorf("Can't send instant monitoring: %v", err)
@@ -682,7 +693,7 @@ func runInstanceStatusToPB(runStatus *launcher.InstancesStatus) *pb.RunInstances
 	pbStatus := &pb.RunInstancesStatus{Instances: make([]*pb.InstanceStatus, len(runStatus.Instances))}
 
 	for i, instance := range runStatus.Instances {
-		pbStatus.Instances[i] = cloudprotocolInstanceStatusToPB(instance)
+		pbStatus.Instances[i] = instanceStatusToPB(instance)
 	}
 
 	return pbStatus
@@ -692,13 +703,13 @@ func updateInstanceStatusToPB(updateStatus *launcher.InstancesStatus) *pb.Update
 	pbStatus := &pb.UpdateInstancesStatus{Instances: make([]*pb.InstanceStatus, len(updateStatus.Instances))}
 
 	for i, instance := range updateStatus.Instances {
-		pbStatus.Instances[i] = cloudprotocolInstanceStatusToPB(instance)
+		pbStatus.Instances[i] = instanceStatusToPB(instance)
 	}
 
 	return pbStatus
 }
 
-func cloudprotocolInstanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
+func instanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
 	return &pb.InstanceStatus{
 		Instance:       pbconvert.InstanceIdentToPB(instance.InstanceIdent),
 		ServiceVersion: instance.ServiceVersion, RunState: instance.RunState,
@@ -706,7 +717,7 @@ func cloudprotocolInstanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.
 	}
 }
 
-func monitoringDataToPB(monitoring cloudprotocol.MonitoringData) *pb.MonitoringData {
+func monitoringDataToPB(monitoring aostypes.MonitoringData) *pb.MonitoringData {
 	pbMonitoringData := &pb.MonitoringData{
 		Ram: monitoring.RAM, Cpu: monitoring.CPU, InTraffic: monitoring.InTraffic,
 		OutTraffic: monitoring.OutTraffic, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
@@ -719,16 +730,15 @@ func monitoringDataToPB(monitoring cloudprotocol.MonitoringData) *pb.MonitoringD
 	return pbMonitoringData
 }
 
-func cloudprotocolAverageMonitoringToPB(monitoring cloudprotocol.NodeMonitoringData) *pb.AverageMonitoring {
+func averageMonitoringToPB(monitoring aostypes.NodeMonitoring) *pb.AverageMonitoring {
 	pbMonitoring := &pb.AverageMonitoring{
-		Timestamp:          timestamppb.New(monitoring.Timestamp),
-		NodeMonitoring:     monitoringDataToPB(monitoring.MonitoringData),
-		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
+		NodeMonitoring:      monitoringDataToPB(monitoring.NodeData),
+		InstancesMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.InstancesData)),
 	}
 
-	for i, instanceMonitoring := range monitoring.ServiceInstances {
-		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
-			Instance:       pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+	for i, instanceMonitoring := range monitoring.InstancesData {
+		pbMonitoring.InstancesMonitoring[i] = &pb.InstanceMonitoring{
+			Instance:       pbconvert.InstanceIdentToPB(monitoring.InstancesData[i].InstanceIdent),
 			MonitoringData: monitoringDataToPB(instanceMonitoring.MonitoringData),
 		}
 	}
@@ -736,16 +746,15 @@ func cloudprotocolAverageMonitoringToPB(monitoring cloudprotocol.NodeMonitoringD
 	return pbMonitoring
 }
 
-func cloudprotocolInstantMonitoringToPB(monitoring cloudprotocol.NodeMonitoringData) *pb.InstantMonitoring {
+func instantMonitoringToPB(monitoring aostypes.NodeMonitoring) *pb.InstantMonitoring {
 	pbMonitoring := &pb.InstantMonitoring{
-		Timestamp:          timestamppb.New(monitoring.Timestamp),
-		NodeMonitoring:     monitoringDataToPB(monitoring.MonitoringData),
-		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
+		NodeMonitoring:      monitoringDataToPB(monitoring.NodeData),
+		InstancesMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.InstancesData)),
 	}
 
-	for i, instanceMonitoring := range monitoring.ServiceInstances {
-		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
-			Instance:       pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+	for i, instanceMonitoring := range monitoring.InstancesData {
+		pbMonitoring.InstancesMonitoring[i] = &pb.InstanceMonitoring{
+			Instance:       pbconvert.InstanceIdentToPB(monitoring.InstancesData[i].InstanceIdent),
 			MonitoringData: monitoringDataToPB(instanceMonitoring.MonitoringData),
 		}
 	}
