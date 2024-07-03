@@ -50,8 +50,6 @@ func createConfigFile() (err error) {
 	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
-	"remoteNode": true,
-	"runnerFeatures": ["crun", "runc"],
 	"unitConfigFile": "/var/aos/aos_unit.cfg",
 	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
@@ -412,27 +410,5 @@ func TestPartLimit(t *testing.T) {
 
 	if config.LayersPartLimit != 20 {
 		t.Errorf("Wrong LayersPartLimit value: %v", config.LayersPartLimit)
-	}
-}
-
-func TestRemoteNodeFalg(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %v", err)
-	}
-
-	if config.RemoteNode != true {
-		t.Errorf("Wrong remoteNode value: %v", config.RemoteNode)
-	}
-}
-
-func TestRunnerFeatures(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %v", err)
-	}
-
-	if !reflect.DeepEqual(config.RunnerFeatures, []string{"crun", "runc"}) {
-		t.Errorf("Wrong runnerFeatures value: %v", config.RunnerFeatures)
 	}
 }
