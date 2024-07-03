@@ -71,8 +71,7 @@ type testNodeInfoProvider struct {
 }
 
 type testMonitoringProvider struct {
-	monitoringChannel chan cloudprotocol.NodeMonitoringData
-	averageMonitoring cloudprotocol.NodeMonitoringData
+	averageMonitoring aostypes.NodeMonitoring
 }
 
 type testLogProvider struct {
@@ -85,9 +84,6 @@ type testLogProvider struct {
 type testLogData struct {
 	internalLog   cloudprotocol.PushLog
 	expectedPBLog pbsm.LogData
-}
-type testAlertProvider struct {
-	alertsChannel chan cloudprotocol.AlertItem
 }
 
 type testServiceManager struct {
@@ -141,7 +137,7 @@ func TestSMRegistration(t *testing.T) {
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, true)
+		nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -159,15 +155,11 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 	defer server.close()
 
-	testMonitoring := &testMonitoringProvider{
-		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
-	}
-
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
 
 	client, err := smclient.New(&config.Config{
 		CMServerURL: serverURL,
-	}, nodeInfoProvider, nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
+	}, nodeInfoProvider, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -178,16 +170,17 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	type testMonitoringElement struct {
-		sendMonitoring     cloudprotocol.NodeMonitoringData
+		sendMonitoring     aostypes.NodeMonitoring
 		expectedMonitoring pbsm.InstantMonitoring
 	}
 
 	testMonitoringData := []testMonitoringElement{
 		{
-			sendMonitoring: cloudprotocol.NodeMonitoringData{
-				MonitoringData: cloudprotocol.MonitoringData{
+			sendMonitoring: aostypes.NodeMonitoring{
+				NodeID: "nodeID",
+				NodeData: aostypes.MonitoringData{
 					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []cloudprotocol.PartitionUsage{{Name: "p1", UsedSize: 100}},
+					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
 			expectedMonitoring: pbsm.InstantMonitoring{
@@ -198,24 +191,25 @@ func TestMonitoringNotifications(t *testing.T) {
 			},
 		},
 		{
-			sendMonitoring: cloudprotocol.NodeMonitoringData{
-				MonitoringData: cloudprotocol.MonitoringData{
+			sendMonitoring: aostypes.NodeMonitoring{
+				NodeID: "nodeID",
+				NodeData: aostypes.MonitoringData{
 					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []cloudprotocol.PartitionUsage{{Name: "p1", UsedSize: 100}},
+					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
-				ServiceInstances: []cloudprotocol.InstanceMonitoringData{
+				InstancesData: []aostypes.InstanceMonitoring{
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
-						MonitoringData: cloudprotocol.MonitoringData{
+						MonitoringData: aostypes.MonitoringData{
 							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []cloudprotocol.PartitionUsage{{Name: "ps1", UsedSize: 100}},
+							Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
-						MonitoringData: cloudprotocol.MonitoringData{
+						MonitoringData: aostypes.MonitoringData{
 							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []cloudprotocol.PartitionUsage{{Name: "ps2", UsedSize: 100}},
+							Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
 				},
@@ -225,7 +219,7 @@ func TestMonitoringNotifications(t *testing.T) {
 					Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
 					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
-				InstanceMonitoring: []*pbsm.InstanceMonitoring{
+				InstancesMonitoring: []*pbsm.InstanceMonitoring{
 					{
 						Instance: &pbcommon.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
 						MonitoringData: &pbsm.MonitoringData{
@@ -246,11 +240,9 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	for i := range testMonitoringData {
-		testMonitoring.monitoringChannel <- testMonitoringData[i].sendMonitoring
+		client.SendMonitoringData(testMonitoringData[i].sendMonitoring)
 
 		receivedMonitoring := <-server.instantMonitoringChannel
-
-		receivedMonitoring.InstantMonitoring.Timestamp = nil
 
 		if !proto.Equal(receivedMonitoring.InstantMonitoring, &testMonitoringData[i].expectedMonitoring) {
 			t.Errorf("Incorrect monitoring data")
@@ -269,7 +261,7 @@ func TestLogsNotification(t *testing.T) {
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+		nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -369,10 +361,9 @@ func TestAlertNotifications(t *testing.T) {
 	defer server.close()
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
-	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, testAlerts, nil, nil, nil, nil, true)
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -501,7 +492,7 @@ func TestAlertNotifications(t *testing.T) {
 	}
 
 	for i := range testAlertItems {
-		testAlerts.alertsChannel <- testAlertItems[i].sendAlert
+		client.SendAlert(testAlertItems[i].sendAlert)
 
 		receivedAlert := <-server.alertChannel
 
@@ -559,7 +550,7 @@ func TestAlertNotifications(t *testing.T) {
 	}
 
 	for i := range invalidAlerts {
-		testAlerts.alertsChannel <- invalidAlerts[i]
+		client.SendAlert(invalidAlerts[i])
 	}
 
 	select {
@@ -706,7 +697,7 @@ func TestRunInstances(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, nil, true)
+		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -796,7 +787,7 @@ func TestNetworkUpdate(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, nil, nil, netManager, nil, true)
+		nil, nil, nil, nil, nil, nil, nil, netManager, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -836,23 +827,23 @@ func TestOverrideEnvVars(t *testing.T) {
 			req: &pbsm.OverrideEnvVars{EnvVars: []*pbsm.OverrideInstanceEnvVar{
 				{
 					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service1", SubjectId: "subject1", Instance: 2},
-					Vars: []*pbsm.EnvVarInfo{
-						{VarId: "varID1", Variable: "var1", Ttl: timestamppb.Now()},
-						{VarId: "varID2", Variable: "var2", Ttl: timestamppb.Now()},
-						{VarId: "varID3", Variable: "var3", Ttl: timestamppb.Now()},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name1", Value: "value1", Ttl: timestamppb.Now()},
+						{Name: "name2", Value: "value2", Ttl: timestamppb.Now()},
+						{Name: "name3", Value: "value3", Ttl: timestamppb.Now()},
 					},
 				},
 				{
 					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service2", SubjectId: "subject3", Instance: 0},
-					Vars: []*pbsm.EnvVarInfo{
-						{VarId: "varID4", Variable: "var4", Ttl: timestamppb.Now()},
-						{VarId: "varID5", Variable: "var5", Ttl: timestamppb.Now()},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name4", Value: "value4", Ttl: timestamppb.Now()},
+						{Name: "name5", Value: "value5", Ttl: timestamppb.Now()},
 					},
 				},
 				{
 					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service3", Instance: -1},
-					Vars: []*pbsm.EnvVarInfo{
-						{VarId: "varID6", Variable: "var6", Ttl: timestamppb.Now()},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name6", Value: "value6", Ttl: timestamppb.Now()},
 					},
 				},
 			}},
@@ -860,15 +851,15 @@ func TestOverrideEnvVars(t *testing.T) {
 				{
 					InstanceFilter: cloudprotocol.NewInstanceFilter("service1", "subject1", -1),
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "varID1"},
-						{ID: "varID2", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error2"}},
+						{Name: "name1"},
+						{Name: "name2", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error2"}},
 					},
 				},
 				{
 					InstanceFilter: cloudprotocol.NewInstanceFilter("service2", "subject3", 2),
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "varID3", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error3"}},
-						{ID: "varID4", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error4"}},
+						{Name: "name3", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error3"}},
+						{Name: "name4", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error4"}},
 					},
 				},
 			},
@@ -885,7 +876,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -931,7 +922,7 @@ func TestCloudConnection(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
+		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -988,24 +979,24 @@ func TestAverageMonitoring(t *testing.T) {
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
 	testMonitoring := &testMonitoringProvider{
-		averageMonitoring: cloudprotocol.NodeMonitoringData{
-			MonitoringData: cloudprotocol.MonitoringData{
+		averageMonitoring: aostypes.NodeMonitoring{
+			NodeData: aostypes.MonitoringData{
 				RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-				Disk: []cloudprotocol.PartitionUsage{{Name: "p1", UsedSize: 100}},
+				Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 			},
-			ServiceInstances: []cloudprotocol.InstanceMonitoringData{
+			InstancesData: []aostypes.InstanceMonitoring{
 				{
 					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
-					MonitoringData: cloudprotocol.MonitoringData{
+					MonitoringData: aostypes.MonitoringData{
 						RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-						Disk: []cloudprotocol.PartitionUsage{{Name: "ps1", UsedSize: 100}},
+						Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
-					MonitoringData: cloudprotocol.MonitoringData{
+					MonitoringData: aostypes.MonitoringData{
 						RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-						Disk: []cloudprotocol.PartitionUsage{{Name: "ps2", UsedSize: 100}},
+						Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 					},
 				},
 			},
@@ -1013,7 +1004,7 @@ func TestAverageMonitoring(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
+		nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -1154,13 +1145,13 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 					envVarStatus.GetInstanceFilter().GetServiceId(),
 					envVarStatus.GetInstanceFilter().GetSubjectId(),
 					envVarStatus.GetInstanceFilter().GetInstance()),
-				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.GetVarsStatus())),
+				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.GetStatuses())),
 			}
 
-			for j, s := range envVarStatus.GetVarsStatus() {
+			for j, s := range envVarStatus.GetStatuses() {
 				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{
-					ID:        s.GetVarId(),
-					ErrorInfo: pbconvert.NewErrorInfoFromPB(s.GetError()),
+					Name:      s.GetName(),
+					ErrorInfo: pbconvert.ErrorInfoFromPB(s.GetError()),
 				}
 			}
 		}
@@ -1176,17 +1167,17 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 	}
 }
 
-func convertMonitoringData(monitoring *pbsm.MonitoringData) cloudprotocol.MonitoringData {
-	data := cloudprotocol.MonitoringData{
+func convertMonitoringData(monitoring *pbsm.MonitoringData) aostypes.MonitoringData {
+	data := aostypes.MonitoringData{
 		RAM:        monitoring.GetRam(),
 		CPU:        monitoring.GetCpu(),
 		InTraffic:  monitoring.GetInTraffic(),
 		OutTraffic: monitoring.GetOutTraffic(),
-		Disk:       make([]cloudprotocol.PartitionUsage, 0, len(monitoring.GetDisk())),
+		Disk:       make([]aostypes.PartitionUsage, 0, len(monitoring.GetDisk())),
 	}
 
 	for _, disk := range monitoring.GetDisk() {
-		data.Disk = append(data.Disk, cloudprotocol.PartitionUsage{
+		data.Disk = append(data.Disk, aostypes.PartitionUsage{
 			Name:     disk.GetName(),
 			UsedSize: disk.GetUsedSize(),
 		})
@@ -1195,15 +1186,15 @@ func convertMonitoringData(monitoring *pbsm.MonitoringData) cloudprotocol.Monito
 	return data
 }
 
-func convertAverageMonitoring(monitoring *pbsm.AverageMonitoring) cloudprotocol.NodeMonitoringData {
-	data := cloudprotocol.NodeMonitoringData{
-		MonitoringData:   convertMonitoringData(monitoring.GetNodeMonitoring()),
-		ServiceInstances: make([]cloudprotocol.InstanceMonitoringData, 0, len(monitoring.GetInstanceMonitoring())),
+func convertAverageMonitoring(monitoring *pbsm.AverageMonitoring) aostypes.NodeMonitoring {
+	data := aostypes.NodeMonitoring{
+		NodeData:      convertMonitoringData(monitoring.GetNodeMonitoring()),
+		InstancesData: make([]aostypes.InstanceMonitoring, 0, len(monitoring.GetInstancesMonitoring())),
 	}
 
-	for _, instanceMonitoring := range monitoring.GetInstanceMonitoring() {
-		data.ServiceInstances = append(data.ServiceInstances, cloudprotocol.InstanceMonitoringData{
-			InstanceIdent:  pbconvert.NewInstanceIdentFromPB(instanceMonitoring.GetInstance()),
+	for _, instanceMonitoring := range monitoring.GetInstancesMonitoring() {
+		data.InstancesData = append(data.InstancesData, aostypes.InstanceMonitoring{
+			InstanceIdent:  pbconvert.InstanceIdentFromPB(instanceMonitoring.GetInstance()),
 			MonitoringData: convertMonitoringData(instanceMonitoring.GetMonitoringData()),
 		})
 	}
@@ -1211,12 +1202,10 @@ func convertAverageMonitoring(monitoring *pbsm.AverageMonitoring) cloudprotocol.
 	return data
 }
 
-func (server *testServer) waitAndCheckAverageMonitoring(monitoring cloudprotocol.NodeMonitoringData) error {
+func (server *testServer) waitAndCheckAverageMonitoring(monitoring aostypes.NodeMonitoring) error {
 	for {
 		select {
 		case data := <-server.averageMonitoringChannel:
-			data.AverageMonitoring.Timestamp = nil
-
 			if !reflect.DeepEqual(convertAverageMonitoring(data.AverageMonitoring), monitoring) {
 				return aoserrors.New("incorrect monitoring data")
 			}
@@ -1296,16 +1285,16 @@ func convertEnvVarsReq(req *pbsm.OverrideEnvVars) []cloudprotocol.EnvVarsInstanc
 				envVar.GetInstanceFilter().GetServiceId(),
 				envVar.GetInstanceFilter().GetSubjectId(),
 				envVar.GetInstanceFilter().GetInstance()),
-			EnvVars: make([]cloudprotocol.EnvVarInfo, len(envVar.GetVars())),
+			Variables: make([]cloudprotocol.EnvVarInfo, len(envVar.GetVariables())),
 		}
 
-		for j, v := range envVar.GetVars() {
-			envVars[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: v.GetVarId(), Variable: v.GetVariable()}
+		for j, v := range envVar.GetVariables() {
+			envVars[i].Variables[j] = cloudprotocol.EnvVarInfo{Name: v.GetName(), Value: v.GetValue()}
 
 			if v.GetTtl() != nil {
 				t := v.GetTtl().AsTime()
 
-				envVars[i].EnvVars[j].TTL = &t
+				envVars[i].Variables[j].TTL = &t
 			}
 		}
 	}
@@ -1321,13 +1310,7 @@ func (provider *testNodeInfoProvider) GetNodeInfo() (cloudprotocol.NodeInfo, err
 	return provider.nodeInfo, nil
 }
 
-func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (
-	channel <-chan cloudprotocol.NodeMonitoringData,
-) {
-	return monitoring.monitoringChannel
-}
-
-func (monitoring *testMonitoringProvider) GetAverageMonitoring() (cloudprotocol.NodeMonitoringData, error) {
+func (monitoring *testMonitoringProvider) GetAverageMonitoring() (aostypes.NodeMonitoring, error) {
 	return monitoring.averageMonitoring, nil
 }
 
@@ -1356,10 +1339,6 @@ func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLo
 
 func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog) {
 	return logProvider.channel
-}
-
-func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
-	return alerts.alertsChannel
 }
 
 func (processor *testServiceManager) ProcessDesiredServices(services []aostypes.ServiceInfo) error {
