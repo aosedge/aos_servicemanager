@@ -27,7 +27,7 @@ import (
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
-	pb "github.com/aosedge/aos_common/api/servicemanager/v3"
+	pb "github.com/aosedge/aos_common/api/servicemanager"
 	"github.com/aosedge/aos_common/utils/cryptutils"
 	"github.com/aosedge/aos_common/utils/pbconvert"
 	"github.com/golang/protobuf/ptypes/timestamp"
@@ -62,6 +62,7 @@ type SMClient struct {
 
 	config               *config.Config
 	connection           *grpc.ClientConn
+	nodeID               string
 	stream               pb.SMService_RegisterSMClient
 	closeChannel         chan struct{}
 	servicesProcessor    ServicesProcessor
@@ -75,15 +76,12 @@ type SMClient struct {
 	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    <-chan cloudprotocol.NodeMonitoringData
 	logsChannel          <-chan cloudprotocol.PushLog
-	nodeDescription      NodeDescription
-	nodeMonitoringData   cloudprotocol.NodeMonitoringData
 	runStatus            *launcher.InstancesStatus
 }
 
-type NodeDescription struct {
-	NodeID     string
-	NodeType   string
-	SystemInfo cloudprotocol.SystemInfo
+// NodeInfoProvider interface to get node information.
+type NodeInfoProvider interface {
+	GetNodeInfo() (cloudprotocol.NodeInfo, error)
 }
 
 // CertificateProvider interface to get certificate.
@@ -93,7 +91,7 @@ type CertificateProvider interface {
 
 // UnitConfigProcessor unit configuration handler.
 type UnitConfigProcessor interface {
-	GetUnitConfigInfo() (version string)
+	GetUnitConfigStatus() (version string, err error)
 	CheckUnitConfig(configJSON, version string) error
 	UpdateUnitConfig(configJSON, version string) error
 }
@@ -127,6 +125,7 @@ type NetworkProvider interface {
 
 // MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
+	GetAverageMonitoring() (cloudprotocol.NodeMonitoringData, error)
 	GetMonitoringDataChannel() (monitoringChannel <-chan cloudprotocol.NodeMonitoringData)
 }
 
@@ -149,13 +148,13 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
  **********************************************************************************************************************/
 
 // New creates SM client fo communication with CM.
-func New(config *config.Config, nodeDescription NodeDescription, certificateProvider CertificateProvider,
+func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
 	unitConfigProcessor UnitConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
 	logsProvider LogsProvider, networkManager NetworkProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
-		config: config, nodeDescription: nodeDescription, servicesProcessor: servicesProcessor,
+		config: config, servicesProcessor: servicesProcessor,
 		layersProcessor: layersProcessor, launcher: launcher, unitConfigProcessor: unitConfigProcessor,
 		monitoringProvider: monitoringProvider, logsProvider: logsProvider,
 		networkManager: networkManager, closeChannel: make(chan struct{}, 1),
@@ -164,6 +163,13 @@ func New(config *config.Config, nodeDescription NodeDescription, certificateProv
 	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
+
+	nodeInfo, err := nodeInfoProvider.GetNodeInfo()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
+
+	cmClient.nodeID = nodeInfo.NodeID
 
 	if cmClient.launcher != nil {
 		cmClient.runtimeStatusChannel = launcher.RuntimeStatusChannel()
@@ -193,10 +199,10 @@ func (client *SMClient) Close() (err error) {
 	}
 
 	if client.connection != nil {
-		errCloseconn := client.connection.Close()
+		errCloseConn := client.connection.Close()
 
 		if err != nil {
-			err = errCloseconn
+			err = errCloseConn
 		}
 	}
 
@@ -243,7 +249,7 @@ func (client *SMClient) createConnection(
 	log.Debug("Connected to CM")
 
 	go func() {
-		err := client.register(config)
+		err := client.register()
 
 		for {
 			if err != nil && len(client.closeChannel) == 0 {
@@ -267,7 +273,7 @@ func (client *SMClient) createConnection(
 				return
 
 			case <-time.After(cmReconnectTimeout):
-				err = client.register(config)
+				err = client.register()
 			}
 		}
 	}()
@@ -275,7 +281,7 @@ func (client *SMClient) createConnection(
 	return nil
 }
 
-func (client *SMClient) register(config *config.Config) (err error) {
+func (client *SMClient) register() (err error) {
 	client.Lock()
 	defer client.Unlock()
 
@@ -285,22 +291,9 @@ func (client *SMClient) register(config *config.Config) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	nodeCfg := pb.NodeConfiguration{
-		NodeId: client.nodeDescription.NodeID, NodeType: client.nodeDescription.NodeType, RemoteNode: config.RemoteNode,
-		RunnerFeatures: config.RunnerFeatures,
-		NumCpus:        client.nodeDescription.SystemInfo.NumCPUs, TotalRam: client.nodeDescription.SystemInfo.TotalRAM,
-		Partitions: make([]*pb.Partition, len(client.nodeDescription.SystemInfo.Partitions)),
-	}
-
-	for i, partition := range client.nodeDescription.SystemInfo.Partitions {
-		nodeCfg.Partitions[i] = &pb.Partition{
-			Name: partition.Name, Types: partition.Types, TotalSize: partition.TotalSize,
-		}
-	}
-
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
-			SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfiguration{NodeConfiguration: &nodeCfg},
+			SMOutgoingMessage: &pb.SMOutgoingMessages_RegisterSm{RegisterSm: &pb.RegisterSM{NodeId: client.nodeID}},
 		}); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -362,8 +355,8 @@ func (client *SMClient) processMessages() (err error) {
 		case *pb.SMIncomingMessages_OverrideEnvVars:
 			client.processOverrideEnvVars(data.OverrideEnvVars)
 
-		case *pb.SMIncomingMessages_GetNodeMonitoring:
-			client.processNodeMonitoringData()
+		case *pb.SMIncomingMessages_GetAverageMonitoring:
+			client.processAverageMonitoringData()
 
 		case *pb.SMIncomingMessages_ConnectionStatus:
 			client.processConnectionStatus(data.ConnectionStatus)
@@ -372,7 +365,13 @@ func (client *SMClient) processMessages() (err error) {
 }
 
 func (client *SMClient) processGetUnitConfigStatus() {
-	status := &pb.UnitConfigStatus{VendorVersion: client.unitConfigProcessor.GetUnitConfigInfo()}
+	version, err := client.unitConfigProcessor.GetUnitConfigStatus()
+
+	status := &pb.UnitConfigStatus{Version: version}
+
+	if err != nil {
+		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
+	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
 		SMOutgoingMessage: &pb.SMOutgoingMessages_UnitConfigStatus{UnitConfigStatus: status},
@@ -384,8 +383,10 @@ func (client *SMClient) processGetUnitConfigStatus() {
 func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
-	if err := client.unitConfigProcessor.CheckUnitConfig(check.GetUnitConfig(), check.GetVendorVersion()); err != nil {
-		status.Error = err.Error()
+	if err := client.unitConfigProcessor.CheckUnitConfig(check.GetUnitConfig(), check.GetVersion()); err != nil {
+		if err != nil {
+			status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
+		}
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
@@ -398,8 +399,10 @@ func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
 func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
 	status := &pb.UnitConfigStatus{}
 
-	if err := client.unitConfigProcessor.UpdateUnitConfig(config.GetUnitConfig(), config.GetVendorVersion()); err != nil {
-		status.Error = err.Error()
+	if err := client.unitConfigProcessor.UpdateUnitConfig(config.GetUnitConfig(), config.GetVersion()); err != nil {
+		if err != nil {
+			status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
+		}
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
@@ -431,14 +434,13 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 
 	for i, pbService := range runInstances.GetServices() {
 		services[i] = aostypes.ServiceInfo{
-			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    pbService.GetVersionInfo().GetAosVersion(),
-				VendorVersion: pbService.GetVersionInfo().GetVendorVersion(),
-				Description:   pbService.GetVersionInfo().GetDescription(),
-			},
-			ID: pbService.GetServiceId(), ProviderID: pbService.GetProviderId(),
-			URL: pbService.GetUrl(), GID: pbService.GetGid(),
-			Sha256: pbService.GetSha256(), Sha512: pbService.GetSha512(), Size: pbService.GetSize(),
+			ServiceID:  pbService.GetServiceId(),
+			ProviderID: pbService.GetProviderId(),
+			Version:    pbService.GetVersion(),
+			URL:        pbService.GetUrl(),
+			GID:        pbService.GetGid(),
+			Sha256:     pbService.GetSha256(),
+			Size:       pbService.GetSize(),
 		}
 	}
 
@@ -450,13 +452,12 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 
 	for i, pbLayer := range runInstances.GetLayers() {
 		layers[i] = aostypes.LayerInfo{
-			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    pbLayer.GetVersionInfo().GetAosVersion(),
-				VendorVersion: pbLayer.GetVersionInfo().GetVendorVersion(),
-				Description:   pbLayer.GetVersionInfo().GetDescription(),
-			},
-			ID: pbLayer.GetLayerId(), Digest: pbLayer.GetDigest(), URL: pbLayer.GetUrl(),
-			Sha256: pbLayer.GetSha256(), Sha512: pbLayer.GetSha512(), Size: pbLayer.GetSize(),
+			LayerID: pbLayer.GetLayerId(),
+			Digest:  pbLayer.GetDigest(),
+			Version: pbLayer.GetVersion(),
+			URL:     pbLayer.GetUrl(),
+			Sha256:  pbLayer.GetSha256(),
+			Size:    pbLayer.GetSize(),
 		}
 	}
 
@@ -468,7 +469,7 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 
 	for i, pbInstance := range runInstances.GetInstances() {
 		instances[i] = aostypes.InstanceInfo{
-			InstanceIdent:     pbconvert.NewInstanceIdentFromPB(pbInstance.GetInstance()),
+			InstanceIdent:     pbconvert.InstanceIdentFromPB(pbInstance.GetInstance()),
 			NetworkParameters: pbconvert.NewNetworkParametersFromPB(pbInstance.GetNetworkParameters()),
 			UID:               pbInstance.GetUid(), Priority: pbInstance.GetPriority(),
 			StoragePath: pbInstance.GetStoragePath(), StatePath: pbInstance.GetStatePath(),
@@ -481,32 +482,42 @@ func (client *SMClient) processRunInstances(runInstances *pb.RunInstances) {
 }
 
 func (client *SMClient) processGetSystemLogRequest(logRequest *pb.SystemLogRequest) {
-	getSystemLogRequest := cloudprotocol.RequestLog{LogID: logRequest.GetLogId()}
-
-	getSystemLogRequest.Filter.From, getSystemLogRequest.Filter.Till = getFromTillTimeFromPB(
-		logRequest.GetFrom(), logRequest.GetTill())
+	getSystemLogRequest := cloudprotocol.RequestLog{
+		LogID: logRequest.GetLogId(),
+		Filter: cloudprotocol.LogFilter{
+			From: getTimeFromPB(logRequest.GetFrom()),
+			Till: getTimeFromPB(logRequest.GetTill()),
+		},
+	}
 
 	client.logsProvider.GetSystemLog(getSystemLogRequest)
 }
 
 func (client *SMClient) processGetInstanceLogRequest(instanceLogRequest *pb.InstanceLogRequest) {
-	getInstanceLogRequest := cloudprotocol.RequestLog{LogID: instanceLogRequest.GetLogId()}
-
-	getInstanceLogRequest.Filter.From, getInstanceLogRequest.Filter.Till = getFromTillTimeFromPB(
-		instanceLogRequest.GetFrom(), instanceLogRequest.GetTill())
-	getInstanceLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(instanceLogRequest.GetInstance())
+	getInstanceLogRequest := cloudprotocol.RequestLog{
+		LogID: instanceLogRequest.GetLogId(),
+		Filter: cloudprotocol.LogFilter{
+			From: getTimeFromPB(instanceLogRequest.GetFrom()),
+			Till: getTimeFromPB(instanceLogRequest.GetTill()),
+			InstanceFilter: pbconvert.InstanceFilterFromPB(
+				instanceLogRequest.GetInstanceFilter()),
+		},
+	}
 
 	if err := client.logsProvider.GetInstanceLog(getInstanceLogRequest); err != nil {
 		log.Errorf("Can't get instance log: %v", err)
 	}
 }
 
-func (client *SMClient) processGetInstanceCrashLogRequest(logrequest *pb.InstanceCrashLogRequest) {
-	getInstanceCrashLogRequest := cloudprotocol.RequestLog{LogID: logrequest.GetLogId()}
-
-	getInstanceCrashLogRequest.Filter.From, getInstanceCrashLogRequest.Filter.Till = getFromTillTimeFromPB(
-		logrequest.GetFrom(), logrequest.GetTill())
-	getInstanceCrashLogRequest.Filter.InstanceFilter = getInstanceFilterFromPB(logrequest.GetInstance())
+func (client *SMClient) processGetInstanceCrashLogRequest(crashLogRequest *pb.InstanceCrashLogRequest) {
+	getInstanceCrashLogRequest := cloudprotocol.RequestLog{
+		LogID: crashLogRequest.GetLogId(),
+		Filter: cloudprotocol.LogFilter{
+			From:           getTimeFromPB(crashLogRequest.GetFrom()),
+			Till:           getTimeFromPB(crashLogRequest.GetTill()),
+			InstanceFilter: pbconvert.InstanceFilterFromPB(crashLogRequest.GetInstanceFilter()),
+		},
+	}
 
 	if err := client.logsProvider.GetInstanceCrashLog(getInstanceCrashLogRequest); err != nil {
 		log.Errorf("Can't get instance crash log: %v", err)
@@ -518,7 +529,7 @@ func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
 
 	for i, pbEnvVar := range envVars.GetEnvVars() {
 		envVarsInfo[i] = cloudprotocol.EnvVarsInstanceInfo{
-			InstanceFilter: getInstanceFilterFromPB(pbEnvVar.GetInstance()),
+			InstanceFilter: pbconvert.InstanceFilterFromPB(pbEnvVar.GetInstanceFilter()),
 			EnvVars:        make([]cloudprotocol.EnvVarInfo, len(pbEnvVar.GetVars())),
 		}
 
@@ -536,18 +547,20 @@ func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
 
 	envVarsStatuses, err := client.launcher.OverrideEnvVars(envVarsInfo)
 	if err != nil {
-		statuses.Error = err.Error()
+		statuses.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	} else {
 		statuses.EnvVarsStatus = make([]*pb.EnvVarInstanceStatus, len(envVarsStatuses))
 
 		for i, status := range envVarsStatuses {
 			statuses.EnvVarsStatus[i] = &pb.EnvVarInstanceStatus{
-				Instance:   pbconvert.InstanceFilterToPB(status.InstanceFilter),
-				VarsStatus: make([]*pb.EnvVarStatus, len(status.Statuses)),
+				InstanceFilter: pbconvert.InstanceFilterToPB(status.InstanceFilter),
+				VarsStatus:     make([]*pb.EnvVarStatus, len(status.Statuses)),
 			}
 
 			for j, varStatus := range status.Statuses {
-				statuses.EnvVarsStatus[i].VarsStatus[j] = &pb.EnvVarStatus{VarId: varStatus.ID, Error: varStatus.Error}
+				statuses.EnvVarsStatus[i].VarsStatus[j] = &pb.EnvVarStatus{
+					VarId: varStatus.ID, Error: pbconvert.ErrorInfoToPB(varStatus.ErrorInfo),
+				}
 			}
 		}
 	}
@@ -555,18 +568,25 @@ func (client *SMClient) processOverrideEnvVars(envVars *pb.OverrideEnvVars) {
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
 		SMOutgoingMessage: &pb.SMOutgoingMessages_OverrideEnvVarStatus{OverrideEnvVarStatus: statuses},
 	}); err != nil {
-		log.Errorf("Can't send roverride env vars status: %v", err)
+		log.Errorf("Can't send override env vars status: %v", err)
 	}
 }
 
-func (client *SMClient) processNodeMonitoringData() {
+func (client *SMClient) processAverageMonitoringData() {
+	averageMonitoring, err := client.monitoringProvider.GetAverageMonitoring()
+	if err != nil {
+		log.Errorf("Can't get average monitoring: %v", err)
+
+		return
+	}
+
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
-			SMOutgoingMessage: &pb.SMOutgoingMessages_NodeMonitoring{
-				NodeMonitoring: cloudprotocolMonitoringToPB(client.nodeMonitoringData),
+			SMOutgoingMessage: &pb.SMOutgoingMessages_AverageMonitoring{
+				AverageMonitoring: cloudprotocolAverageMonitoringToPB(averageMonitoring),
 			},
 		}); err != nil {
-		log.Errorf("Can't send monitoring notification: %v ", err)
+		log.Errorf("Can't send average monitoring: %v ", err)
 	}
 }
 
@@ -607,15 +627,13 @@ func (client *SMClient) handleChannels() {
 			}
 
 		case monitoringData := <-client.monitoringChannel:
-			client.nodeMonitoringData = monitoringData
-
 			if err := client.stream.Send(
 				&pb.SMOutgoingMessages{
-					SMOutgoingMessage: &pb.SMOutgoingMessages_NodeMonitoring{
-						NodeMonitoring: cloudprotocolMonitoringToPB(monitoringData),
+					SMOutgoingMessage: &pb.SMOutgoingMessages_InstantMonitoring{
+						InstantMonitoring: cloudprotocolInstantMonitoringToPB(monitoringData),
 					},
 				}); err != nil {
-				log.Errorf("Can't send monitoring notification: %v", err)
+				log.Errorf("Can't send instant monitoring: %v", err)
 
 				return
 			}
@@ -682,103 +700,74 @@ func updateInstanceStatusToPB(updateStatus *launcher.InstancesStatus) *pb.Update
 
 func cloudprotocolInstanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
 	return &pb.InstanceStatus{
-		Instance: pbconvert.InstanceIdentToPB(instance.InstanceIdent), AosVersion: instance.AosVersion,
-		RunState: instance.RunState, ErrorInfo: cloudprotocolErrorInfoToPB(instance.ErrorInfo),
+		Instance:       pbconvert.InstanceIdentToPB(instance.InstanceIdent),
+		ServiceVersion: instance.ServiceVersion, RunState: instance.RunState,
+		ErrorInfo: pbconvert.ErrorInfoToPB(instance.ErrorInfo),
 	}
 }
 
-func cloudprotocolErrorInfoToPB(errorInfo *cloudprotocol.ErrorInfo) *pb.ErrorInfo {
-	if errorInfo == nil {
-		return nil
-	}
-
-	return &pb.ErrorInfo{
-		AosCode:  int32(errorInfo.AosCode),
-		ExitCode: int32(errorInfo.ExitCode), Message: errorInfo.Message,
-	}
-}
-
-func cloudprotocolMonitoringToPB(monitoring cloudprotocol.NodeMonitoringData) *pb.NodeMonitoring {
-	pbMonitoring := &pb.NodeMonitoring{
-		Timestamp: timestamppb.New(monitoring.Timestamp),
-		MonitoringData: &pb.MonitoringData{
-			Ram:        monitoring.RAM,
-			Cpu:        monitoring.CPU,
-			InTraffic:  monitoring.InTraffic,
-			OutTraffic: monitoring.OutTraffic,
-			Disk:       make([]*pb.PartitionUsage, len(monitoring.Disk)),
-		},
-		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
+func monitoringDataToPB(monitoring cloudprotocol.MonitoringData) *pb.MonitoringData {
+	pbMonitoringData := &pb.MonitoringData{
+		Ram: monitoring.RAM, Cpu: monitoring.CPU, InTraffic: monitoring.InTraffic,
+		OutTraffic: monitoring.OutTraffic, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
 	}
 
 	for i, disk := range monitoring.Disk {
-		pbMonitoring.MonitoringData.Disk[i] = &pb.PartitionUsage{Name: disk.Name, UsedSize: disk.UsedSize}
+		pbMonitoringData.Disk[i] = &pb.PartitionUsage{Name: disk.Name, UsedSize: disk.UsedSize}
 	}
 
-	for i, serviceMonitoring := range monitoring.ServiceInstances {
-		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
-			Instance: pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
-			MonitoringData: &pb.MonitoringData{
-				Ram:        serviceMonitoring.RAM,
-				Cpu:        serviceMonitoring.CPU,
-				InTraffic:  serviceMonitoring.InTraffic,
-				OutTraffic: serviceMonitoring.OutTraffic,
-				Disk:       make([]*pb.PartitionUsage, len(serviceMonitoring.Disk)),
-			},
-		}
+	return pbMonitoringData
+}
 
-		for j, serviceDisk := range serviceMonitoring.Disk {
-			pbMonitoring.InstanceMonitoring[i].MonitoringData.Disk[j] = &pb.PartitionUsage{
-				Name: serviceDisk.Name, UsedSize: serviceDisk.UsedSize,
-			}
+func cloudprotocolAverageMonitoringToPB(monitoring cloudprotocol.NodeMonitoringData) *pb.AverageMonitoring {
+	pbMonitoring := &pb.AverageMonitoring{
+		Timestamp:          timestamppb.New(monitoring.Timestamp),
+		NodeMonitoring:     monitoringDataToPB(monitoring.MonitoringData),
+		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
+	}
+
+	for i, instanceMonitoring := range monitoring.ServiceInstances {
+		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
+			Instance:       pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+			MonitoringData: monitoringDataToPB(instanceMonitoring.MonitoringData),
 		}
 	}
 
 	return pbMonitoring
 }
 
-func getFromTillTimeFromPB(fromPB, tillPB *timestamp.Timestamp) (from, till *time.Time) {
-	if fromPB != nil {
-		localFrom := fromPB.AsTime()
-
-		from = &localFrom
+func cloudprotocolInstantMonitoringToPB(monitoring cloudprotocol.NodeMonitoringData) *pb.InstantMonitoring {
+	pbMonitoring := &pb.InstantMonitoring{
+		Timestamp:          timestamppb.New(monitoring.Timestamp),
+		NodeMonitoring:     monitoringDataToPB(monitoring.MonitoringData),
+		InstanceMonitoring: make([]*pb.InstanceMonitoring, len(monitoring.ServiceInstances)),
 	}
 
-	if tillPB != nil {
-		localTill := tillPB.AsTime()
-
-		till = &localTill
+	for i, instanceMonitoring := range monitoring.ServiceInstances {
+		pbMonitoring.InstanceMonitoring[i] = &pb.InstanceMonitoring{
+			Instance:       pbconvert.InstanceIdentToPB(monitoring.ServiceInstances[i].InstanceIdent),
+			MonitoringData: monitoringDataToPB(instanceMonitoring.MonitoringData),
+		}
 	}
 
-	return from, till
+	return pbMonitoring
+}
+
+func getTimeFromPB(timePB *timestamp.Timestamp) *time.Time {
+	if timePB != nil {
+		time := timePB.AsTime()
+
+		return &time
+	}
+
+	return nil
 }
 
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
-	pbLog = &pb.LogData{
+	return &pb.LogData{
 		LogId: log.LogID, PartCount: log.PartsCount, Part: log.Part, Data: log.Content,
+		Error: pbconvert.ErrorInfoToPB(log.ErrorInfo),
 	}
-
-	if log.ErrorInfo != nil {
-		pbLog.Error = log.ErrorInfo.Message
-	}
-
-	return pbLog
-}
-
-func getInstanceFilterFromPB(ident *pb.InstanceIdent) (filter cloudprotocol.InstanceFilter) {
-	filter.ServiceID = &ident.ServiceId
-
-	if ident.GetSubjectId() != "" {
-		filter.SubjectID = &ident.SubjectId
-	}
-
-	if ident.GetInstance() != -1 {
-		instance := (uint64)(ident.GetInstance())
-
-		filter.Instance = &instance
-	}
-
-	return filter
 }
 
 func cloudprotocolAlertToPB(alert *cloudprotocol.AlertItem) (pbAlert *pb.Alert, err error) {
@@ -851,15 +840,12 @@ func getPBResourceValidateAlertFromPayload(payload interface{}) (*pb.Alert_Resou
 		return nil, aoserrors.Wrap(errIncorrectAlertType)
 	}
 
-	pbResAlert := pb.ResourceValidateAlert{}
+	pbResAlert := pb.ResourceValidateAlert{
+		Name: resAlert.Name,
+	}
 
-	for _, resAlertData := range resAlert.ResourcesErrors {
-		pbResAlertElement := pb.ResourceValidateErrors{
-			Name:     resAlertData.Name,
-			ErrorMsg: resAlertData.Errors,
-		}
-
-		pbResAlert.Errors = append(pbResAlert.GetErrors(), &pbResAlertElement)
+	for _, errorInfo := range resAlert.Errors {
+		pbResAlert.Errors = append(pbResAlert.Errors, pbconvert.ErrorInfoToPB(&errorInfo))
 	}
 
 	return &pb.Alert_ResourceValidateAlert{ResourceValidateAlert: &pbResAlert}, nil
@@ -903,14 +889,14 @@ func getPBInstanceQuotaAlertFromPayload(payload interface{}) (*pb.Alert_Instance
 }
 
 func getPBInstanceAlertFromPayload(payload interface{}) (*pb.Alert_InstanceAlert, error) {
-	instAlert, ok := payload.(cloudprotocol.ServiceInstanceAlert)
+	instanceAlert, ok := payload.(cloudprotocol.ServiceInstanceAlert)
 	if !ok {
 		return nil, aoserrors.Wrap(errIncorrectAlertType)
 	}
 
 	return &pb.Alert_InstanceAlert{InstanceAlert: &pb.InstanceAlert{
-		Instance:   pbconvert.InstanceIdentToPB(instAlert.InstanceIdent),
-		AosVersion: instAlert.AosVersion,
-		Message:    instAlert.Message,
+		Instance:       pbconvert.InstanceIdentToPB(instanceAlert.InstanceIdent),
+		ServiceVersion: instanceAlert.ServiceVersion,
+		Message:        instanceAlert.Message,
 	}}, nil
 }
