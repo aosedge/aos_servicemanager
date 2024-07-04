@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
 	"github.com/aosedge/aos_common/migration"
+	semver "github.com/hashicorp/go-version"
 	_ "github.com/mattn/go-sqlite3" // ignore lint
 	log "github.com/sirupsen/logrus"
 
@@ -368,25 +370,30 @@ func (db *Database) GetInstanceInfoByID(
 		return ident, "", aoserrors.Wrap(err)
 	}
 
-	stmt, err := db.sql.Prepare(
-		`SELECT version FROM services WHERE version = (SELECT MAX(version)
-		FROM services WHERE id = ?) AND id = ?`)
-	if err != nil {
-		return ident, "", aoserrors.Wrap(err)
-	}
-	defer stmt.Close()
-
-	err = stmt.QueryRow(instance.ServiceID, instance.ServiceID).Scan(&version)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return ident, "", servicemanager.ErrNotExist
-	}
-
+	services, err := db.GetAllServiceVersions(instance.ServiceID)
 	if err != nil {
 		return ident, "", aoserrors.Wrap(err)
 	}
 
-	return instance.InstanceIdent, version, nil
+	if len(services) == 0 {
+		return ident, "", errNotExist
+	}
+
+	sort.Slice(services, func(i, j int) bool {
+		ver1, err := semver.NewSemver(services[i].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		ver2, err := semver.NewSemver(services[j].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		return ver1.LessThan(ver2)
+	})
+
+	return instance.InstanceIdent, services[len(services)-1].Version, nil
 }
 
 // GetAllInstances returns all instance.
