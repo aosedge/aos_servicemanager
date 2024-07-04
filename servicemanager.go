@@ -221,7 +221,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.launcher, err = launcher.New(cfg, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
+	if sm.launcher, err = launcher.New(cfg, sm.iam, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
 		sm.network, sm.iam, sm.monitor, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}

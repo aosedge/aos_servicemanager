@@ -31,11 +31,11 @@ import (
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/opencontainers/runc/libcontainer/specconv"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aosedge/aos_servicemanager/servicemanager"
@@ -44,8 +44,6 @@ import (
 /***********************************************************************************************************************
  * Consts
  **********************************************************************************************************************/
-
-const defaultCPUPeriod uint64 = 100000
 
 const cgroupsPath = "/system.slice/system-aos\\x2dservice.slice/"
 
@@ -64,6 +62,7 @@ const (
 type runtimeSpec struct {
 	ociSpec         runtimespec.Spec
 	resourceManager ResourceManager
+	nodeInfo        *cloudprotocol.NodeInfo
 }
 
 /***********************************************************************************************************************
@@ -113,17 +112,9 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 		spec.ociSpec.Linux.Resources.CPU = &runtimespec.LinuxCPU{}
 	}
 
-	cpuCount, err := cpu.Counts(true)
-	if err != nil {
-		log.Errorf("Can't get cpu count: %v", err)
+	cpuQuota := int64(cpuLimit)
 
-		cpuCount = 1
-	}
-
-	cpuQuota := int64((defaultCPUPeriod * (cpuLimit) * uint64(cpuCount)) / 100) //nolint:gomnd // Translate to percents
-	cpuPeriod := defaultCPUPeriod
-
-	spec.ociSpec.Linux.Resources.CPU.Period = &cpuPeriod
+	spec.ociSpec.Linux.Resources.CPU.Period = &spec.nodeInfo.MaxDMIPs
 	spec.ociSpec.Linux.Resources.CPU.Quota = &cpuQuota
 }
 
@@ -537,6 +528,7 @@ func (launcher *Launcher) createRuntimeSpec(instance *runtimeInstanceInfo) (*run
 	spec := &runtimeSpec{
 		resourceManager: launcher.resourceManager,
 		ociSpec:         *specconv.Example(),
+		nodeInfo:        &launcher.nodeInfo,
 	}
 
 	spec.ociSpec.Process.Args = nil
