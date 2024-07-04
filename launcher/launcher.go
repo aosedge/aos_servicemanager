@@ -68,6 +68,11 @@ const (
  * Types
  **********************************************************************************************************************/
 
+// NodeInfoProvider provides node information.
+type NodeInfoProvider interface {
+	GetNodeInfo() (cloudprotocol.NodeInfo, error)
+}
+
 // Storage storage interface.
 type Storage interface {
 	AddInstance(instance InstanceInfo) error
@@ -167,6 +172,7 @@ type Launcher struct {
 	alertSender       AlertSender
 
 	config                 *config.Config
+	nodeInfo               cloudprotocol.NodeInfo
 	runtimeStatusChannel   chan RuntimeStatus
 	cancelFunction         context.CancelFunc
 	actionHandler          *action.Handler
@@ -215,11 +221,17 @@ var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint
  **********************************************************************************************************************/
 
 // New creates new launcher object.
-func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, layerProvider LayerProvider,
-	instanceRunner InstanceRunner, resourceManager ResourceManager, networkManager NetworkManager,
-	instanceRegistrar InstanceRegistrar, instanceMonitor InstanceMonitor, alertSender AlertSender,
+func New(config *config.Config, nodeInfoProvider NodeInfoProvider, storage Storage, serviceProvider ServiceProvider,
+	layerProvider LayerProvider, instanceRunner InstanceRunner, resourceManager ResourceManager,
+	networkManager NetworkManager, instanceRegistrar InstanceRegistrar, instanceMonitor InstanceMonitor,
+	alertSender AlertSender,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
+
+	nodeInfo, err := nodeInfoProvider.GetNodeInfo()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, layerProvider: layerProvider,
@@ -227,6 +239,7 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 		instanceRegistrar: instanceRegistrar, instanceMonitor: instanceMonitor, alertSender: alertSender,
 
 		config:               config,
+		nodeInfo:             nodeInfo,
 		actionHandler:        action.New(maxParallelInstanceActions),
 		runtimeStatusChannel: make(chan RuntimeStatus, 1),
 		currentInstances:     make(map[string]*runtimeInstanceInfo),
