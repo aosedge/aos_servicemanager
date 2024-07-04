@@ -40,7 +40,6 @@ import (
 	"github.com/google/uuid"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aosedge/aos_servicemanager/config"
@@ -74,6 +73,10 @@ var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
+
+type testNodeInfoProvider struct {
+	nodeInfo cloudprotocol.NodeInfo
+}
 
 type testStorage struct {
 	sync.RWMutex
@@ -300,9 +303,9 @@ func TestRunInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -351,9 +354,9 @@ func TestUpdateInstances(t *testing.T) {
 	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(nil, nil)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -445,9 +448,9 @@ func TestRestartInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), newTestStorage(),
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -527,9 +530,9 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
-		newTestAlertSender())
+		newTestNodeInfoProvider(), newTestStorage(), newTestServiceProvider(), newTestLayerProvider(),
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -586,12 +589,15 @@ func TestHostFSDir(t *testing.T) {
 }
 
 func TestRuntimeSpec(t *testing.T) {
+	nodeInfoProvider := newTestNodeInfoProvider()
 	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 	resourceManager := newTestResourceManager()
 	networkManager := newTestNetworkManager()
 	testRegistrar := newTestRegistrar()
+
+	nodeInfoProvider.nodeInfo.MaxDMIPs = 100000
 
 	runItem := testItem{
 		services: []serviceInfo{
@@ -641,9 +647,8 @@ func TestRuntimeSpec(t *testing.T) {
 		WorkingDir: tmpDir,
 		StorageDir: filepath.Join(tmpDir, "storages"),
 		StateDir:   filepath.Join(tmpDir, "states"),
-	}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
-		newTestInstanceMonitor(), newTestAlertSender())
+	}, nodeInfoProvider, storage, serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil),
+		resourceManager, networkManager, testRegistrar, newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -668,15 +673,15 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 
 	resourceManager.addDevice(cloudprotocol.DeviceInfo{
-		Name: "input", HostDevices: []string{fmt.Sprintf("%s/input:/dev/input", hostDeviceDir)},
+		Name: "input", HostDevices: []string{hostDeviceDir + "/input:/dev/input"},
 		Groups: hostGroups[:2],
 	})
 	resourceManager.addDevice(cloudprotocol.DeviceInfo{
-		Name: "video", HostDevices: []string{fmt.Sprintf("%s/video:/dev/video", hostDeviceDir)},
+		Name: "video", HostDevices: []string{hostDeviceDir + "/video:/dev/video"},
 		Groups: hostGroups[2:4],
 	})
 	resourceManager.addDevice(cloudprotocol.DeviceInfo{
-		Name: "sound", HostDevices: []string{fmt.Sprintf("%s/sound:/dev/sound", hostDeviceDir)},
+		Name: "sound", HostDevices: []string{hostDeviceDir + "/sound:/dev/sound"},
 		Groups: hostGroups[4:6],
 	})
 
@@ -816,13 +821,7 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
 	}
 
-	cpuCount, err := cpu.Counts(true)
-	if err != nil {
-		t.Fatalf("Can't get cpu count: %v", err)
-	}
-
-	if *runtimeSpec.Linux.Resources.CPU.Quota !=
-		int64(*serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(cpuCount)/100) {
+	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPULimit) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
@@ -1083,8 +1082,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		WorkingDir: tmpDir,
 		StorageDir: filepath.Join(tmpDir, "storages"),
 		StateDir:   filepath.Join(tmpDir, "states"),
-	}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, registrar, instanceMonitor, newTestAlertSender())
+	}, newTestNodeInfoProvider(), storage, serviceProvider, layerProvider, newTestRunner(nil, nil), resourceManager,
+		networkManager, registrar, instanceMonitor, newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1593,9 +1592,9 @@ func TestOverrideEnvVars(t *testing.T) {
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1692,9 +1691,9 @@ func TestRestartStoredInstancesOnStart(t *testing.T) {
 		t.Fatalf("Can't install services: %v", err)
 	}
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2133,9 +2132,9 @@ func TestInstancePriorities(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
-		newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2300,8 +2299,8 @@ func TestResourceAlerts(t *testing.T) {
 
 	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device0", SharedCount: 1})
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(),
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), newTestStorage(),
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(),
 		newTestRegistrar(), newTestInstanceMonitor(), alertSender)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
@@ -2351,9 +2350,9 @@ func TestOfflineTimeout(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	storage := newTestStorage()
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2472,11 +2471,12 @@ func TestOfflineTimeout(t *testing.T) {
 
 	testLauncher.Close()
 
-	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
+	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
+
 	defer testLauncher.Close()
 
 	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
@@ -2499,6 +2499,18 @@ func TestOfflineTimeout(t *testing.T) {
 		}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
+}
+
+/***********************************************************************************************************************
+ * testNodeInfoProvider
+ **********************************************************************************************************************/
+
+func newTestNodeInfoProvider() *testNodeInfoProvider {
+	return &testNodeInfoProvider{}
+}
+
+func (provider *testNodeInfoProvider) GetNodeInfo() (cloudprotocol.NodeInfo, error) {
+	return provider.nodeInfo, nil
 }
 
 /***********************************************************************************************************************
