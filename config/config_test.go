@@ -50,7 +50,7 @@ func createConfigFile() (err error) {
 	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
-	"unitConfigFile": "/var/aos/aos_unit.cfg",
+	"nodeConfigFile": "/var/aos/aos_node.cfg",
 	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
@@ -179,14 +179,14 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 	}
 }
 
-func TestGetUnitConfigFile(t *testing.T) {
+func TestGetNodeConfigFile(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.UnitConfigFile != "/var/aos/aos_unit.cfg" {
-		t.Errorf("Wrong unit config value: %s", config.UnitConfigFile)
+	if config.NodeConfigFile != "/var/aos/aos_node.cfg" {
+		t.Errorf("Wrong node config value: %s", config.NodeConfigFile)
 	}
 }
 

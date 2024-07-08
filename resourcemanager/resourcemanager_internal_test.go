@@ -84,49 +84,49 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestValidUnitConfiguration(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+func TestValidNodeConfiguration(t *testing.T) {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %v", err)
+	if err = rm.nodeConfigError; err != nil {
+		t.Errorf("Node config error: %v", err)
 	}
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createEmptyUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createEmptyNodeConfigJSON()); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %v", err)
+	if err = rm.nodeConfigError; err != nil {
+		t.Errorf("Node config error: %v", err)
 	}
 }
 
-func TestInvalidUnitConfiguration(t *testing.T) {
-	if err := writeTestUnitConfigFile(createInvalidUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+func TestInvalidNodeConfiguration(t *testing.T) {
+	if err := writeTestNodeConfigFile(createInvalidNodeConfigJSON()); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
+	if err = rm.nodeConfigError; err == nil {
 		t.Error("Can't detect unavailable devices")
 	}
 
@@ -134,26 +134,26 @@ func TestInvalidUnitConfiguration(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Error("Proceed without unit configuration")
+	if err = rm.nodeConfigError; err == nil {
+		t.Error("Proceed without node configuration")
 	}
 
 	if err = rm.AllocateDevice("random", "instance0"); err == nil {
-		t.Error("Proceed without unit configuration")
+		t.Error("Proceed without node configuration")
 	}
 }
 
 func TestGetDeviceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -178,11 +178,11 @@ func TestGetDeviceInfo(t *testing.T) {
 }
 
 func TestGetResourceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -212,11 +212,11 @@ func TestGetResourceInfo(t *testing.T) {
 }
 
 func TestAllocateAndReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -239,11 +239,11 @@ func TestAllocateAndReleaseDevices(t *testing.T) {
 }
 
 func TestAllocateUnavailableDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -254,11 +254,11 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 }
 
 func TestReleaseNotAllocatedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -284,11 +284,11 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 }
 
 func TestAllocateLimitedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -313,11 +313,11 @@ func TestAllocateLimitedDevice(t *testing.T) {
 }
 
 func TestGetDeviceInstances(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -367,11 +367,11 @@ func TestGetDeviceInstances(t *testing.T) {
 }
 
 func TestReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -415,112 +415,112 @@ func TestReleaseDevices(t *testing.T) {
 	}
 }
 
-func TestNotExistUnitConfig(t *testing.T) {
+func TestNotExistNodeConfig(t *testing.T) {
 	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Error("Unit config should be invalid if config is not exits")
+	if err = rm.nodeConfigError; err == nil {
+		t.Error("Node config should be invalid if config is not exits")
 	}
 }
 
-func TestInvalidVersionUnitConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createWrongVersionUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+func TestInvalidVersionNodeConfig(t *testing.T) {
+	if err := writeTestNodeConfigFile(createWrongVersionNodeConfigJSON()); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node_wrong_version.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Errorf("Unit config should be invalid in case of version mismatch")
+	if err = rm.nodeConfigError; err == nil {
+		t.Errorf("Node config should be invalid in case of version mismatch")
 	}
 }
 
-func TestGetUnitConfigStatus(t *testing.T) {
+func TestGetNodeConfigStatus(t *testing.T) {
 	vendorVersion := "2.1.0"
 
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(vendorVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile(vendorVersion)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	version, err := rm.GetUnitConfigStatus()
+	version, err := rm.GetNodeConfigStatus()
 	if err != nil {
-		t.Errorf("Unit config status error: %v", err)
+		t.Errorf("Node config status error: %v", err)
 	}
 
 	if version != vendorVersion {
-		t.Errorf("Wrong unit config version: %v", version)
+		t.Errorf("Wrong node config version: %v", version)
 	}
 }
 
-func TestUpdateUnitConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0.0")); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+func TestUpdateNodeConfig(t *testing.T) {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	newVendorVersion := "2.0.0"
 
-	if err = rm.UpdateUnitConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
-		t.Fatalf("Can't update unit config: %v", err)
+	if err = rm.UpdateNodeConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
+		t.Fatalf("Can't update node config: %v", err)
 	}
 
-	version, err := rm.GetUnitConfigStatus()
+	version, err := rm.GetNodeConfigStatus()
 	if err != nil {
-		t.Errorf("Unit config status error: %v", err)
+		t.Errorf("Node config status error: %v", err)
 	}
 
 	if version != newVendorVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong node config version: %s", version)
 	}
 }
 
-func TestUpdateErrorUnitConfig(t *testing.T) {
+func TestUpdateErrorNodeConfig(t *testing.T) {
 	currentConfigVersion := "1.0.0"
 
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(currentConfigVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile(currentConfigVersion)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), testAlertSender)
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.UpdateUnitConfig(createInvalidUnitConfigJSON(), "3.5"); err == nil {
+	if err = rm.UpdateNodeConfig(createInvalidNodeConfigJSON(), "3.5"); err == nil {
 		t.Errorf("Update should fail")
 	}
 
-	version, err := rm.GetUnitConfigStatus()
+	version, err := rm.GetNodeConfigStatus()
 	if err != nil {
-		t.Errorf("Unit config status error: %v", err)
+		t.Errorf("Node config status error: %v", err)
 	}
 
 	if version != currentConfigVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong node config version: %s", version)
 	}
 
 	testAlertSender.checkAlert(t)
 }
 
 func TestGetNodeConfig(t *testing.T) {
-	nodeConfig := cloudprotocol.NodeConfig{
+	cloudNodeConfig := cloudprotocol.NodeConfig{
 		NodeType: "mainType",
 		Devices: []cloudprotocol.DeviceInfo{
 			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
@@ -532,21 +532,21 @@ func TestGetNodeConfig(t *testing.T) {
 			{Name: "wifi", Groups: []string{"wifi-group"}},
 		},
 	}
-	unitConfig := unitConfig{
+	rmNodeConfig := nodeConfig{
 		Version:    "1.0.0",
-		NodeConfig: nodeConfig,
+		NodeConfig: cloudNodeConfig,
 	}
 
-	configJSON, err := json.Marshal(unitConfig)
+	configJSON, err := json.Marshal(rmNodeConfig)
 	if err != nil {
-		t.Fatalf("Can't marshal unit config: %v", err)
+		t.Fatalf("Can't marshal node config: %v", err)
 	}
 
-	if err := writeTestUnitConfigFile(string(configJSON)); err != nil {
-		t.Fatalf("Can't write unit config: %v", err)
+	if err := writeTestNodeConfigFile(string(configJSON)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestGetNodeConfig(t *testing.T) {
 		t.Fatalf("Can't get node config: %v", err)
 	}
 
-	if !reflect.DeepEqual(getNodeConfig, nodeConfig) {
+	if !reflect.DeepEqual(getNodeConfig, rmNodeConfig.NodeConfig) {
 		t.Errorf("Wrong node config: %v", getNodeConfig)
 	}
 
@@ -585,8 +585,8 @@ func TestGetNodeConfig(t *testing.T) {
 		t.Fatalf("Can't marshal node config: %v", err)
 	}
 
-	if err = rm.UpdateUnitConfig(string(newConfigJSON), "2.0.0"); err != nil {
-		t.Fatalf("Can't update unit config: %v", err)
+	if err = rm.UpdateNodeConfig(string(newConfigJSON), "2.0.0"); err != nil {
+		t.Fatalf("Can't update node config: %v", err)
 	}
 
 	select {
@@ -596,7 +596,7 @@ func TestGetNodeConfig(t *testing.T) {
 		}
 
 	case <-time.After(5 * time.Second):
-		t.Fatal("Can't wait for unit config update")
+		t.Fatal("Can't wait for node config update")
 	}
 }
 
@@ -624,7 +624,7 @@ func cleanup() (err error) {
 	return nil
 }
 
-func createWrongVersionUnitConfigJSON() (configJSON string) {
+func createWrongVersionNodeConfigJSON() (configJSON string) {
 	return `{
 	"formatVersion": 256,
 	"version": "1.0.0",
@@ -650,7 +650,7 @@ func createWrongVersionUnitConfigJSON() (configJSON string) {
 }`
 }
 
-func createTestUnitConfigJSON(version string) (configJSON string) {
+func createTestNodeConfigFile(version string) (configJSON string) {
 	return fmt.Sprintf(`{
 	"version": "%s",
 	"nodeType": "mainType",
@@ -769,7 +769,7 @@ func createTestNodeConfigJSON() (configJSON string) {
 }`
 }
 
-func createInvalidUnitConfigJSON() (configJSON string) {
+func createInvalidNodeConfigJSON() (configJSON string) {
 	return `{
 	"vendorVersion": "3.5",
 	"nodeType": "mainType",
@@ -788,7 +788,7 @@ func createInvalidUnitConfigJSON() (configJSON string) {
 }`
 }
 
-func createEmptyUnitConfigJSON() (configJSON string) {
+func createEmptyNodeConfigJSON() (configJSON string) {
 	return `{
 		"vendorVersion": "1.0.0",
 		"nodeType": "mainType",
@@ -796,8 +796,8 @@ func createEmptyUnitConfigJSON() (configJSON string) {
 }`
 }
 
-func writeTestUnitConfigFile(content string) (err error) {
-	if err := os.WriteFile(path.Join(tmpDir, "aos_unit.cfg"), []byte(content), 0o600); err != nil {
+func writeTestNodeConfigFile(content string) (err error) {
+	if err := os.WriteFile(path.Join(tmpDir, "aos_node.cfg"), []byte(content), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
