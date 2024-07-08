@@ -134,7 +134,7 @@ func TestSMRegistration(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, true)
@@ -143,7 +143,8 @@ func TestSMRegistration(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 }
@@ -155,7 +156,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
 	client, err := smclient.New(&config.Config{
 		CMServerURL: serverURL,
@@ -165,7 +166,8 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -257,7 +259,7 @@ func TestLogsNotification(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
@@ -267,7 +269,8 @@ func TestLogsNotification(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -360,7 +363,7 @@ func TestAlertNotifications(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
@@ -369,7 +372,8 @@ func TestAlertNotifications(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -691,7 +695,7 @@ func TestRunInstances(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	serviceManager := &testServiceManager{}
 	layerManager := &testLayerManager{}
 	launcher := newTestLauncher()
@@ -703,7 +707,8 @@ func TestRunInstances(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -781,7 +786,7 @@ func TestNetworkUpdate(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	netManager := &testNetworkUpdates{
 		callChannel: make(chan struct{}, 1),
 	}
@@ -793,7 +798,8 @@ func TestNetworkUpdate(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -872,7 +878,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
@@ -882,7 +888,8 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -918,7 +925,7 @@ func TestCloudConnection(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
@@ -928,7 +935,8 @@ func TestCloudConnection(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -977,7 +985,7 @@ func TestAverageMonitoring(t *testing.T) {
 	}
 	defer server.close()
 
-	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID"}}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	testMonitoring := &testMonitoringProvider{
 		averageMonitoring: aostypes.NodeMonitoring{
 			NodeData: aostypes.MonitoringData{
@@ -1010,7 +1018,8 @@ func TestAverageMonitoring(t *testing.T) {
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID); err != nil {
+	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
@@ -1063,11 +1072,15 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) waitClientRegistered(nodeID string) error {
+func (server *testServer) waitClientRegistered(nodeID, nodeType string) error {
 	select {
 	case registerSM := <-server.registerChannel:
 		if registerSM.GetNodeId() != nodeID {
 			return aoserrors.Errorf("incorrect node id: %s", registerSM.GetNodeId())
+		}
+
+		if registerSM.GetNodeType() != nodeType {
+			return aoserrors.Errorf("incorrect node type: %s", registerSM.GetNodeType())
 		}
 
 		return nil
