@@ -1319,7 +1319,7 @@ func (c *testCNIInterface) DelNetworkList(ctx context.Context, list *cni.Network
 func (c *testCNIInterface) AddNetwork(
 	ctx context.Context, net *cni.NetworkConfig, rt *cni.RuntimeConf,
 ) (types.Result, error) {
-	return nil, nil
+	return nil, nil //nolint: nilnil
 }
 
 func (c *testCNIInterface) CheckNetwork(ctx context.Context, net *cni.NetworkConfig, rt *cni.RuntimeConf) error {
@@ -1343,13 +1343,13 @@ func (c *testCNIInterface) GetNetworkCachedConfig(net *cni.NetworkConfig, rt *cn
 }
 
 func (c *testCNIInterface) GetNetworkCachedResult(net *cni.NetworkConfig, rt *cni.RuntimeConf) (types.Result, error) {
-	return nil, nil
+	return nil, nil //nolint: nilnil
 }
 
 func (c *testCNIInterface) GetNetworkListCachedResult(
 	net *cni.NetworkConfigList, rt *cni.RuntimeConf,
 ) (types.Result, error) {
-	return nil, nil
+	return nil, nil //nolint: nilnil
 }
 
 func (c *testCNIInterface) ValidateNetwork(ctx context.Context, net *cni.NetworkConfig) ([]string, error) {

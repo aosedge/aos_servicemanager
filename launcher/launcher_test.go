@@ -953,12 +953,12 @@ func TestRuntimeSpec(t *testing.T) {
 	envVars = append(envVars, defaultEnvVars...)
 	envVars = append(envVars, imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
-	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
+	envVars = append(envVars, "AOS_SECRET="+testRegistrar.secrets[instance.InstanceIdent])
 
 	if !compareArrays(len(envVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
 		return envVars[index1] == runtimeSpec.Process.Env[index2]
 	}) {
-		t.Errorf("Wrong env variables value: %v", runtimeSpec.Process.Env)
+		t.Errorf("Wrong env variables value: %v %v", runtimeSpec.Process.Env, envVars)
 	}
 
 	// Check UID/GID
@@ -3601,10 +3601,10 @@ func getInstanceRuntimeSpec(instanceID string) (runtimespec.Spec, error) {
 }
 
 func getAosEnvVars(instance launcher.InstanceInfo) (aosEnvVars []string) {
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SERVICE_ID=%s", instance.ServiceID))
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SUBJECT_ID=%s", instance.SubjectID))
+	aosEnvVars = append(aosEnvVars, "AOS_SERVICE_ID="+instance.ServiceID)
+	aosEnvVars = append(aosEnvVars, "AOS_SUBJECT_ID="+instance.SubjectID)
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_INDEX=%d", instance.Instance))
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_ID=%s", instance.InstanceID))
+	aosEnvVars = append(aosEnvVars, "AOS_INSTANCE_ID="+instance.InstanceID)
 
 	return aosEnvVars
 }

@@ -853,8 +853,8 @@ func getPBResourceValidateAlertFromPayload(payload interface{}) (*pb.Alert_Resou
 		Name: resAlert.Name,
 	}
 
-	for _, errorInfo := range resAlert.Errors {
-		pbResAlert.Errors = append(pbResAlert.Errors, pbconvert.ErrorInfoToPB(&errorInfo))
+	for i := range resAlert.Errors {
+		pbResAlert.Errors = append(pbResAlert.Errors, pbconvert.ErrorInfoToPB(&resAlert.Errors[i]))
 	}
 
 	return &pb.Alert_ResourceValidateAlert{ResourceValidateAlert: &pbResAlert}, nil
