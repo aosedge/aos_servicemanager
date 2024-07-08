@@ -413,7 +413,7 @@ func (sm *ServiceManager) removeOutdatedServices(services []ServiceInfo) error {
 
 func (sm *ServiceManager) removeOutdatedService(id string) error {
 	serviceInfo := strings.Split(id, "_")
-	if len(serviceInfo) < 2 { //nolint:gomnd
+	if len(serviceInfo) < 2 {
 		return aoserrors.New("Unexpected service id format")
 	}
 

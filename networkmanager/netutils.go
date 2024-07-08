@@ -54,7 +54,9 @@ func createNetNS(name string) (err error) {
 		if err != nil {
 			return aoserrors.Wrap(err)
 		}
+
 		defer origin.Close()
+
 		defer func() {
 			if setErr := netns.Set(origin); setErr != nil {
 				if err == nil {
