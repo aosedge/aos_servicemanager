@@ -74,7 +74,7 @@ type SMClient struct {
 	servicesProcessor    ServicesProcessor
 	layersProcessor      LayersProcessor
 	launcher             InstanceLauncher
-	unitConfigProcessor  UnitConfigProcessor
+	nodeConfigProcessor  NodeConfigProcessor
 	monitoringProvider   MonitoringDataProvider
 	logsProvider         LogsProvider
 	networkManager       NetworkProvider
@@ -95,11 +95,11 @@ type CertificateProvider interface {
 	GetCertificate(certType string) (certURL, ketURL string, err error)
 }
 
-// UnitConfigProcessor unit configuration handler.
-type UnitConfigProcessor interface {
-	GetUnitConfigStatus() (version string, err error)
-	CheckUnitConfig(configJSON, version string) error
-	UpdateUnitConfig(configJSON, version string) error
+// NodeConfigProcessor node configuration handler.
+type NodeConfigProcessor interface {
+	GetNodeConfigStatus() (version string, err error)
+	CheckNodeConfig(configJSON, version string) error
+	UpdateNodeConfig(configJSON, version string) error
 }
 
 // ServicesProcessor process desired services list.
@@ -150,12 +150,12 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 // New creates SM client fo communication with CM.
 func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
-	unitConfigProcessor UnitConfigProcessor, monitoringProvider MonitoringDataProvider,
+	nodeConfigProcessor NodeConfigProcessor, monitoringProvider MonitoringDataProvider,
 	logsProvider LogsProvider, networkManager NetworkProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
 		config: config, servicesProcessor: servicesProcessor,
-		layersProcessor: layersProcessor, launcher: launcher, unitConfigProcessor: unitConfigProcessor,
+		layersProcessor: layersProcessor, launcher: launcher, nodeConfigProcessor: nodeConfigProcessor,
 		monitoringProvider: monitoringProvider, logsProvider: logsProvider,
 		networkManager: networkManager, alertChannel: make(chan cloudprotocol.AlertItem, alertChannelSize),
 		monitoringChannel: make(chan aostypes.NodeMonitoring, monitoringChannelSize),
@@ -347,14 +347,14 @@ func (client *SMClient) processMessages() (err error) {
 		}
 
 		switch data := message.GetSMIncomingMessage().(type) {
-		case *pb.SMIncomingMessages_GetUnitConfigStatus:
-			client.processGetUnitConfigStatus()
+		case *pb.SMIncomingMessages_GetNodeConfigStatus:
+			client.processGetNodeConfigStatus()
 
-		case *pb.SMIncomingMessages_CheckUnitConfig:
-			client.processCheckUnitConfig(data.CheckUnitConfig)
+		case *pb.SMIncomingMessages_CheckNodeConfig:
+			client.processCheckNodeConfig(data.CheckNodeConfig)
 
-		case *pb.SMIncomingMessages_SetUnitConfig:
-			client.processSetUnitConfig(data.SetUnitConfig)
+		case *pb.SMIncomingMessages_SetNodeConfig:
+			client.processSetNodeConfig(data.SetNodeConfig)
 
 		case *pb.SMIncomingMessages_RunInstances:
 			client.processRunInstances(data.RunInstances)
@@ -383,47 +383,47 @@ func (client *SMClient) processMessages() (err error) {
 	}
 }
 
-func (client *SMClient) processGetUnitConfigStatus() {
-	version, err := client.unitConfigProcessor.GetUnitConfigStatus()
+func (client *SMClient) processGetNodeConfigStatus() {
+	version, err := client.nodeConfigProcessor.GetNodeConfigStatus()
 
-	status := &pb.UnitConfigStatus{Version: version}
+	status := &pb.NodeConfigStatus{Version: version}
 
 	if err != nil {
 		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
-		SMOutgoingMessage: &pb.SMOutgoingMessages_UnitConfigStatus{UnitConfigStatus: status},
+		SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfigStatus{NodeConfigStatus: status},
 	}); err != nil {
-		log.Errorf("Can't send unit config status: %v", err)
+		log.Errorf("Can't send node config status: %v", err)
 	}
 }
 
-func (client *SMClient) processCheckUnitConfig(check *pb.CheckUnitConfig) {
-	status := &pb.UnitConfigStatus{}
+func (client *SMClient) processCheckNodeConfig(check *pb.CheckNodeConfig) {
+	status := &pb.NodeConfigStatus{}
 
-	if err := client.unitConfigProcessor.CheckUnitConfig(check.GetUnitConfig(), check.GetVersion()); err != nil {
+	if err := client.nodeConfigProcessor.CheckNodeConfig(check.GetNodeConfig(), check.GetVersion()); err != nil {
 		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
-		SMOutgoingMessage: &pb.SMOutgoingMessages_UnitConfigStatus{UnitConfigStatus: status},
+		SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfigStatus{NodeConfigStatus: status},
 	}); err != nil {
-		log.Errorf("Can't send unit config status: %v", err)
+		log.Errorf("Can't send node config status: %v", err)
 	}
 }
 
-func (client *SMClient) processSetUnitConfig(config *pb.SetUnitConfig) {
-	status := &pb.UnitConfigStatus{}
+func (client *SMClient) processSetNodeConfig(config *pb.SetNodeConfig) {
+	status := &pb.NodeConfigStatus{}
 
-	if err := client.unitConfigProcessor.UpdateUnitConfig(config.GetUnitConfig(), config.GetVersion()); err != nil {
+	if err := client.nodeConfigProcessor.UpdateNodeConfig(config.GetNodeConfig(), config.GetVersion()); err != nil {
 		status.Error = pbconvert.ErrorInfoToPB(&cloudprotocol.ErrorInfo{Message: err.Error()})
 	}
 
 	if err := client.stream.Send(&pb.SMOutgoingMessages{
-		SMOutgoingMessage: &pb.SMOutgoingMessages_UnitConfigStatus{UnitConfigStatus: status},
+		SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfigStatus{NodeConfigStatus: status},
 	}); err != nil {
-		log.Errorf("Can't send unit config status: %v", err)
+		log.Errorf("Can't send node config status: %v", err)
 	}
 }
 
