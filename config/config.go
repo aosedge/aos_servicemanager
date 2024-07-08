@@ -75,7 +75,7 @@ type Config struct {
 	LayersPartLimit           uint                     `json:"layersPartLimit"`
 	DownloadDir               string                   `json:"downloadDir"`
 	ExtractDir                string                   `json:"extractDir"`
-	UnitConfigFile            string                   `json:"unitConfigFile"`
+	NodeConfigFile            string                   `json:"nodeConfigFile"`
 	ServiceTTLDays            uint64                   `json:"serviceTtlDays"`
 	LayerTTLDays              uint64                   `json:"layerTtlDays"`
 	ServiceHealthCheckTimeout aostypes.Duration        `json:"serviceHealthCheckTimeout"`
@@ -144,8 +144,8 @@ func New(fileName string) (config *Config, err error) {
 		config.ExtractDir = path.Join(config.WorkingDir, "extract")
 	}
 
-	if config.UnitConfigFile == "" {
-		config.UnitConfigFile = path.Join(config.WorkingDir, "aos_unit.cfg")
+	if config.NodeConfigFile == "" {
+		config.NodeConfigFile = path.Join(config.WorkingDir, "aos_node.cfg")
 	}
 
 	if config.Migration.MigrationPath == "" {
