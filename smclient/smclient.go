@@ -68,6 +68,7 @@ type SMClient struct {
 	config               *config.Config
 	connection           *grpc.ClientConn
 	nodeID               string
+	nodeType             string
 	stream               pb.SMService_RegisterSMClient
 	closeChannel         chan struct{}
 	servicesProcessor    ServicesProcessor
@@ -171,6 +172,7 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 	}
 
 	cmClient.nodeID = nodeInfo.NodeID
+	cmClient.nodeType = nodeInfo.NodeType
 
 	if cmClient.launcher != nil {
 		cmClient.runtimeStatusChannel = launcher.RuntimeStatusChannel()
@@ -308,7 +310,9 @@ func (client *SMClient) register() (err error) {
 
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
-			SMOutgoingMessage: &pb.SMOutgoingMessages_RegisterSm{RegisterSm: &pb.RegisterSM{NodeId: client.nodeID}},
+			SMOutgoingMessage: &pb.SMOutgoingMessages_RegisterSm{RegisterSm: &pb.RegisterSM{
+				NodeId: client.nodeID, NodeType: client.nodeType,
+			}},
 		}); err != nil {
 		return aoserrors.Wrap(err)
 	}
