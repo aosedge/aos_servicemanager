@@ -1236,7 +1236,6 @@ func instanceInfoEqual(info1, info2 aostypes.InstanceInfo) bool {
 		info1.Priority != info2.Priority ||
 		info1.StoragePath != info2.StoragePath ||
 		info1.StatePath != info2.StatePath {
-
 		return false
 	}
 

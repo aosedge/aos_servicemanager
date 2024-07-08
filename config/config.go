@@ -99,16 +99,16 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		ServiceTTLDays:            30,                                            //nolint:gomnd
-		LayerTTLDays:              30,                                            //nolint:gomnd
-		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, //nolint:gomnd
+		ServiceTTLDays:            30,                                            //nolint:mnd
+		LayerTTLDays:              30,                                            //nolint:mnd
+		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, //nolint:mnd
 		Monitoring: resourcemonitor.Config{
 			PollPeriod:    aostypes.Duration{Duration: 10 * time.Second},
 			AverageWindow: aostypes.Duration{Duration: 1 * time.Minute},
 		},
 		Logging: Logging{
-			MaxPartSize:  524288, //nolint:gomnd
-			MaxPartCount: 20,     //nolint:gomnd
+			MaxPartSize:  524288, //nolint:mnd
+			MaxPartCount: 20,     //nolint:mnd
 		},
 		JournalAlerts: journalalerts.Config{
 			SystemAlertPriority:  defaultSystemAlertPriority,

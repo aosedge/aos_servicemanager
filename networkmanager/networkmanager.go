@@ -1015,7 +1015,7 @@ func prepareNetworkConfigList(networkDir, instanceID, networkID string, params N
 }
 
 func randomVlanName() (string, error) {
-	b := make([]byte, 4) //nolint:gomnd
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
 		return "", aoserrors.Wrap(err)
 	}

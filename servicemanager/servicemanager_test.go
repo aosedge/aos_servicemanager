@@ -598,6 +598,7 @@ func TestCachedServiceOnStart(t *testing.T) {
 	if sm, err = servicemanager.New(config, serviceStorage); err != nil {
 		t.Fatalf("Can't create SM: %v", err)
 	}
+
 	defer sm.Close()
 
 	if _, err := sm.GetServiceInfo("service1"); !errors.Is(err, servicemanager.ErrNotExist) {
