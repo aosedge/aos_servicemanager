@@ -34,7 +34,6 @@ const MonitoringMessageType = "monitoringData"
 
 // NodeMonitoringData node monitoring data.
 type NodeMonitoringData struct {
-	aostypes.MonitoringData
 	NodeID string                    `json:"nodeId"`
 	Items  []aostypes.MonitoringData `json:"items"`
 }
