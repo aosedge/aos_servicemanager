@@ -113,12 +113,12 @@ type FirewallRule struct {
 
 // NetworkParameters networks parameters.
 type NetworkParameters struct {
-	NetworkID     string
-	Subnet        string
-	IP            string
-	VlanID        uint64
-	DNSServers    []string
-	FirewallRules []FirewallRule
+	NetworkID     string         `json:"networkId"`
+	Subnet        string         `json:"subnet"`
+	IP            string         `json:"ip"`
+	VlanID        uint64         `json:"vlanId"`
+	DNSServers    []string       `json:"dnsServers"`
+	FirewallRules []FirewallRule `json:"firewallRules"`
 }
 
 // InstanceInfo instance information to start it.
