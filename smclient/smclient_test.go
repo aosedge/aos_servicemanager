@@ -57,13 +57,18 @@ const waitRegisteredTimeout = 30 * time.Second
 type testServer struct {
 	grpcServer               *grpc.Server
 	stream                   pbsm.SMService_RegisterSMServer
-	registerChannel          chan *pbsm.RegisterSM
+	nodeConfigStatusChannel  chan *pbsm.NodeConfigStatus
 	alertChannel             chan *pbsm.Alert
 	instantMonitoringChannel chan *pbsm.SMOutgoingMessages_InstantMonitoring
 	averageMonitoringChannel chan *pbsm.SMOutgoingMessages_AverageMonitoring
 	logChannel               chan *pbsm.SMOutgoingMessages_Log
 	envVarsChannel           chan *pbsm.SMOutgoingMessages_OverrideEnvVarStatus
 	pbsm.UnimplementedSMServiceServer
+}
+
+type testNodeConfigProcessor struct {
+	version string
+	err     error
 }
 
 type testNodeInfoProvider struct {
@@ -136,14 +141,14 @@ func TestSMRegistration(t *testing.T) {
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -158,15 +163,14 @@ func TestMonitoringNotifications(t *testing.T) {
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
-	client, err := smclient.New(&config.Config{
-		CMServerURL: serverURL,
-	}, nodeInfoProvider, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -263,13 +267,13 @@ func TestLogsNotification(t *testing.T) {
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+		nil, nil, nil, nil, &testNodeConfigProcessor{}, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -365,14 +369,14 @@ func TestAlertNotifications(t *testing.T) {
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err = server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -700,14 +704,14 @@ func TestRunInstances(t *testing.T) {
 	layerManager := &testLayerManager{}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, serviceManager,
+		layerManager, launcher, &testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -791,14 +795,14 @@ func TestNetworkUpdate(t *testing.T) {
 		callChannel: make(chan struct{}, 1),
 	}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, nil, nil, netManager, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, netManager, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -881,14 +885,14 @@ func TestOverrideEnvVars(t *testing.T) {
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -928,14 +932,14 @@ func TestCloudConnection(t *testing.T) {
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -1011,14 +1015,14 @@ func TestAverageMonitoring(t *testing.T) {
 		},
 	}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, testMonitoring, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(nodeInfoProvider.nodeInfo.NodeID,
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
 		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
@@ -1040,7 +1044,7 @@ func TestAverageMonitoring(t *testing.T) {
 
 func newTestServer(url string) (server *testServer, err error) {
 	server = &testServer{
-		registerChannel:          make(chan *pbsm.RegisterSM, 10),
+		nodeConfigStatusChannel:  make(chan *pbsm.NodeConfigStatus, 10),
 		alertChannel:             make(chan *pbsm.Alert, 10),
 		instantMonitoringChannel: make(chan *pbsm.SMOutgoingMessages_InstantMonitoring, 10),
 		averageMonitoringChannel: make(chan *pbsm.SMOutgoingMessages_AverageMonitoring, 1),
@@ -1072,15 +1076,15 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) waitClientRegistered(nodeID, nodeType string) error {
+func (server *testServer) waitNodeConfigStatus(nodeID, nodeType string) error {
 	select {
-	case registerSM := <-server.registerChannel:
-		if registerSM.GetNodeId() != nodeID {
-			return aoserrors.Errorf("incorrect node id: %s", registerSM.GetNodeId())
+	case nodeConfigStatus := <-server.nodeConfigStatusChannel:
+		if nodeConfigStatus.GetNodeId() != nodeID {
+			return aoserrors.Errorf("incorrect node id: %s", nodeConfigStatus.GetNodeId())
 		}
 
-		if registerSM.GetNodeType() != nodeType {
-			return aoserrors.Errorf("incorrect node type: %s", registerSM.GetNodeType())
+		if nodeConfigStatus.GetNodeType() != nodeType {
+			return aoserrors.Errorf("incorrect node type: %s", nodeConfigStatus.GetNodeType())
 		}
 
 		return nil
@@ -1104,8 +1108,8 @@ func (server *testServer) RegisterSM(stream pbsm.SMService_RegisterSMServer) err
 		}
 
 		switch data := message.GetSMOutgoingMessage().(type) {
-		case *pbsm.SMOutgoingMessages_RegisterSm:
-			server.registerChannel <- data.RegisterSm
+		case *pbsm.SMOutgoingMessages_NodeConfigStatus:
+			server.nodeConfigStatusChannel <- data.NodeConfigStatus
 
 		case *pbsm.SMOutgoingMessages_InstantMonitoring:
 			server.instantMonitoringChannel <- data
@@ -1318,6 +1322,18 @@ func convertEnvVarsReq(req *pbsm.OverrideEnvVars) []cloudprotocol.EnvVarsInstanc
 /***********************************************************************************************************************
  * Interfaces
  **********************************************************************************************************************/
+
+func (processor *testNodeConfigProcessor) GetNodeConfigStatus() (version string, err error) {
+	return processor.version, processor.err
+}
+
+func (processor *testNodeConfigProcessor) CheckNodeConfig(configJSON, version string) error {
+	return processor.err
+}
+
+func (processor *testNodeConfigProcessor) UpdateNodeConfig(configJSON, version string) error {
+	return processor.err
+}
 
 func (provider *testNodeInfoProvider) GetNodeInfo() (cloudprotocol.NodeInfo, error) {
 	return provider.nodeInfo, nil
