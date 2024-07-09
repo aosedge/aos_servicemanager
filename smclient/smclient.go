@@ -308,10 +308,18 @@ func (client *SMClient) register() (err error) {
 		return aoserrors.Wrap(err)
 	}
 
+	var configErrorInfo *cloudprotocol.ErrorInfo
+
+	configVersion, configError := client.nodeConfigProcessor.GetNodeConfigStatus()
+	if configError != nil {
+		configErrorInfo = &cloudprotocol.ErrorInfo{Message: configError.Error()}
+	}
+
 	if err := client.stream.Send(
 		&pb.SMOutgoingMessages{
-			SMOutgoingMessage: &pb.SMOutgoingMessages_RegisterSm{RegisterSm: &pb.RegisterSM{
-				NodeId: client.nodeID, NodeType: client.nodeType,
+			SMOutgoingMessage: &pb.SMOutgoingMessages_NodeConfigStatus{NodeConfigStatus: &pb.NodeConfigStatus{
+				NodeId: client.nodeID, NodeType: client.nodeType, Version: configVersion,
+				Error: pbconvert.ErrorInfoToPB(configErrorInfo),
 			}},
 		}); err != nil {
 		return aoserrors.Wrap(err)
