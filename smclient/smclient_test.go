@@ -246,7 +246,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	for i := range testMonitoringData {
-		client.SendMonitoringData(testMonitoringData[i].sendMonitoring)
+		client.SendNodeMonitoring(testMonitoringData[i].sendMonitoring)
 
 		receivedMonitoring := <-server.instantMonitoringChannel
 

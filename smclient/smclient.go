@@ -196,8 +196,8 @@ func (client *SMClient) SendAlert(alert cloudprotocol.AlertItem) {
 	client.alertChannel <- alert
 }
 
-// SendMonitoringData sends monitoring data.
-func (client *SMClient) SendMonitoringData(monitoringData aostypes.NodeMonitoring) {
+// SendNodeMonitoring sends node monitoring.
+func (client *SMClient) SendNodeMonitoring(monitoringData aostypes.NodeMonitoring) {
 	if len(client.monitoringChannel) >= cap(client.monitoringChannel) {
 		log.Warn("Skip sending monitoring data. Channel full.")
 
