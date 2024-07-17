@@ -1335,7 +1335,7 @@ func (processor *testNodeConfigProcessor) UpdateNodeConfig(configJSON, version s
 	return processor.err
 }
 
-func (provider *testNodeInfoProvider) GetNodeInfo() (cloudprotocol.NodeInfo, error) {
+func (provider *testNodeInfoProvider) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
 	return provider.nodeInfo, nil
 }
 

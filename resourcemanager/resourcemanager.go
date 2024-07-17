@@ -281,16 +281,16 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
 	return instances, nil
 }
 
-// GetNodeConfig returns node configuration.
-func (resourcemanager *ResourceManager) GetNodeConfig() (cloudprotocol.NodeConfig, error) {
+// GetCurrentNodeConfig returns current node configuration.
+func (resourcemanager *ResourceManager) GetCurrentNodeConfig() (cloudprotocol.NodeConfig, error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
 	return resourcemanager.nodeConfig.NodeConfig, nil
 }
 
-// NodeConfigChangedChannel returns node config changed channel.
-func (resourcemanager *ResourceManager) NodeConfigChangedChannel() <-chan cloudprotocol.NodeConfig {
+// CurrentNodeConfigChannel returns node config changed channel.
+func (resourcemanager *ResourceManager) CurrentNodeConfigChannel() <-chan cloudprotocol.NodeConfig {
 	return resourcemanager.nodeConfigChannel
 }
 

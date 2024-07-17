@@ -551,7 +551,7 @@ func TestGetNodeConfig(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	getNodeConfig, err := rm.GetNodeConfig()
+	getNodeConfig, err := rm.GetCurrentNodeConfig()
 	if err != nil {
 		t.Fatalf("Can't get node config: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestGetNodeConfig(t *testing.T) {
 	}
 
 	select {
-	case nodeConfig := <-rm.NodeConfigChangedChannel():
+	case nodeConfig := <-rm.CurrentNodeConfigChannel():
 		if !reflect.DeepEqual(nodeConfig, newNodeConfig) {
 			t.Errorf("Wrong node config: %v", nodeConfig)
 		}

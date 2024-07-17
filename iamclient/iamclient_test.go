@@ -117,7 +117,7 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestGetNodeInfo(t *testing.T) {
+func TestGetCurrentNodeInfo(t *testing.T) {
 	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
@@ -167,7 +167,7 @@ func TestGetNodeInfo(t *testing.T) {
 	}
 	defer client.Close()
 
-	nodeInfo, err := client.GetNodeInfo()
+	nodeInfo, err := client.GetCurrentNodeInfo()
 	if err != nil {
 		t.Fatalf("Can't get node info: %v", err)
 	}

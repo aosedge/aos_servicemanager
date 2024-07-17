@@ -87,7 +87,7 @@ type SMClient struct {
 
 // NodeInfoProvider interface to get node information.
 type NodeInfoProvider interface {
-	GetNodeInfo() (cloudprotocol.NodeInfo, error)
+	GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error)
 }
 
 // CertificateProvider interface to get certificate.
@@ -166,7 +166,7 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 		return nil, aoserrors.Wrap(err)
 	}
 
-	nodeInfo, err := nodeInfoProvider.GetNodeInfo()
+	nodeInfo, err := nodeInfoProvider.GetCurrentNodeInfo()
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}

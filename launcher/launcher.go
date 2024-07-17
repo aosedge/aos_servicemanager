@@ -70,7 +70,7 @@ const (
 
 // NodeInfoProvider provides node information.
 type NodeInfoProvider interface {
-	GetNodeInfo() (cloudprotocol.NodeInfo, error)
+	GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error)
 }
 
 // Storage storage interface.
@@ -228,7 +228,7 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, storage Stora
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
 
-	nodeInfo, err := nodeInfoProvider.GetNodeInfo()
+	nodeInfo, err := nodeInfoProvider.GetCurrentNodeInfo()
 	if err != nil {
 		return nil, aoserrors.Wrap(err)
 	}
