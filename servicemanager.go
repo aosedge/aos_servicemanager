@@ -192,7 +192,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	nodeInfo, err := sm.iam.GetNodeInfo()
+	nodeInfo, err := sm.iam.GetCurrentNodeInfo()
 	if err != nil {
 		return sm, aoserrors.Wrap(err)
 	}

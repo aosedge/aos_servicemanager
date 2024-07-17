@@ -137,8 +137,8 @@ func New(
 	return client, nil
 }
 
-// GetNodeInfo returns node info.
-func (client *Client) GetNodeInfo() (cloudprotocol.NodeInfo, error) {
+// GetCurrentNodeInfo returns node info.
+func (client *Client) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
 	return client.nodeInfo, nil
 }
 
