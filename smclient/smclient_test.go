@@ -77,6 +77,7 @@ type testNodeInfoProvider struct {
 
 type testMonitoringProvider struct {
 	averageMonitoring aostypes.NodeMonitoring
+	monitoringChannel chan aostypes.NodeMonitoring
 }
 
 type testLogProvider struct {
@@ -166,9 +167,10 @@ func TestMonitoringNotifications(t *testing.T) {
 	defer server.close()
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+	monitoringProvider := newTestMonitoringProvider()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, monitoringProvider, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -250,7 +252,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	for i := range testMonitoringData {
-		client.SendNodeMonitoring(testMonitoringData[i].sendMonitoring)
+		monitoringProvider.monitoringChannel <- testMonitoringData[i].sendMonitoring
 
 		receivedMonitoring := <-server.instantMonitoringChannel
 
@@ -1342,6 +1344,16 @@ func (processor *testNodeConfigProcessor) UpdateNodeConfig(configJSON, version s
 
 func (provider *testNodeInfoProvider) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
 	return provider.nodeInfo, nil
+}
+
+func newTestMonitoringProvider() *testMonitoringProvider {
+	return &testMonitoringProvider{
+		monitoringChannel: make(chan aostypes.NodeMonitoring, 10),
+	}
+}
+
+func (monitoring *testMonitoringProvider) GetNodeMonitoringChannel() <-chan aostypes.NodeMonitoring {
+	return monitoring.monitoringChannel
 }
 
 func (monitoring *testMonitoringProvider) GetAverageMonitoring() (aostypes.NodeMonitoring, error) {
