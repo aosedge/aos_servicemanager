@@ -219,7 +219,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	if sm.monitor, err = resourcemonitor.New(
-		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.alerts, sm.client); err != nil {
+		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
