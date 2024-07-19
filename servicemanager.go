@@ -36,6 +36,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
 
+	"github.com/aosedge/aos_servicemanager/alerts"
 	"github.com/aosedge/aos_servicemanager/config"
 	"github.com/aosedge/aos_servicemanager/database"
 	"github.com/aosedge/aos_servicemanager/iamclient"
@@ -62,6 +63,7 @@ const dbFileName = "servicemanager.db"
 type serviceManager struct {
 	cryptoContext   *cryptutils.CryptoContext
 	journalAlerts   *journalalerts.JournalAlerts
+	alerts          *alerts.Alerts
 	cfg             *config.Config
 	db              *database.Database
 	launcher        *launcher.Launcher
@@ -188,7 +190,11 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.client); err != nil {
+	if sm.alerts, err = alerts.New(); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -208,12 +214,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.resourcemanager, err = resource.New(cfg.NodeConfigFile, sm.client); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.NodeConfigFile, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
 	if sm.monitor, err = resourcemonitor.New(
-		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.client, sm.client); err != nil {
+		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.alerts, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -222,7 +228,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	if sm.launcher, err = launcher.New(cfg, sm.iam, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
-		sm.network, sm.iam, sm.monitor, sm.client); err != nil {
+		sm.network, sm.iam, sm.monitor, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -231,7 +237,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 	}
 
 	if sm.client, err = smclient.New(cfg, sm.iam, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager,
-		sm.monitor, sm.logging, sm.network, sm.cryptoContext, false); err != nil {
+		sm.alerts, sm.monitor, sm.logging, sm.network, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 

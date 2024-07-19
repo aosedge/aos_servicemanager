@@ -79,7 +79,7 @@ type SMClient struct {
 	logsProvider         LogsProvider
 	networkManager       NetworkProvider
 	runtimeStatusChannel <-chan launcher.RuntimeStatus
-	alertChannel         chan cloudprotocol.AlertItem
+	alertChannel         <-chan cloudprotocol.AlertItem
 	monitoringChannel    chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
 	runStatus            *launcher.InstancesStatus
@@ -120,6 +120,12 @@ type InstanceLauncher interface {
 	CloudConnection(connected bool) error
 }
 
+// AlertsProvider alert data provider interface.
+type AlertsProvider interface {
+	GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem)
+}
+
+// NetworkProvider network provider interface.
 type NetworkProvider interface {
 	UpdateNetworks(networkParameters []aostypes.NetworkParameters) error
 }
@@ -150,14 +156,13 @@ var errIncorrectAlertType = errors.New("incorrect alert type")
 // New creates SM client fo communication with CM.
 func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificateProvider CertificateProvider,
 	servicesProcessor ServicesProcessor, layersProcessor LayersProcessor, launcher InstanceLauncher,
-	nodeConfigProcessor NodeConfigProcessor, monitoringProvider MonitoringDataProvider,
+	nodeConfigProcessor NodeConfigProcessor, alertsProvider AlertsProvider, monitoringProvider MonitoringDataProvider,
 	logsProvider LogsProvider, networkManager NetworkProvider, cryptcoxontext *cryptutils.CryptoContext, insecure bool,
 ) (*SMClient, error) {
 	cmClient := &SMClient{
 		config: config, servicesProcessor: servicesProcessor,
 		layersProcessor: layersProcessor, launcher: launcher, nodeConfigProcessor: nodeConfigProcessor,
-		monitoringProvider: monitoringProvider, logsProvider: logsProvider,
-		networkManager: networkManager, alertChannel: make(chan cloudprotocol.AlertItem, alertChannelSize),
+		monitoringProvider: monitoringProvider, logsProvider: logsProvider, networkManager: networkManager,
 		monitoringChannel: make(chan aostypes.NodeMonitoring, monitoringChannelSize),
 		closeChannel:      make(chan struct{}, 1),
 	}
@@ -178,22 +183,15 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 		cmClient.runtimeStatusChannel = launcher.RuntimeStatusChannel()
 	}
 
+	if alertsProvider != nil {
+		cmClient.alertChannel = alertsProvider.GetAlertsChannel()
+	}
+
 	if logsProvider != nil {
 		cmClient.logsChannel = logsProvider.GetLogsDataChannel()
 	}
 
 	return cmClient, nil
-}
-
-// SendAlert sends alert.
-func (client *SMClient) SendAlert(alert cloudprotocol.AlertItem) {
-	if len(client.alertChannel) >= cap(client.alertChannel) {
-		log.Warn("Skip alert, channel is full")
-
-		return
-	}
-
-	client.alertChannel <- alert
 }
 
 // SendNodeMonitoring sends node monitoring.
