@@ -91,6 +91,10 @@ type testLogData struct {
 	expectedPBLog pbsm.LogData
 }
 
+type testAlertProvider struct {
+	alertsChannel chan cloudprotocol.AlertItem
+}
+
 type testServiceManager struct {
 	services []aostypes.ServiceInfo
 }
@@ -142,7 +146,7 @@ func TestSMRegistration(t *testing.T) {
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -164,7 +168,7 @@ func TestMonitoringNotifications(t *testing.T) {
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -267,7 +271,7 @@ func TestLogsNotification(t *testing.T) {
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
-		nil, nil, nil, nil, &testNodeConfigProcessor{}, nil, &logProvider, nil, nil, true)
+		nil, nil, nil, nil, &testNodeConfigProcessor{}, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -368,9 +372,10 @@ func TestAlertNotifications(t *testing.T) {
 	defer server.close()
 
 	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+	alertProvider := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, alertProvider, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -500,7 +505,7 @@ func TestAlertNotifications(t *testing.T) {
 	}
 
 	for i := range testAlertItems {
-		client.SendAlert(testAlertItems[i].sendAlert)
+		alertProvider.alertsChannel <- testAlertItems[i].sendAlert
 
 		receivedAlert := <-server.alertChannel
 
@@ -558,7 +563,7 @@ func TestAlertNotifications(t *testing.T) {
 	}
 
 	for i := range invalidAlerts {
-		client.SendAlert(invalidAlerts[i])
+		alertProvider.alertsChannel <- invalidAlerts[i]
 	}
 
 	select {
@@ -705,7 +710,7 @@ func TestRunInstances(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, serviceManager,
-		layerManager, launcher, &testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		layerManager, launcher, &testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -796,7 +801,7 @@ func TestNetworkUpdate(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, nil, nil, netManager, nil, true)
+		&testNodeConfigProcessor{}, nil, nil, nil, netManager, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -886,7 +891,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -933,7 +938,7 @@ func TestCloudConnection(t *testing.T) {
 	launcher := newTestLauncher()
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
-		&testNodeConfigProcessor{}, nil, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create SM client: %v", err)
 	}
@@ -1016,7 +1021,7 @@ func TestAverageMonitoring(t *testing.T) {
 	}
 
 	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
-		&testNodeConfigProcessor{}, testMonitoring, nil, nil, nil, true)
+		&testNodeConfigProcessor{}, nil, testMonitoring, nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Can't create UM client: %v", err)
 	}
@@ -1364,6 +1369,10 @@ func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLo
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
 
 	logProvider.sentIndex++
+}
+
+func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
+	return alerts.alertsChannel
 }
 
 func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog) {
