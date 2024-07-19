@@ -208,12 +208,12 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		}
 	}
 
-	if sm.monitor, err = resourcemonitor.New(
-		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.client, sm.client); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.NodeConfigFile, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.resourcemanager, err = resource.New(cfg.NodeConfigFile, sm.client); err != nil {
+	if sm.monitor, err = resourcemonitor.New(
+		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.client, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
