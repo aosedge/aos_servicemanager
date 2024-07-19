@@ -188,10 +188,6 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.client); err != nil {
-		return sm, aoserrors.Wrap(err)
-	}
-
 	nodeInfo, err := sm.iam.GetNodeInfo()
 	if err != nil {
 		return sm, aoserrors.Wrap(err)
@@ -232,6 +228,10 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 
 	if sm.client, err = smclient.New(cfg, sm.iam, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager,
 		sm.monitor, sm.logging, sm.network, sm.cryptoContext, false); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.journalAlerts, err = journalalerts.New(sm.cfg.JournalAlerts, sm.db, sm.db, sm.client); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
