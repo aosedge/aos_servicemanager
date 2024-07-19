@@ -52,11 +52,6 @@ const (
 	cmReconnectTimeout = 10 * time.Second
 )
 
-const (
-	alertChannelSize      = 64
-	monitoringChannelSize = 64
-)
-
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
@@ -80,7 +75,7 @@ type SMClient struct {
 	networkManager       NetworkProvider
 	runtimeStatusChannel <-chan launcher.RuntimeStatus
 	alertChannel         <-chan cloudprotocol.AlertItem
-	monitoringChannel    chan aostypes.NodeMonitoring
+	monitoringChannel    <-chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
 	runStatus            *launcher.InstancesStatus
 }
@@ -133,6 +128,7 @@ type NetworkProvider interface {
 // MonitoringDataProvider monitoring data provider interface.
 type MonitoringDataProvider interface {
 	GetAverageMonitoring() (aostypes.NodeMonitoring, error)
+	GetNodeMonitoringChannel() <-chan aostypes.NodeMonitoring
 }
 
 // LogsProvider logs data provider interface.
@@ -163,8 +159,7 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 		config: config, servicesProcessor: servicesProcessor,
 		layersProcessor: layersProcessor, launcher: launcher, nodeConfigProcessor: nodeConfigProcessor,
 		monitoringProvider: monitoringProvider, logsProvider: logsProvider, networkManager: networkManager,
-		monitoringChannel: make(chan aostypes.NodeMonitoring, monitoringChannelSize),
-		closeChannel:      make(chan struct{}, 1),
+		closeChannel: make(chan struct{}, 1),
 	}
 
 	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
@@ -187,22 +182,15 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 		cmClient.alertChannel = alertsProvider.GetAlertsChannel()
 	}
 
+	if monitoringProvider != nil {
+		cmClient.monitoringChannel = monitoringProvider.GetNodeMonitoringChannel()
+	}
+
 	if logsProvider != nil {
 		cmClient.logsChannel = logsProvider.GetLogsDataChannel()
 	}
 
 	return cmClient, nil
-}
-
-// SendNodeMonitoring sends node monitoring.
-func (client *SMClient) SendNodeMonitoring(monitoringData aostypes.NodeMonitoring) {
-	if len(client.monitoringChannel) >= cap(client.monitoringChannel) {
-		log.Warn("Skip sending monitoring data. Channel full.")
-
-		return
-	}
-
-	client.monitoringChannel <- monitoringData
 }
 
 // Close closes SM client.
