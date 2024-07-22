@@ -717,7 +717,8 @@ func instanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatu
 
 func monitoringDataToPB(monitoring aostypes.MonitoringData) *pb.MonitoringData {
 	pbMonitoringData := &pb.MonitoringData{
-		Ram: monitoring.RAM, Cpu: monitoring.CPU, InTraffic: monitoring.InTraffic,
+		Timestamp: timestamppb.New(monitoring.Timestamp),
+		Ram:       monitoring.RAM, Cpu: monitoring.CPU, InTraffic: monitoring.InTraffic,
 		OutTraffic: monitoring.OutTraffic, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
 	}
 

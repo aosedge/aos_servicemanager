@@ -160,6 +160,9 @@ func TestSMRegistration(t *testing.T) {
 }
 
 func TestMonitoringNotifications(t *testing.T) {
+	currentTime := time.Now()
+	pbCurrentTime := timestamppb.New(currentTime)
+
 	server, err := newTestServer(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
@@ -191,13 +194,15 @@ func TestMonitoringNotifications(t *testing.T) {
 			sendMonitoring: aostypes.NodeMonitoring{
 				NodeID: "nodeID",
 				NodeData: aostypes.MonitoringData{
-					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+					Timestamp: currentTime,
+					RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
 					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
 			expectedMonitoring: pbsm.InstantMonitoring{
 				NodeMonitoring: &pbsm.MonitoringData{
-					Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+					Timestamp: pbCurrentTime,
+					Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
 					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
@@ -206,21 +211,24 @@ func TestMonitoringNotifications(t *testing.T) {
 			sendMonitoring: aostypes.NodeMonitoring{
 				NodeID: "nodeID",
 				NodeData: aostypes.MonitoringData{
-					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+					Timestamp: currentTime,
+					RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
 					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 				InstancesData: []aostypes.InstanceMonitoring{
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
 						MonitoringData: aostypes.MonitoringData{
-							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+							Timestamp: currentTime,
+							RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
 							Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
 						MonitoringData: aostypes.MonitoringData{
-							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+							Timestamp: currentTime,
+							RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
 							Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
@@ -228,21 +236,24 @@ func TestMonitoringNotifications(t *testing.T) {
 			},
 			expectedMonitoring: pbsm.InstantMonitoring{
 				NodeMonitoring: &pbsm.MonitoringData{
-					Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+					Timestamp: pbCurrentTime,
+					Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
 					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 				InstancesMonitoring: []*pbsm.InstanceMonitoring{
 					{
 						Instance: &pbcommon.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
 						MonitoringData: &pbsm.MonitoringData{
-							Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+							Timestamp: pbCurrentTime,
+							Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
 							Disk: []*pbsm.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
 					{
 						Instance: &pbcommon.InstanceIdent{ServiceId: "service2", SubjectId: "s1", Instance: 1},
 						MonitoringData: &pbsm.MonitoringData{
-							Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+							Timestamp: pbCurrentTime,
+							Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
 							Disk: []*pbsm.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
@@ -257,6 +268,9 @@ func TestMonitoringNotifications(t *testing.T) {
 		receivedMonitoring := <-server.instantMonitoringChannel
 
 		if !proto.Equal(receivedMonitoring.InstantMonitoring, &testMonitoringData[i].expectedMonitoring) {
+			log.Debug("Received monitoring: ", receivedMonitoring.InstantMonitoring)
+			log.Debug("Expected monitoring: ", &testMonitoringData[i].expectedMonitoring)
+
 			t.Errorf("Incorrect monitoring data")
 		}
 	}
