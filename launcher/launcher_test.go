@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -821,7 +822,8 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
 	}
 
-	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPULimit) {
+	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPULimit*
+		(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(runtime.NumCPU())/nodeInfoProvider.nodeInfo.MaxDMIPs) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
