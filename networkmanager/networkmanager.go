@@ -376,17 +376,21 @@ func (manager *NetworkManager) RemoveInstanceFromNetwork(instanceID, networkID s
 		return nil
 	}
 
-	if manager.trafficMonitoring != nil {
-		if err := manager.trafficMonitoring.stopInstanceTrafficMonitor(instanceID); err != nil {
-			return aoserrors.Wrap(err)
+	err := manager.removeInstanceNetwork(instanceID, networkID)
+
+	if errInstanceFromCache := manager.deleteInstanceNetworkFromCache(instanceID, networkID); errInstanceFromCache != nil {
+		log.Errorf("Can't delete instance from cache: %v", errInstanceFromCache)
+
+		if err == nil {
+			err = errInstanceFromCache
 		}
 	}
 
-	if err := manager.removeInstanceFromNetwork(instanceID, networkID); err != nil {
-		return aoserrors.Wrap(err)
+	if err == nil {
+		log.WithFields(log.Fields{"instanceID": instanceID}).Debug("Instance has been removed from network")
 	}
 
-	return manager.deleteInstanceNetworkFromCache(instanceID, networkID)
+	return err
 }
 
 // GetInstanceIP return instance IP address.
@@ -456,7 +460,29 @@ func (manager *NetworkManager) SetTrafficPeriod(period int) error {
  * Private
  **********************************************************************************************************************/
 
-func (manager *NetworkManager) removeNetworks(networkParameters []aostypes.NetworkParameters) error {
+func (manager *NetworkManager) removeInstanceNetwork(instanceID, networkID string) error {
+	var err error
+
+	if manager.trafficMonitoring != nil {
+		if errStopMonitoring := manager.trafficMonitoring.stopInstanceTrafficMonitor(instanceID); errStopMonitoring != nil {
+			log.Errorf("Can't stop monitoring instance traffic: %v", errStopMonitoring)
+
+			err = errStopMonitoring
+		}
+	}
+
+	if errRemoveInstance := manager.removeInstanceFromNetwork(instanceID, networkID); errRemoveInstance != nil {
+		log.Errorf("Can't remove instance from network: %v", errRemoveInstance)
+
+		if err == nil {
+			err = errRemoveInstance
+		}
+	}
+
+	return err
+}
+
+func (manager *NetworkManager) removeNetworks(networkParameters []aostypes.NetworkParameters) (err error) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -470,24 +496,44 @@ next:
 
 		log.Infof("Removing network: %s", existNetworkParameter.NetworkID)
 
-		instances, ok := manager.instancesData[existNetworkParameter.NetworkID]
-		if !ok || len(instances) == 0 {
-			log.Infof("Network %s is empty", existNetworkParameter.NetworkID)
+		instances := manager.instancesData[existNetworkParameter.NetworkID]
 
-			if err := manager.clearNetwork(existNetworkParameter.NetworkID); err != nil {
-				return err
+		for instanceID := range instances {
+			log.Debugf("Removing instance %s from network %s", instanceID, existNetworkParameter.NetworkID)
+
+			if errRemove := manager.removeInstanceNetwork(
+				instanceID, existNetworkParameter.NetworkID); errRemove != nil {
+				log.Errorf("Can't remove instance from network: %v", errRemove)
+
+				if err == nil {
+					err = errRemove
+				}
+			}
+		}
+
+		if errClean := manager.clearNetwork(existNetworkParameter.NetworkID); errClean != nil {
+			log.Errorf("Can't clear network: %s", errClean)
+
+			if err == nil {
+				err = errClean
 			}
 		}
 
 		delete(manager.providerNetworks, existNetworkParameter.NetworkID)
 
-		if err := manager.storage.RemoveNetworkInfo(existNetworkParameter.NetworkID); err != nil {
-			return aoserrors.Wrap(err)
+		if errRemoveStorage := manager.storage.RemoveNetworkInfo(existNetworkParameter.NetworkID); errRemoveStorage != nil {
+			log.Errorf("Can't remove network info from storage: %v", errRemoveStorage)
+
+			if err == nil {
+				err = errRemoveStorage
+			}
 		}
 
-		log.WithFields(log.Fields{
-			"networkID": existNetworkParameter.NetworkID,
-		}).Debug("Network has been removed")
+		if err == nil {
+			log.WithFields(log.Fields{
+				"networkID": existNetworkParameter.NetworkID,
+			}).Debug("Network has been removed")
+		}
 	}
 
 	return nil
