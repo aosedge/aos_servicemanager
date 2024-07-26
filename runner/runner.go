@@ -303,6 +303,8 @@ func (runner *Runner) getStartingState(
 ) string {
 	var currentState string
 
+	timeoutChannel := time.After(time.Duration(startTimeoutMultiplier * float32(params.StartInterval)))
+
 	statuses, err := runner.systemd.ListUnitsByNamesContext(context.Background(), []string{unitName})
 	if err == nil && len(statuses) > 0 {
 		currentState = statuses[0].ActiveState
@@ -317,7 +319,11 @@ func (runner *Runner) getStartingState(
 
 			currentState = unitStatus.ActiveState
 
-		case <-time.After(time.Duration(startTimeoutMultiplier * float32(params.StartInterval))):
+		case <-timeoutChannel:
+			log.WithFields(log.Fields{
+				"name": unitName, "currentState": currentState,
+			}).Debug("Start instance timeout")
+
 			if currentState != cloudprotocol.InstanceStateActive {
 				return cloudprotocol.InstanceStateFailed
 			}
