@@ -618,7 +618,7 @@ func TestRuntimeSpec(t *testing.T) {
 					Hostname: newString("testHostName"),
 					Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
 					Quotas: aostypes.ServiceQuotas{
-						CPULimit:    newUint64(42),
+						CPULimit:    newUint64(2000),
 						RAMLimit:    newUint64(1024),
 						PIDsLimit:   newUint64(10),
 						NoFileLimit: newUint64(3),
@@ -984,6 +984,96 @@ func TestRuntimeSpec(t *testing.T) {
 		return expectedGroups[index1] == runtimeSpec.Process.User.AdditionalGids[index2]
 	}) {
 		t.Errorf("Wrong additional GIDs value: %v", runtimeSpec.Process.User.AdditionalGids)
+	}
+}
+
+func TestMinCPUQuota(t *testing.T) {
+	testData := testItem{
+		services: []serviceInfo{
+			{
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
+				serviceConfig: &aostypes.ServiceConfig{
+					Quotas: aostypes.ServiceQuotas{
+						CPULimit: newUint64(42),
+					},
+				},
+			},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+		},
+	}
+
+	var currentTestItem testItem
+
+	runningInstances := make(map[string]runner.InstanceStatus)
+
+	storage := newTestStorage()
+	serviceProvider := newTestServiceProvider()
+	layerProvider := newTestLayerProvider()
+	instanceRunner := newTestRunner(
+		func(instanceID string) runner.InstanceStatus {
+			status := getRunnerStatus(instanceID, currentTestItem, storage)
+			runningInstances[instanceID] = status
+
+			return status
+		},
+		func(instanceID string) error {
+			delete(runningInstances, instanceID)
+
+			return nil
+		},
+	)
+
+	nodeInfoProvider := newTestNodeInfoProvider()
+	nodeInfoProvider.nodeInfo.MaxDMIPs = 100000
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, nodeInfoProvider, storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	if err = serviceProvider.installServices(testData.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err = layerProvider.installLayers(testData.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(testData.instances, false); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(testData)},
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		runtimeStatus, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	instanceInfo, err := storage.getInstanceByIdent(testData.instances[0].InstanceIdent)
+	if err != nil {
+		t.Fatalf("Can't get instance: %v", err)
+	}
+
+	runtimeSpec, err := getInstanceRuntimeSpec(instanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance runtime spec: %v", err)
+	}
+
+	if *runtimeSpec.Linux.Resources.CPU.Quota != 1000 {
+		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 }
 
