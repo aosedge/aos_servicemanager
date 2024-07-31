@@ -46,7 +46,10 @@ import (
  * Consts
  **********************************************************************************************************************/
 
-const defaultCPUPeriod uint64 = 100000
+const (
+	defaultCPUPeriod uint64 = 100000
+	minCPUQuota      int64  = 1000
+)
 
 const cgroupsPath = "/system.slice/system-aos\\x2dservice.slice/"
 
@@ -116,7 +119,11 @@ func (spec *runtimeSpec) setCPULimit(cpuLimit uint64) {
 	}
 
 	cpuPeriod := defaultCPUPeriod
+
 	cpuQuota := int64(cpuLimit * defaultCPUPeriod * uint64(runtime.NumCPU()) / spec.nodeInfo.MaxDMIPs)
+	if cpuQuota < minCPUQuota {
+		cpuQuota = minCPUQuota
+	}
 
 	spec.ociSpec.Linux.Resources.CPU.Period = &cpuPeriod
 	spec.ociSpec.Linux.Resources.CPU.Quota = &cpuQuota
