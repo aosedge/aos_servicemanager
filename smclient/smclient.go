@@ -710,7 +710,7 @@ func updateInstanceStatusToPB(updateStatus *launcher.InstancesStatus) *pb.Update
 func instanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatus {
 	return &pb.InstanceStatus{
 		Instance:       pbconvert.InstanceIdentToPB(instance.InstanceIdent),
-		ServiceVersion: instance.ServiceVersion, RunState: instance.RunState,
+		ServiceVersion: instance.ServiceVersion, RunState: instance.Status,
 		ErrorInfo: pbconvert.ErrorInfoToPB(instance.ErrorInfo),
 	}
 }
@@ -718,8 +718,8 @@ func instanceStatusToPB(instance cloudprotocol.InstanceStatus) *pb.InstanceStatu
 func monitoringDataToPB(monitoring aostypes.MonitoringData) *pb.MonitoringData {
 	pbMonitoringData := &pb.MonitoringData{
 		Timestamp: timestamppb.New(monitoring.Timestamp),
-		Ram:       monitoring.RAM, Cpu: monitoring.CPU, InTraffic: monitoring.InTraffic,
-		OutTraffic: monitoring.OutTraffic, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
+		Ram:       monitoring.RAM, Cpu: monitoring.CPU, Download: monitoring.Download,
+		Upload: monitoring.Upload, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
 	}
 
 	for i, disk := range monitoring.Disk {
