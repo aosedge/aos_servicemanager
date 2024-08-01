@@ -19,7 +19,6 @@
 package alerts
 
 import (
-	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,7 +34,7 @@ const alertChannelSize = 50
 
 // Alerts instance.
 type Alerts struct {
-	alertsChannel chan cloudprotocol.AlertItem
+	alertsChannel chan interface{}
 }
 
 /***********************************************************************************************************************
@@ -47,19 +46,19 @@ func New() (instance *Alerts, err error) {
 	log.Debug("New alerts")
 
 	instance = &Alerts{
-		alertsChannel: make(chan cloudprotocol.AlertItem, alertChannelSize),
+		alertsChannel: make(chan interface{}, alertChannelSize),
 	}
 
 	return instance, nil
 }
 
 // GetAlertsChannel returns channel with alerts to be sent.
-func (instance *Alerts) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
+func (instance *Alerts) GetAlertsChannel() (channel <-chan interface{}) {
 	return instance.alertsChannel
 }
 
 // SendResourceAlert sends resource alert.
-func (instance *Alerts) SendAlert(alert cloudprotocol.AlertItem) {
+func (instance *Alerts) SendAlert(alert interface{}) {
 	if len(instance.alertsChannel) >= cap(instance.alertsChannel) {
 		log.Warn("Skip alert, channel is full")
 

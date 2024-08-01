@@ -74,7 +74,7 @@ type SMClient struct {
 	logsProvider         LogsProvider
 	networkManager       NetworkProvider
 	runtimeStatusChannel <-chan launcher.RuntimeStatus
-	alertChannel         <-chan cloudprotocol.AlertItem
+	alertChannel         <-chan interface{}
 	monitoringChannel    <-chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
 	runStatus            *launcher.InstancesStatus
@@ -117,7 +117,7 @@ type InstanceLauncher interface {
 
 // AlertsProvider alert data provider interface.
 type AlertsProvider interface {
-	GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem)
+	GetAlertsChannel() (channel <-chan interface{})
 }
 
 // NetworkProvider network provider interface.
@@ -620,7 +620,7 @@ func (client *SMClient) handleChannels() {
 			}
 
 		case alert := <-client.alertChannel:
-			pbAlert, err := cloudprotocolAlertToPB(&alert)
+			pbAlert, err := cloudprotocolAlertToPB(alert)
 			if err != nil {
 				log.Errorf("Can't convert alert to pb: %v", err)
 
@@ -778,133 +778,93 @@ func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
 	}
 }
 
-func cloudprotocolAlertToPB(alert *cloudprotocol.AlertItem) (pbAlert *pb.Alert, err error) {
-	pbAlert = &pb.Alert{Tag: alert.Tag, Timestamp: timestamppb.New(alert.Timestamp)}
+func cloudprotocolAlertToPB(alert interface{}) (*pb.Alert, error) {
+	switch alertItem := alert.(type) {
+	case cloudprotocol.SystemAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagSystemError,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_SystemAlert{
+				SystemAlert: &pb.SystemAlert{Message: alertItem.Message},
+			},
+		}, nil
 
-	switch alert.Tag {
-	case cloudprotocol.AlertTagSystemError:
-		if pbAlert.Payload, err = getPBSystemAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
+	case cloudprotocol.CoreAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagAosCore,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_CoreAlert{
+				CoreAlert: &pb.CoreAlert{
+					CoreComponent: alertItem.CoreComponent,
+					Message:       alertItem.Message,
+				},
+			},
+		}, nil
+
+	case cloudprotocol.ResourceValidateAlert:
+		pbResourceValidateAlert := &pb.ResourceValidateAlert{
+			Name: alertItem.Name,
 		}
 
-	case cloudprotocol.AlertTagAosCore:
-		if pbAlert.Payload, err = getPBCoreAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
+		for i := range alertItem.Errors {
+			pbResourceValidateAlert.Errors = append(pbResourceValidateAlert.Errors,
+				pbconvert.ErrorInfoToPB(&alertItem.Errors[i]))
 		}
 
-	case cloudprotocol.AlertTagResourceValidate:
-		if pbAlert.Payload, err = getPBResourceValidateAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
-		}
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagResourceValidate,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_ResourceValidateAlert{
+				ResourceValidateAlert: pbResourceValidateAlert,
+			},
+		}, nil
 
-	case cloudprotocol.AlertTagDeviceAllocate:
-		if pbAlert.Payload, err = getPBDeviceAllocateAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
-		}
+	case cloudprotocol.DeviceAllocateAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagDeviceAllocate,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_DeviceAllocateAlert{
+				DeviceAllocateAlert: &pb.DeviceAllocateAlert{
+					Instance: pbconvert.InstanceIdentToPB(alertItem.InstanceIdent), Message: alertItem.Message,
+					Device: alertItem.Device,
+				},
+			},
+		}, nil
 
-	case cloudprotocol.AlertTagSystemQuota:
-		if pbAlert.Payload, err = getPBSystemQuotaAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
-		}
+	case cloudprotocol.SystemQuotaAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagSystemQuota,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_SystemQuotaAlert{
+				SystemQuotaAlert: &pb.SystemQuotaAlert{
+					Parameter: alertItem.Parameter,
+					Value:     alertItem.Value,
+				},
+			},
+		}, nil
 
-	case cloudprotocol.AlertTagInstanceQuota:
-		if pbAlert.Payload, err = getPBInstanceQuotaAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
-		}
+	case cloudprotocol.InstanceQuotaAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagInstanceQuota,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_InstanceQuotaAlert{InstanceQuotaAlert: &pb.InstanceQuotaAlert{
+				Instance:  pbconvert.InstanceIdentToPB(alertItem.InstanceIdent),
+				Parameter: alertItem.Parameter,
+				Value:     alertItem.Value,
+			}},
+		}, nil
 
-	case cloudprotocol.AlertTagServiceInstance:
-		if pbAlert.Payload, err = getPBInstanceAlertFromPayload(alert.Payload); err != nil {
-			return nil, err
-		}
+	case cloudprotocol.ServiceInstanceAlert:
+		return &pb.Alert{
+			Tag:       cloudprotocol.AlertTagServiceInstance,
+			Timestamp: timestamppb.New(alertItem.Timestamp),
+			AlertItem: &pb.Alert_InstanceAlert{InstanceAlert: &pb.InstanceAlert{
+				Instance:       pbconvert.InstanceIdentToPB(alertItem.InstanceIdent),
+				ServiceVersion: alertItem.ServiceVersion,
+				Message:        alertItem.Message,
+			}},
+		}, nil
 	}
 
-	return pbAlert, nil
-}
-
-func getPBSystemAlertFromPayload(payload interface{}) (*pb.Alert_SystemAlert, error) {
-	sysAlert, ok := payload.(cloudprotocol.SystemAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_SystemAlert{SystemAlert: &pb.SystemAlert{Message: sysAlert.Message}}, nil
-}
-
-func getPBCoreAlertFromPayload(payload interface{}) (*pb.Alert_CoreAlert, error) {
-	coreAlert, ok := payload.(cloudprotocol.CoreAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_CoreAlert{CoreAlert: &pb.CoreAlert{
-		CoreComponent: coreAlert.CoreComponent,
-		Message:       coreAlert.Message,
-	}}, nil
-}
-
-func getPBResourceValidateAlertFromPayload(payload interface{}) (*pb.Alert_ResourceValidateAlert, error) {
-	resAlert, ok := payload.(cloudprotocol.ResourceValidateAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	pbResAlert := pb.ResourceValidateAlert{
-		Name: resAlert.Name,
-	}
-
-	for i := range resAlert.Errors {
-		pbResAlert.Errors = append(pbResAlert.Errors, pbconvert.ErrorInfoToPB(&resAlert.Errors[i]))
-	}
-
-	return &pb.Alert_ResourceValidateAlert{ResourceValidateAlert: &pbResAlert}, nil
-}
-
-func getPBDeviceAllocateAlertFromPayload(payload interface{}) (*pb.Alert_DeviceAllocateAlert, error) {
-	devAlert, ok := payload.(cloudprotocol.DeviceAllocateAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_DeviceAllocateAlert{DeviceAllocateAlert: &pb.DeviceAllocateAlert{
-		Instance: pbconvert.InstanceIdentToPB(devAlert.InstanceIdent), Message: devAlert.Message,
-		Device: devAlert.Device,
-	}}, nil
-}
-
-func getPBSystemQuotaAlertFromPayload(payload interface{}) (*pb.Alert_SystemQuotaAlert, error) {
-	sysQuotaAlert, ok := payload.(cloudprotocol.SystemQuotaAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_SystemQuotaAlert{SystemQuotaAlert: &pb.SystemQuotaAlert{
-		Parameter: sysQuotaAlert.Parameter,
-		Value:     sysQuotaAlert.Value,
-	}}, nil
-}
-
-func getPBInstanceQuotaAlertFromPayload(payload interface{}) (*pb.Alert_InstanceQuotaAlert, error) {
-	instQuotaAlert, ok := payload.(cloudprotocol.InstanceQuotaAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_InstanceQuotaAlert{InstanceQuotaAlert: &pb.InstanceQuotaAlert{
-		Instance:  pbconvert.InstanceIdentToPB(instQuotaAlert.InstanceIdent),
-		Parameter: instQuotaAlert.Parameter,
-		Value:     instQuotaAlert.Value,
-	}}, nil
-}
-
-func getPBInstanceAlertFromPayload(payload interface{}) (*pb.Alert_InstanceAlert, error) {
-	instanceAlert, ok := payload.(cloudprotocol.ServiceInstanceAlert)
-	if !ok {
-		return nil, aoserrors.Wrap(errIncorrectAlertType)
-	}
-
-	return &pb.Alert_InstanceAlert{InstanceAlert: &pb.InstanceAlert{
-		Instance:       pbconvert.InstanceIdentToPB(instanceAlert.InstanceIdent),
-		ServiceVersion: instanceAlert.ServiceVersion,
-		Message:        instanceAlert.Message,
-	}}, nil
+	return nil, errIncorrectAlertType
 }
