@@ -195,14 +195,14 @@ func TestMonitoringNotifications(t *testing.T) {
 				NodeID: "nodeID",
 				NodeData: aostypes.MonitoringData{
 					Timestamp: currentTime,
-					RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+					RAM:       10, CPU: 20, Download: 40, Upload: 50,
 					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
 			expectedMonitoring: pbsm.InstantMonitoring{
 				NodeMonitoring: &pbsm.MonitoringData{
 					Timestamp: pbCurrentTime,
-					Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+					Ram:       10, Cpu: 20, Download: 40, Upload: 50,
 					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
@@ -212,7 +212,7 @@ func TestMonitoringNotifications(t *testing.T) {
 				NodeID: "nodeID",
 				NodeData: aostypes.MonitoringData{
 					Timestamp: currentTime,
-					RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+					RAM:       10, CPU: 20, Download: 40, Upload: 50,
 					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 				InstancesData: []aostypes.InstanceMonitoring{
@@ -220,7 +220,7 @@ func TestMonitoringNotifications(t *testing.T) {
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
 						MonitoringData: aostypes.MonitoringData{
 							Timestamp: currentTime,
-							RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+							RAM:       10, CPU: 20, Download: 40, Upload: 50,
 							Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
@@ -228,7 +228,7 @@ func TestMonitoringNotifications(t *testing.T) {
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
 						MonitoringData: aostypes.MonitoringData{
 							Timestamp: currentTime,
-							RAM:       10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+							RAM:       10, CPU: 20, Download: 40, Upload: 50,
 							Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
@@ -237,7 +237,7 @@ func TestMonitoringNotifications(t *testing.T) {
 			expectedMonitoring: pbsm.InstantMonitoring{
 				NodeMonitoring: &pbsm.MonitoringData{
 					Timestamp: pbCurrentTime,
-					Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+					Ram:       10, Cpu: 20, Download: 40, Upload: 50,
 					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 				InstancesMonitoring: []*pbsm.InstanceMonitoring{
@@ -245,7 +245,7 @@ func TestMonitoringNotifications(t *testing.T) {
 						Instance: &pbcommon.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
 						MonitoringData: &pbsm.MonitoringData{
 							Timestamp: pbCurrentTime,
-							Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+							Ram:       10, Cpu: 20, Download: 40, Upload: 50,
 							Disk: []*pbsm.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
@@ -253,7 +253,7 @@ func TestMonitoringNotifications(t *testing.T) {
 						Instance: &pbcommon.InstanceIdent{ServiceId: "service2", SubjectId: "s1", Instance: 1},
 						MonitoringData: &pbsm.MonitoringData{
 							Timestamp: pbCurrentTime,
-							Ram:       10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
+							Ram:       10, Cpu: 20, Download: 40, Upload: 50,
 							Disk: []*pbsm.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
@@ -951,21 +951,21 @@ func TestAverageMonitoring(t *testing.T) {
 	testMonitoring := &testMonitoringProvider{
 		averageMonitoring: aostypes.NodeMonitoring{
 			NodeData: aostypes.MonitoringData{
-				RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+				RAM: 10, CPU: 20, Download: 40, Upload: 50,
 				Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 			},
 			InstancesData: []aostypes.InstanceMonitoring{
 				{
 					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
 					MonitoringData: aostypes.MonitoringData{
-						RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+						RAM: 10, CPU: 20, Download: 40, Upload: 50,
 						Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 					},
 				},
 				{
 					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
 					MonitoringData: aostypes.MonitoringData{
-						RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
+						RAM: 10, CPU: 20, Download: 40, Upload: 50,
 						Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 					},
 				},
@@ -1144,11 +1144,11 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 
 func convertMonitoringData(monitoring *pbsm.MonitoringData) aostypes.MonitoringData {
 	data := aostypes.MonitoringData{
-		RAM:        monitoring.GetRam(),
-		CPU:        monitoring.GetCpu(),
-		InTraffic:  monitoring.GetInTraffic(),
-		OutTraffic: monitoring.GetOutTraffic(),
-		Disk:       make([]aostypes.PartitionUsage, 0, len(monitoring.GetDisk())),
+		RAM:      monitoring.GetRam(),
+		CPU:      monitoring.GetCpu(),
+		Download: monitoring.GetDownload(),
+		Upload:   monitoring.GetUpload(),
+		Disk:     make([]aostypes.PartitionUsage, 0, len(monitoring.GetDisk())),
 	}
 
 	for _, disk := range monitoring.GetDisk() {
