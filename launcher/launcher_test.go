@@ -3197,9 +3197,9 @@ func newTestAlertSender() *testAlertSender {
 	return &testAlertSender{}
 }
 
-func (sender *testAlertSender) SendAlert(alertItem cloudprotocol.AlertItem) {
-	if alert, ok := alertItem.Payload.(cloudprotocol.DeviceAllocateAlert); ok {
-		sender.alerts = append(sender.alerts, alert)
+func (sender *testAlertSender) SendAlert(alert interface{}) {
+	if deviceAllocateAlert, ok := alert.(cloudprotocol.DeviceAllocateAlert); ok {
+		sender.alerts = append(sender.alerts, deviceAllocateAlert)
 	}
 }
 

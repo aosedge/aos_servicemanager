@@ -63,7 +63,7 @@ type ResourceManager struct {
 
 // AlertSender provides alert sender interface.
 type AlertSender interface {
-	SendAlert(alert cloudprotocol.AlertItem)
+	SendAlert(alert interface{})
 }
 
 type nodeConfig struct {
@@ -399,7 +399,13 @@ func (resourcemanager *ResourceManager) validateNodeConfig(config cloudprotocol.
 func (resourcemanager *ResourceManager) validateDevices(devices []cloudprotocol.DeviceInfo) error {
 	// compare available device names and additional groups with system ones
 	for _, device := range devices {
-		deviceAlert := cloudprotocol.ResourceValidateAlert{Name: device.Name}
+		deviceAlert := cloudprotocol.ResourceValidateAlert{
+			AlertItem: cloudprotocol.AlertItem{
+				Timestamp: time.Now(),
+				Tag:       cloudprotocol.AlertTagResourceValidate,
+			},
+			Name: device.Name,
+		}
 
 		// check devices
 		for _, hostDevice := range device.HostDevices {
@@ -425,11 +431,7 @@ func (resourcemanager *ResourceManager) validateDevices(devices []cloudprotocol.
 
 		if len(deviceAlert.Errors) > 0 {
 			if resourcemanager.alertSender != nil {
-				resourcemanager.alertSender.SendAlert(cloudprotocol.AlertItem{
-					Timestamp: time.Now(),
-					Tag:       cloudprotocol.AlertTagResourceValidate,
-					Payload:   deviceAlert,
-				})
+				resourcemanager.alertSender.SendAlert(deviceAlert)
 			}
 
 			return aoserrors.New("device resources are not valid")

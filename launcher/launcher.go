@@ -137,7 +137,7 @@ type InstanceMonitor interface {
 
 // AlertSender provides interface to send alerts.
 type AlertSender interface {
-	SendAlert(alert cloudprotocol.AlertItem)
+	SendAlert(alert interface{})
 }
 
 // InstanceInfo instance information.
@@ -1215,15 +1215,15 @@ func (launcher *Launcher) updateOfflineTimeouts() {
 	launcher.setOfflineInstancesStatus(instances)
 }
 
-func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error) cloudprotocol.AlertItem {
-	return cloudprotocol.AlertItem{
-		Timestamp: time.Now(),
-		Tag:       cloudprotocol.AlertTagDeviceAllocate,
-		Payload: cloudprotocol.DeviceAllocateAlert{
-			InstanceIdent: instance.InstanceIdent,
-			Device:        device,
-			Message:       err.Error(),
+func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error) interface{} {
+	return cloudprotocol.DeviceAllocateAlert{
+		AlertItem: cloudprotocol.AlertItem{
+			Timestamp: time.Now(),
+			Tag:       cloudprotocol.AlertTagDeviceAllocate,
 		},
+		InstanceIdent: instance.InstanceIdent,
+		Device:        device,
+		Message:       err.Error(),
 	}
 }
 

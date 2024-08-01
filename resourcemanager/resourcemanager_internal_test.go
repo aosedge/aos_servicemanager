@@ -39,7 +39,7 @@ import (
  **********************************************************************************************************************/
 
 type alertSender struct {
-	alert []cloudprotocol.ResourceValidateAlert
+	alerts []cloudprotocol.ResourceValidateAlert
 }
 
 /***********************************************************************************************************************
@@ -804,31 +804,31 @@ func writeTestNodeConfigFile(content string) (err error) {
 	return nil
 }
 
-func (sender *alertSender) SendAlert(alert cloudprotocol.AlertItem) {
-	resourceValidateAlert, ok := alert.Payload.(cloudprotocol.ResourceValidateAlert)
+func (sender *alertSender) SendAlert(alert interface{}) {
+	resourceValidateAlert, ok := alert.(cloudprotocol.ResourceValidateAlert)
 	if !ok {
 		return
 	}
 
-	sender.alert = append(sender.alert, resourceValidateAlert)
+	sender.alerts = append(sender.alerts, resourceValidateAlert)
 }
 
 func (sender *alertSender) checkAlert(t *testing.T) {
 	t.Helper()
 
-	if len(sender.alert) != 1 {
-		t.Fatalf("Wrong resources errors count: %d", len(sender.alert))
+	if len(sender.alerts) != 1 {
+		t.Fatalf("Wrong resources errors count: %d", len(sender.alerts))
 	}
 
-	if sender.alert[0].Name != "some_not_existed_device" {
-		t.Errorf("Wrong alert device name: %s", sender.alert[0].Name)
+	if sender.alerts[0].Name != "some_not_existed_device" {
+		t.Errorf("Wrong alert device name: %s", sender.alerts[0].Name)
 	}
 
-	if len(sender.alert[0].Errors) != 2 {
-		t.Errorf("Wrong alert errors count: %d", len(sender.alert[0].Errors))
+	if len(sender.alerts[0].Errors) != 2 {
+		t.Errorf("Wrong alert errors count: %d", len(sender.alerts[0].Errors))
 	}
 
-	for _, errInfo := range sender.alert[0].Errors {
+	for _, errInfo := range sender.alerts[0].Errors {
 		if !strings.Contains(errInfo.Message, "is not present on system") {
 			t.Errorf("Wrong alert error message: %v", errInfo.Message)
 		}
