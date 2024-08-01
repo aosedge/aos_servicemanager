@@ -1128,30 +1128,30 @@ func TestRuntimeEnvironment(t *testing.T) {
 					Resources: []string{"resource0", "resource1", "resource2"},
 					Devices:   []aostypes.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
 					AlertRules: &aostypes.AlertRules{
-						RAM: &aostypes.AlertRuleParam{
-							Timeout: aostypes.Duration{Duration: 1 * time.Second},
-							Low:     10, High: 100,
+						RAM: &aostypes.AlertRulePercents{
+							MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
+							MinThreshold: 10, MaxThreshold: 100,
 						},
-						CPU: &aostypes.AlertRuleParam{
-							Timeout: aostypes.Duration{Duration: 2 * time.Second},
-							Low:     20, High: 200,
+						CPU: &aostypes.AlertRulePercents{
+							MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
+							MinThreshold: 20, MaxThreshold: 200,
 						},
-						UsedDisks: []aostypes.PartitionAlertRuleParam{
+						UsedDisks: []aostypes.PartitionAlertRule{
 							{
 								Name: "storage",
-								AlertRuleParam: aostypes.AlertRuleParam{
-									Timeout: aostypes.Duration{Duration: 3 * time.Second},
-									Low:     30, High: 300,
+								AlertRulePercents: aostypes.AlertRulePercents{
+									MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
+									MinThreshold: 30, MaxThreshold: 300,
 								},
 							},
 						},
-						InTraffic: &aostypes.AlertRuleParam{
-							Timeout: aostypes.Duration{Duration: 4 * time.Second},
-							Low:     40, High: 400,
+						Download: &aostypes.AlertRulePoints{
+							MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
+							MinThreshold: 40, MaxThreshold: 400,
 						},
-						OutTraffic: &aostypes.AlertRuleParam{
-							Timeout: aostypes.Duration{Duration: 5 * time.Second},
-							Low:     50, High: 500,
+						Upload: &aostypes.AlertRulePoints{
+							MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
+							MinThreshold: 50, MaxThreshold: 500,
 						},
 					},
 				},
@@ -3372,7 +3372,7 @@ func createInstancesStatuses(item testItem) (instancesStatuses []cloudprotocol.I
 	for i, instance := range item.instances {
 		instanceStatus := cloudprotocol.InstanceStatus{
 			InstanceIdent: item.instances[i].InstanceIdent,
-			RunState:      cloudprotocol.InstanceStateActive,
+			Status:        cloudprotocol.InstanceStateActive,
 		}
 
 		for _, service := range item.services {
@@ -3382,7 +3382,7 @@ func createInstancesStatuses(item testItem) (instancesStatuses []cloudprotocol.I
 		}
 
 		if i < len(item.err) && item.err[i] != nil {
-			instanceStatus.RunState = cloudprotocol.InstanceStateFailed
+			instanceStatus.Status = cloudprotocol.InstanceStateFailed
 			instanceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{
 				Message: item.err[i].Error(),
 			}

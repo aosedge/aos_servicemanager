@@ -526,7 +526,7 @@ func TestGetNodeConfig(t *testing.T) {
 			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
 			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
 		},
-		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: 1.0, Mem: 2.0, Storage: 3.0},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: newFloat(1.0), RAM: newFloat(2.0), Storage: newFloat(3.0)},
 		Resources: []cloudprotocol.ResourceInfo{
 			{Name: "bluetooth", Groups: []string{"bluetooth"}},
 			{Name: "wifi", Groups: []string{"wifi-group"}},
@@ -567,7 +567,7 @@ func TestGetNodeConfig(t *testing.T) {
 			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
 			{Name: "input", SharedCount: 2, HostDevices: []string{"/dev/input/by-path"}},
 		},
-		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: 1.0, Mem: 2.0, Storage: 3.0},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: newFloat(1.0), RAM: newFloat(2.0), Storage: newFloat(3.0)},
 		Resources: []cloudprotocol.ResourceInfo{
 			{Name: "bluetooth", Groups: []string{"bluetooth"}},
 			{Name: "wifi", Groups: []string{"wifi-group"}},
@@ -833,4 +833,8 @@ func (sender *alertSender) checkAlert(t *testing.T) {
 			t.Errorf("Wrong alert error message: %v", errInfo.Message)
 		}
 	}
+}
+
+func newFloat(value float64) *float64 {
+	return &value
 }
