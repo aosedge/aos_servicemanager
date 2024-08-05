@@ -635,7 +635,11 @@ func (client *SMClient) handleChannels() {
 				return
 			}
 
-		case monitoringData := <-client.monitoringChannel:
+		case monitoringData, ok := <-client.monitoringChannel:
+			if !ok {
+				break
+			}
+
 			if err := client.stream.Send(
 				&pb.SMOutgoingMessages{
 					SMOutgoingMessage: &pb.SMOutgoingMessages_InstantMonitoring{
