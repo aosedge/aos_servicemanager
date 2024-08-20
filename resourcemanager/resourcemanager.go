@@ -381,6 +381,13 @@ func (resourcemanager *ResourceManager) loadNodeConfiguration() (err error) {
 
 	byteValue, err := os.ReadFile(resourcemanager.nodeConfigFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Don't treat absent config as an error.
+			resourcemanager.nodeConfig.Version = "0.0.0"
+
+			return nil
+		}
+
 		return aoserrors.Wrap(err)
 	}
 
