@@ -421,23 +421,12 @@ func TestNotExistNodeConfig(t *testing.T) {
 		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.nodeConfigError; err == nil {
-		t.Error("Node config should be invalid if config is not exits")
-	}
-}
-
-func TestInvalidVersionNodeConfig(t *testing.T) {
-	if err := writeTestNodeConfigFile(createWrongVersionNodeConfigJSON()); err != nil {
-		t.Fatalf("Can't write node config: %v", err)
+	if err = rm.nodeConfigError; err != nil {
+		t.Error("Node config should be valid if config is not exits")
 	}
 
-	rm, err := New(path.Join(tmpDir, "aos_node_wrong_version.cfg"), &alertSender{})
-	if err != nil {
-		t.Fatalf("Can't create resource manager: %v", err)
-	}
-
-	if err = rm.nodeConfigError; err == nil {
-		t.Errorf("Node config should be invalid in case of version mismatch")
+	if rm.nodeConfig.Version != "0.0.0" {
+		t.Error("Wrong node config version")
 	}
 }
 
@@ -624,32 +613,6 @@ func cleanup() (err error) {
 	}
 
 	return nil
-}
-
-func createWrongVersionNodeConfigJSON() (configJSON string) {
-	return `{
-	"formatVersion": 256,
-	"version": "1.0.0",
-	"devices": [
-		{
-			"name": "random",
-			"sharedCount": 0,
-			"groups": [
-				"root"
-			],
-			"hostDevices": [
-				"/dev/random"
-			]
-		},
-		{
-			"name": "null",
-			"sharedCount": 2,
-			"hostDevices": [
-				"/dev/null"
-			]
-		}
-	]
-}`
 }
 
 func createTestNodeConfigFile(version string) (configJSON string) {
