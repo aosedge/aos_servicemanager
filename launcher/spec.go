@@ -136,8 +136,8 @@ func (spec *runtimeSpec) applyServiceConfig(config *aostypes.ServiceConfig) erro
 
 	spec.ociSpec.Linux.Sysctl = config.Sysctl
 
-	if config.Quotas.CPULimit != nil {
-		spec.setCPULimit(*config.Quotas.CPULimit)
+	if config.Quotas.CPUDMIPSLimit != nil {
+		spec.setCPULimit(*config.Quotas.CPUDMIPSLimit)
 	}
 
 	if config.Quotas.RAMLimit != nil {
