@@ -585,12 +585,14 @@ func TestGetNodeConfig(t *testing.T) {
 		t.Fatalf("Can't marshal node config: %v", err)
 	}
 
+	curNodeConfigListener := rm.SubscribeCurrentNodeConfigChange()
+
 	if err = rm.UpdateNodeConfig(string(newConfigJSON), "2.0.0"); err != nil {
 		t.Fatalf("Can't update node config: %v", err)
 	}
 
 	select {
-	case nodeConfig := <-rm.CurrentNodeConfigChannel():
+	case nodeConfig := <-curNodeConfigListener:
 		if !reflect.DeepEqual(nodeConfig, newNodeConfig) {
 			t.Errorf("Wrong node config: %v", nodeConfig)
 		}
