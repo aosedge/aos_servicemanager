@@ -618,11 +618,11 @@ func TestRuntimeSpec(t *testing.T) {
 					Hostname: newString("testHostName"),
 					Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
 					Quotas: aostypes.ServiceQuotas{
-						CPULimit:    newUint64(2000),
-						RAMLimit:    newUint64(1024),
-						PIDsLimit:   newUint64(10),
-						NoFileLimit: newUint64(3),
-						TmpLimit:    newUint64(512),
+						CPUDMIPSLimit: newUint64(2000),
+						RAMLimit:      newUint64(1024),
+						PIDsLimit:     newUint64(10),
+						NoFileLimit:   newUint64(3),
+						TmpLimit:      newUint64(512),
 					},
 					Devices: []aostypes.ServiceDevice{
 						{Name: "input", Permissions: "r"},
@@ -822,7 +822,7 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
 	}
 
-	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPULimit*
+	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPUDMIPSLimit*
 		(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(runtime.NumCPU())/nodeInfoProvider.nodeInfo.MaxDMIPs) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
@@ -994,7 +994,7 @@ func TestMinCPUQuota(t *testing.T) {
 				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
 				serviceConfig: &aostypes.ServiceConfig{
 					Quotas: aostypes.ServiceQuotas{
-						CPULimit: newUint64(42),
+						CPUDMIPSLimit: newUint64(42),
 					},
 				},
 			},
