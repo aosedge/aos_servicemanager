@@ -51,14 +51,14 @@ const (
 type ResourceManager struct {
 	sync.Mutex
 
-	allocatedDevices  map[string][]string
-	hostDevices       []string
-	hostGroups        []string
-	nodeConfigFile    string
-	nodeConfig        nodeConfig
-	nodeConfigError   error
-	alertSender       AlertSender
-	nodeConfigChannel chan cloudprotocol.NodeConfig
+	allocatedDevices           map[string][]string
+	hostDevices                []string
+	hostGroups                 []string
+	nodeConfigFile             string
+	nodeConfig                 nodeConfig
+	nodeConfigError            error
+	alertSender                AlertSender
+	currentNodeConfigListeners []chan cloudprotocol.NodeConfig
 }
 
 // AlertSender provides alert sender interface.
@@ -87,9 +87,9 @@ func New(nodeConfigFile string, alertSender AlertSender) (resourcemanager *Resou
 	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
-		nodeConfigFile:    nodeConfigFile,
-		alertSender:       alertSender,
-		nodeConfigChannel: make(chan cloudprotocol.NodeConfig, 1),
+		nodeConfigFile:             nodeConfigFile,
+		alertSender:                alertSender,
+		currentNodeConfigListeners: make([]chan cloudprotocol.NodeConfig, 0),
 	}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
@@ -155,7 +155,7 @@ func (resourcemanager *ResourceManager) UpdateNodeConfig(configJSON, version str
 		return aoserrors.Wrap(err)
 	}
 
-	resourcemanager.nodeConfigChannel <- resourcemanager.nodeConfig.NodeConfig
+	resourcemanager.updateCurrentNodeConfigListeners(resourcemanager.nodeConfig.NodeConfig)
 
 	log.WithField("version", resourcemanager.nodeConfig.Version).Debug("Update node configuration")
 
@@ -289,9 +289,17 @@ func (resourcemanager *ResourceManager) GetCurrentNodeConfig() (cloudprotocol.No
 	return resourcemanager.nodeConfig.NodeConfig, nil
 }
 
-// CurrentNodeConfigChannel returns node config changed channel.
-func (resourcemanager *ResourceManager) CurrentNodeConfigChannel() <-chan cloudprotocol.NodeConfig {
-	return resourcemanager.nodeConfigChannel
+// SubscribeCurrentNodeConfigChange subscribes new current node config listener.
+func (resourcemanager *ResourceManager) SubscribeCurrentNodeConfigChange() <-chan cloudprotocol.NodeConfig {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	log.Debug("Subscribe to current node config change event")
+
+	ch := make(chan cloudprotocol.NodeConfig, 1)
+	resourcemanager.currentNodeConfigListeners = append(resourcemanager.currentNodeConfigListeners, ch)
+
+	return ch
 }
 
 /***********************************************************************************************************************
@@ -451,6 +459,12 @@ func (resourcemanager *ResourceManager) getAvailableDevice(
 	}
 
 	return deviceInfo, aoserrors.Errorf("device is not available")
+}
+
+func (resourcemanager *ResourceManager) updateCurrentNodeConfigListeners(curNodeConfig cloudprotocol.NodeConfig) {
+	for _, listener := range resourcemanager.currentNodeConfigListeners {
+		listener <- curNodeConfig
+	}
 }
 
 func contains(arr []string, str string) bool {
