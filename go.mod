@@ -9,7 +9,7 @@ replace github.com/coreos/go-iptables => github.com/aosedge/go-iptables v0.0.0-2
 replace github.com/anexia-it/fsquota => github.com/aosedge/fsquota v0.0.0-20231127111317-842d831105a7
 
 require (
-	github.com/aosedge/aos_common v0.0.0-20240807131318-ec6baf1da16c
+	github.com/aosedge/aos_common v0.0.0-20240820101828-9451f51fe248
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
 	github.com/coreos/go-iptables v0.6.0
