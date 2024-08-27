@@ -778,7 +778,8 @@ func getTimeFromPB(timePB *timestamp.Timestamp) *time.Time {
 func cloudprotocolLogToPB(log cloudprotocol.PushLog) (pbLog *pb.LogData) {
 	return &pb.LogData{
 		LogId: log.LogID, PartCount: log.PartsCount, Part: log.Part, Data: log.Content,
-		Error: pbconvert.ErrorInfoToPB(log.ErrorInfo),
+		Error:  pbconvert.ErrorInfoToPB(log.ErrorInfo),
+		Status: log.Status,
 	}
 }
 

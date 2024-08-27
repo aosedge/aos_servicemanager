@@ -124,7 +124,7 @@ func (instance *Logging) GetInstanceLog(request cloudprotocol.RequestLog) error 
 	if len(logRequest.instanceIDs) == 0 {
 		log.WithField("logID", request.LogID).Debug("No instance ids for log request")
 
-		instance.sendEmptyResponse(request.LogID)
+		instance.sendEmptyResponse(request.LogID, cloudprotocol.LogStatusAbsent, aoserrors.New("no service instance found"))
 
 		return nil
 	}
@@ -154,7 +154,7 @@ func (instance *Logging) GetInstanceCrashLog(request cloudprotocol.RequestLog) e
 	if len(logRequest.instanceIDs) == 0 {
 		log.WithField("logID", request.LogID).Debug("No instance ids for log request")
 
-		instance.sendEmptyResponse(request.LogID)
+		instance.sendEmptyResponse(request.LogID, cloudprotocol.LogStatusAbsent, aoserrors.New("no service instance found"))
 
 		return nil
 	}
@@ -322,7 +322,7 @@ func (instance *Logging) getInstanceCrashLog(request getLogRequest) (err error) 
 			"instanceIDs": request.instanceIDs,
 		}).Debug("No instance crash found")
 
-		instance.sendEmptyResponse(request.logID)
+		instance.sendEmptyResponse(request.logID, cloudprotocol.LogStatusEmpty, aoserrors.New("no instance crash found"))
 
 		return nil
 	}
@@ -434,7 +434,8 @@ func (instance *Logging) archivateCrashLog(
 
 func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	response := cloudprotocol.PushLog{
-		LogID: logID,
+		LogID:  logID,
+		Status: cloudprotocol.LogStatusError,
 		ErrorInfo: &cloudprotocol.ErrorInfo{
 			Message: errorStr,
 		},
@@ -443,7 +444,7 @@ func (instance *Logging) sendErrorResponse(errorStr, logID string) {
 	instance.logChannel <- response
 }
 
-func (instance *Logging) sendEmptyResponse(logID string) {
+func (instance *Logging) sendEmptyResponse(logID string, status string, err error) {
 	log.Debug("Send empty log")
 
 	var part uint64 = 1
@@ -453,6 +454,10 @@ func (instance *Logging) sendEmptyResponse(logID string) {
 		PartsCount: part,
 		Part:       part,
 		Content:    []byte{},
+		Status:     status,
+		ErrorInfo: &cloudprotocol.ErrorInfo{
+			Message: err.Error(),
+		},
 	}
 }
 

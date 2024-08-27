@@ -717,7 +717,7 @@ func checkEmptyLog(t *testing.T, logChannel <-chan cloudprotocol.PushLog) {
 	for {
 		select {
 		case result := <-logChannel:
-			if result.ErrorInfo != nil {
+			if result.Status != cloudprotocol.LogStatusAbsent && result.Status != cloudprotocol.LogStatusEmpty {
 				t.Errorf("Error log received: %s", result.ErrorInfo.Message)
 				return
 			}
