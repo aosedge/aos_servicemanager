@@ -112,6 +112,7 @@ func (instance *archivator) sendLog(logID string) (err error) {
 			PartsCount: part,
 			Part:       part,
 			Content:    []byte{},
+			Status:     cloudprotocol.LogStatusEmpty,
 		}
 
 		log.WithFields(log.Fields{
@@ -138,6 +139,7 @@ func (instance *archivator) sendLog(logID string) (err error) {
 			PartsCount: instance.partCount,
 			Part:       part,
 			Content:    data,
+			Status:     cloudprotocol.LogStatusOk,
 		}
 	}
 
