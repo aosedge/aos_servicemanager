@@ -1136,7 +1136,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 							MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
 							MinThreshold: 20, MaxThreshold: 200,
 						},
-						UsedDisks: []aostypes.PartitionAlertRule{
+						Partitions: []aostypes.PartitionAlertRule{
 							{
 								Name: "storage",
 								AlertRulePercents: aostypes.AlertRulePercents{
