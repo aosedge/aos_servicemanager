@@ -723,11 +723,11 @@ func monitoringDataToPB(monitoring aostypes.MonitoringData) *pb.MonitoringData {
 	pbMonitoringData := &pb.MonitoringData{
 		Timestamp: timestamppb.New(monitoring.Timestamp),
 		Ram:       monitoring.RAM, Cpu: monitoring.CPU, Download: monitoring.Download,
-		Upload: monitoring.Upload, Disk: make([]*pb.PartitionUsage, len(monitoring.Disk)),
+		Upload: monitoring.Upload, Partitions: make([]*pb.PartitionUsage, len(monitoring.Partitions)),
 	}
 
-	for i, disk := range monitoring.Disk {
-		pbMonitoringData.Disk[i] = &pb.PartitionUsage{Name: disk.Name, UsedSize: disk.UsedSize}
+	for i, partition := range monitoring.Partitions {
+		pbMonitoringData.Partitions[i] = &pb.PartitionUsage{Name: partition.Name, UsedSize: partition.UsedSize}
 	}
 
 	return pbMonitoringData
