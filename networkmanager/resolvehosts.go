@@ -25,7 +25,7 @@ import (
 	"os"
 
 	"github.com/aosedge/aos_common/aoserrors"
-	"github.com/aosedge/aos_common/aostypes"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 )
 
 /***********************************************************************************************************************
@@ -33,7 +33,7 @@ import (
  **********************************************************************************************************************/
 
 //nolint:gochecknoglobals
-var defaultContent = []aostypes.Host{
+var defaultContent = []cloudprotocol.HostInfo{
 	{IP: "127.0.0.1", Hostname: "localhost"},
 	{IP: "::1", Hostname: "localhost ip6-localhost ip6-loopback"},
 }
@@ -42,7 +42,7 @@ var defaultContent = []aostypes.Host{
  * Private
  **********************************************************************************************************************/
 
-func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []aostypes.Host) (err error) {
+func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts []cloudprotocol.HostInfo) (err error) {
 	content := bytes.NewBuffer(nil)
 
 	if err = writeHosts(content, defaultContent); err != nil {
@@ -55,7 +55,7 @@ func writeHostToHostsFile(hostsFilePath, ip, serviceID, hostname string, hosts [
 		ownHosts = ownHosts + " " + hostname
 	}
 
-	if err = writeHosts(content, append([]aostypes.Host{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
+	if err = writeHosts(content, append([]cloudprotocol.HostInfo{{IP: ip, Hostname: ownHosts}}, hosts...)); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -86,7 +86,7 @@ func writeResolveConfFile(resolvCongFilePath string, mainServers []string, extra
 	return nil
 }
 
-func writeHosts(w io.Writer, hosts []aostypes.Host) (err error) {
+func writeHosts(w io.Writer, hosts []cloudprotocol.HostInfo) (err error) {
 	for _, host := range hosts {
 		if _, err = fmt.Fprintf(w, "%s\t%s\n", host.IP, host.Hostname); err != nil {
 			return aoserrors.Wrap(err)

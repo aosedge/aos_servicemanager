@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/aosedge/aos_common/aoserrors"
-	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
 	log "github.com/sirupsen/logrus"
 )
@@ -52,24 +51,24 @@ const (
 type ResourceManager struct {
 	sync.Mutex
 
-	nodeType         string
-	allocatedDevices map[string][]string
-	hostDevices      []string
-	hostGroups       []string
-	unitConfigFile   string
-	unitConfig       unitConfig
-	unitConfigError  error
-	alertSender      AlertSender
+	allocatedDevices           map[string][]string
+	hostDevices                []string
+	hostGroups                 []string
+	nodeConfigFile             string
+	nodeConfig                 nodeConfig
+	nodeConfigError            error
+	alertSender                AlertSender
+	currentNodeConfigListeners []chan cloudprotocol.NodeConfig
 }
 
 // AlertSender provides alert sender interface.
 type AlertSender interface {
-	SendAlert(alert cloudprotocol.AlertItem)
+	SendAlert(alert interface{})
 }
 
-type unitConfig struct {
-	aostypes.NodeUnitConfig
-	VendorVersion string `json:"vendorVersion"`
+type nodeConfig struct {
+	cloudprotocol.NodeConfig
+	Version string `json:"version"`
 }
 
 /***********************************************************************************************************************
@@ -84,13 +83,13 @@ var ErrNoAvailableDevice = errors.New("no device available")
  **********************************************************************************************************************/
 
 // New creates new resource manager object.
-func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
+func New(nodeConfigFile string, alertSender AlertSender) (resourcemanager *ResourceManager, err error) {
 	log.Debug("New resource manager")
 
 	resourcemanager = &ResourceManager{
-		nodeType:       nodeType,
-		unitConfigFile: unitConfigFile,
-		alertSender:    alertSender,
+		nodeConfigFile:             nodeConfigFile,
+		alertSender:                alertSender,
+		currentNodeConfigListeners: make([]chan cloudprotocol.NodeConfig, 0),
 	}
 
 	if resourcemanager.hostDevices, err = resourcemanager.discoverHostDevices(); err != nil {
@@ -103,41 +102,41 @@ func New(nodeType, unitConfigFile string, alertSender AlertSender) (resourcemana
 
 	resourcemanager.allocatedDevices = make(map[string][]string)
 
-	if err = resourcemanager.loadUnitConfiguration(); err != nil {
-		log.Errorf("Unit configuration error: %s", err)
+	if err = resourcemanager.loadNodeConfiguration(); err != nil {
+		log.Errorf("Node configuration error: %v", err)
 	}
 
-	log.WithField("version", resourcemanager.unitConfig.VendorVersion).Debug("Unit config version")
+	log.WithField("version", resourcemanager.nodeConfig.Version).Debug("Node config version")
 
 	return resourcemanager, nil
 }
 
-// GetUnitConfigInfo returns unit config info.
-func (resourcemanager *ResourceManager) GetUnitConfigInfo() (version string) {
+// GetNodeConfigStatus returns node config status.
+func (resourcemanager *ResourceManager) GetNodeConfigStatus() (version string, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.unitConfig.VendorVersion
+	return resourcemanager.nodeConfig.Version, resourcemanager.nodeConfigError
 }
 
-// CheckUnitConfig checks unit config.
-func (resourcemanager *ResourceManager) CheckUnitConfig(configJSON, version string) error {
+// CheckNodeConfig checks node config.
+func (resourcemanager *ResourceManager) CheckNodeConfig(configJSON, version string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	return resourcemanager.checkUnitConfig(configJSON, version)
+	return resourcemanager.checkNodeConfig(configJSON)
 }
 
-// UpdateUnitConfig updates unit configuration.
-func (resourcemanager *ResourceManager) UpdateUnitConfig(configJSON, version string) error {
+// UpdateNodeConfig updates node configuration.
+func (resourcemanager *ResourceManager) UpdateNodeConfig(configJSON, version string) error {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	if err := resourcemanager.checkUnitConfig(configJSON, version); err != nil {
+	if err := resourcemanager.checkNodeConfig(configJSON); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	config := unitConfig{VendorVersion: version}
+	config := nodeConfig{Version: version}
 
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return aoserrors.Wrap(err)
@@ -148,21 +147,23 @@ func (resourcemanager *ResourceManager) UpdateUnitConfig(configJSON, version str
 		return aoserrors.Wrap(err)
 	}
 
-	if err := os.WriteFile(resourcemanager.unitConfigFile, dataToWrite, 0o600); err != nil {
+	if err := os.WriteFile(resourcemanager.nodeConfigFile, dataToWrite, 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err := resourcemanager.loadUnitConfiguration(); err != nil {
+	if err := resourcemanager.loadNodeConfiguration(); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	log.WithField("version", resourcemanager.unitConfig.VendorVersion).Debug("Update unit configuration")
+	resourcemanager.updateCurrentNodeConfigListeners(resourcemanager.nodeConfig.NodeConfig)
+
+	log.WithField("version", resourcemanager.nodeConfig.Version).Debug("Update node configuration")
 
 	return nil
 }
 
 // GetDeviceInfo returns device information.
-func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo aostypes.DeviceInfo, err error) {
+func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo cloudprotocol.DeviceInfo, err error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
@@ -174,17 +175,17 @@ func (resourcemanager *ResourceManager) GetDeviceInfo(name string) (deviceInfo a
 }
 
 // GetResourceInfo returns resource information.
-func (resourcemanager *ResourceManager) GetResourceInfo(name string) (aostypes.ResourceInfo, error) {
+func (resourcemanager *ResourceManager) GetResourceInfo(name string) (cloudprotocol.ResourceInfo, error) {
 	resourcemanager.Lock()
 	defer resourcemanager.Unlock()
 
-	for _, resource := range resourcemanager.unitConfig.Resources {
+	for _, resource := range resourcemanager.nodeConfig.Resources {
 		if resource.Name == name {
 			return resource, nil
 		}
 	}
 
-	return aostypes.ResourceInfo{}, aoserrors.New("resource is not available")
+	return cloudprotocol.ResourceInfo{}, aoserrors.New("resource is not available")
 }
 
 // AllocateDevice tries to allocate device.
@@ -194,8 +195,8 @@ func (resourcemanager *ResourceManager) AllocateDevice(device, instanceID string
 
 	log.WithFields(log.Fields{"instanceID": instanceID, "device": device}).Debug("Allocate device")
 
-	if resourcemanager.unitConfigError != nil {
-		return aoserrors.Wrap(resourcemanager.unitConfigError)
+	if resourcemanager.nodeConfigError != nil {
+		return aoserrors.Wrap(resourcemanager.nodeConfigError)
 	}
 
 	deviceInfo, err := resourcemanager.getAvailableDevice(device)
@@ -280,22 +281,39 @@ func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]str
 	return instances, nil
 }
 
+// GetCurrentNodeConfig returns current node configuration.
+func (resourcemanager *ResourceManager) GetCurrentNodeConfig() (cloudprotocol.NodeConfig, error) {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	return resourcemanager.nodeConfig.NodeConfig, nil
+}
+
+// SubscribeCurrentNodeConfigChange subscribes new current node config listener.
+func (resourcemanager *ResourceManager) SubscribeCurrentNodeConfigChange() <-chan cloudprotocol.NodeConfig {
+	resourcemanager.Lock()
+	defer resourcemanager.Unlock()
+
+	log.Debug("Subscribe to current node config change event")
+
+	ch := make(chan cloudprotocol.NodeConfig, 1)
+	resourcemanager.currentNodeConfigListeners = append(resourcemanager.currentNodeConfigListeners, ch)
+
+	return ch
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
-func (resourcemanager *ResourceManager) checkUnitConfig(configJSON, version string) error {
-	nodeConfig := aostypes.NodeUnitConfig{}
-
-	if version == resourcemanager.unitConfig.VendorVersion {
-		return aoserrors.New("invalid vendor version")
-	}
+func (resourcemanager *ResourceManager) checkNodeConfig(configJSON string) error {
+	nodeConfig := cloudprotocol.NodeConfig{}
 
 	if err := json.Unmarshal([]byte(configJSON), &nodeConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err := resourcemanager.validateUnitConfig(nodeConfig); err != nil {
+	if err := resourcemanager.validateNodeConfig(nodeConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -354,34 +372,37 @@ func (resourcemanager *ResourceManager) discoverHostGroups() (hostGroups []strin
 	return hostGroups, nil
 }
 
-func (resourcemanager *ResourceManager) loadUnitConfiguration() (err error) {
+func (resourcemanager *ResourceManager) loadNodeConfiguration() (err error) {
 	defer func() {
-		resourcemanager.unitConfigError = aoserrors.Wrap(err)
+		resourcemanager.nodeConfigError = aoserrors.Wrap(err)
 	}()
 
-	resourcemanager.unitConfig = unitConfig{}
+	resourcemanager.nodeConfig = nodeConfig{}
 
-	byteValue, err := os.ReadFile(resourcemanager.unitConfigFile)
+	byteValue, err := os.ReadFile(resourcemanager.nodeConfigFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Don't treat absent config as an error.
+			resourcemanager.nodeConfig.Version = "0.0.0"
+
+			return nil
+		}
+
 		return aoserrors.Wrap(err)
 	}
 
-	if err = json.Unmarshal(byteValue, &resourcemanager.unitConfig); err != nil {
+	if err = json.Unmarshal(byteValue, &resourcemanager.nodeConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	if err = resourcemanager.validateUnitConfig(resourcemanager.unitConfig.NodeUnitConfig); err != nil {
+	if err = resourcemanager.validateNodeConfig(resourcemanager.nodeConfig.NodeConfig); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (resourcemanager *ResourceManager) validateUnitConfig(config aostypes.NodeUnitConfig) (err error) {
-	if config.NodeType != resourcemanager.nodeType {
-		return aoserrors.New("invalid node type")
-	}
-
+func (resourcemanager *ResourceManager) validateNodeConfig(config cloudprotocol.NodeConfig) (err error) {
 	if err = resourcemanager.validateDevices(config.Devices); err != nil {
 		return aoserrors.Wrap(err)
 	}
@@ -389,22 +410,26 @@ func (resourcemanager *ResourceManager) validateUnitConfig(config aostypes.NodeU
 	return nil
 }
 
-// compare available devices from unit config with host (real) devices.
-func (resourcemanager *ResourceManager) validateDevices(devices []aostypes.DeviceInfo) error {
-	var deviceErrors []cloudprotocol.ResourceValidateError
-
+// compare available devices from node config with host (real) devices.
+func (resourcemanager *ResourceManager) validateDevices(devices []cloudprotocol.DeviceInfo) error {
 	// compare available device names and additional groups with system ones
 	for _, device := range devices {
-		deviceError := cloudprotocol.ResourceValidateError{Name: device.Name}
+		deviceAlert := cloudprotocol.ResourceValidateAlert{
+			AlertItem: cloudprotocol.AlertItem{
+				Timestamp: time.Now(),
+				Tag:       cloudprotocol.AlertTagResourceValidate,
+			},
+			Name: device.Name,
+		}
 
 		// check devices
 		for _, hostDevice := range device.HostDevices {
 			if !contains(resourcemanager.hostDevices, hostDevice) {
 				err := aoserrors.Errorf("device %s is not present on system", hostDevice)
 
-				log.Errorf("Device validation error: %s", err)
+				log.Errorf("Device validation error: %v", err)
 
-				deviceError.Errors = append(deviceError.Errors, err.Error())
+				deviceAlert.Errors = append(deviceAlert.Errors, cloudprotocol.ErrorInfo{Message: err.Error()})
 			}
 		}
 
@@ -413,42 +438,40 @@ func (resourcemanager *ResourceManager) validateDevices(devices []aostypes.Devic
 			if !contains(resourcemanager.hostGroups, group) {
 				err := aoserrors.Errorf("%s group is not present on system", group)
 
-				log.Errorf("Device validation error: %s", err)
+				log.Errorf("Device validation error: %v", err)
 
-				deviceError.Errors = append(deviceError.Errors, err.Error())
+				deviceAlert.Errors = append(deviceAlert.Errors, cloudprotocol.ErrorInfo{Message: err.Error()})
 			}
 		}
 
-		if len(deviceError.Errors) > 0 {
-			deviceErrors = append(deviceErrors, deviceError)
-		}
-	}
+		if len(deviceAlert.Errors) > 0 {
+			if resourcemanager.alertSender != nil {
+				resourcemanager.alertSender.SendAlert(deviceAlert)
+			}
 
-	if len(deviceErrors) != 0 {
-		if resourcemanager.alertSender != nil {
-			resourcemanager.alertSender.SendAlert(cloudprotocol.AlertItem{
-				Timestamp: time.Now(),
-				Tag:       cloudprotocol.AlertTagResourceValidate,
-				Payload: cloudprotocol.ResourceValidateAlert{
-					ResourcesErrors: deviceErrors,
-				},
-			})
+			return aoserrors.New("device resources are not valid")
 		}
-
-		return aoserrors.New("device resources are not valid")
 	}
 
 	return nil
 }
 
-func (resourcemanager *ResourceManager) getAvailableDevice(name string) (deviceInfo aostypes.DeviceInfo, err error) {
-	for _, deviceInfo = range resourcemanager.unitConfig.Devices {
+func (resourcemanager *ResourceManager) getAvailableDevice(
+	name string,
+) (deviceInfo cloudprotocol.DeviceInfo, err error) {
+	for _, deviceInfo = range resourcemanager.nodeConfig.Devices {
 		if deviceInfo.Name == name {
 			return deviceInfo, nil
 		}
 	}
 
 	return deviceInfo, aoserrors.Errorf("device is not available")
+}
+
+func (resourcemanager *ResourceManager) updateCurrentNodeConfigListeners(curNodeConfig cloudprotocol.NodeConfig) {
+	for _, listener := range resourcemanager.currentNodeConfigListeners {
+		listener <- curNodeConfig
+	}
 }
 
 func contains(arr []string, str string) bool {

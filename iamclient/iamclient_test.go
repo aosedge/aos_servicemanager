@@ -28,7 +28,9 @@ import (
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
-	pb "github.com/aosedge/aos_common/api/iamanager/v4"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
+	pb "github.com/aosedge/aos_common/api/iamanager"
+	"github.com/aosedge/aos_common/utils/pbconvert"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -61,8 +63,7 @@ type testServer struct {
 	publicServer    *grpc.Server
 	protectedServer *grpc.Server
 
-	nodeID           string
-	nodeType         string
+	nodeInfo         cloudprotocol.NodeInfo
 	permissionsCache map[string]servicePermissions
 }
 
@@ -116,7 +117,7 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestGetNodeIDAndType(t *testing.T) {
+func TestGetCurrentNodeInfo(t *testing.T) {
 	testServer, err := newTestServer(publicServerURL, protectedServerURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
@@ -124,8 +125,38 @@ func TestGetNodeIDAndType(t *testing.T) {
 
 	defer testServer.close()
 
-	testServer.nodeID = "testNodeID"
-	testServer.nodeType = "testNodeType"
+	testServer.nodeInfo = cloudprotocol.NodeInfo{
+		NodeID:   "nodeID",
+		NodeType: "nodeType",
+		Name:     "name",
+		Status:   "status",
+		OSType:   "osType",
+		MaxDMIPs: 10000,
+		CPUs: []cloudprotocol.CPUInfo{
+			{
+				ModelName: "modelName1", NumCores: 1, NumThreads: 2, Arch: "arch1",
+				ArchFamily: "archFamily1", MaxDMIPs: 1000,
+			},
+			{
+				ModelName: "modelName2", NumCores: 2, NumThreads: 4, Arch: "arch2",
+				ArchFamily: "archFamily2", MaxDMIPs: 2000,
+			},
+		},
+		Partitions: []cloudprotocol.PartitionInfo{
+			{Name: "name1", Types: []string{"type1", "type2"}, TotalSize: 1000, Path: "/path1"},
+			{Name: "name2", Types: []string{"type3", "type4"}, TotalSize: 2000, Path: "/path2"},
+			{Name: "name3", Types: []string{"type5", "type6"}, TotalSize: 3000, Path: "/path3"},
+		},
+		Attrs: map[string]interface{}{
+			"attr1": "value1",
+			"attr2": "value2",
+		},
+		ErrorInfo: &cloudprotocol.ErrorInfo{
+			AosCode:  1,
+			ExitCode: 2,
+			Message:  "message",
+		},
+	}
 
 	client, err := iamclient.New(&config.Config{
 		IAMProtectedServerURL: protectedServerURL,
@@ -136,12 +167,13 @@ func TestGetNodeIDAndType(t *testing.T) {
 	}
 	defer client.Close()
 
-	if testServer.nodeID != client.GetNodeID() {
-		t.Errorf("Invalid nodeID: %s", client.GetNodeID())
+	nodeInfo, err := client.GetCurrentNodeInfo()
+	if err != nil {
+		t.Fatalf("Can't get node info: %v", err)
 	}
 
-	if testServer.nodeType != client.GetNodeType() {
-		t.Errorf("Invalid nodeType: %s", client.GetNodeType())
+	if !reflect.DeepEqual(testServer.nodeInfo, nodeInfo) {
+		t.Errorf("Wrong node info: %v %v", nodeInfo, testServer.nodeInfo)
 	}
 }
 
@@ -296,7 +328,62 @@ func (server *testServer) close() {
 }
 
 func (server *testServer) GetNodeInfo(context context.Context, req *empty.Empty) (*pb.NodeInfo, error) {
-	return &pb.NodeInfo{NodeId: server.nodeID, NodeType: server.nodeType}, nil
+	pbNodeInfo := &pb.NodeInfo{
+		NodeId:   server.nodeInfo.NodeID,
+		NodeType: server.nodeInfo.NodeType,
+		Name:     server.nodeInfo.Name,
+		Status:   server.nodeInfo.Status,
+		OsType:   server.nodeInfo.OSType,
+		MaxDmips: server.nodeInfo.MaxDMIPs,
+		TotalRam: server.nodeInfo.TotalRAM,
+	}
+
+	if server.nodeInfo.ErrorInfo != nil {
+		pbNodeInfo.Error = pbconvert.ErrorInfoToPB(server.nodeInfo.ErrorInfo)
+	}
+
+	if server.nodeInfo.CPUs != nil {
+		pbNodeInfo.Cpus = make([]*pb.CPUInfo, 0, len(server.nodeInfo.CPUs))
+
+		for _, cpu := range server.nodeInfo.CPUs {
+			pbNodeInfo.Cpus = append(pbNodeInfo.Cpus, &pb.CPUInfo{
+				ModelName:  cpu.ModelName,
+				NumCores:   cpu.NumCores,
+				NumThreads: cpu.NumThreads,
+				Arch:       cpu.Arch,
+				ArchFamily: cpu.ArchFamily,
+				MaxDmips:   cpu.MaxDMIPs,
+			})
+		}
+	}
+
+	if server.nodeInfo.Attrs != nil {
+		pbNodeInfo.Attrs = make([]*pb.NodeAttribute, 0, len(server.nodeInfo.Attrs))
+
+		for key, value := range server.nodeInfo.Attrs {
+			strValue, ok := value.(string)
+			if !ok {
+				return nil, aoserrors.New("incorrect attribute value")
+			}
+
+			pbNodeInfo.Attrs = append(pbNodeInfo.Attrs, &pb.NodeAttribute{Name: key, Value: strValue})
+		}
+	}
+
+	if server.nodeInfo.Partitions != nil {
+		pbNodeInfo.Partitions = make([]*pb.PartitionInfo, 0, len(server.nodeInfo.Partitions))
+
+		for _, partition := range server.nodeInfo.Partitions {
+			pbNodeInfo.Partitions = append(pbNodeInfo.Partitions, &pb.PartitionInfo{
+				Name:      partition.Name,
+				Types:     partition.Types,
+				TotalSize: partition.TotalSize,
+				Path:      partition.Path,
+			})
+		}
+	}
+
+	return pbNodeInfo, nil
 }
 
 func (server *testServer) RegisterInstance(
@@ -304,7 +391,7 @@ func (server *testServer) RegisterInstance(
 ) (rsp *pb.RegisterInstanceResponse, err error) {
 	rsp = &pb.RegisterInstanceResponse{}
 
-	instanceIdent := pbToInstanceIdent(req.GetInstance())
+	instanceIdent := pbconvert.InstanceIdentFromPB(req.GetInstance())
 
 	if secret := server.findSecret(instanceIdent); secret != "" {
 		return rsp, aoserrors.New("service is already registered")
@@ -328,7 +415,7 @@ func (server *testServer) UnregisterInstance(
 ) (rsp *empty.Empty, err error) {
 	rsp = &empty.Empty{}
 
-	secret := server.findSecret(pbToInstanceIdent(req.GetInstance()))
+	secret := server.findSecret(pbconvert.InstanceIdentFromPB(req.GetInstance()))
 	if secret == "" {
 		return rsp, aoserrors.New("service is not registered ")
 	}
@@ -354,7 +441,7 @@ func (server *testServer) GetPermissions(
 	}
 
 	rsp.Permissions = &pb.Permissions{Permissions: permissions}
-	rsp.Instance = instanceIdentToPB(funcServersPermissions.instanceIdent)
+	rsp.Instance = pbconvert.InstanceIdentToPB(funcServersPermissions.instanceIdent)
 
 	return rsp, nil
 }
@@ -378,14 +465,4 @@ func randomString() string {
 	}
 
 	return string(secret)
-}
-
-func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
-}
-
-func pbToInstanceIdent(ident *pb.InstanceIdent) aostypes.InstanceIdent {
-	return aostypes.InstanceIdent{
-		ServiceID: ident.GetServiceId(), SubjectID: ident.GetSubjectId(), Instance: ident.GetInstance(),
-	}
 }

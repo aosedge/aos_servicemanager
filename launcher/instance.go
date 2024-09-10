@@ -50,14 +50,14 @@ func newRuntimeInstanceInfo(info InstanceInfo) *runtimeInstanceInfo {
 func (instance *runtimeInstanceInfo) getCloudStatus() cloudprotocol.InstanceStatus {
 	status := cloudprotocol.InstanceStatus{
 		InstanceIdent: instance.InstanceIdent,
-		RunState:      instance.runStatus.State,
+		Status:        instance.runStatus.State,
 	}
 
 	if instance.service != nil {
-		status.AosVersion = instance.service.AosVersion
+		status.ServiceVersion = instance.service.Version
 	}
 
-	if status.RunState == cloudprotocol.InstanceStateFailed {
+	if status.Status == cloudprotocol.InstanceStateFailed {
 		status.ErrorInfo = &cloudprotocol.ErrorInfo{ExitCode: instance.runStatus.ExitCode}
 
 		if instance.runStatus.Err != nil {

@@ -43,7 +43,6 @@ import (
 	"github.com/aosedge/aos_servicemanager/launcher"
 	"github.com/aosedge/aos_servicemanager/layermanager"
 	"github.com/aosedge/aos_servicemanager/logging"
-	"github.com/aosedge/aos_servicemanager/monitorcontroller"
 	"github.com/aosedge/aos_servicemanager/networkmanager"
 	resource "github.com/aosedge/aos_servicemanager/resourcemanager"
 	"github.com/aosedge/aos_servicemanager/runner"
@@ -62,22 +61,21 @@ const dbFileName = "servicemanager.db"
  **********************************************************************************************************************/
 
 type serviceManager struct {
-	cryptoContext     *cryptutils.CryptoContext
-	journalAlerts     *journalalerts.JournalAlerts
-	alerts            *alerts.Alerts
-	cfg               *config.Config
-	db                *database.Database
-	launcher          *launcher.Launcher
-	resourcemanager   *resource.ResourceManager
-	logging           *logging.Logging
-	monitor           *resourcemonitor.ResourceMonitor
-	monitorController *monitorcontroller.MonitorController
-	network           *networkmanager.NetworkManager
-	iam               *iamclient.Client
-	client            *smclient.SMClient
-	layerMgr          *layermanager.LayerManager
-	serviceMgr        *servicemanager.ServiceManager
-	runner            *runner.Runner
+	cryptoContext   *cryptutils.CryptoContext
+	journalAlerts   *journalalerts.JournalAlerts
+	alerts          *alerts.Alerts
+	cfg             *config.Config
+	db              *database.Database
+	launcher        *launcher.Launcher
+	resourcemanager *resource.ResourceManager
+	logging         *logging.Logging
+	monitor         *resourcemonitor.ResourceMonitor
+	network         *networkmanager.NetworkManager
+	iam             *iamclient.Client
+	client          *smclient.SMClient
+	layerMgr        *layermanager.LayerManager
+	serviceMgr      *servicemanager.ServiceManager
+	runner          *runner.Runner
 }
 
 type journalHook struct {
@@ -125,8 +123,8 @@ func cleanup(cfg *config.Config, dbFile string) {
 		log.Errorf("Can't cleanup database: %s", err)
 	}
 
-	if err := os.RemoveAll(cfg.UnitConfigFile); err != nil {
-		log.Errorf("Can't remove unit config file: %v", err)
+	if err := os.RemoveAll(cfg.NodeConfigFile); err != nil {
+		log.Errorf("Can't remove node config file: %v", err)
 	}
 }
 
@@ -200,27 +198,28 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
+	nodeInfo, err := sm.iam.GetCurrentNodeInfo()
+	if err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.monitorController, err = monitorcontroller.New(); err != nil {
+	runners, err := nodeInfo.GetNodeRunners()
+	if err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if !slices.Contains(cfg.RunnerFeatures, "runx") {
-		if sm.monitor, err = resourcemonitor.New(
-			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, sm.network); err != nil {
-			return sm, aoserrors.Wrap(err)
-		}
-	} else {
-		if sm.monitor, err = resourcemonitor.New(
-			sm.iam.GetNodeID(), cfg.Monitoring, sm.alerts, sm.monitorController, nil); err != nil {
+	if !slices.Contains(runners, "runx") {
+		if sm.network, err = networkmanager.New(cfg, sm.db); err != nil {
 			return sm, aoserrors.Wrap(err)
 		}
 	}
 
-	if sm.resourcemanager, err = resource.New(sm.iam.GetNodeType(), cfg.UnitConfigFile, sm.alerts); err != nil {
+	if sm.resourcemanager, err = resource.New(cfg.NodeConfigFile, sm.alerts); err != nil {
+		return sm, aoserrors.Wrap(err)
+	}
+
+	if sm.monitor, err = resourcemonitor.New(
+		cfg.Monitoring, sm.iam, sm.resourcemanager, sm.network, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -228,7 +227,7 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.launcher, err = launcher.New(cfg, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
+	if sm.launcher, err = launcher.New(cfg, sm.iam, sm.db, sm.serviceMgr, sm.layerMgr, sm.runner, sm.resourcemanager,
 		sm.network, sm.iam, sm.monitor, sm.alerts); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
@@ -237,12 +236,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.client, err = smclient.New(cfg, smclient.NodeDescription{
-		NodeID:     sm.iam.GetNodeID(),
-		NodeType:   sm.iam.GetNodeType(),
-		SystemInfo: sm.monitor.GetSystemInfo(),
-	}, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager, sm.alerts, sm.monitorController, sm.logging,
-		sm.network, sm.cryptoContext, false); err != nil {
+	if sm.client, err = smclient.New(cfg, sm.iam, sm.iam, sm.serviceMgr, sm.layerMgr, sm.launcher, sm.resourcemanager,
+		sm.alerts, sm.monitor, sm.logging, sm.network, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
@@ -320,7 +315,7 @@ func (hook *journalHook) Fire(entry *log.Entry) (err error) {
 		return aoserrors.Wrap(err)
 	}
 
-	err = journal.Print(hook.severityMap[entry.Level], logMessage)
+	err = journal.Print(hook.severityMap[entry.Level], "%s", logMessage)
 
 	return aoserrors.Wrap(err)
 }

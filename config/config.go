@@ -26,6 +26,7 @@ import (
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
 	"github.com/aosedge/aos_common/journalalerts"
 	"github.com/aosedge/aos_common/resourcemonitor"
 	log "github.com/sirupsen/logrus"
@@ -60,32 +61,30 @@ type Migration struct {
 
 // Config instance.
 type Config struct {
-	CACert                    string                 `json:"caCert"`
-	CertStorage               string                 `json:"certStorage"`
-	CMServerURL               string                 `json:"cmServerUrl"`
-	IAMProtectedServerURL     string                 `json:"iamProtectedServerUrl"`
-	IAMPublicServerURL        string                 `json:"iamPublicServerUrl"`
-	WorkingDir                string                 `json:"workingDir"`
-	StorageDir                string                 `json:"storageDir"`
-	StateDir                  string                 `json:"stateDir"`
-	ServicesDir               string                 `json:"servicesDir"`
-	ServicesPartLimit         uint                   `json:"servicesPartLimit"`
-	LayersDir                 string                 `json:"layersDir"`
-	LayersPartLimit           uint                   `json:"layersPartLimit"`
-	DownloadDir               string                 `json:"downloadDir"`
-	ExtractDir                string                 `json:"extractDir"`
-	RemoteNode                bool                   `json:"remoteNode"`
-	RunnerFeatures            []string               `json:"runnerFeatures"`
-	UnitConfigFile            string                 `json:"unitConfigFile"`
-	ServiceTTLDays            uint64                 `json:"serviceTtlDays"`
-	LayerTTLDays              uint64                 `json:"layerTtlDays"`
-	ServiceHealthCheckTimeout aostypes.Duration      `json:"serviceHealthCheckTimeout"`
-	Monitoring                resourcemonitor.Config `json:"monitoring"`
-	Logging                   Logging                `json:"logging"`
-	JournalAlerts             journalalerts.Config   `json:"journalAlerts,omitempty"`
-	HostBinds                 []string               `json:"hostBinds"`
-	Hosts                     []aostypes.Host        `json:"hosts,omitempty"`
-	Migration                 Migration              `json:"migration"`
+	CACert                    string                   `json:"caCert"`
+	CertStorage               string                   `json:"certStorage"`
+	CMServerURL               string                   `json:"cmServerUrl"`
+	IAMProtectedServerURL     string                   `json:"iamProtectedServerUrl"`
+	IAMPublicServerURL        string                   `json:"iamPublicServerUrl"`
+	WorkingDir                string                   `json:"workingDir"`
+	StorageDir                string                   `json:"storageDir"`
+	StateDir                  string                   `json:"stateDir"`
+	ServicesDir               string                   `json:"servicesDir"`
+	ServicesPartLimit         uint                     `json:"servicesPartLimit"`
+	LayersDir                 string                   `json:"layersDir"`
+	LayersPartLimit           uint                     `json:"layersPartLimit"`
+	DownloadDir               string                   `json:"downloadDir"`
+	ExtractDir                string                   `json:"extractDir"`
+	NodeConfigFile            string                   `json:"nodeConfigFile"`
+	ServiceTTLDays            uint64                   `json:"serviceTtlDays"`
+	LayerTTLDays              uint64                   `json:"layerTtlDays"`
+	ServiceHealthCheckTimeout aostypes.Duration        `json:"serviceHealthCheckTimeout"`
+	Monitoring                resourcemonitor.Config   `json:"monitoring"`
+	Logging                   Logging                  `json:"logging"`
+	JournalAlerts             journalalerts.Config     `json:"journalAlerts,omitempty"`
+	HostBinds                 []string                 `json:"hostBinds"`
+	Hosts                     []cloudprotocol.HostInfo `json:"hosts,omitempty"`
+	Migration                 Migration                `json:"migration"`
 }
 
 /***********************************************************************************************************************
@@ -100,16 +99,16 @@ func New(fileName string) (config *Config, err error) {
 	}
 
 	config = &Config{
-		ServiceTTLDays:            30,                                            //nolint:gomnd
-		LayerTTLDays:              30,                                            //nolint:gomnd
-		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, //nolint:gomnd
+		ServiceTTLDays:            30,                                            //nolint:mnd
+		LayerTTLDays:              30,                                            //nolint:mnd
+		ServiceHealthCheckTimeout: aostypes.Duration{Duration: 35 * time.Second}, //nolint:mnd
 		Monitoring: resourcemonitor.Config{
-			SendPeriod: aostypes.Duration{Duration: 1 * time.Minute},
-			PollPeriod: aostypes.Duration{Duration: 10 * time.Second},
+			PollPeriod:    aostypes.Duration{Duration: 10 * time.Second},
+			AverageWindow: aostypes.Duration{Duration: 1 * time.Minute},
 		},
 		Logging: Logging{
-			MaxPartSize:  524288, //nolint:gomnd
-			MaxPartCount: 20,     //nolint:gomnd
+			MaxPartSize:  524288, //nolint:mnd
+			MaxPartCount: 20,     //nolint:mnd
 		},
 		JournalAlerts: journalalerts.Config{
 			SystemAlertPriority:  defaultSystemAlertPriority,
@@ -145,8 +144,8 @@ func New(fileName string) (config *Config, err error) {
 		config.ExtractDir = path.Join(config.WorkingDir, "extract")
 	}
 
-	if config.UnitConfigFile == "" {
-		config.UnitConfigFile = path.Join(config.WorkingDir, "aos_unit.cfg")
+	if config.NodeConfigFile == "" {
+		config.NodeConfigFile = path.Join(config.WorkingDir, "aos_node.cfg")
 	}
 
 	if config.Migration.MigrationPath == "" {

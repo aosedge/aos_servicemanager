@@ -26,7 +26,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,6 +42,7 @@ import (
 
 	"github.com/aosedge/aos_servicemanager/config"
 	"github.com/aosedge/aos_servicemanager/utils/whiteouts"
+	semver "github.com/hashicorp/go-version"
 )
 
 /***********************************************************************************************************************
@@ -59,8 +60,8 @@ type ServiceStorage interface {
 	GetAllServiceVersions(serviceID string) ([]ServiceInfo, error)
 	GetServices() ([]ServiceInfo, error)
 	AddService(info ServiceInfo) error
-	RemoveService(serviceID string, aosVersion uint64) error
-	SetServiceCached(serviceID string, aosVersion uint64, cached bool) error
+	RemoveService(serviceID string, version string) error
+	SetServiceCached(serviceID string, version string, cached bool) error
 }
 
 // ServiceManager instance.
@@ -77,9 +78,9 @@ type ServiceManager struct {
 
 // ServiceInfo service information.
 type ServiceInfo struct {
-	aostypes.VersionInfo
 	ServiceID       string
 	ServiceProvider string
+	Version         string
 	ImagePath       string
 	ManifestDigest  []byte
 	Timestamp       time.Time
@@ -157,7 +158,7 @@ func New(
 		}
 
 		if err := sm.serviceAllocator.AddOutdatedItem(
-			fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion), service.Size, service.Timestamp); err != nil {
+			fmt.Sprintf("%s_%s", service.ServiceID, service.Version), service.Size, service.Timestamp); err != nil {
 			return nil, aoserrors.Wrap(err)
 		}
 	}
@@ -194,6 +195,20 @@ func (sm *ServiceManager) GetServiceInfo(serviceID string) (serviceInfo ServiceI
 	if err != nil {
 		return serviceInfo, aoserrors.Wrap(err)
 	}
+
+	sort.Slice(services, func(i, j int) bool {
+		ver1, err := semver.NewSemver(services[i].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		ver2, err := semver.NewSemver(services[j].Version)
+		if err != nil {
+			return services[i].Version < services[j].Version
+		}
+
+		return ver1.LessThan(ver2)
+	})
 
 	for _, service := range services {
 		if service.ServiceID == serviceID && !service.Cached {
@@ -251,7 +266,7 @@ func (sm *ServiceManager) updateCachedServices(
 nextService:
 	for _, storeService := range storeServices {
 		for i, desiredService := range desiredServices {
-			if desiredService.ID == storeService.ServiceID && desiredService.AosVersion == storeService.AosVersion {
+			if desiredService.ServiceID == storeService.ServiceID && desiredService.Version == storeService.Version {
 				if storeService.Cached {
 					if err := sm.setServiceCached(storeService, false); err != nil {
 						return desiredServices, err
@@ -286,8 +301,8 @@ func (sm *ServiceManager) installServices(desiredServices []aostypes.ServiceInfo
 
 func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error {
 	log.WithFields(log.Fields{
-		"ID":         serviceInfo.ID,
-		"AosVersion": serviceInfo.AosVersion,
+		"id":      serviceInfo.ServiceID,
+		"version": serviceInfo.Version,
 	}).Debug("Install service")
 
 	var spacePackage, spaceService spaceallocator.Space
@@ -302,9 +317,9 @@ func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error
 			releaseAllocatedSpace(imagePath, spaceService, spacePackage)
 
 			log.WithFields(log.Fields{
-				"id":         serviceInfo.ID,
-				"aosVersion": serviceInfo.AosVersion,
-				"imagePath":  imagePath,
+				"id":        serviceInfo.ServiceID,
+				"version":   serviceInfo.Version,
+				"imagePath": imagePath,
 			}).Errorf("Can't install service: %v", err)
 
 			return
@@ -335,9 +350,9 @@ func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error
 	}
 
 	if err = sm.serviceInfoProvider.AddService(ServiceInfo{
-		VersionInfo:     serviceInfo.VersionInfo,
-		ServiceID:       serviceInfo.ID,
+		ServiceID:       serviceInfo.ServiceID,
 		ServiceProvider: serviceInfo.ProviderID,
+		Version:         serviceInfo.Version,
 		ImagePath:       imagePath,
 		Size:            size,
 		ManifestDigest:  manifestDigest,
@@ -348,9 +363,9 @@ func (sm *ServiceManager) installService(serviceInfo aostypes.ServiceInfo) error
 	}
 
 	log.WithFields(log.Fields{
-		"id":         serviceInfo.ID,
-		"aosVersion": serviceInfo.AosVersion,
-		"imagePath":  imagePath,
+		"id":        serviceInfo.ServiceID,
+		"version":   serviceInfo.Version,
+		"imagePath": imagePath,
 	}).Info("Service successfully installed")
 
 	return nil
@@ -388,7 +403,7 @@ func (sm *ServiceManager) removeOutdatedServices(services []ServiceInfo) error {
 					return err
 				}
 
-				sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion))
+				sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%s", service.ServiceID, service.Version))
 			}
 		}
 	}
@@ -398,11 +413,11 @@ func (sm *ServiceManager) removeOutdatedServices(services []ServiceInfo) error {
 
 func (sm *ServiceManager) removeOutdatedService(id string) error {
 	serviceInfo := strings.Split(id, "_")
-	if len(serviceInfo) < 2 { //nolint:gomnd
+	if len(serviceInfo) < 2 {
 		return aoserrors.New("Unexpected service id format")
 	}
 
-	aosVersionStr := serviceInfo[len(serviceInfo)-1]
+	version := serviceInfo[len(serviceInfo)-1]
 	serviceInfo = serviceInfo[:len(serviceInfo)-1]
 	serviceID := strings.Join(serviceInfo, "_")
 
@@ -411,18 +426,13 @@ func (sm *ServiceManager) removeOutdatedService(id string) error {
 		return aoserrors.Wrap(err)
 	}
 
-	aosVersion, err := strconv.ParseUint(aosVersionStr, 10, 64)
-	if err != nil {
-		return aoserrors.Wrap(err)
-	}
-
 	for _, service := range services {
-		if service.AosVersion == aosVersion {
+		if service.Version == version {
 			if err := os.RemoveAll(service.ImagePath); err != nil {
 				return aoserrors.Wrap(err)
 			}
 
-			if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+			if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.Version); err != nil {
 				return aoserrors.Wrap(err)
 			}
 		}
@@ -432,11 +442,11 @@ func (sm *ServiceManager) removeOutdatedService(id string) error {
 }
 
 func (sm *ServiceManager) setServiceCached(service ServiceInfo, cached bool) error {
-	if err := sm.serviceInfoProvider.SetServiceCached(service.ServiceID, service.AosVersion, cached); err != nil {
+	if err := sm.serviceInfoProvider.SetServiceCached(service.ServiceID, service.Version, cached); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
-	id := fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion)
+	id := fmt.Sprintf("%s_%s", service.ServiceID, service.Version)
 
 	if cached {
 		if err := sm.serviceAllocator.AddOutdatedItem(
@@ -458,18 +468,18 @@ func (sm *ServiceManager) removeService(service ServiceInfo) error {
 	}
 
 	if service.Cached {
-		sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%d", service.ServiceID, service.AosVersion))
+		sm.serviceAllocator.RestoreOutdatedItem(fmt.Sprintf("%s_%s", service.ServiceID, service.Version))
 	}
 
 	sm.serviceAllocator.FreeSpace(service.Size)
 
-	if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+	if err := sm.serviceInfoProvider.RemoveService(service.ServiceID, service.Version); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
-		"serviceID":  service.ServiceID,
-		"aosVersion": service.AosVersion,
+		"serviceID": service.ServiceID,
+		"version":   service.Version,
 	}).Info("Service successfully removed")
 
 	return nil
@@ -551,7 +561,7 @@ func (sm *ServiceManager) removeDamagedServiceFolders(services []ServiceInfo) er
 		if err != nil || !fi.Mode().IsDir() {
 			log.Warnf("Service missing: %v", service.ImagePath)
 
-			if err = sm.serviceInfoProvider.RemoveService(service.ServiceID, service.AosVersion); err != nil {
+			if err = sm.serviceInfoProvider.RemoveService(service.ServiceID, service.Version); err != nil {
 				return aoserrors.Wrap(err)
 			}
 		}
@@ -615,7 +625,6 @@ func (sm *ServiceManager) extractPackageByURL(
 
 	if err = image.CheckFileInfo(context.Background(), sourceFile, image.FileInfo{
 		Sha256: serviceInfo.Sha256,
-		Sha512: serviceInfo.Sha512,
 		Size:   serviceInfo.Size,
 	}); err != nil {
 		return "", 0, nil, aoserrors.Wrap(err)

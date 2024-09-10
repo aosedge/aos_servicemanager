@@ -51,9 +51,11 @@ func TestAlerts(t *testing.T) {
 		t.Fatalf("Can't create alerts: %s", err)
 	}
 
-	testAlert := cloudprotocol.AlertItem{
-		Tag:     cloudprotocol.AlertTagSystemError,
-		Payload: cloudprotocol.SystemAlert{Message: "some error"},
+	testAlert := cloudprotocol.SystemAlert{
+		AlertItem: cloudprotocol.AlertItem{
+			Tag: cloudprotocol.AlertTagSystemError,
+		},
+		Message: "some error",
 	}
 
 	for i := 1; i < 55; i++ {

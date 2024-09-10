@@ -24,8 +24,10 @@ import (
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
-	pb "github.com/aosedge/aos_common/api/iamanager/v4"
+	"github.com/aosedge/aos_common/api/cloudprotocol"
+	pb "github.com/aosedge/aos_common/api/iamanager"
 	"github.com/aosedge/aos_common/utils/cryptutils"
+	"github.com/aosedge/aos_common/utils/pbconvert"
 	"github.com/golang/protobuf/ptypes/empty"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -49,8 +51,7 @@ const iamRequestTimeout = 30 * time.Second
 type Client struct {
 	sync.Mutex
 
-	nodeID   string
-	nodeType string
+	nodeInfo cloudprotocol.NodeInfo
 
 	publicConnection         *grpc.ClientConn
 	protectedConnection      *grpc.ClientConn
@@ -129,21 +130,16 @@ func New(
 
 	log.Debug("Connected to IAM")
 
-	if client.nodeID, client.nodeType, err = client.getNodeInfo(); err != nil {
+	if err = client.getNodeInfo(); err != nil {
 		return client, aoserrors.Wrap(err)
 	}
 
 	return client, nil
 }
 
-// GetNodeID returns node ID.
-func (client *Client) GetNodeID() string {
-	return client.nodeID
-}
-
-// GetNodeType returns node type.
-func (client *Client) GetNodeType() string {
-	return client.nodeType
+// GetCurrentNodeInfo returns node info.
+func (client *Client) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
+	return client.nodeInfo, nil
 }
 
 // GetCertificate gets certificate and key url from IAM by type.
@@ -187,7 +183,7 @@ func (client *Client) RegisterInstance(
 	}
 
 	response, err := client.permissionsService.RegisterInstance(ctx,
-		&pb.RegisterInstanceRequest{Instance: instanceIdentToPB(instance), Permissions: reqPermissions})
+		&pb.RegisterInstanceRequest{Instance: pbconvert.InstanceIdentToPB(instance), Permissions: reqPermissions})
 	if err != nil {
 		return "", aoserrors.Wrap(err)
 	}
@@ -207,7 +203,7 @@ func (client *Client) UnregisterInstance(instance aostypes.InstanceIdent) (err e
 	defer cancel()
 
 	if _, err := client.permissionsService.UnregisterInstance(ctx,
-		&pb.UnregisterInstanceRequest{Instance: instanceIdentToPB(instance)}); err != nil {
+		&pb.UnregisterInstanceRequest{Instance: pbconvert.InstanceIdentToPB(instance)}); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
@@ -256,13 +252,13 @@ func (client *Client) Close() (err error) {
  * Private
  **********************************************************************************************************************/
 
-func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
+func (client *Client) getNodeInfo() error {
 	ctx, cancel := context.WithTimeout(context.Background(), iamRequestTimeout)
 	defer cancel()
 
 	response, err := client.publicService.GetNodeInfo(ctx, &empty.Empty{})
 	if err != nil {
-		return "", "", aoserrors.Wrap(err)
+		return aoserrors.Wrap(err)
 	}
 
 	log.WithFields(log.Fields{
@@ -270,9 +266,7 @@ func (client *Client) getNodeInfo() (nodeID, nodeType string, err error) {
 		"nodeType": response.GetNodeType(),
 	}).Debug("Get node Info")
 
-	return response.GetNodeId(), response.GetNodeType(), nil
-}
+	client.nodeInfo = pbconvert.NodeInfoFromPB(response)
 
-func instanceIdentToPB(ident aostypes.InstanceIdent) *pb.InstanceIdent {
-	return &pb.InstanceIdent{ServiceId: ident.ServiceID, SubjectId: ident.SubjectID, Instance: ident.Instance}
+	return nil
 }

@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +41,6 @@ import (
 	"github.com/google/uuid"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/shirou/gopsutil/cpu"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/aosedge/aos_servicemanager/config"
@@ -75,6 +75,10 @@ var defaultEnvVars = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
  * Types
  **********************************************************************************************************************/
 
+type testNodeInfoProvider struct {
+	nodeInfo cloudprotocol.NodeInfo
+}
+
 type testStorage struct {
 	sync.RWMutex
 	instances  map[string]launcher.InstanceInfo
@@ -101,8 +105,8 @@ type testRunner struct {
 type testResourceManager struct {
 	sync.RWMutex
 	allocatedDevices map[string][]string
-	devices          map[string]aostypes.DeviceInfo
-	resources        map[string]aostypes.ResourceInfo
+	devices          map[string]cloudprotocol.DeviceInfo
+	resources        map[string]cloudprotocol.ResourceInfo
 }
 
 type testNetworkManager struct {
@@ -212,9 +216,9 @@ func TestRunInstances(t *testing.T) {
 		// start from scratch
 		{
 			services: []serviceInfo{
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -225,9 +229,9 @@ func TestRunInstances(t *testing.T) {
 		// start the same instances
 		{
 			services: []serviceInfo{
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -238,9 +242,9 @@ func TestRunInstances(t *testing.T) {
 		// stop and start some instances
 		{
 			services: []serviceInfo{
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service3"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service3"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -251,9 +255,9 @@ func TestRunInstances(t *testing.T) {
 		// new service version
 		{
 			services: []serviceInfo{
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service0", VersionInfo: aostypes.VersionInfo{AosVersion: 1}}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service3"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0", Version: "1.0.0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service3"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -264,9 +268,9 @@ func TestRunInstances(t *testing.T) {
 		// start error
 		{
 			services: []serviceInfo{
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-				{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+				{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 			},
 			instances: []aostypes.InstanceInfo{
 				{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject1", Instance: 0}},
@@ -300,9 +304,9 @@ func TestRunInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -351,9 +355,9 @@ func TestUpdateInstances(t *testing.T) {
 	layerProvider := newTestLayerProvider()
 	instanceRunner := newTestRunner(nil, nil)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -366,9 +370,9 @@ func TestUpdateInstances(t *testing.T) {
 
 	runItem := testItem{
 		services: []serviceInfo{
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -445,9 +449,9 @@ func TestRestartInstances(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), newTestStorage(),
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -460,9 +464,9 @@ func TestRestartInstances(t *testing.T) {
 
 	runItem := testItem{
 		services: []serviceInfo{
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -527,9 +531,9 @@ func TestHostFSDir(t *testing.T) {
 		WorkingDir: tmpDir,
 		HostBinds:  hostFSBinds,
 	},
-		newTestStorage(), newTestServiceProvider(), newTestLayerProvider(), newTestRunner(nil, nil),
-		newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
-		newTestAlertSender())
+		newTestNodeInfoProvider(), newTestStorage(), newTestServiceProvider(), newTestLayerProvider(),
+		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
+		newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -586,6 +590,7 @@ func TestHostFSDir(t *testing.T) {
 }
 
 func TestRuntimeSpec(t *testing.T) {
+	nodeInfoProvider := newTestNodeInfoProvider()
 	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
@@ -593,10 +598,12 @@ func TestRuntimeSpec(t *testing.T) {
 	networkManager := newTestNetworkManager()
 	testRegistrar := newTestRegistrar()
 
+	nodeInfoProvider.nodeInfo.MaxDMIPs = 100000
+
 	runItem := testItem{
 		services: []serviceInfo{
 			{
-				ServiceInfo: aostypes.ServiceInfo{ID: "service0"},
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
 				gid:         3456,
 				imageConfig: &imagespec.Image{
 					OS: "linux",
@@ -611,11 +618,11 @@ func TestRuntimeSpec(t *testing.T) {
 					Hostname: newString("testHostName"),
 					Sysctl:   map[string]string{"key1": "val1", "key2": "val2", "key3": "val3"},
 					Quotas: aostypes.ServiceQuotas{
-						CPULimit:    newUint64(42),
-						RAMLimit:    newUint64(1024),
-						PIDsLimit:   newUint64(10),
-						NoFileLimit: newUint64(3),
-						TmpLimit:    newUint64(512),
+						CPUDMIPSLimit: newUint64(2000),
+						RAMLimit:      newUint64(1024),
+						PIDsLimit:     newUint64(10),
+						NoFileLimit:   newUint64(3),
+						TmpLimit:      newUint64(512),
 					},
 					Devices: []aostypes.ServiceDevice{
 						{Name: "input", Permissions: "r"},
@@ -641,9 +648,8 @@ func TestRuntimeSpec(t *testing.T) {
 		WorkingDir: tmpDir,
 		StorageDir: filepath.Join(tmpDir, "storages"),
 		StateDir:   filepath.Join(tmpDir, "states"),
-	}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, networkManager, testRegistrar,
-		newTestInstanceMonitor(), newTestAlertSender())
+	}, nodeInfoProvider, storage, serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil),
+		resourceManager, networkManager, testRegistrar, newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -667,16 +673,16 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Fatalf("Can't remove host device dir: %v", err)
 	}
 
-	resourceManager.addDevice(aostypes.DeviceInfo{
-		Name: "input", HostDevices: []string{fmt.Sprintf("%s/input:/dev/input", hostDeviceDir)},
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{
+		Name: "input", HostDevices: []string{hostDeviceDir + "/input:/dev/input"},
 		Groups: hostGroups[:2],
 	})
-	resourceManager.addDevice(aostypes.DeviceInfo{
-		Name: "video", HostDevices: []string{fmt.Sprintf("%s/video:/dev/video", hostDeviceDir)},
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{
+		Name: "video", HostDevices: []string{hostDeviceDir + "/video:/dev/video"},
 		Groups: hostGroups[2:4],
 	})
-	resourceManager.addDevice(aostypes.DeviceInfo{
-		Name: "sound", HostDevices: []string{fmt.Sprintf("%s/sound:/dev/sound", hostDeviceDir)},
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{
+		Name: "sound", HostDevices: []string{hostDeviceDir + "/sound:/dev/sound"},
 		Groups: hostGroups[4:6],
 	})
 
@@ -721,7 +727,7 @@ func TestRuntimeSpec(t *testing.T) {
 
 	hostDirs := filepath.Join(tmpDir, "mount")
 
-	hostMounts := []aostypes.FileSystemMount{
+	hostMounts := []cloudprotocol.FileSystemMount{
 		{Source: filepath.Join(hostDirs, "dir0"), Destination: "/dir0", Type: "bind", Options: []string{"opt0, opt1"}},
 		{Source: filepath.Join(hostDirs, "dir1"), Destination: "/dir1", Type: "bind", Options: []string{"opt2, opt3"}},
 		{Source: filepath.Join(hostDirs, "dir2"), Destination: "/dir2", Type: "bind", Options: []string{"opt4, opt5"}},
@@ -731,13 +737,13 @@ func TestRuntimeSpec(t *testing.T) {
 
 	envVars := []string{"var0=0", "var1=1", "var2=2", "var3=3", "var4=4", "var5=5", "var6=6", "var7=7"}
 
-	resourceManager.addResource(aostypes.ResourceInfo{
+	resourceManager.addResource(cloudprotocol.ResourceInfo{
 		Name: "resource1", Mounts: hostMounts[:2], Env: envVars[:2], Groups: hostGroups[6:7],
 	})
-	resourceManager.addResource(aostypes.ResourceInfo{
+	resourceManager.addResource(cloudprotocol.ResourceInfo{
 		Name: "resource2", Mounts: hostMounts[2:4], Env: envVars[2:5], Groups: hostGroups[7:8],
 	})
-	resourceManager.addResource(aostypes.ResourceInfo{
+	resourceManager.addResource(cloudprotocol.ResourceInfo{
 		Name: "resource3", Mounts: hostMounts[4:], Env: envVars[5:], Groups: hostGroups[8:],
 	})
 
@@ -816,13 +822,8 @@ func TestRuntimeSpec(t *testing.T) {
 		t.Errorf("Wrong CPU period value: %d", *runtimeSpec.Linux.Resources.CPU.Period)
 	}
 
-	cpuCount, err := cpu.Counts(true)
-	if err != nil {
-		t.Fatalf("Can't get cpu count: %v", err)
-	}
-
-	if *runtimeSpec.Linux.Resources.CPU.Quota !=
-		int64(*serviceConfig.Quotas.CPULimit*(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(cpuCount)/100) {
+	if *runtimeSpec.Linux.Resources.CPU.Quota != int64(*serviceConfig.Quotas.CPUDMIPSLimit*
+		(*runtimeSpec.Linux.Resources.CPU.Period)*uint64(runtime.NumCPU())/nodeInfoProvider.nodeInfo.MaxDMIPs) {
 		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
 	}
 
@@ -954,12 +955,12 @@ func TestRuntimeSpec(t *testing.T) {
 	envVars = append(envVars, defaultEnvVars...)
 	envVars = append(envVars, imageConfig.Config.Env...)
 	envVars = append(envVars, getAosEnvVars(instance)...)
-	envVars = append(envVars, fmt.Sprintf("AOS_SECRET=%s", testRegistrar.secrets[instance.InstanceIdent]))
+	envVars = append(envVars, "AOS_SECRET="+testRegistrar.secrets[instance.InstanceIdent])
 
 	if !compareArrays(len(envVars), len(runtimeSpec.Process.Env), func(index1, index2 int) bool {
 		return envVars[index1] == runtimeSpec.Process.Env[index2]
 	}) {
-		t.Errorf("Wrong env variables value: %v", runtimeSpec.Process.Env)
+		t.Errorf("Wrong env variables value: %v %v", runtimeSpec.Process.Env, envVars)
 	}
 
 	// Check UID/GID
@@ -986,6 +987,96 @@ func TestRuntimeSpec(t *testing.T) {
 	}
 }
 
+func TestMinCPUQuota(t *testing.T) {
+	testData := testItem{
+		services: []serviceInfo{
+			{
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
+				serviceConfig: &aostypes.ServiceConfig{
+					Quotas: aostypes.ServiceQuotas{
+						CPUDMIPSLimit: newUint64(42),
+					},
+				},
+			},
+		},
+		instances: []aostypes.InstanceInfo{
+			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
+		},
+	}
+
+	var currentTestItem testItem
+
+	runningInstances := make(map[string]runner.InstanceStatus)
+
+	storage := newTestStorage()
+	serviceProvider := newTestServiceProvider()
+	layerProvider := newTestLayerProvider()
+	instanceRunner := newTestRunner(
+		func(instanceID string) runner.InstanceStatus {
+			status := getRunnerStatus(instanceID, currentTestItem, storage)
+			runningInstances[instanceID] = status
+
+			return status
+		},
+		func(instanceID string) error {
+			delete(runningInstances, instanceID)
+
+			return nil
+		},
+	)
+
+	nodeInfoProvider := newTestNodeInfoProvider()
+	nodeInfoProvider.nodeInfo.MaxDMIPs = 100000
+
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, nodeInfoProvider, storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	if err != nil {
+		t.Fatalf("Can't create launcher: %v", err)
+	}
+	defer testLauncher.Close()
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		launcher.RuntimeStatus{RunStatus: &launcher.InstancesStatus{}}, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	if err = serviceProvider.installServices(testData.services); err != nil {
+		t.Fatalf("Can't install services: %v", err)
+	}
+
+	if err = layerProvider.installLayers(testData.layers); err != nil {
+		t.Fatalf("Can't install layers: %v", err)
+	}
+
+	if err = testLauncher.RunInstances(testData.instances, false); err != nil {
+		t.Fatalf("Can't run instances: %v", err)
+	}
+
+	runtimeStatus := launcher.RuntimeStatus{
+		RunStatus: &launcher.InstancesStatus{Instances: createInstancesStatuses(testData)},
+	}
+
+	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
+		runtimeStatus, defaultStatusTimeout); err != nil {
+		t.Errorf("Check runtime status error: %v", err)
+	}
+
+	instanceInfo, err := storage.getInstanceByIdent(testData.instances[0].InstanceIdent)
+	if err != nil {
+		t.Fatalf("Can't get instance: %v", err)
+	}
+
+	runtimeSpec, err := getInstanceRuntimeSpec(instanceInfo.InstanceID)
+	if err != nil {
+		t.Fatalf("Can't get instance runtime spec: %v", err)
+	}
+
+	if *runtimeSpec.Linux.Resources.CPU.Quota != 1000 {
+		t.Errorf("Wrong CPU quota value: %d", *runtimeSpec.Linux.Resources.CPU.Quota)
+	}
+}
+
 func TestRuntimeEnvironment(t *testing.T) {
 	layerDigest1, layerDigest2, layerDigest3, layerDigest4 := uuid.NewString(), uuid.NewString(),
 		uuid.NewString(), uuid.NewString()
@@ -998,23 +1089,23 @@ func TestRuntimeEnvironment(t *testing.T) {
 	registrar := newTestRegistrar()
 	instanceMonitor := newTestInstanceMonitor()
 
-	resourceHosts := []aostypes.Host{
+	resourceHosts := []cloudprotocol.HostInfo{
 		{IP: "10.0.0.1", Hostname: "host1"},
 		{IP: "10.0.0.2", Hostname: "host2"},
 		{IP: "10.0.0.3", Hostname: "host3"},
 	}
 
-	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource0", Hosts: resourceHosts[:1]})
-	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource1", Hosts: resourceHosts[1:2]})
-	resourceManager.addResource(aostypes.ResourceInfo{Name: "resource2", Hosts: resourceHosts[2:]})
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device0"})
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device1"})
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device2"})
+	resourceManager.addResource(cloudprotocol.ResourceInfo{Name: "resource0", Hosts: resourceHosts[:1]})
+	resourceManager.addResource(cloudprotocol.ResourceInfo{Name: "resource1", Hosts: resourceHosts[1:2]})
+	resourceManager.addResource(cloudprotocol.ResourceInfo{Name: "resource2", Hosts: resourceHosts[2:]})
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device0"})
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device1"})
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device2"})
 
 	runItem := testItem{
 		services: []serviceInfo{
 			{
-				ServiceInfo:  aostypes.ServiceInfo{ID: "service0"},
+				ServiceInfo:  aostypes.ServiceInfo{ServiceID: "service0"},
 				gid:          3456,
 				layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
 				imageConfig: &imagespec.Image{
@@ -1037,28 +1128,28 @@ func TestRuntimeEnvironment(t *testing.T) {
 					Resources: []string{"resource0", "resource1", "resource2"},
 					Devices:   []aostypes.ServiceDevice{{Name: "device0"}, {Name: "device1"}, {Name: "device2"}},
 					AlertRules: &aostypes.AlertRules{
-						RAM: &aostypes.AlertRuleParam{
+						RAM: &aostypes.AlertRulePercents{
 							MinTimeout:   aostypes.Duration{Duration: 1 * time.Second},
 							MinThreshold: 10, MaxThreshold: 100,
 						},
-						CPU: &aostypes.AlertRuleParam{
+						CPU: &aostypes.AlertRulePercents{
 							MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
 							MinThreshold: 20, MaxThreshold: 200,
 						},
-						UsedDisks: []aostypes.PartitionAlertRuleParam{
+						UsedDisks: []aostypes.PartitionAlertRule{
 							{
 								Name: "storage",
-								AlertRuleParam: aostypes.AlertRuleParam{
+								AlertRulePercents: aostypes.AlertRulePercents{
 									MinTimeout:   aostypes.Duration{Duration: 3 * time.Second},
 									MinThreshold: 30, MaxThreshold: 300,
 								},
 							},
 						},
-						InTraffic: &aostypes.AlertRuleParam{
+						Download: &aostypes.AlertRulePoints{
 							MinTimeout:   aostypes.Duration{Duration: 4 * time.Second},
 							MinThreshold: 40, MaxThreshold: 400,
 						},
-						OutTraffic: &aostypes.AlertRuleParam{
+						Upload: &aostypes.AlertRulePoints{
 							MinTimeout:   aostypes.Duration{Duration: 5 * time.Second},
 							MinThreshold: 50, MaxThreshold: 500,
 						},
@@ -1083,8 +1174,8 @@ func TestRuntimeEnvironment(t *testing.T) {
 		WorkingDir: tmpDir,
 		StorageDir: filepath.Join(tmpDir, "storages"),
 		StateDir:   filepath.Join(tmpDir, "states"),
-	}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), resourceManager, networkManager, registrar, instanceMonitor, newTestAlertSender())
+	}, newTestNodeInfoProvider(), storage, serviceProvider, layerProvider, newTestRunner(nil, nil), resourceManager,
+		networkManager, registrar, instanceMonitor, newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1296,10 +1387,10 @@ func TestOverrideEnvVars(t *testing.T) {
 			envVars: []cloudprotocol.EnvVarsInstanceInfo{
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: newString("service0")},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id0", Variable: "VAR0=VAL0"},
-						{ID: "id1", Variable: "VAR1=VAL1"},
-						{ID: "id2", Variable: "VAR2=VAL2"},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR0", Value: "VAL0"},
+						{Name: "VAR1", Value: "VAL1"},
+						{Name: "VAR2", Value: "VAL2"},
 					},
 				},
 			},
@@ -1307,7 +1398,7 @@ func TestOverrideEnvVars(t *testing.T) {
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{ServiceID: newString("service0")},
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "id0"}, {ID: "id1"}, {ID: "id2"},
+						{Name: "VAR0"}, {Name: "VAR1"}, {Name: "VAR2"},
 					},
 				},
 			},
@@ -1351,9 +1442,9 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id3", Variable: "VAR3=VAL3"},
-						{ID: "id4", Variable: "VAR4=VAL4"},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR3", Value: "VAL3"},
+						{Name: "VAR4", Value: "VAL4"},
 					},
 				},
 			},
@@ -1363,7 +1454,7 @@ func TestOverrideEnvVars(t *testing.T) {
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "id3"}, {ID: "id4"},
+						{Name: "VAR3"}, {Name: "VAR4"},
 					},
 				},
 			},
@@ -1405,7 +1496,7 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"), Instance: newUint64(1),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{{ID: "id5", Variable: "VAR5=VAL5"}},
+					Variables: []cloudprotocol.EnvVarInfo{{Name: "VAR5", Value: "VAL5"}},
 				},
 			},
 			status: []cloudprotocol.EnvVarsInstanceStatus{
@@ -1413,7 +1504,7 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"), Instance: newUint64(1),
 					},
-					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id5"}},
+					Statuses: []cloudprotocol.EnvVarStatus{{Name: "VAR5"}},
 				},
 			},
 			instances: []instanceEnvVars{
@@ -1452,16 +1543,16 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id6", Variable: "VAR6=VAL6", TTL: newTime(time.Now().Add(-10 * time.Second))},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR6", Value: "VAL6", TTL: newTime(time.Now().Add(-10 * time.Second))},
 					},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject1"),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id7", Variable: "VAR7=VAL7", TTL: newTime(time.Now().Add(10 * time.Second))},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR7", Value: "VAL7", TTL: newTime(time.Now().Add(10 * time.Second))},
 					},
 				},
 			},
@@ -1470,13 +1561,15 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
-					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id6", Error: "environment variable expired"}},
+					Statuses: []cloudprotocol.EnvVarStatus{{Name: "VAR6", ErrorInfo: &cloudprotocol.ErrorInfo{
+						Message: "environment variable expired",
+					}}},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject1"),
 					},
-					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id7"}},
+					Statuses: []cloudprotocol.EnvVarStatus{{Name: "VAR7"}},
 				},
 			},
 			instances: []instanceEnvVars{
@@ -1516,16 +1609,16 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id8", Variable: "VAR8=VAL8", TTL: newTime(time.Now().Add(2 * time.Second))},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR8", Value: "VAL8", TTL: newTime(time.Now().Add(2 * time.Second))},
 					},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject1"),
 					},
-					EnvVars: []cloudprotocol.EnvVarInfo{
-						{ID: "id9", Variable: "VAR9=VAL9"},
+					Variables: []cloudprotocol.EnvVarInfo{
+						{Name: "VAR9", Value: "VAL9"},
 					},
 				},
 			},
@@ -1534,13 +1627,13 @@ func TestOverrideEnvVars(t *testing.T) {
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject0"),
 					},
-					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id8"}},
+					Statuses: []cloudprotocol.EnvVarStatus{{Name: "VAR8"}},
 				},
 				{
 					InstanceFilter: cloudprotocol.InstanceFilter{
 						ServiceID: newString("service0"), SubjectID: newString("subject1"),
 					},
-					Statuses: []cloudprotocol.EnvVarStatus{{ID: "id9"}},
+					Statuses: []cloudprotocol.EnvVarStatus{{Name: "VAR9"}},
 				},
 			},
 			instances: []instanceEnvVars{
@@ -1577,7 +1670,7 @@ func TestOverrideEnvVars(t *testing.T) {
 	}
 
 	runItem := testItem{
-		services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}}},
+		services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}}},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 1}},
@@ -1591,9 +1684,9 @@ func TestOverrideEnvVars(t *testing.T) {
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(),
-		newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1665,9 +1758,9 @@ func TestRestartStoredInstancesOnStart(t *testing.T) {
 
 	runItem := testItem{
 		services: []serviceInfo{
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service0"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service1"}},
-			{ServiceInfo: aostypes.ServiceInfo{ID: "service2"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"}},
+			{ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"}},
 		},
 		instances: []aostypes.InstanceInfo{
 			{InstanceIdent: aostypes.InstanceIdent{ServiceID: "service0", SubjectID: "subject0", Instance: 0}},
@@ -1690,9 +1783,9 @@ func TestRestartStoredInstancesOnStart(t *testing.T) {
 		t.Fatalf("Can't install services: %v", err)
 	}
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -1730,7 +1823,7 @@ func TestInstancePriorities(t *testing.T) {
 		// start from scratch
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1760,7 +1853,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 4 to the highest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1802,7 +1895,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 8 to the lowest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 400),
@@ -1826,7 +1919,7 @@ func TestInstancePriorities(t *testing.T) {
 		// change instance 1 to priority 500
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1860,7 +1953,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the highest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1906,7 +1999,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the lowest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1933,7 +2026,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Add new instances with the middle priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1971,7 +2064,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the highest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -1998,7 +2091,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the lowest priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2023,7 +2116,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Remove instances with the middle priority
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2046,7 +2139,7 @@ func TestInstancePriorities(t *testing.T) {
 		// Change instance 3 priority to the same order
 		{
 			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ID: service}}},
+				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(0, 400),
 					instancePriority(1, 500),
@@ -2076,7 +2169,7 @@ func TestInstancePriorities(t *testing.T) {
 		{
 			testItem: testItem{
 				services: []serviceInfo{
-					{ServiceInfo: aostypes.ServiceInfo{ID: service}},
+					{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}},
 				},
 				instances: []aostypes.InstanceInfo{
 					instancePriority(1, 500),
@@ -2131,9 +2224,9 @@ func TestInstancePriorities(t *testing.T) {
 		},
 	)
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider, layerProvider,
-		instanceRunner, newTestResourceManager(), newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(),
-		newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2205,7 +2298,7 @@ func TestResourceAlerts(t *testing.T) {
 			testItem: testItem{
 				services: []serviceInfo{
 					{
-						ServiceInfo:   aostypes.ServiceInfo{ID: "service0"},
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: "service0"},
 						serviceConfig: serviceConfig,
 					},
 				},
@@ -2244,7 +2337,7 @@ func TestResourceAlerts(t *testing.T) {
 			testItem: testItem{
 				services: []serviceInfo{
 					{
-						ServiceInfo:   aostypes.ServiceInfo{ID: "service0"},
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: "service0"},
 						serviceConfig: serviceConfig,
 					},
 				},
@@ -2296,10 +2389,10 @@ func TestResourceAlerts(t *testing.T) {
 	resourceManager := newTestResourceManager()
 	alertSender := newTestAlertSender()
 
-	resourceManager.addDevice(aostypes.DeviceInfo{Name: "device0", SharedCount: 1})
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device0", SharedCount: 1})
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestStorage(), serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(),
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), newTestStorage(),
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), resourceManager, newTestNetworkManager(),
 		newTestRegistrar(), newTestInstanceMonitor(), alertSender)
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
@@ -2349,9 +2442,9 @@ func TestOfflineTimeout(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	storage := newTestStorage()
 
-	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
+	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
@@ -2364,19 +2457,19 @@ func TestOfflineTimeout(t *testing.T) {
 	item := testItem{
 		services: []serviceInfo{
 			{
-				ServiceInfo: aostypes.ServiceInfo{ID: "service0"},
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
 			},
 			{
-				ServiceInfo: aostypes.ServiceInfo{ID: "service1"},
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service1"},
 				serviceConfig: &aostypes.ServiceConfig{
 					OfflineTTL: aostypes.Duration{Duration: 5 * time.Second},
 				},
 			},
 			{
-				ServiceInfo: aostypes.ServiceInfo{ID: "service2"},
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service2"},
 			},
 			{
-				ServiceInfo: aostypes.ServiceInfo{ID: "service3"},
+				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service3"},
 				serviceConfig: &aostypes.ServiceConfig{
 					OfflineTTL: aostypes.Duration{Duration: 10 * time.Second},
 				},
@@ -2470,11 +2563,12 @@ func TestOfflineTimeout(t *testing.T) {
 
 	testLauncher.Close()
 
-	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, storage, serviceProvider,
-		newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(), newTestNetworkManager(),
-		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
+	if testLauncher, err = launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
+		serviceProvider, newTestLayerProvider(), newTestRunner(nil, nil), newTestResourceManager(),
+		newTestNetworkManager(), newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender()); err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
 	}
+
 	defer testLauncher.Close()
 
 	if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
@@ -2497,6 +2591,18 @@ func TestOfflineTimeout(t *testing.T) {
 		}}, defaultStatusTimeout); err != nil {
 		t.Errorf("Check runtime status error: %v", err)
 	}
+}
+
+/***********************************************************************************************************************
+ * testNodeInfoProvider
+ **********************************************************************************************************************/
+
+func newTestNodeInfoProvider() *testNodeInfoProvider {
+	return &testNodeInfoProvider{}
+}
+
+func (provider *testNodeInfoProvider) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
+	return provider.nodeInfo, nil
 }
 
 /***********************************************************************************************************************
@@ -2652,17 +2758,17 @@ func (provider *testServiceProvider) installServices(services []serviceInfo) err
 	provider.layerDigests = map[string][]string{}
 
 	for _, service := range services {
-		servicePath := filepath.Join(tmpDir, servicesDir, service.ID)
+		servicePath := filepath.Join(tmpDir, servicesDir, service.ServiceID)
 
-		provider.services[service.ID] = servicemanager.ServiceInfo{
-			VersionInfo:     service.VersionInfo,
-			ServiceID:       service.ID,
+		provider.services[service.ServiceID] = servicemanager.ServiceInfo{
+			Version:         service.Version,
+			ServiceID:       service.ServiceID,
 			ServiceProvider: service.ProviderID,
 			ImagePath:       servicePath,
 			GID:             service.gid,
 		}
 
-		provider.layerDigests[service.ID] = service.layerDigests
+		provider.layerDigests[service.ServiceID] = service.layerDigests
 
 		if err := os.MkdirAll(filepath.Join(servicePath, instanceRootFS), 0o755); err != nil {
 			return aoserrors.Wrap(err)
@@ -2674,13 +2780,13 @@ func (provider *testServiceProvider) installServices(services []serviceInfo) err
 			imageConfig = service.imageConfig
 		}
 
-		if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, imageConfigFile),
+		if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ServiceID, imageConfigFile),
 			imageConfig); err != nil {
 			return err
 		}
 
 		if service.serviceConfig != nil {
-			if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ID, serviceConfigFile),
+			if err := writeConfig(filepath.Join(tmpDir, servicesDir, service.ServiceID, serviceConfigFile),
 				service.serviceConfig); err != nil {
 				return err
 			}
@@ -2730,9 +2836,9 @@ func (provider *testLayerProvider) installLayers(layers []aostypes.LayerInfo) er
 		layerPath := filepath.Join(tmpDir, layersDir, layer.Digest)
 
 		provider.layers[layer.Digest] = layermanager.LayerInfo{
-			VersionInfo: layer.VersionInfo,
-			Digest:      layer.Digest,
-			Path:        layerPath,
+			Digest:  layer.Digest,
+			Version: layer.Version,
+			Path:    layerPath,
 		}
 
 		if err := os.MkdirAll(layerPath, 0o755); err != nil {
@@ -2795,30 +2901,30 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 func newTestResourceManager() *testResourceManager {
 	return &testResourceManager{
 		allocatedDevices: map[string][]string{},
-		devices:          make(map[string]aostypes.DeviceInfo),
-		resources:        make(map[string]aostypes.ResourceInfo),
+		devices:          make(map[string]cloudprotocol.DeviceInfo),
+		resources:        make(map[string]cloudprotocol.ResourceInfo),
 	}
 }
 
-func (manager *testResourceManager) GetDeviceInfo(device string) (aostypes.DeviceInfo, error) {
+func (manager *testResourceManager) GetDeviceInfo(device string) (cloudprotocol.DeviceInfo, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
-		return aostypes.DeviceInfo{}, aoserrors.New("device info not found")
+		return cloudprotocol.DeviceInfo{}, aoserrors.New("device info not found")
 	}
 
 	return deviceInfo, nil
 }
 
-func (manager *testResourceManager) GetResourceInfo(resource string) (aostypes.ResourceInfo, error) {
+func (manager *testResourceManager) GetResourceInfo(resource string) (cloudprotocol.ResourceInfo, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 
 	resourceInfo, ok := manager.resources[resource]
 	if !ok {
-		return aostypes.ResourceInfo{}, aoserrors.New("resource info not found")
+		return cloudprotocol.ResourceInfo{}, aoserrors.New("resource info not found")
 	}
 
 	return resourceInfo, nil
@@ -2899,14 +3005,14 @@ func (manager *testResourceManager) GetDeviceInstances(name string) (instanceIDs
 	return manager.allocatedDevices[name], nil
 }
 
-func (manager *testResourceManager) addDevice(device aostypes.DeviceInfo) {
+func (manager *testResourceManager) addDevice(device cloudprotocol.DeviceInfo) {
 	manager.Lock()
 	defer manager.Unlock()
 
 	manager.devices[device.Name] = device
 }
 
-func (manager *testResourceManager) addResource(resource aostypes.ResourceInfo) {
+func (manager *testResourceManager) addResource(resource cloudprotocol.ResourceInfo) {
 	manager.Lock()
 	defer manager.Unlock()
 
@@ -3091,9 +3197,9 @@ func newTestAlertSender() *testAlertSender {
 	return &testAlertSender{}
 }
 
-func (sender *testAlertSender) SendAlert(alertItem cloudprotocol.AlertItem) {
-	if alert, ok := alertItem.Payload.(cloudprotocol.DeviceAllocateAlert); ok {
-		sender.alerts = append(sender.alerts, alert)
+func (sender *testAlertSender) SendAlert(alert interface{}) {
+	if deviceAllocateAlert, ok := alert.(cloudprotocol.DeviceAllocateAlert); ok {
+		sender.alerts = append(sender.alerts, deviceAllocateAlert)
 	}
 }
 
@@ -3266,17 +3372,17 @@ func createInstancesStatuses(item testItem) (instancesStatuses []cloudprotocol.I
 	for i, instance := range item.instances {
 		instanceStatus := cloudprotocol.InstanceStatus{
 			InstanceIdent: item.instances[i].InstanceIdent,
-			RunState:      cloudprotocol.InstanceStateActive,
+			Status:        cloudprotocol.InstanceStateActive,
 		}
 
 		for _, service := range item.services {
-			if instance.ServiceID == service.ID {
-				instanceStatus.AosVersion = service.AosVersion
+			if instance.ServiceID == service.ServiceID {
+				instanceStatus.ServiceVersion = service.Version
 			}
 		}
 
 		if i < len(item.err) && item.err[i] != nil {
-			instanceStatus.RunState = cloudprotocol.InstanceStateFailed
+			instanceStatus.Status = cloudprotocol.InstanceStateFailed
 			instanceStatus.ErrorInfo = &cloudprotocol.ErrorInfo{
 				Message: item.err[i].Error(),
 			}
@@ -3443,7 +3549,7 @@ func newTime(value time.Time) *time.Time {
 	return &value
 }
 
-func createSpecMounts(mounts []aostypes.FileSystemMount) (specMounts []runtimespec.Mount) {
+func createSpecMounts(mounts []cloudprotocol.FileSystemMount) (specMounts []runtimespec.Mount) {
 	// Manadatory mounts
 	specMounts = append(specMounts, runtimespec.Mount{Source: "proc", Destination: "/proc", Type: "proc"})
 	specMounts = append(specMounts, runtimespec.Mount{
@@ -3587,10 +3693,10 @@ func getInstanceRuntimeSpec(instanceID string) (runtimespec.Spec, error) {
 }
 
 func getAosEnvVars(instance launcher.InstanceInfo) (aosEnvVars []string) {
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SERVICE_ID=%s", instance.ServiceID))
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_SUBJECT_ID=%s", instance.SubjectID))
+	aosEnvVars = append(aosEnvVars, "AOS_SERVICE_ID="+instance.ServiceID)
+	aosEnvVars = append(aosEnvVars, "AOS_SUBJECT_ID="+instance.SubjectID)
 	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_INDEX=%d", instance.Instance))
-	aosEnvVars = append(aosEnvVars, fmt.Sprintf("AOS_INSTANCE_ID=%s", instance.InstanceID))
+	aosEnvVars = append(aosEnvVars, "AOS_INSTANCE_ID="+instance.InstanceID)
 
 	return aosEnvVars
 }
@@ -3681,6 +3787,21 @@ func isInstanceFilterEqual(filter1, filter2 cloudprotocol.InstanceFilter) bool {
 	return true
 }
 
+func compareErrorInfo(errorInfo1, errorInfo2 *cloudprotocol.ErrorInfo) bool {
+	if errorInfo1 == nil && errorInfo2 == nil {
+		return true
+	}
+
+	if errorInfo1 == nil || errorInfo2 == nil {
+		return false
+	}
+
+	return (strings.HasPrefix(errorInfo1.Message, errorInfo2.Message) ||
+		strings.HasPrefix(errorInfo2.Message, errorInfo1.Message)) &&
+		errorInfo1.AosCode == errorInfo2.AosCode &&
+		errorInfo1.ExitCode == errorInfo2.ExitCode
+}
+
 func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstanceStatus) error {
 	if !compareArrays(len(status1), len(status2),
 		func(index1, index2 int) bool {
@@ -3691,11 +3812,12 @@ func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstan
 			}
 
 			return compareArrays(len(status1.Statuses), len(status2.Statuses), func(index1, index2 int) bool {
-				return status1.Statuses[index1].ID == status2.Statuses[index2].ID &&
-					(strings.HasPrefix(status1.Statuses[index1].Error, status2.Statuses[index2].Error) ||
-						(strings.HasPrefix(status2.Statuses[index2].Error, status1.Statuses[index1].Error)))
+				return status1.Statuses[index1].Name == status2.Statuses[index2].Name &&
+					compareErrorInfo(status1.Statuses[index1].ErrorInfo, status2.Statuses[index2].ErrorInfo)
 			})
 		}) {
+		log.Debug("====================", status1, status2)
+
 		return aoserrors.New("override env vars status mismatch")
 	}
 

@@ -725,15 +725,12 @@ func createLayer(
 	}
 
 	return aostypes.LayerInfo{
-		VersionInfo: aostypes.VersionInfo{
-			AosVersion: 1,
-		},
-		URL:    "file://" + layerFile,
-		Digest: string(layerDigest),
-		ID:     layerID,
-		Sha256: fileInfo.Sha256,
-		Sha512: fileInfo.Sha512,
-		Size:   fileInfo.Size,
+		URL:     "file://" + layerFile,
+		Digest:  string(layerDigest),
+		LayerID: layerID,
+		Version: "1.0.0",
+		Sha256:  fileInfo.Sha256,
+		Size:    fileInfo.Size,
 	}, nil
 }
 

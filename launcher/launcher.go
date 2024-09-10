@@ -39,7 +39,6 @@ import (
 	"github.com/google/uuid"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 
 	"github.com/aosedge/aos_servicemanager/config"
@@ -68,6 +67,11 @@ const (
 /***********************************************************************************************************************
  * Types
  **********************************************************************************************************************/
+
+// NodeInfoProvider provides node information.
+type NodeInfoProvider interface {
+	GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error)
+}
 
 // Storage storage interface.
 type Storage interface {
@@ -102,8 +106,8 @@ type InstanceRunner interface {
 
 // ResourceManager provides API to validate, request and release resources.
 type ResourceManager interface {
-	GetDeviceInfo(device string) (aostypes.DeviceInfo, error)
-	GetResourceInfo(resource string) (aostypes.ResourceInfo, error)
+	GetDeviceInfo(device string) (cloudprotocol.DeviceInfo, error)
+	GetResourceInfo(resource string) (cloudprotocol.ResourceInfo, error)
 	AllocateDevice(device, instanceID string) error
 	ReleaseDevice(device, instanceID string) error
 	ReleaseDevices(instanceID string) error
@@ -133,7 +137,7 @@ type InstanceMonitor interface {
 
 // AlertSender provides interface to send alerts.
 type AlertSender interface {
-	SendAlert(alert cloudprotocol.AlertItem)
+	SendAlert(alert interface{})
 }
 
 // InstanceInfo instance information.
@@ -168,6 +172,7 @@ type Launcher struct {
 	alertSender       AlertSender
 
 	config                 *config.Config
+	nodeInfo               cloudprotocol.NodeInfo
 	runtimeStatusChannel   chan RuntimeStatus
 	cancelFunction         context.CancelFunc
 	actionHandler          *action.Handler
@@ -216,11 +221,17 @@ var defaultHostFSBinds = []string{"bin", "sbin", "lib", "lib64", "usr"} //nolint
  **********************************************************************************************************************/
 
 // New creates new launcher object.
-func New(config *config.Config, storage Storage, serviceProvider ServiceProvider, layerProvider LayerProvider,
-	instanceRunner InstanceRunner, resourceManager ResourceManager, networkManager NetworkManager,
-	instanceRegistrar InstanceRegistrar, instanceMonitor InstanceMonitor, alertSender AlertSender,
+func New(config *config.Config, nodeInfoProvider NodeInfoProvider, storage Storage, serviceProvider ServiceProvider,
+	layerProvider LayerProvider, instanceRunner InstanceRunner, resourceManager ResourceManager,
+	networkManager NetworkManager, instanceRegistrar InstanceRegistrar, instanceMonitor InstanceMonitor,
+	alertSender AlertSender,
 ) (launcher *Launcher, err error) {
 	log.Debug("New launcher")
+
+	nodeInfo, err := nodeInfoProvider.GetCurrentNodeInfo()
+	if err != nil {
+		return nil, aoserrors.Wrap(err)
+	}
 
 	launcher = &Launcher{
 		storage: storage, serviceProvider: serviceProvider, layerProvider: layerProvider,
@@ -228,6 +239,7 @@ func New(config *config.Config, storage Storage, serviceProvider ServiceProvider
 		instanceRegistrar: instanceRegistrar, instanceMonitor: instanceMonitor, alertSender: alertSender,
 
 		config:               config,
+		nodeInfo:             nodeInfo,
 		actionHandler:        action.New(maxParallelInstanceActions),
 		runtimeStatusChannel: make(chan RuntimeStatus, 1),
 		currentInstances:     make(map[string]*runtimeInstanceInfo),
@@ -446,7 +458,7 @@ runInstancesLoop:
 			}
 
 			if currentInstance.service != nil &&
-				currentInstance.service.AosVersion == launcher.currentServices[currentInstance.ServiceID].AosVersion &&
+				currentInstance.service.Version == launcher.currentServices[currentInstance.ServiceID].Version &&
 				instanceInfoEqual(currentInstance.InstanceInfo.InstanceInfo, runInstance.InstanceInfo) &&
 				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive &&
 				currentInstance.Priority >= maxStartPriority && !maxPriorityIncreased {
@@ -509,7 +521,7 @@ func (launcher *Launcher) releaseRuntime(instance *runtimeInstanceInfo) (err err
 		}
 	}
 
-	if !slices.Contains(launcher.config.RunnerFeatures, runxRunner) {
+	if launcher.networkManager != nil {
 		if networkErr := launcher.networkManager.RemoveInstanceFromNetwork(
 			instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
 			err = aoserrors.Wrap(networkErr)
@@ -623,7 +635,7 @@ func (launcher *Launcher) doStartAction(instance *runtimeInstanceInfo) {
 	})
 }
 
-func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []aostypes.Host, err error) {
+func (launcher *Launcher) getHostsFromResources(resources []string) (hosts []cloudprotocol.HostInfo, err error) {
 	for _, resource := range resources {
 		unitResource, err := launcher.resourceManager.GetResourceInfo(resource)
 		if err != nil {
@@ -684,7 +696,7 @@ func (launcher *Launcher) setupNetwork(instance *runtimeInstanceInfo) (err error
 		params.ExposedPorts = append(params.ExposedPorts, key)
 	}
 
-	if !slices.Contains(launcher.config.RunnerFeatures, runxRunner) {
+	if launcher.networkManager != nil {
 		if err := launcher.networkManager.AddInstanceToNetwork(
 			instance.InstanceID, instance.service.ServiceProvider, params); err != nil {
 			return aoserrors.Wrap(err)
@@ -729,8 +741,10 @@ func (launcher *Launcher) setupRuntime(instance *runtimeInstanceInfo) error {
 		instance.secret = secret
 	}
 
-	if err := launcher.setupNetwork(instance); err != nil {
-		return err
+	if launcher.networkManager != nil {
+		if err := launcher.setupNetwork(instance); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1201,15 +1215,15 @@ func (launcher *Launcher) updateOfflineTimeouts() {
 	launcher.setOfflineInstancesStatus(instances)
 }
 
-func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error) cloudprotocol.AlertItem {
-	return cloudprotocol.AlertItem{
-		Timestamp: time.Now(),
-		Tag:       cloudprotocol.AlertTagDeviceAllocate,
-		Payload: cloudprotocol.DeviceAllocateAlert{
-			InstanceIdent: instance.InstanceIdent,
-			Device:        device,
-			Message:       err.Error(),
+func deviceAllocateAlert(instance *runtimeInstanceInfo, device string, err error) interface{} {
+	return cloudprotocol.DeviceAllocateAlert{
+		AlertItem: cloudprotocol.AlertItem{
+			Timestamp: time.Now(),
+			Tag:       cloudprotocol.AlertTagDeviceAllocate,
 		},
+		InstanceIdent: instance.InstanceIdent,
+		Device:        device,
+		Message:       err.Error(),
 	}
 }
 

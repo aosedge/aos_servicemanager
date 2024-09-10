@@ -29,7 +29,9 @@ import (
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
 	"github.com/aosedge/aos_common/api/cloudprotocol"
-	pb "github.com/aosedge/aos_common/api/servicemanager/v3"
+	pbcommon "github.com/aosedge/aos_common/api/common"
+	pbsm "github.com/aosedge/aos_common/api/servicemanager"
+	"github.com/aosedge/aos_common/utils/pbconvert"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -53,18 +55,29 @@ const waitRegisteredTimeout = 30 * time.Second
  **********************************************************************************************************************/
 
 type testServer struct {
-	grpcServer        *grpc.Server
-	stream            pb.SMService_RegisterSMServer
-	registerChannel   chan *pb.NodeConfiguration
-	alertChannel      chan *pb.Alert
-	monitoringChannel chan *pb.SMOutgoingMessages_NodeMonitoring
-	logChannel        chan *pb.SMOutgoingMessages_Log
-	envVarsChannel    chan *pb.SMOutgoingMessages_OverrideEnvVarStatus
-	pb.UnimplementedSMServiceServer
+	grpcServer               *grpc.Server
+	stream                   pbsm.SMService_RegisterSMServer
+	nodeConfigStatusChannel  chan *pbsm.NodeConfigStatus
+	alertChannel             chan *pbsm.Alert
+	instantMonitoringChannel chan *pbsm.SMOutgoingMessages_InstantMonitoring
+	averageMonitoringChannel chan *pbsm.SMOutgoingMessages_AverageMonitoring
+	logChannel               chan *pbsm.SMOutgoingMessages_Log
+	envVarsChannel           chan *pbsm.SMOutgoingMessages_OverrideEnvVarStatus
+	pbsm.UnimplementedSMServiceServer
+}
+
+type testNodeConfigProcessor struct {
+	version string
+	err     error
+}
+
+type testNodeInfoProvider struct {
+	nodeInfo cloudprotocol.NodeInfo
 }
 
 type testMonitoringProvider struct {
-	monitoringChannel chan cloudprotocol.NodeMonitoringData
+	averageMonitoring aostypes.NodeMonitoring
+	monitoringChannel chan aostypes.NodeMonitoring
 }
 
 type testLogProvider struct {
@@ -76,10 +89,11 @@ type testLogProvider struct {
 
 type testLogData struct {
 	internalLog   cloudprotocol.PushLog
-	expectedPBLog pb.LogData
+	expectedPBLog pbsm.LogData
 }
+
 type testAlertProvider struct {
-	alertsChannel chan cloudprotocol.AlertItem
+	alertsChannel chan interface{}
 }
 
 type testServiceManager struct {
@@ -128,134 +142,119 @@ func TestSMRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
-	testMonitoring := &testMonitoringProvider{
-		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
-	}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 
-	systemInfo := cloudprotocol.SystemInfo{
-		NumCPUs: 1, TotalRAM: 100,
-		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
-	}
-
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL, RunnerFeatures: []string{"crun"}},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
-		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	expectedNodeConfiguration := &pb.NodeConfiguration{
-		NodeId: "mainSM", NodeType: "model1", RemoteNode: false, RunnerFeatures: []string{"crun"},
-		NumCpus: 1, TotalRam: 100,
-		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
-	}
-
-	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 }
 
 func TestMonitoringNotifications(t *testing.T) {
+	currentTime := time.Now()
+	pbCurrentTime := timestamppb.New(currentTime)
+
 	server, err := newTestServer(serverURL)
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
-	testMonitoring := &testMonitoringProvider{
-		monitoringChannel: make(chan cloudprotocol.NodeMonitoringData, 10),
-	}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+	monitoringProvider := newTestMonitoringProvider()
 
-	systemInfo := cloudprotocol.SystemInfo{
-		NumCPUs: 1, TotalRAM: 100,
-		Partitions: []cloudprotocol.PartitionInfo{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
-	}
-
-	client, err := smclient.New(&config.Config{
-		CMServerURL: serverURL, RemoteNode: true, RunnerFeatures: []string{"crun"},
-	}, smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: systemInfo},
-		nil, nil, nil, nil, nil, nil, testMonitoring, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, monitoringProvider, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	expectedNodeConfiguration := &pb.NodeConfiguration{
-		NodeId: "mainSM", NodeType: "model1", RemoteNode: true, RunnerFeatures: []string{"crun"},
-		NumCpus: 1, TotalRam: 100,
-		Partitions: []*pb.Partition{{Name: "p1", Types: []string{"t1"}, TotalSize: 200}},
-	}
-
-	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	type testMonitoringElement struct {
-		sendMonitoring     cloudprotocol.NodeMonitoringData
-		expectedMonitoring pb.NodeMonitoring
+		sendMonitoring     aostypes.NodeMonitoring
+		expectedMonitoring pbsm.InstantMonitoring
 	}
 
 	testMonitoringData := []testMonitoringElement{
 		{
-			sendMonitoring: cloudprotocol.NodeMonitoringData{
-				MonitoringData: cloudprotocol.MonitoringData{
-					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []cloudprotocol.PartitionUsage{{Name: "p1", UsedSize: 100}},
+			sendMonitoring: aostypes.NodeMonitoring{
+				NodeID: "nodeID",
+				NodeData: aostypes.MonitoringData{
+					Timestamp: currentTime,
+					RAM:       10, CPU: 20, Download: 40, Upload: 50,
+					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
-			expectedMonitoring: pb.NodeMonitoring{
-				MonitoringData: &pb.MonitoringData{
-					Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []*pb.PartitionUsage{{Name: "p1", UsedSize: 100}},
+			expectedMonitoring: pbsm.InstantMonitoring{
+				NodeMonitoring: &pbsm.MonitoringData{
+					Timestamp: pbCurrentTime,
+					Ram:       10, Cpu: 20, Download: 40, Upload: 50,
+					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
 			},
 		},
 		{
-			sendMonitoring: cloudprotocol.NodeMonitoringData{
-				MonitoringData: cloudprotocol.MonitoringData{
-					RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []cloudprotocol.PartitionUsage{{Name: "p1", UsedSize: 100}},
+			sendMonitoring: aostypes.NodeMonitoring{
+				NodeID: "nodeID",
+				NodeData: aostypes.MonitoringData{
+					Timestamp: currentTime,
+					RAM:       10, CPU: 20, Download: 40, Upload: 50,
+					Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
-				ServiceInstances: []cloudprotocol.InstanceMonitoringData{
+				InstancesData: []aostypes.InstanceMonitoring{
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
-						MonitoringData: cloudprotocol.MonitoringData{
-							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []cloudprotocol.PartitionUsage{{Name: "ps1", UsedSize: 100}},
+						MonitoringData: aostypes.MonitoringData{
+							Timestamp: currentTime,
+							RAM:       10, CPU: 20, Download: 40, Upload: 50,
+							Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
 					{
 						InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
-						MonitoringData: cloudprotocol.MonitoringData{
-							RAM: 10, CPU: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []cloudprotocol.PartitionUsage{{Name: "ps2", UsedSize: 100}},
+						MonitoringData: aostypes.MonitoringData{
+							Timestamp: currentTime,
+							RAM:       10, CPU: 20, Download: 40, Upload: 50,
+							Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
 				},
 			},
-			expectedMonitoring: pb.NodeMonitoring{
-				MonitoringData: &pb.MonitoringData{
-					Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
-					Disk: []*pb.PartitionUsage{{Name: "p1", UsedSize: 100}},
+			expectedMonitoring: pbsm.InstantMonitoring{
+				NodeMonitoring: &pbsm.MonitoringData{
+					Timestamp: pbCurrentTime,
+					Ram:       10, Cpu: 20, Download: 40, Upload: 50,
+					Disk: []*pbsm.PartitionUsage{{Name: "p1", UsedSize: 100}},
 				},
-				InstanceMonitoring: []*pb.InstanceMonitoring{
+				InstancesMonitoring: []*pbsm.InstanceMonitoring{
 					{
-						Instance: &pb.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
-						MonitoringData: &pb.MonitoringData{
-							Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []*pb.PartitionUsage{{Name: "ps1", UsedSize: 100}},
+						Instance: &pbcommon.InstanceIdent{ServiceId: "service1", SubjectId: "s1", Instance: 1},
+						MonitoringData: &pbsm.MonitoringData{
+							Timestamp: pbCurrentTime,
+							Ram:       10, Cpu: 20, Download: 40, Upload: 50,
+							Disk: []*pbsm.PartitionUsage{{Name: "ps1", UsedSize: 100}},
 						},
 					},
 					{
-						Instance: &pb.InstanceIdent{ServiceId: "service2", SubjectId: "s1", Instance: 1},
-						MonitoringData: &pb.MonitoringData{
-							Ram: 10, Cpu: 20, InTraffic: 40, OutTraffic: 50,
-							Disk: []*pb.PartitionUsage{{Name: "ps2", UsedSize: 100}},
+						Instance: &pbcommon.InstanceIdent{ServiceId: "service2", SubjectId: "s1", Instance: 1},
+						MonitoringData: &pbsm.MonitoringData{
+							Timestamp: pbCurrentTime,
+							Ram:       10, Cpu: 20, Download: 40, Upload: 50,
+							Disk: []*pbsm.PartitionUsage{{Name: "ps2", UsedSize: 100}},
 						},
 					},
 				},
@@ -264,15 +263,14 @@ func TestMonitoringNotifications(t *testing.T) {
 	}
 
 	for i := range testMonitoringData {
-		testMonitoring.monitoringChannel <- testMonitoringData[i].sendMonitoring
+		monitoringProvider.monitoringChannel <- testMonitoringData[i].sendMonitoring
 
-		receivedMonitoring := <-server.monitoringChannel
+		receivedMonitoring := <-server.instantMonitoringChannel
 
-		receivedMonitoring.NodeMonitoring.Timestamp = nil
+		if !proto.Equal(receivedMonitoring.InstantMonitoring, &testMonitoringData[i].expectedMonitoring) {
+			log.Debug("Received monitoring: ", receivedMonitoring.InstantMonitoring)
+			log.Debug("Expected monitoring: ", &testMonitoringData[i].expectedMonitoring)
 
-		if !proto.Equal(receivedMonitoring.NodeMonitoring, &testMonitoringData[i].expectedMonitoring) {
-			log.Debug("R :", receivedMonitoring.NodeMonitoring)
-			log.Debug("E :", &testMonitoringData[i].expectedMonitoring)
 			t.Errorf("Incorrect monitoring data")
 		}
 	}
@@ -283,81 +281,83 @@ func TestLogsNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	logProvider := testLogProvider{channel: make(chan cloudprotocol.PushLog)}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, nil, nil, nil, nil, &logProvider, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider,
+		nil, nil, nil, nil, &testNodeConfigProcessor{}, nil, nil, &logProvider, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	expectedNodeConfiguration := &pb.NodeConfiguration{
-		NodeId: "mainSM", NodeType: "model1",
-	}
-
-	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	logProvider.testLogs = []testLogData{
 		{
 			internalLog:   cloudprotocol.PushLog{LogID: "systemLog", Content: []byte{1, 2, 3}},
-			expectedPBLog: pb.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
+			expectedPBLog: pbsm.LogData{LogId: "systemLog", Data: []byte{1, 2, 3}},
 		},
 		{
 			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog1", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
-			expectedPBLog: pb.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pbsm.LogData{LogId: "serviceLog1", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
 			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog2", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
-			expectedPBLog: pb.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pbsm.LogData{LogId: "serviceLog2", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
 			internalLog:   cloudprotocol.PushLog{LogID: "serviceLog3", Content: []byte{1, 2, 4}, PartsCount: 10, Part: 1},
-			expectedPBLog: pb.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
+			expectedPBLog: pbsm.LogData{LogId: "serviceLog3", Data: []byte{1, 2, 4}, PartCount: 10, Part: 1},
 		},
 		{
 			internalLog: cloudprotocol.PushLog{
 				LogID: "serviceCrashLog", Content: []byte{1, 2, 4},
 				ErrorInfo: &cloudprotocol.ErrorInfo{
-					Message: "some error",
+					AosCode:  1,
+					Message:  "some error",
+					ExitCode: 5,
 				},
 				Part: 1,
 			},
-			expectedPBLog: pb.LogData{LogId: "serviceCrashLog", Data: []byte{1, 2, 4}, Error: "some error", Part: 1},
+			expectedPBLog: pbsm.LogData{LogId: "serviceCrashLog", Part: 1, Data: []byte{1, 2, 4}, Error: &pbcommon.ErrorInfo{
+				AosCode:  1,
+				Message:  "some error",
+				ExitCode: 5,
+			}},
 		},
 	}
 
-	if err := server.stream.Send(&pb.SMIncomingMessages{SMIncomingMessage: &pb.SMIncomingMessages_SystemLogRequest{
-		SystemLogRequest: &pb.SystemLogRequest{LogId: "systemlog"},
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{SMIncomingMessage: &pbsm.SMIncomingMessages_SystemLogRequest{
+		SystemLogRequest: &pbsm.SystemLogRequest{LogId: "systemlog"},
 	}}); err != nil {
 		t.Fatalf("Can't get system log: %v", err)
 	}
 
-	instanceLogRequests := []pb.InstanceLogRequest{
+	instanceLogRequests := []pbsm.InstanceLogRequest{
 		{
-			Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "", Instance: -1},
-			LogId:    "serviceLog1",
+			InstanceFilter: &pbsm.InstanceFilter{ServiceId: "id1", SubjectId: "", Instance: -1},
+			LogId:          "serviceLog1",
 		},
 		{
-			Instance: &pb.InstanceIdent{ServiceId: "id2", SubjectId: "s1", Instance: 10},
-			LogId:    "serviceLog2",
+			InstanceFilter: &pbsm.InstanceFilter{ServiceId: "id2", SubjectId: "s1", Instance: 10},
+			LogId:          "serviceLog2",
 		},
 		{
-			Instance: &pb.InstanceIdent{ServiceId: "id3", SubjectId: "s1", Instance: 10},
-			From:     timestamppb.Now(), Till: timestamppb.Now(),
+			InstanceFilter: &pbsm.InstanceFilter{ServiceId: "id3", SubjectId: "s1", Instance: 10},
+			From:           timestamppb.Now(), Till: timestamppb.Now(),
 			LogId: "serviceLog3",
 		},
 	}
 
 	for i := range instanceLogRequests {
-		if err := server.stream.Send(&pb.SMIncomingMessages{
-			SMIncomingMessage: &pb.SMIncomingMessages_InstanceLogRequest{
+		if err := server.stream.Send(&pbsm.SMIncomingMessages{
+			SMIncomingMessage: &pbsm.SMIncomingMessages_InstanceLogRequest{
 				InstanceLogRequest: &instanceLogRequests[i],
 			},
 		}); err != nil {
@@ -365,10 +365,10 @@ func TestLogsNotification(t *testing.T) {
 		}
 	}
 
-	if err := server.stream.Send(&pb.SMIncomingMessages{
-		SMIncomingMessage: &pb.SMIncomingMessages_InstanceCrashLogRequest{
-			InstanceCrashLogRequest: &pb.InstanceCrashLogRequest{
-				LogId: "serviceCrashLog", Instance: &pb.InstanceIdent{ServiceId: "id3"},
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{
+		SMIncomingMessage: &pbsm.SMIncomingMessages_InstanceCrashLogRequest{
+			InstanceCrashLogRequest: &pbsm.InstanceCrashLogRequest{
+				LogId: "serviceCrashLog", InstanceFilter: &pbsm.InstanceFilter{ServiceId: "id3"},
 			},
 		},
 	}); err != nil {
@@ -385,139 +385,125 @@ func TestAlertNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
-	testAlerts := &testAlertProvider{alertsChannel: make(chan cloudprotocol.AlertItem, 10)}
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+	alertProvider := &testAlertProvider{alertsChannel: make(chan interface{}, 10)}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, nil, nil, testAlerts, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, alertProvider, nil, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	expectedNodeConfiguration := &pb.NodeConfiguration{
-		NodeId: "mainSM", NodeType: "model1",
-	}
-
-	if err = server.waitClientRegistered(expectedNodeConfiguration); err != nil {
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	type testAlertItem struct {
-		sendAlert     cloudprotocol.AlertItem
-		expectedAlert pb.Alert
+		sendAlert     interface{}
+		expectedAlert pbsm.Alert
 	}
 
 	testAlertItems := []testAlertItem{
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag:     cloudprotocol.AlertTagSystemError,
-				Payload: cloudprotocol.SystemAlert{Message: "SystemAlertMessage"},
+			sendAlert: cloudprotocol.SystemAlert{
+				AlertItem: cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagSystemError},
+				Message:   "SystemAlertMessage",
 			},
-			expectedAlert: pb.Alert{
-				Tag:     cloudprotocol.AlertTagSystemError,
-				Payload: &pb.Alert_SystemAlert{SystemAlert: &pb.SystemAlert{Message: "SystemAlertMessage"}},
+			expectedAlert: pbsm.Alert{
+				Tag:       cloudprotocol.AlertTagSystemError,
+				AlertItem: &pbsm.Alert_SystemAlert{SystemAlert: &pbsm.SystemAlert{Message: "SystemAlertMessage"}},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag:     cloudprotocol.AlertTagAosCore,
-				Payload: cloudprotocol.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
+			sendAlert: cloudprotocol.CoreAlert{
+				AlertItem:     cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagAosCore},
+				CoreComponent: "SM", Message: "CoreAlertMessage",
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagAosCore,
-				Payload: &pb.Alert_CoreAlert{
-					CoreAlert: &pb.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
+				AlertItem: &pbsm.Alert_CoreAlert{
+					CoreAlert: &pbsm.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
 				},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag: cloudprotocol.AlertTagResourceValidate,
-				Payload: cloudprotocol.ResourceValidateAlert{
-					ResourcesErrors: []cloudprotocol.ResourceValidateError{
-						{Name: "someName1", Errors: []string{"error1", "error2"}},
-						{Name: "someName2", Errors: []string{"error3", "error4"}},
-					},
-				},
+			sendAlert: cloudprotocol.ResourceValidateAlert{
+				AlertItem: cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagResourceValidate},
+				Name:      "someName",
+				Errors:    []cloudprotocol.ErrorInfo{{Message: "error1"}, {Message: "error2"}},
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagResourceValidate,
-				Payload: &pb.Alert_ResourceValidateAlert{
-					ResourceValidateAlert: &pb.ResourceValidateAlert{
-						Errors: []*pb.ResourceValidateErrors{
-							{Name: "someName1", ErrorMsg: []string{"error1", "error2"}},
-							{Name: "someName2", ErrorMsg: []string{"error3", "error4"}},
+				AlertItem: &pbsm.Alert_ResourceValidateAlert{
+					ResourceValidateAlert: &pbsm.ResourceValidateAlert{
+						Name: "someName",
+						Errors: []*pbcommon.ErrorInfo{
+							{Message: "error1"}, {Message: "error2"},
 						},
 					},
 				},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag: cloudprotocol.AlertTagDeviceAllocate,
-				Payload: cloudprotocol.DeviceAllocateAlert{
-					InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-					Device:        "someDevice", Message: "someMessage",
-				},
+			sendAlert: cloudprotocol.DeviceAllocateAlert{
+				AlertItem:     cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagDeviceAllocate},
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Device:        "someDevice", Message: "someMessage",
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagDeviceAllocate,
-				Payload: &pb.Alert_DeviceAllocateAlert{
-					DeviceAllocateAlert: &pb.DeviceAllocateAlert{
-						Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+				AlertItem: &pbsm.Alert_DeviceAllocateAlert{
+					DeviceAllocateAlert: &pbsm.DeviceAllocateAlert{
+						Instance: &pbcommon.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
 						Device:   "someDevice", Message: "someMessage",
 					},
 				},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag:     cloudprotocol.AlertTagSystemQuota,
-				Payload: cloudprotocol.SystemQuotaAlert{Parameter: "param1", Value: 42},
+			sendAlert: cloudprotocol.SystemQuotaAlert{
+				AlertItem: cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagSystemQuota},
+				Parameter: "param1", Value: 42,
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagSystemQuota,
-				Payload: &pb.Alert_SystemQuotaAlert{
-					SystemQuotaAlert: &pb.SystemQuotaAlert{Parameter: "param1", Value: 42},
+				AlertItem: &pbsm.Alert_SystemQuotaAlert{
+					SystemQuotaAlert: &pbsm.SystemQuotaAlert{Parameter: "param1", Value: 42},
 				},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag: cloudprotocol.AlertTagInstanceQuota,
-				Payload: cloudprotocol.InstanceQuotaAlert{
-					InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-					Parameter:     "param1", Value: 42,
-				},
+			sendAlert: cloudprotocol.InstanceQuotaAlert{
+				AlertItem:     cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagInstanceQuota},
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Parameter:     "param1", Value: 42,
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagInstanceQuota,
-				Payload: &pb.Alert_InstanceQuotaAlert{
-					InstanceQuotaAlert: &pb.InstanceQuotaAlert{
-						Instance:  &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+				AlertItem: &pbsm.Alert_InstanceQuotaAlert{
+					InstanceQuotaAlert: &pbsm.InstanceQuotaAlert{
+						Instance:  &pbcommon.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
 						Parameter: "param1", Value: 42,
 					},
 				},
 			},
 		},
 		{
-			sendAlert: cloudprotocol.AlertItem{
-				Tag: cloudprotocol.AlertTagServiceInstance,
-				Payload: cloudprotocol.ServiceInstanceAlert{
-					InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-					Message:       "ServiceInstanceAlert", AosVersion: 42,
-				},
+			sendAlert: cloudprotocol.ServiceInstanceAlert{
+				AlertItem:     cloudprotocol.AlertItem{Tag: cloudprotocol.AlertTagServiceInstance},
+				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
+				Message:       "ServiceInstanceAlert", ServiceVersion: "2.0.0",
 			},
-			expectedAlert: pb.Alert{
+			expectedAlert: pbsm.Alert{
 				Tag: cloudprotocol.AlertTagServiceInstance,
-				Payload: &pb.Alert_InstanceAlert{
-					InstanceAlert: &pb.InstanceAlert{
-						Instance: &pb.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
-						Message:  "ServiceInstanceAlert", AosVersion: 42,
+				AlertItem: &pbsm.Alert_InstanceAlert{
+					InstanceAlert: &pbsm.InstanceAlert{
+						Instance: &pbcommon.InstanceIdent{ServiceId: "id1", SubjectId: "s1", Instance: 1},
+						Message:  "ServiceInstanceAlert", ServiceVersion: "2.0.0",
 					},
 				},
 			},
@@ -525,142 +511,81 @@ func TestAlertNotifications(t *testing.T) {
 	}
 
 	for i := range testAlertItems {
-		testAlerts.alertsChannel <- testAlertItems[i].sendAlert
+		alertProvider.alertsChannel <- testAlertItems[i].sendAlert
 
 		receivedAlert := <-server.alertChannel
 
 		receivedAlert.Timestamp = nil
 
 		if !proto.Equal(receivedAlert, &testAlertItems[i].expectedAlert) {
-			t.Errorf("Incorrect log item %s", receivedAlert.GetTag())
+			log.Debug(i)
+			log.Debug(receivedAlert)
+			log.Debug(&testAlertItems[i].expectedAlert)
+
+			t.Errorf("Incorrect alert item %s", receivedAlert.GetTag())
 		}
-	}
-
-	// test incorrect alerts
-	invalidAlerts := []cloudprotocol.AlertItem{
-		{
-			Tag:     cloudprotocol.AlertTagAosCore,
-			Payload: cloudprotocol.SystemAlert{Message: "SystemAlertMessage"},
-		},
-		{
-			Tag:     cloudprotocol.AlertTagDeviceAllocate,
-			Payload: cloudprotocol.CoreAlert{CoreComponent: "SM", Message: "CoreAlertMessage"},
-		},
-		{
-			Tag: cloudprotocol.AlertTagSystemError,
-			Payload: cloudprotocol.ResourceValidateAlert{
-				ResourcesErrors: []cloudprotocol.ResourceValidateError{
-					{Name: "someName1", Errors: []string{"error1", "error2"}},
-					{Name: "someName2", Errors: []string{"error3", "error4"}},
-				},
-			},
-		},
-		{
-			Tag: cloudprotocol.AlertTagSystemQuota,
-			Payload: cloudprotocol.DeviceAllocateAlert{
-				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-				Device:        "someDevice", Message: "someMessage",
-			},
-		},
-
-		{
-			Tag:     cloudprotocol.AlertTagInstanceQuota,
-			Payload: cloudprotocol.SystemQuotaAlert{Parameter: "param1", Value: 42},
-		},
-
-		{
-			Tag: cloudprotocol.AlertTagServiceInstance,
-			Payload: cloudprotocol.InstanceQuotaAlert{
-				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-				Parameter:     "param1", Value: 42,
-			},
-		},
-
-		{
-			Tag: cloudprotocol.AlertTagResourceValidate,
-			Payload: cloudprotocol.ServiceInstanceAlert{
-				InstanceIdent: aostypes.InstanceIdent{ServiceID: "id1", SubjectID: "s1", Instance: 1},
-				Message:       "ServiceInstanceAlert", AosVersion: 42,
-			},
-		},
-	}
-
-	for i := range invalidAlerts {
-		testAlerts.alertsChannel <- invalidAlerts[i]
-	}
-
-	select {
-	case <-server.alertChannel:
-		t.Error("Unexpected Alert")
-
-	case <-time.After(1 * time.Second):
 	}
 }
 
 func TestRunInstances(t *testing.T) {
-	data := []*pb.RunInstances{
+	data := []*pbsm.RunInstances{
 		{},
 		{ForceRestart: true},
 		{
-			Services: []*pb.ServiceInfo{
+			Services: []*pbsm.ServiceInfo{
 				{
-					VersionInfo: &pb.VersionInfo{AosVersion: 4, VendorVersion: "32", Description: "this is service 1"},
-					Url:         "url123",
-					ServiceId:   "service1",
-					ProviderId:  "provider1",
-					Gid:         984,
-					Sha256:      []byte("fdksj"),
-					Sha512:      []byte("popk"),
-					Size:        789,
+					ServiceId:  "service1",
+					ProviderId: "provider1",
+					Version:    "2.0.0",
+					Url:        "url123",
+					Gid:        984,
+					Sha256:     []byte("fdksj"),
+					Size:       789,
 				},
 				{
-					VersionInfo: &pb.VersionInfo{AosVersion: 6, VendorVersion: "17", Description: "this is service 2"},
-					Url:         "url354",
-					ServiceId:   "service2",
-					ProviderId:  "provider2",
-					Gid:         21,
-					Sha256:      []byte("sdfafsd"),
-					Sha512:      []byte("dsklddf"),
-					Size:        12900,
+					ServiceId:  "service2",
+					ProviderId: "provider2",
+					Version:    "3.0.0",
+					Url:        "url354",
+					Gid:        21,
+					Sha256:     []byte("sdfafsd"),
+					Size:       12900,
 				},
 			},
-			Layers: []*pb.LayerInfo{
+			Layers: []*pbsm.LayerInfo{
 				{
-					VersionInfo: &pb.VersionInfo{AosVersion: 1, VendorVersion: "7", Description: "this is layer 1"},
-					Url:         "url670",
-					LayerId:     "layer1",
-					Digest:      "digest2329",
-					Sha256:      []byte("sassfdc"),
-					Sha512:      []byte("dsdsjkk"),
-					Size:        3489,
+					LayerId: "layer1",
+					Digest:  "digest2329",
+					Version: "1.0.0",
+					Url:     "url670",
+					Sha256:  []byte("sassfdc"),
+					Size:    3489,
 				},
 				{
-					VersionInfo: &pb.VersionInfo{AosVersion: 3, VendorVersion: "9", Description: "this is layer 2"},
-					Url:         "url654",
-					LayerId:     "layer2",
-					Digest:      "digest6509",
-					Sha256:      []byte("asdasdd"),
-					Sha512:      []byte("pcxalks"),
-					Size:        3489,
+					LayerId: "layer2",
+					Digest:  "digest6509",
+					Version: "2.0.0",
+					Url:     "url654",
+					Sha256:  []byte("asdasdd"),
+					Size:    3489,
 				},
 				{
-					VersionInfo: &pb.VersionInfo{AosVersion: 5, VendorVersion: "5", Description: "this is layer 3"},
-					Url:         "url986",
-					LayerId:     "layer3",
-					Digest:      "digest3209",
-					Sha256:      []byte("dsakjcd"),
-					Sha512:      []byte("cszxdfa"),
-					Size:        3489,
+					LayerId: "layer3",
+					Digest:  "digest3209",
+					Version: "3.0.0",
+					Url:     "url986",
+					Sha256:  []byte("dsakjcd"),
+					Size:    3489,
 				},
 			},
-			Instances: []*pb.InstanceInfo{
+			Instances: []*pbsm.InstanceInfo{
 				{
-					Instance: &pb.InstanceIdent{
+					Instance: &pbcommon.InstanceIdent{
 						ServiceId: "service1",
 						SubjectId: "subject1",
 						Instance:  0,
 					},
-					NetworkParameters: &pb.NetworkParameters{
+					NetworkParameters: &pbsm.NetworkParameters{
 						Ip:         "172.17.0.1",
 						Subnet:     "172.17.0.0/16",
 						VlanId:     1,
@@ -672,12 +597,12 @@ func TestRunInstances(t *testing.T) {
 					StatePath:   "statePath1",
 				},
 				{
-					Instance: &pb.InstanceIdent{
+					Instance: &pbcommon.InstanceIdent{
 						ServiceId: "service1",
 						SubjectId: "subject1",
 						Instance:  1,
 					},
-					NetworkParameters: &pb.NetworkParameters{
+					NetworkParameters: &pbsm.NetworkParameters{
 						Ip:         "172.17.0.2",
 						Subnet:     "172.17.0.0/16",
 						VlanId:     1,
@@ -689,12 +614,12 @@ func TestRunInstances(t *testing.T) {
 					StatePath:   "statePath2",
 				},
 				{
-					Instance: &pb.InstanceIdent{
+					Instance: &pbcommon.InstanceIdent{
 						ServiceId: "service2",
 						SubjectId: "subject1",
 						Instance:  0,
 					},
-					NetworkParameters: &pb.NetworkParameters{
+					NetworkParameters: &pbsm.NetworkParameters{
 						Ip:         "172.17.0.3",
 						Subnet:     "172.17.0.0/16",
 						VlanId:     1,
@@ -706,12 +631,12 @@ func TestRunInstances(t *testing.T) {
 					StatePath:   "statePath3",
 				},
 				{
-					Instance: &pb.InstanceIdent{
+					Instance: &pbcommon.InstanceIdent{
 						ServiceId: "service2",
 						SubjectId: "subject2",
 						Instance:  5,
 					},
-					NetworkParameters: &pb.NetworkParameters{
+					NetworkParameters: &pbsm.NetworkParameters{
 						Ip:         "172.17.0.4",
 						Subnet:     "172.17.0.0/16",
 						VlanId:     1,
@@ -730,28 +655,28 @@ func TestRunInstances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	serviceManager := &testServiceManager{}
 	layerManager := &testLayerManager{}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, serviceManager, layerManager, launcher, nil, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, serviceManager,
+		layerManager, launcher, &testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	for _, req := range data {
-		if err := server.stream.Send(&pb.SMIncomingMessages{
-			SMIncomingMessage: &pb.SMIncomingMessages_RunInstances{RunInstances: req},
+		if err := server.stream.Send(&pbsm.SMIncomingMessages{
+			SMIncomingMessage: &pbsm.SMIncomingMessages_RunInstances{RunInstances: req},
 		}); err != nil {
 			t.Fatalf("Can't send request: %v", err)
 		}
@@ -785,8 +710,8 @@ func TestRunInstances(t *testing.T) {
 }
 
 func TestNetworkUpdate(t *testing.T) {
-	data := &pb.UpdateNetworks{
-		Networks: []*pb.NetworkParameters{
+	data := &pbsm.UpdateNetworks{
+		Networks: []*pbsm.NetworkParameters{
 			{
 				Subnet:    "172.17.0.0/16",
 				Ip:        "172.17.0.1",
@@ -821,27 +746,27 @@ func TestNetworkUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	netManager := &testNetworkUpdates{
 		callChannel: make(chan struct{}, 1),
 	}
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, nil, nil, nil, nil, nil, netManager, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, netManager, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
-	if err := server.stream.Send(&pb.SMIncomingMessages{
-		SMIncomingMessage: &pb.SMIncomingMessages_UpdateNetworks{UpdateNetworks: data},
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{
+		SMIncomingMessage: &pbsm.SMIncomingMessages_UpdateNetworks{UpdateNetworks: data},
 	}); err != nil {
 		t.Fatalf("Can't send request: %v", err)
 	}
@@ -857,36 +782,36 @@ func TestNetworkUpdate(t *testing.T) {
 
 func TestOverrideEnvVars(t *testing.T) {
 	type testData struct {
-		req    *pb.OverrideEnvVars
+		req    *pbsm.OverrideEnvVars
 		status []cloudprotocol.EnvVarsInstanceStatus
 	}
 
 	data := []testData{
 		{
-			req:    &pb.OverrideEnvVars{},
+			req:    &pbsm.OverrideEnvVars{},
 			status: []cloudprotocol.EnvVarsInstanceStatus{},
 		},
 		{
-			req: &pb.OverrideEnvVars{EnvVars: []*pb.OverrideInstanceEnvVar{
+			req: &pbsm.OverrideEnvVars{EnvVars: []*pbsm.OverrideInstanceEnvVar{
 				{
-					Instance: &pb.InstanceIdent{ServiceId: "service1", SubjectId: "subject1", Instance: 2},
-					Vars: []*pb.EnvVarInfo{
-						{VarId: "varID1", Variable: "var1", Ttl: timestamppb.Now()},
-						{VarId: "varID2", Variable: "var2", Ttl: timestamppb.Now()},
-						{VarId: "varID3", Variable: "var3", Ttl: timestamppb.Now()},
+					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service1", SubjectId: "subject1", Instance: 2},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name1", Value: "value1", Ttl: timestamppb.Now()},
+						{Name: "name2", Value: "value2", Ttl: timestamppb.Now()},
+						{Name: "name3", Value: "value3", Ttl: timestamppb.Now()},
 					},
 				},
 				{
-					Instance: &pb.InstanceIdent{ServiceId: "service2", SubjectId: "subject3", Instance: 0},
-					Vars: []*pb.EnvVarInfo{
-						{VarId: "varID4", Variable: "var4", Ttl: timestamppb.Now()},
-						{VarId: "varID5", Variable: "var5", Ttl: timestamppb.Now()},
+					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service2", SubjectId: "subject3", Instance: 0},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name4", Value: "value4", Ttl: timestamppb.Now()},
+						{Name: "name5", Value: "value5", Ttl: timestamppb.Now()},
 					},
 				},
 				{
-					Instance: &pb.InstanceIdent{ServiceId: "service3", Instance: -1},
-					Vars: []*pb.EnvVarInfo{
-						{VarId: "varID6", Variable: "var6", Ttl: timestamppb.Now()},
+					InstanceFilter: &pbsm.InstanceFilter{ServiceId: "service3", Instance: -1},
+					Variables: []*pbsm.EnvVarInfo{
+						{Name: "name6", Value: "value6", Ttl: timestamppb.Now()},
 					},
 				},
 			}},
@@ -894,15 +819,15 @@ func TestOverrideEnvVars(t *testing.T) {
 				{
 					InstanceFilter: cloudprotocol.NewInstanceFilter("service1", "subject1", -1),
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "varID1"},
-						{ID: "varID2", Error: "error2"},
+						{Name: "name1"},
+						{Name: "name2", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error2"}},
 					},
 				},
 				{
 					InstanceFilter: cloudprotocol.NewInstanceFilter("service2", "subject3", 2),
 					Statuses: []cloudprotocol.EnvVarStatus{
-						{ID: "varID3", Error: "error3"},
-						{ID: "varID4", Error: "error4"},
+						{Name: "name3", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error3"}},
+						{Name: "name4", ErrorInfo: &cloudprotocol.ErrorInfo{Message: "error4"}},
 					},
 				},
 			},
@@ -913,28 +838,28 @@ func TestOverrideEnvVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	for _, item := range data {
 		launcher.envVarsStatus = item.status
 
-		if err := server.stream.Send(&pb.SMIncomingMessages{
-			SMIncomingMessage: &pb.SMIncomingMessages_OverrideEnvVars{OverrideEnvVars: item.req},
+		if err := server.stream.Send(&pbsm.SMIncomingMessages{
+			SMIncomingMessage: &pbsm.SMIncomingMessages_OverrideEnvVars{OverrideEnvVars: item.req},
 		}); err != nil {
 			t.Fatalf("Can't send request: %v", err)
 		}
@@ -960,28 +885,28 @@ func TestCloudConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Can't create test server: %v", err)
 	}
-
 	defer server.close()
 
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
 	launcher := newTestLauncher()
 
-	client, err := smclient.New(&config.Config{CMServerURL: serverURL},
-		smclient.NodeDescription{NodeID: "mainSM", NodeType: "model1", SystemInfo: cloudprotocol.SystemInfo{}},
-		nil, nil, nil, launcher, nil, nil, nil, nil, nil, nil, true)
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, launcher,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
 	if err != nil {
-		t.Fatalf("Can't create UM client: %v", err)
+		t.Fatalf("Can't create SM client: %v", err)
 	}
 	defer client.Close()
 
-	if err := server.waitClientRegistered(&pb.NodeConfiguration{NodeId: "mainSM", NodeType: "model1"}); err != nil {
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
 		t.Fatalf("SM registration error: %v", err)
 	}
 
 	// Check connected status
 
-	if err := server.stream.Send(&pb.SMIncomingMessages{
-		SMIncomingMessage: &pb.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pb.ConnectionStatus{
-			CloudStatus: pb.ConnectionEnum_CONNECTED,
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{
+		SMIncomingMessage: &pbsm.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pbsm.ConnectionStatus{
+			CloudStatus: pbsm.ConnectionEnum_CONNECTED,
 		}},
 	}); err != nil {
 		t.Fatalf("Can't send request: %v", err)
@@ -998,9 +923,9 @@ func TestCloudConnection(t *testing.T) {
 
 	// Check disconnected status
 
-	if err := server.stream.Send(&pb.SMIncomingMessages{
-		SMIncomingMessage: &pb.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pb.ConnectionStatus{
-			CloudStatus: pb.ConnectionEnum_DISCONNECTED,
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{
+		SMIncomingMessage: &pbsm.SMIncomingMessages_ConnectionStatus{ConnectionStatus: &pbsm.ConnectionStatus{
+			CloudStatus: pbsm.ConnectionEnum_DISCONNECTED,
 		}},
 	}); err != nil {
 		t.Fatalf("Can't send request: %v", err)
@@ -1015,17 +940,74 @@ func TestCloudConnection(t *testing.T) {
 	}
 }
 
+func TestAverageMonitoring(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+	defer server.close()
+
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+	testMonitoring := &testMonitoringProvider{
+		averageMonitoring: aostypes.NodeMonitoring{
+			NodeData: aostypes.MonitoringData{
+				RAM: 10, CPU: 20, Download: 40, Upload: 50,
+				Disk: []aostypes.PartitionUsage{{Name: "p1", UsedSize: 100}},
+			},
+			InstancesData: []aostypes.InstanceMonitoring{
+				{
+					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service1", SubjectID: "s1", Instance: 1},
+					MonitoringData: aostypes.MonitoringData{
+						RAM: 10, CPU: 20, Download: 40, Upload: 50,
+						Disk: []aostypes.PartitionUsage{{Name: "ps1", UsedSize: 100}},
+					},
+				},
+				{
+					InstanceIdent: aostypes.InstanceIdent{ServiceID: "service2", SubjectID: "s1", Instance: 1},
+					MonitoringData: aostypes.MonitoringData{
+						RAM: 10, CPU: 20, Download: 40, Upload: 50,
+						Disk: []aostypes.PartitionUsage{{Name: "ps2", UsedSize: 100}},
+					},
+				},
+			},
+		},
+	}
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, testMonitoring, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create UM client: %v", err)
+	}
+	defer client.Close()
+
+	if err := server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	if err := server.stream.Send(&pbsm.SMIncomingMessages{
+		SMIncomingMessage: &pbsm.SMIncomingMessages_GetAverageMonitoring{},
+	}); err != nil {
+		t.Fatalf("Can't get average monitoring: %v", err)
+	}
+
+	if err := server.waitAndCheckAverageMonitoring(testMonitoring.averageMonitoring); err != nil {
+		t.Errorf("Incorrect monitoring: %v", err)
+	}
+}
+
 /***********************************************************************************************************************
  * Private
  **********************************************************************************************************************/
 
 func newTestServer(url string) (server *testServer, err error) {
 	server = &testServer{
-		registerChannel:   make(chan *pb.NodeConfiguration, 10),
-		alertChannel:      make(chan *pb.Alert, 10),
-		monitoringChannel: make(chan *pb.SMOutgoingMessages_NodeMonitoring, 10),
-		logChannel:        make(chan *pb.SMOutgoingMessages_Log, 10),
-		envVarsChannel:    make(chan *pb.SMOutgoingMessages_OverrideEnvVarStatus, 10),
+		nodeConfigStatusChannel:  make(chan *pbsm.NodeConfigStatus, 10),
+		alertChannel:             make(chan *pbsm.Alert, 10),
+		instantMonitoringChannel: make(chan *pbsm.SMOutgoingMessages_InstantMonitoring, 10),
+		averageMonitoringChannel: make(chan *pbsm.SMOutgoingMessages_AverageMonitoring, 1),
+		logChannel:               make(chan *pbsm.SMOutgoingMessages_Log, 10),
+		envVarsChannel:           make(chan *pbsm.SMOutgoingMessages_OverrideEnvVarStatus, 10),
 	}
 
 	listener, err := net.Listen("tcp", url)
@@ -1035,7 +1017,7 @@ func newTestServer(url string) (server *testServer, err error) {
 
 	server.grpcServer = grpc.NewServer()
 
-	pb.RegisterSMServiceServer(server.grpcServer, server)
+	pbsm.RegisterSMServiceServer(server.grpcServer, server)
 
 	go func() {
 		if err := server.grpcServer.Serve(listener); err != nil {
@@ -1052,11 +1034,15 @@ func (server *testServer) close() {
 	}
 }
 
-func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfiguration) error {
+func (server *testServer) waitNodeConfigStatus(nodeID, nodeType string) error {
 	select {
-	case nodeConfig := <-server.registerChannel:
-		if !proto.Equal(nodeConfig, expectedNodeConfig) {
-			return aoserrors.New("incorrect node configuration")
+	case nodeConfigStatus := <-server.nodeConfigStatusChannel:
+		if nodeConfigStatus.GetNodeId() != nodeID {
+			return aoserrors.Errorf("incorrect node id: %s", nodeConfigStatus.GetNodeId())
+		}
+
+		if nodeConfigStatus.GetNodeType() != nodeType {
+			return aoserrors.Errorf("incorrect node type: %s", nodeConfigStatus.GetNodeType())
 		}
 
 		return nil
@@ -1066,7 +1052,7 @@ func (server *testServer) waitClientRegistered(expectedNodeConfig *pb.NodeConfig
 	}
 }
 
-func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) error {
+func (server *testServer) RegisterSM(stream pbsm.SMService_RegisterSMServer) error {
 	server.stream = stream
 
 	for {
@@ -1080,19 +1066,22 @@ func (server *testServer) RegisterSM(stream pb.SMService_RegisterSMServer) error
 		}
 
 		switch data := message.GetSMOutgoingMessage().(type) {
-		case *pb.SMOutgoingMessages_NodeConfiguration:
-			server.registerChannel <- data.NodeConfiguration
+		case *pbsm.SMOutgoingMessages_NodeConfigStatus:
+			server.nodeConfigStatusChannel <- data.NodeConfigStatus
 
-		case *pb.SMOutgoingMessages_NodeMonitoring:
-			server.monitoringChannel <- data
+		case *pbsm.SMOutgoingMessages_InstantMonitoring:
+			server.instantMonitoringChannel <- data
 
-		case *pb.SMOutgoingMessages_Log:
+		case *pbsm.SMOutgoingMessages_AverageMonitoring:
+			server.averageMonitoringChannel <- data
+
+		case *pbsm.SMOutgoingMessages_Log:
 			server.logChannel <- data
 
-		case *pb.SMOutgoingMessages_Alert:
+		case *pbsm.SMOutgoingMessages_Alert:
 			server.alertChannel <- data.Alert
 
-		case *pb.SMOutgoingMessages_OverrideEnvVarStatus:
+		case *pbsm.SMOutgoingMessages_OverrideEnvVarStatus:
 			server.envVarsChannel <- data
 		}
 	}
@@ -1128,14 +1117,17 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 		for i, envVarStatus := range data.OverrideEnvVarStatus.GetEnvVarsStatus() {
 			receivedStatus[i] = cloudprotocol.EnvVarsInstanceStatus{
 				InstanceFilter: cloudprotocol.NewInstanceFilter(
-					envVarStatus.GetInstance().GetServiceId(),
-					envVarStatus.GetInstance().GetSubjectId(),
-					envVarStatus.GetInstance().GetInstance()),
-				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.GetVarsStatus())),
+					envVarStatus.GetInstanceFilter().GetServiceId(),
+					envVarStatus.GetInstanceFilter().GetSubjectId(),
+					envVarStatus.GetInstanceFilter().GetInstance()),
+				Statuses: make([]cloudprotocol.EnvVarStatus, len(envVarStatus.GetStatuses())),
 			}
 
-			for j, s := range envVarStatus.GetVarsStatus() {
-				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{ID: s.GetVarId(), Error: s.GetError()}
+			for j, s := range envVarStatus.GetStatuses() {
+				receivedStatus[i].Statuses[j] = cloudprotocol.EnvVarStatus{
+					Name:      s.GetName(),
+					ErrorInfo: pbconvert.ErrorInfoFromPB(s.GetError()),
+				}
 			}
 		}
 
@@ -1150,24 +1142,70 @@ func (server *testServer) waitEnvVarsStatus(status []cloudprotocol.EnvVarsInstan
 	}
 }
 
-func convertRunInstancesReq(req *pb.RunInstances) (
+func convertMonitoringData(monitoring *pbsm.MonitoringData) aostypes.MonitoringData {
+	data := aostypes.MonitoringData{
+		RAM:      monitoring.GetRam(),
+		CPU:      monitoring.GetCpu(),
+		Download: monitoring.GetDownload(),
+		Upload:   monitoring.GetUpload(),
+		Disk:     make([]aostypes.PartitionUsage, 0, len(monitoring.GetDisk())),
+	}
+
+	for _, disk := range monitoring.GetDisk() {
+		data.Disk = append(data.Disk, aostypes.PartitionUsage{
+			Name:     disk.GetName(),
+			UsedSize: disk.GetUsedSize(),
+		})
+	}
+
+	return data
+}
+
+func convertAverageMonitoring(monitoring *pbsm.AverageMonitoring) aostypes.NodeMonitoring {
+	data := aostypes.NodeMonitoring{
+		NodeData:      convertMonitoringData(monitoring.GetNodeMonitoring()),
+		InstancesData: make([]aostypes.InstanceMonitoring, 0, len(monitoring.GetInstancesMonitoring())),
+	}
+
+	for _, instanceMonitoring := range monitoring.GetInstancesMonitoring() {
+		data.InstancesData = append(data.InstancesData, aostypes.InstanceMonitoring{
+			InstanceIdent:  pbconvert.InstanceIdentFromPB(instanceMonitoring.GetInstance()),
+			MonitoringData: convertMonitoringData(instanceMonitoring.GetMonitoringData()),
+		})
+	}
+
+	return data
+}
+
+func (server *testServer) waitAndCheckAverageMonitoring(monitoring aostypes.NodeMonitoring) error {
+	for {
+		select {
+		case data := <-server.averageMonitoringChannel:
+			if !reflect.DeepEqual(convertAverageMonitoring(data.AverageMonitoring), monitoring) {
+				return aoserrors.New("incorrect monitoring data")
+			}
+
+			return nil
+
+		case <-time.After(5 * time.Second):
+			return aoserrors.New("timeout")
+		}
+	}
+}
+
+func convertRunInstancesReq(req *pbsm.RunInstances) (
 	services []aostypes.ServiceInfo, layers []aostypes.LayerInfo, instances []aostypes.InstanceInfo, forceRestart bool,
 ) {
 	services = make([]aostypes.ServiceInfo, len(req.GetServices()))
 
 	for i, service := range req.GetServices() {
 		services[i] = aostypes.ServiceInfo{
-			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    service.GetVersionInfo().GetAosVersion(),
-				VendorVersion: service.GetVersionInfo().GetVendorVersion(),
-				Description:   service.GetVersionInfo().GetDescription(),
-			},
-			ID:         service.GetServiceId(),
+			ServiceID:  service.GetServiceId(),
 			ProviderID: service.GetProviderId(),
+			Version:    service.GetVersion(),
 			GID:        service.GetGid(),
 			URL:        service.GetUrl(),
 			Sha256:     service.GetSha256(),
-			Sha512:     service.GetSha512(),
 			Size:       service.GetSize(),
 		}
 	}
@@ -1176,17 +1214,12 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 
 	for i, layer := range req.GetLayers() {
 		layers[i] = aostypes.LayerInfo{
-			VersionInfo: aostypes.VersionInfo{
-				AosVersion:    layer.GetVersionInfo().GetAosVersion(),
-				VendorVersion: layer.GetVersionInfo().GetVendorVersion(),
-				Description:   layer.GetVersionInfo().GetDescription(),
-			},
-			ID:     layer.GetLayerId(),
-			Digest: layer.GetDigest(),
-			URL:    layer.GetUrl(),
-			Sha256: layer.GetSha256(),
-			Sha512: layer.GetSha512(),
-			Size:   layer.GetSize(),
+			LayerID: layer.GetLayerId(),
+			Digest:  layer.GetDigest(),
+			Version: layer.GetVersion(),
+			URL:     layer.GetUrl(),
+			Sha256:  layer.GetSha256(),
+			Size:    layer.GetSize(),
 		}
 	}
 
@@ -1197,7 +1230,7 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 			InstanceIdent: aostypes.InstanceIdent{
 				ServiceID: instance.GetInstance().GetServiceId(),
 				SubjectID: instance.GetInstance().GetSubjectId(),
-				Instance:  uint64(instance.GetInstance().GetInstance()),
+				Instance:  instance.GetInstance().GetInstance(),
 			},
 			NetworkParameters: aostypes.NetworkParameters{
 				IP:            instance.GetNetworkParameters().GetIp(),
@@ -1218,23 +1251,25 @@ func convertRunInstancesReq(req *pb.RunInstances) (
 	return services, layers, instances, forceRestart
 }
 
-func convertEnvVarsReq(req *pb.OverrideEnvVars) []cloudprotocol.EnvVarsInstanceInfo {
+func convertEnvVarsReq(req *pbsm.OverrideEnvVars) []cloudprotocol.EnvVarsInstanceInfo {
 	envVars := make([]cloudprotocol.EnvVarsInstanceInfo, len(req.GetEnvVars()))
 
 	for i, envVar := range req.GetEnvVars() {
 		envVars[i] = cloudprotocol.EnvVarsInstanceInfo{
 			InstanceFilter: cloudprotocol.NewInstanceFilter(
-				envVar.GetInstance().GetServiceId(), envVar.GetInstance().GetSubjectId(), envVar.GetInstance().GetInstance()),
-			EnvVars: make([]cloudprotocol.EnvVarInfo, len(envVar.GetVars())),
+				envVar.GetInstanceFilter().GetServiceId(),
+				envVar.GetInstanceFilter().GetSubjectId(),
+				envVar.GetInstanceFilter().GetInstance()),
+			Variables: make([]cloudprotocol.EnvVarInfo, len(envVar.GetVariables())),
 		}
 
-		for j, v := range envVar.GetVars() {
-			envVars[i].EnvVars[j] = cloudprotocol.EnvVarInfo{ID: v.GetVarId(), Variable: v.GetVariable()}
+		for j, v := range envVar.GetVariables() {
+			envVars[i].Variables[j] = cloudprotocol.EnvVarInfo{Name: v.GetName(), Value: v.GetValue()}
 
 			if v.GetTtl() != nil {
 				t := v.GetTtl().AsTime()
 
-				envVars[i].EnvVars[j].TTL = &t
+				envVars[i].Variables[j].TTL = &t
 			}
 		}
 	}
@@ -1246,15 +1281,40 @@ func convertEnvVarsReq(req *pb.OverrideEnvVars) []cloudprotocol.EnvVarsInstanceI
  * Interfaces
  **********************************************************************************************************************/
 
-func (monitoring *testMonitoringProvider) GetMonitoringDataChannel() (
-	channel <-chan cloudprotocol.NodeMonitoringData,
-) {
+func (processor *testNodeConfigProcessor) GetNodeConfigStatus() (version string, err error) {
+	return processor.version, processor.err
+}
+
+func (processor *testNodeConfigProcessor) CheckNodeConfig(configJSON, version string) error {
+	return processor.err
+}
+
+func (processor *testNodeConfigProcessor) UpdateNodeConfig(configJSON, version string) error {
+	return processor.err
+}
+
+func (provider *testNodeInfoProvider) GetCurrentNodeInfo() (cloudprotocol.NodeInfo, error) {
+	return provider.nodeInfo, nil
+}
+
+func newTestMonitoringProvider() *testMonitoringProvider {
+	return &testMonitoringProvider{
+		monitoringChannel: make(chan aostypes.NodeMonitoring, 10),
+	}
+}
+
+func (monitoring *testMonitoringProvider) GetNodeMonitoringChannel() <-chan aostypes.NodeMonitoring {
 	return monitoring.monitoringChannel
+}
+
+func (monitoring *testMonitoringProvider) GetAverageMonitoring() (aostypes.NodeMonitoring, error) {
+	return monitoring.averageMonitoring, nil
 }
 
 func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.RequestLog) error {
 	logProvider.currentLogRequest = request
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
+
 	logProvider.sentIndex++
 
 	return nil
@@ -1262,6 +1322,7 @@ func (logProvider *testLogProvider) GetInstanceLog(request cloudprotocol.Request
 
 func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.RequestLog) error {
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
+
 	logProvider.sentIndex++
 
 	return nil
@@ -1269,15 +1330,16 @@ func (logProvider *testLogProvider) GetInstanceCrashLog(request cloudprotocol.Re
 
 func (logProvider *testLogProvider) GetSystemLog(request cloudprotocol.RequestLog) {
 	logProvider.channel <- logProvider.testLogs[logProvider.sentIndex].internalLog
+
 	logProvider.sentIndex++
+}
+
+func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan interface{}) {
+	return alerts.alertsChannel
 }
 
 func (logProvider *testLogProvider) GetLogsDataChannel() (channel <-chan cloudprotocol.PushLog) {
 	return logProvider.channel
-}
-
-func (alerts *testAlertProvider) GetAlertsChannel() (channel <-chan cloudprotocol.AlertItem) {
-	return alerts.alertsChannel
 }
 
 func (processor *testServiceManager) ProcessDesiredServices(services []aostypes.ServiceInfo) error {

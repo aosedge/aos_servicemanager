@@ -18,6 +18,7 @@
 package resourcemanager
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aosedge/aos_common/aoserrors"
 	"github.com/aosedge/aos_common/aostypes"
@@ -37,7 +39,7 @@ import (
  **********************************************************************************************************************/
 
 type alertSender struct {
-	alert cloudprotocol.ResourceValidateAlert
+	alerts []cloudprotocol.ResourceValidateAlert
 }
 
 /***********************************************************************************************************************
@@ -66,13 +68,13 @@ func init() {
 
 func TestMain(m *testing.M) {
 	if err := setup(); err != nil {
-		log.Fatalf("Error setting up: %s", err)
+		log.Fatalf("Error setting up: %v", err)
 	}
 
 	ret := m.Run()
 
 	if err := cleanup(); err != nil {
-		log.Fatalf("Error cleaning up: %s", err)
+		log.Fatalf("Error cleaning up: %v", err)
 	}
 
 	os.Exit(ret)
@@ -82,49 +84,49 @@ func TestMain(m *testing.M) {
  * Tests
  **********************************************************************************************************************/
 
-func TestValidUnitConfiguration(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+func TestValidNodeConfiguration(t *testing.T) {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %s", err)
+	if err = rm.nodeConfigError; err != nil {
+		t.Errorf("Node config error: %v", err)
 	}
 }
 
 func TestEmptyResourcesConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createEmptyUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createEmptyNodeConfigJSON()); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err != nil {
-		t.Errorf("Unit config error: %s", err)
+	if err = rm.nodeConfigError; err != nil {
+		t.Errorf("Node config error: %v", err)
 	}
 }
 
-func TestInvalidUnitConfiguration(t *testing.T) {
-	if err := writeTestUnitConfigFile(createInvalidUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+func TestInvalidNodeConfiguration(t *testing.T) {
+	if err := writeTestNodeConfigFile(createInvalidNodeConfigJSON()); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), testAlertSender)
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
+	if err = rm.nodeConfigError; err == nil {
 		t.Error("Can't detect unavailable devices")
 	}
 
@@ -132,37 +134,37 @@ func TestInvalidUnitConfiguration(t *testing.T) {
 }
 
 func TestUnavailableResources(t *testing.T) {
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Error("Proceed without unit configuration")
+	if err = rm.nodeConfigError; err == nil {
+		t.Error("Proceed without node configuration")
 	}
 
 	if err = rm.AllocateDevice("random", "instance0"); err == nil {
-		t.Error("Proceed without unit configuration")
+		t.Error("Proceed without node configuration")
 	}
 }
 
 func TestGetDeviceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// request standalone device
 	deviceInfo, err := rm.GetDeviceInfo("random")
 	if err != nil {
-		t.Fatalf("Can't get device info: %s", err)
+		t.Fatalf("Can't get device info: %v", err)
 	}
 
-	if !reflect.DeepEqual(deviceInfo, aostypes.DeviceInfo{
+	if !reflect.DeepEqual(deviceInfo, cloudprotocol.DeviceInfo{
 		Name: "random", SharedCount: 0, Groups: []string{"root"},
 		HostDevices: []string{"/dev/random"},
 	}) {
@@ -176,23 +178,23 @@ func TestGetDeviceInfo(t *testing.T) {
 }
 
 func TestGetResourceInfo(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	resourceInfo, err := rm.GetResourceInfo("system-dbus")
 	if err != nil {
-		t.Errorf("Can't get resource inf: %s", err)
+		t.Errorf("Can't get resource inf: %v", err)
 	}
 
-	if !reflect.DeepEqual(resourceInfo, aostypes.ResourceInfo{
+	if !reflect.DeepEqual(resourceInfo, cloudprotocol.ResourceInfo{
 		Name: "system-dbus",
-		Mounts: []aostypes.FileSystemMount{{
+		Mounts: []cloudprotocol.FileSystemMount{{
 			Destination: "/var/run/dbus/system_bus_socket",
 			Options:     []string{"rw", "bind"},
 			Source:      "/var/run/dbus/system_bus_socket",
@@ -210,40 +212,40 @@ func TestGetResourceInfo(t *testing.T) {
 }
 
 func TestAllocateAndReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("random", "instance0"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("random", "instance1"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.ReleaseDevice("random", "instance0"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 
 	if err = rm.ReleaseDevice("random", "instance1"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 }
 
 func TestAllocateUnavailableDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("some_unavailable_device", "instance0"); err == nil {
@@ -252,17 +254,17 @@ func TestAllocateUnavailableDevice(t *testing.T) {
 }
 
 func TestReleaseNotAllocatedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
 		t.Errorf("Can't write resource configuration")
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Fatalf("Can't allocate device: %s", err)
+		t.Fatalf("Can't allocate device: %v", err)
 	}
 
 	// release not allocated device
@@ -277,32 +279,32 @@ func TestReleaseNotAllocatedDevice(t *testing.T) {
 
 	// release correct device for proper instance
 	if err = rm.ReleaseDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't release device: %s", err)
+		t.Errorf("Can't release device: %v", err)
 	}
 }
 
 func TestAllocateLimitedDevice(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// only two instances can use this device
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	// allocate again, should be ignored as already allocated
 	if err = rm.AllocateDevice("null", "instance0"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance1"); err != nil {
-		t.Errorf("Can't allocate device: %s", err)
+		t.Errorf("Can't allocate device: %v", err)
 	}
 
 	if err = rm.AllocateDevice("null", "instance2"); !errors.Is(err, ErrNoAvailableDevice) {
@@ -311,13 +313,13 @@ func TestAllocateLimitedDevice(t *testing.T) {
 }
 
 func TestGetDeviceInstances(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	// get instances of non existing device
@@ -332,13 +334,13 @@ func TestGetDeviceInstances(t *testing.T) {
 
 	for _, instance := range expectedInstances {
 		if err = rm.AllocateDevice("random", instance); err != nil {
-			t.Fatalf("Can't allocate device: %s", err)
+			t.Fatalf("Can't allocate device: %v", err)
 		}
 	}
 
 	instances, err := rm.GetDeviceInstances("random")
 	if err != nil {
-		t.Fatalf("Can't get device instances: %s", err)
+		t.Fatalf("Can't get device instances: %v", err)
 	}
 
 	if !reflect.DeepEqual(instances, expectedInstances) {
@@ -349,12 +351,12 @@ func TestGetDeviceInstances(t *testing.T) {
 
 	for _, instance := range expectedInstances[1:4] {
 		if err = rm.ReleaseDevice("random", instance); err != nil {
-			t.Fatalf("Can't release device: %s", err)
+			t.Fatalf("Can't release device: %v", err)
 		}
 	}
 
 	if instances, err = rm.GetDeviceInstances("random"); err != nil {
-		t.Fatalf("Can't get device instances: %s", err)
+		t.Fatalf("Can't get device instances: %v", err)
 	}
 
 	expectedInstances = append(expectedInstances[:1], expectedInstances[4:]...)
@@ -365,27 +367,27 @@ func TestGetDeviceInstances(t *testing.T) {
 }
 
 func TestReleaseDevices(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
 	allocateDevices := []string{"random", "null", "input", "stdin"}
 
 	for _, device := range allocateDevices {
 		if err = rm.AllocateDevice(device, "instance0"); err != nil {
-			t.Fatalf("Can't allocate device: %s", err)
+			t.Fatalf("Can't allocate device: %v", err)
 		}
 	}
 
 	for _, device := range allocateDevices {
 		instances, err := rm.GetDeviceInstances(device)
 		if err != nil {
-			t.Fatalf("Can't get device instances: %s", err)
+			t.Fatalf("Can't get device instances: %v", err)
 		}
 
 		if len(instances) == 0 {
@@ -398,13 +400,13 @@ func TestReleaseDevices(t *testing.T) {
 	}
 
 	if err = rm.ReleaseDevices("instance0"); err != nil {
-		t.Fatalf("Can't release devices: %s", err)
+		t.Fatalf("Can't release devices: %v", err)
 	}
 
 	for _, device := range allocateDevices {
 		instances, err := rm.GetDeviceInstances(device)
 		if err != nil {
-			t.Fatalf("Can't get device instances: %s", err)
+			t.Fatalf("Can't get device instances: %v", err)
 		}
 
 		if len(instances) > 0 {
@@ -413,98 +415,180 @@ func TestReleaseDevices(t *testing.T) {
 	}
 }
 
-func TestNotExistUnitConfig(t *testing.T) {
-	rm, err := New("mainType", path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
+func TestNotExistNodeConfig(t *testing.T) {
+	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Error("Unit config should be invalid if config is not exits")
+	if err = rm.nodeConfigError; err != nil {
+		t.Error("Node config should be valid if config is not exits")
+	}
+
+	if rm.nodeConfig.Version != "0.0.0" {
+		t.Error("Wrong node config version")
 	}
 }
 
-func TestInvalidVersionUnitConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createWrongVersionUnitConfigJSON()); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+func TestGetNodeConfigStatus(t *testing.T) {
+	vendorVersion := "2.1.0"
+
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile(vendorVersion)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit_wrong_version.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.unitConfigError; err == nil {
-		t.Errorf("Unit config should be invalid in case of version mismatch")
-	}
-}
-
-func TestGetUnitConfigInfo(t *testing.T) {
-	vendorVersion := "2.1"
-
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(vendorVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
-	}
-
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	version, err := rm.GetNodeConfigStatus()
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Errorf("Node config status error: %v", err)
 	}
-
-	version := rm.GetUnitConfigInfo()
 
 	if version != vendorVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong node config version: %v", version)
 	}
 }
 
-func TestUpdateUnitConfig(t *testing.T) {
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON("1.0")); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+func TestUpdateNodeConfig(t *testing.T) {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), &alertSender{})
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	newVendorVersion := "2.0"
+	newVendorVersion := "2.0.0"
 
-	if err = rm.UpdateUnitConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
-		t.Fatalf("Can't update unit config: %s", err)
+	if err = rm.UpdateNodeConfig(createTestNodeConfigJSON(), newVendorVersion); err != nil {
+		t.Fatalf("Can't update node config: %v", err)
 	}
 
-	version := rm.GetUnitConfigInfo()
+	version, err := rm.GetNodeConfigStatus()
+	if err != nil {
+		t.Errorf("Node config status error: %v", err)
+	}
 
 	if version != newVendorVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong node config version: %s", version)
 	}
 }
 
-func TestUpdateErrorUnitConfig(t *testing.T) {
-	currentConfigVersion := "1.0"
+func TestUpdateErrorNodeConfig(t *testing.T) {
+	currentConfigVersion := "1.0.0"
 
-	if err := writeTestUnitConfigFile(createTestUnitConfigJSON(currentConfigVersion)); err != nil {
-		t.Fatalf("Can't write unit config: %s", err)
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile(currentConfigVersion)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
 	}
 
 	testAlertSender := &alertSender{}
 
-	rm, err := New("mainType", path.Join(tmpDir, "aos_unit.cfg"), testAlertSender)
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), testAlertSender)
 	if err != nil {
-		t.Fatalf("Can't create resource manager: %s", err)
+		t.Fatalf("Can't create resource manager: %v", err)
 	}
 
-	if err = rm.UpdateUnitConfig(createInvalidUnitConfigJSON(), "3.5"); err == nil {
+	if err = rm.UpdateNodeConfig(createInvalidNodeConfigJSON(), "3.5"); err == nil {
 		t.Errorf("Update should fail")
 	}
 
-	version := rm.GetUnitConfigInfo()
+	version, err := rm.GetNodeConfigStatus()
+	if err != nil {
+		t.Errorf("Node config status error: %v", err)
+	}
+
 	if version != currentConfigVersion {
-		t.Errorf("Wrong unit config version: %s", version)
+		t.Errorf("Wrong node config version: %s", version)
 	}
 
 	testAlertSender.checkAlert(t)
+}
+
+func TestGetNodeConfig(t *testing.T) {
+	cloudNodeConfig := cloudprotocol.NodeConfig{
+		NodeType: "mainType",
+		Devices: []cloudprotocol.DeviceInfo{
+			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
+			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
+		},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: newFloat(1.0), RAM: newFloat(2.0), Storage: newFloat(3.0)},
+		Resources: []cloudprotocol.ResourceInfo{
+			{Name: "bluetooth", Groups: []string{"bluetooth"}},
+			{Name: "wifi", Groups: []string{"wifi-group"}},
+		},
+	}
+	rmNodeConfig := nodeConfig{
+		Version:    "1.0.0",
+		NodeConfig: cloudNodeConfig,
+	}
+
+	configJSON, err := json.Marshal(rmNodeConfig)
+	if err != nil {
+		t.Fatalf("Can't marshal node config: %v", err)
+	}
+
+	if err := writeTestNodeConfigFile(string(configJSON)); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %v", err)
+	}
+
+	getNodeConfig, err := rm.GetCurrentNodeConfig()
+	if err != nil {
+		t.Fatalf("Can't get node config: %v", err)
+	}
+
+	if !reflect.DeepEqual(getNodeConfig, rmNodeConfig.NodeConfig) {
+		t.Errorf("Wrong node config: %v", getNodeConfig)
+	}
+
+	newNodeConfig := cloudprotocol.NodeConfig{
+		NodeType: "mainType",
+		Devices: []cloudprotocol.DeviceInfo{
+			{Name: "random", SharedCount: 0, Groups: []string{"root"}, HostDevices: []string{"/dev/random"}},
+			{Name: "null", SharedCount: 2, HostDevices: []string{"/dev/null"}},
+			{Name: "input", SharedCount: 2, HostDevices: []string{"/dev/input/by-path"}},
+		},
+		ResourceRatios: &aostypes.ResourceRatiosInfo{CPU: newFloat(1.0), RAM: newFloat(2.0), Storage: newFloat(3.0)},
+		Resources: []cloudprotocol.ResourceInfo{
+			{Name: "bluetooth", Groups: []string{"bluetooth"}},
+			{Name: "wifi", Groups: []string{"wifi-group"}},
+			{Name: "system-dbus", Mounts: []cloudprotocol.FileSystemMount{
+				{
+					Destination: "/var/run/dbus/system_bus_socket", Type: "bind",
+					Source: "/var/run/dbus/system_bus_socket", Options: []string{"rw", "bind"},
+				},
+			}},
+		},
+	}
+
+	newConfigJSON, err := json.Marshal(newNodeConfig)
+	if err != nil {
+		t.Fatalf("Can't marshal node config: %v", err)
+	}
+
+	curNodeConfigListener := rm.SubscribeCurrentNodeConfigChange()
+
+	if err = rm.UpdateNodeConfig(string(newConfigJSON), "2.0.0"); err != nil {
+		t.Fatalf("Can't update node config: %v", err)
+	}
+
+	select {
+	case nodeConfig := <-curNodeConfigListener:
+		if !reflect.DeepEqual(nodeConfig, newNodeConfig) {
+			t.Errorf("Wrong node config: %v", nodeConfig)
+		}
+
+	case <-time.After(5 * time.Second):
+		t.Fatal("Can't wait for node config update")
+	}
 }
 
 /***********************************************************************************************************************
@@ -525,41 +609,15 @@ func setup() (err error) {
 
 func cleanup() (err error) {
 	if err := os.RemoveAll(tmpDir); err != nil {
-		log.Errorf("Can't remove tmp dir: %s", err)
+		log.Errorf("Can't remove tmp dir: %v", err)
 	}
 
 	return nil
 }
 
-func createWrongVersionUnitConfigJSON() (configJSON string) {
-	return `{
-	"formatVersion": 256,
-	"vendorVersion": "1.0",
-	"devices": [
-		{
-			"name": "random",
-			"sharedCount": 0,
-			"groups": [
-				"root"
-			],
-			"hostDevices": [
-				"/dev/random"
-			]
-		},
-		{
-			"name": "null",
-			"sharedCount": 2,
-			"hostDevices": [
-				"/dev/null"
-			]
-		}
-	]
-}`
-}
-
-func createTestUnitConfigJSON(version string) (configJSON string) {
+func createTestNodeConfigFile(version string) (configJSON string) {
 	return fmt.Sprintf(`{
-	"vendorVersion": "%s",
+	"version": "%s",
 	"nodeType": "mainType",
 	"devices": [
 		{
@@ -676,7 +734,7 @@ func createTestNodeConfigJSON() (configJSON string) {
 }`
 }
 
-func createInvalidUnitConfigJSON() (configJSON string) {
+func createInvalidNodeConfigJSON() (configJSON string) {
 	return `{
 	"vendorVersion": "3.5",
 	"nodeType": "mainType",
@@ -695,49 +753,53 @@ func createInvalidUnitConfigJSON() (configJSON string) {
 }`
 }
 
-func createEmptyUnitConfigJSON() (configJSON string) {
+func createEmptyNodeConfigJSON() (configJSON string) {
 	return `{
-		"vendorVersion": "1.0",
+		"vendorVersion": "1.0.0",
 		"nodeType": "mainType",
 		"devices": []
 }`
 }
 
-func writeTestUnitConfigFile(content string) (err error) {
-	if err := os.WriteFile(path.Join(tmpDir, "aos_unit.cfg"), []byte(content), 0o600); err != nil {
+func writeTestNodeConfigFile(content string) (err error) {
+	if err := os.WriteFile(path.Join(tmpDir, "aos_node.cfg"), []byte(content), 0o600); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
 	return nil
 }
 
-func (sender *alertSender) SendAlert(alert cloudprotocol.AlertItem) {
-	resourceValidateAlert, ok := alert.Payload.(cloudprotocol.ResourceValidateAlert)
+func (sender *alertSender) SendAlert(alert interface{}) {
+	resourceValidateAlert, ok := alert.(cloudprotocol.ResourceValidateAlert)
 	if !ok {
 		return
 	}
 
-	sender.alert = resourceValidateAlert
+	sender.alerts = append(sender.alerts, resourceValidateAlert)
 }
 
 func (sender *alertSender) checkAlert(t *testing.T) {
 	t.Helper()
 
-	if len(sender.alert.ResourcesErrors) != 1 {
-		t.Fatalf("Wrong resources errors count: %d", len(sender.alert.ResourcesErrors))
+	if len(sender.alerts) != 1 {
+		t.Fatalf("Wrong resources errors count: %d", len(sender.alerts))
 	}
 
-	if sender.alert.ResourcesErrors[0].Name != "some_not_existed_device" {
-		t.Errorf("Wrong alert device name: %s", sender.alert.ResourcesErrors[0].Name)
+	if sender.alerts[0].Name != "some_not_existed_device" {
+		t.Errorf("Wrong alert device name: %s", sender.alerts[0].Name)
 	}
 
-	if len(sender.alert.ResourcesErrors[0].Errors) != 2 {
-		t.Errorf("Wrong alert errors count: %d", len(sender.alert.ResourcesErrors[0].Errors))
+	if len(sender.alerts[0].Errors) != 2 {
+		t.Errorf("Wrong alert errors count: %d", len(sender.alerts[0].Errors))
 	}
 
-	for _, errMessage := range sender.alert.ResourcesErrors[0].Errors {
-		if !strings.Contains(errMessage, "is not present on system") {
-			t.Errorf("Wrong alert error message: %s", errMessage)
+	for _, errInfo := range sender.alerts[0].Errors {
+		if !strings.Contains(errInfo.Message, "is not present on system") {
+			t.Errorf("Wrong alert error message: %v", errInfo.Message)
 		}
 	}
+}
+
+func newFloat(value float64) *float64 {
+	return &value
 }

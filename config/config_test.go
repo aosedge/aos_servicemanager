@@ -50,24 +50,12 @@ func createConfigFile() (err error) {
 	"layersPartLimit": 20,
 	"downloadDir": "/var/aos/servicemanager/download",
 	"extractDir": "/var/aos/servicemanager/extract",
-	"remoteNode": true,
-	"runnerFeatures": ["crun", "runc"],
-	"unitConfigFile": "/var/aos/aos_unit.cfg",
+	"nodeConfigFile": "/var/aos/aos_node.cfg",
 	"layerTtlDays": 40,
 	"serviceHealthCheckTimeout": "10s",
 	"monitoring": {
-		"sendPeriod": "5m",
 		"pollPeriod": "1s",
-		"ram": {
-			"minTimeout": "10s",
-			"minThreshold": 10,
-			"maxThreshold": 150
-		},
-		"outTraffic": {
-			"minTimeout": "20s",
-			"minThreshold": 10,
-			"maxThreshold": 150
-		}
+		"averageWindow": "5m"
 	},
 	"logging": {
 		"maxPartSize": 1024,
@@ -191,14 +179,14 @@ func TestGetStorageDirAsWorkingDir(t *testing.T) {
 	}
 }
 
-func TestGetUnitConfigFile(t *testing.T) {
+func TestGetNodeConfigFile(t *testing.T) {
 	config, err := config.New("tmp/aos_servicemanager.cfg")
 	if err != nil {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.UnitConfigFile != "/var/aos/aos_unit.cfg" {
-		t.Errorf("Wrong unit config value: %s", config.UnitConfigFile)
+	if config.NodeConfigFile != "/var/aos/aos_node.cfg" {
+		t.Errorf("Wrong node config value: %s", config.NodeConfigFile)
 	}
 }
 
@@ -296,20 +284,12 @@ func TestGetMonitoringConfig(t *testing.T) {
 		t.Fatalf("Error opening config file: %s", err)
 	}
 
-	if config.Monitoring.SendPeriod.Duration != 5*time.Minute {
-		t.Errorf("Wrong send period value: %s", config.Monitoring.SendPeriod)
-	}
-
 	if config.Monitoring.PollPeriod.Duration != 1*time.Second {
 		t.Errorf("Wrong poll period value: %s", config.Monitoring.PollPeriod)
 	}
 
-	if config.Monitoring.RAM.MinTimeout.Duration != 10*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.RAM.MinTimeout)
-	}
-
-	if config.Monitoring.OutTraffic.MinTimeout.Duration != 20*time.Second {
-		t.Errorf("Wrong value: %s", config.Monitoring.OutTraffic.MinTimeout.Duration)
+	if config.Monitoring.AverageWindow.Duration != 5*time.Minute {
+		t.Errorf("Wrong average window value: %s", config.Monitoring.AverageWindow)
 	}
 }
 
@@ -430,27 +410,5 @@ func TestPartLimit(t *testing.T) {
 
 	if config.LayersPartLimit != 20 {
 		t.Errorf("Wrong LayersPartLimit value: %v", config.LayersPartLimit)
-	}
-}
-
-func TestRemoteNodeFalg(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %v", err)
-	}
-
-	if config.RemoteNode != true {
-		t.Errorf("Wrong remoteNode value: %v", config.RemoteNode)
-	}
-}
-
-func TestRunnerFeatures(t *testing.T) {
-	config, err := config.New("tmp/aos_servicemanager.cfg")
-	if err != nil {
-		t.Fatalf("Error opening config file: %v", err)
-	}
-
-	if !reflect.DeepEqual(config.RunnerFeatures, []string{"crun", "runc"}) {
-		t.Errorf("Wrong runnerFeatures value: %v", config.RunnerFeatures)
 	}
 }

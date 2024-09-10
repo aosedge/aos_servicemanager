@@ -1,10 +1,12 @@
+run:
+  go: "1.21"
+
 linters:
   enable-all: true
   disable:
     - cyclop
     - depguard
     - exhaustive
-    - exhaustivestruct
     - exhaustruct
     - gci
     - gochecknoinits
@@ -13,26 +15,19 @@ linters:
     - nestif
     - nlreturn
     - nonamedreturns
-    - nosnakecase
     - unparam
     - varnamelen
     # deprecated
     - bodyclose
     - contextcheck
-    - deadcode
-    - golint
-    - ifshort
-    - interfacer
-    - maligned
+    - execinquery
+    - gomnd
     - nilerr
     - noctx
     - rowserrcheck
-    - scopelint
     - sqlclosecheck
-    - structcheck
     - tparallel
     - unparam
-    - varcheck
     - wastedassign
 
 linters-settings:
@@ -49,13 +44,24 @@ linters-settings:
     excludes:
       - G204
 
-  gomnd:
-    settings:
-      mnd:
-        ignored-numbers: 0o600,0o644,0o755,8,10,16,32,64,128,1000,1000000,0xff
-
-  gofumpt:
-    lang-version: "1.21"
+  mnd:
+    ignored-numbers:
+      [
+        "0o600",
+        "0o644",
+        "0o755",
+        "2",
+        "4",
+        "8",
+        "10",
+        "16",
+        "32",
+        "64",
+        "128",
+        "1000",
+        "1000000",
+        "0xff",
+      ]
 
 issues:
   include:

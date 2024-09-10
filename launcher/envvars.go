@@ -44,12 +44,12 @@ func (launcher *Launcher) setEnvVars(
 			InstanceFilter: envVarInfo.InstanceFilter,
 		}
 
-		for _, envVar := range envVarInfo.EnvVars {
+		for _, envVar := range envVarInfo.Variables {
 			log.WithFields(
 				instanceFilterLogFields(envVarInfo.InstanceFilter, log.Fields{
-					"var": envVar.Variable,
-					"ttl": envVar.TTL,
-					"id":  envVar.ID,
+					"name":  envVar.Name,
+					"value": envVar.Value,
+					"ttl":   envVar.TTL,
 				}),
 			).Debug("Override env var")
 
@@ -57,14 +57,16 @@ func (launcher *Launcher) setEnvVars(
 				err := aoserrors.New("environment variable expired")
 
 				envVarStatus.Statuses = append(envVarStatus.Statuses,
-					cloudprotocol.EnvVarStatus{ID: envVar.ID, Error: err.Error()})
+					cloudprotocol.EnvVarStatus{
+						Name: envVar.Name, ErrorInfo: &cloudprotocol.ErrorInfo{Message: err.Error()},
+					})
 
-				log.WithField("id", envVar.ID).Errorf("Error overriding environment variable: %s", err)
+				log.WithField("name", envVar.Name).Errorf("Error overriding environment variable: %s", err)
 
 				continue
 			}
 
-			envVarStatus.Statuses = append(envVarStatus.Statuses, cloudprotocol.EnvVarStatus{ID: envVar.ID})
+			envVarStatus.Statuses = append(envVarStatus.Statuses, cloudprotocol.EnvVarStatus{Name: envVar.Name})
 		}
 
 		envVarsStatus[i] = envVarStatus
@@ -82,17 +84,15 @@ func (launcher *Launcher) setEnvVars(
 func setEnvVarsErr(
 	envVarsStatus []cloudprotocol.EnvVarsInstanceStatus, err error,
 ) []cloudprotocol.EnvVarsInstanceStatus {
-	var errStr string
-
-	if err != nil {
-		errStr = err.Error()
+	if err == nil {
+		return envVarsStatus
 	}
 
 	for _, envVarStatus := range envVarsStatus {
 		for i, status := range envVarStatus.Statuses {
-			if status.Error == "" {
+			if status.ErrorInfo == nil {
 				envVarStatus.Statuses[i] = cloudprotocol.EnvVarStatus{
-					ID: status.ID, Error: errStr,
+					Name: status.Name, ErrorInfo: &cloudprotocol.ErrorInfo{Message: err.Error()},
 				}
 			}
 		}
@@ -106,8 +106,8 @@ func (launcher *Launcher) getInstanceEnvVars(instance InstanceInfo) (envVars []s
 		if (envVarInfo.ServiceID == nil || *envVarInfo.ServiceID == instance.ServiceID) &&
 			(envVarInfo.SubjectID == nil || *envVarInfo.SubjectID == instance.SubjectID) &&
 			(envVarInfo.Instance == nil || *envVarInfo.Instance == instance.Instance) {
-			for _, envVar := range envVarInfo.EnvVars {
-				envVars = append(envVars, envVar.Variable)
+			for _, envVar := range envVarInfo.Variables {
+				envVars = append(envVars, envVar.Name+"="+envVar.Value)
 			}
 		}
 	}
@@ -125,10 +125,10 @@ func (launcher *Launcher) removeOutdatedEnvVars() {
 	for _, item := range launcher.currentEnvVars {
 		var updatedItems []cloudprotocol.EnvVarInfo
 
-		for _, envVar := range item.EnvVars {
+		for _, envVar := range item.Variables {
 			if envVar.TTL != nil && envVar.TTL.Before(now) {
 				log.WithFields(log.Fields{
-					"id": envVar.ID, "variable": envVar.Variable,
+					"name": envVar.Name, "value": envVar.Value,
 				}).Debug("Remove expired overridden environment variable")
 
 				updated = true
@@ -145,7 +145,7 @@ func (launcher *Launcher) removeOutdatedEnvVars() {
 
 		updatedEnvVars = append(updatedEnvVars, cloudprotocol.EnvVarsInstanceInfo{
 			InstanceFilter: item.InstanceFilter,
-			EnvVars:        updatedItems,
+			Variables:      updatedItems,
 		})
 	}
 
