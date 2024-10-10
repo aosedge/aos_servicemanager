@@ -267,6 +267,13 @@ func (resourcemanager *ResourceManager) ReleaseDevices(instanceID string) (err e
 	return nil
 }
 
+// ResetDevicesAllocation resets all devices allocations.
+func (resourcemanager *ResourceManager) ResetDevicesAllocation() error {
+	resourcemanager.allocatedDevices = make(map[string][]string)
+
+	return nil
+}
+
 // GetDeviceInstances returns ID list of instances that allocate specific device.
 func (resourcemanager *ResourceManager) GetDeviceInstances(device string) ([]string, error) {
 	if _, err := resourcemanager.getAvailableDevice(device); err != nil {

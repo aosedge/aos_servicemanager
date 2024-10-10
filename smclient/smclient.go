@@ -844,6 +844,7 @@ func cloudprotocolAlertToPB(alert interface{}) (*pb.Alert, error) {
 				SystemQuotaAlert: &pb.SystemQuotaAlert{
 					Parameter: alertItem.Parameter,
 					Value:     alertItem.Value,
+					Status:    alertItem.Status,
 				},
 			},
 		}, nil
@@ -856,6 +857,7 @@ func cloudprotocolAlertToPB(alert interface{}) (*pb.Alert, error) {
 				Instance:  pbconvert.InstanceIdentToPB(alertItem.InstanceIdent),
 				Parameter: alertItem.Parameter,
 				Value:     alertItem.Value,
+				Status:    alertItem.Status,
 			}},
 		}, nil
 
