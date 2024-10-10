@@ -415,6 +415,55 @@ func TestReleaseDevices(t *testing.T) {
 	}
 }
 
+func TestResetDevicesAllocation(t *testing.T) {
+	if err := writeTestNodeConfigFile(createTestNodeConfigFile("1.0.0")); err != nil {
+		t.Fatalf("Can't write node config: %v", err)
+	}
+
+	rm, err := New(path.Join(tmpDir, "aos_node.cfg"), &alertSender{})
+	if err != nil {
+		t.Fatalf("Can't create resource manager: %v", err)
+	}
+
+	allocateDevices := []string{"random", "null", "input", "stdin"}
+
+	for _, device := range allocateDevices {
+		if err = rm.AllocateDevice(device, "instance0"); err != nil {
+			t.Fatalf("Can't allocate device: %v", err)
+		}
+	}
+
+	for _, device := range allocateDevices {
+		instances, err := rm.GetDeviceInstances(device)
+		if err != nil {
+			t.Fatalf("Can't get device instances: %v", err)
+		}
+
+		if len(instances) == 0 {
+			t.Fatalf("Wrong device instances count: %d", len(instances))
+		}
+
+		if instances[0] != "instance0" {
+			t.Errorf("Wrong instance ID: %s", instances[0])
+		}
+	}
+
+	if err = rm.ResetDevicesAllocation(); err != nil {
+		t.Fatalf("Can't reset devices allocations: %v", err)
+	}
+
+	for _, device := range allocateDevices {
+		instances, err := rm.GetDeviceInstances(device)
+		if err != nil {
+			t.Fatalf("Can't get device instances: %v", err)
+		}
+
+		if len(instances) > 0 {
+			t.Errorf("Wrong device instances count: %d", len(instances))
+		}
+	}
+}
+
 func TestNotExistNodeConfig(t *testing.T) {
 	rm, err := New(path.Join(tmpDir, "non_exist_config.cfg"), &alertSender{})
 	if err != nil {
