@@ -2025,10 +2025,6 @@ func TestInstancePriorities(t *testing.T) {
 			t.Errorf("Check runtime status error: %v", err)
 		}
 
-		if err = checkInstancesByPriority(startedInstances, item.startedInstances); err != nil {
-			t.Errorf("Check instances by priority error: %v", err)
-		}
-
 		if !compareArrays(len(stoppedInstances), len(item.stoppedInstances), func(index1, index2 int) bool {
 			return reflect.DeepEqual(stoppedInstances[index1], item.stoppedInstances[index2])
 		}) {
@@ -3064,37 +3060,6 @@ func checkRuntimeStatus(statusChannel <-chan launcher.RuntimeStatus,
 
 	case <-time.After(timeout):
 		return aoserrors.New("Wait for runtime status timeout")
-	}
-
-	return nil
-}
-
-func checkInstancesByPriority(compInstances, refInstances []aostypes.InstanceInfo) error {
-	if len(compInstances) != len(refInstances) {
-		return aoserrors.New("wrong instances len")
-	}
-
-	if len(refInstances) == 0 {
-		return nil
-	}
-
-	currentPriority := refInstances[0].Priority
-	startPriorityIndex := 0
-
-	for i, instance := range refInstances {
-		if instance.Priority != currentPriority {
-			compPriorityInstances := compInstances[startPriorityIndex:i]
-			refPriorityInstances := refInstances[startPriorityIndex:i]
-
-			if !compareArrays(len(compPriorityInstances), len(refPriorityInstances), func(index1, index2 int) bool {
-				return reflect.DeepEqual(compPriorityInstances[index1], refPriorityInstances[index2])
-			}) {
-				return aoserrors.New("instance priorities mismatch")
-			}
-
-			currentPriority = instance.Priority
-			startPriorityIndex = i
-		}
 	}
 
 	return nil

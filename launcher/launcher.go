@@ -597,23 +597,7 @@ func (launcher *Launcher) stopInstance(instance *runtimeInstanceInfo) (err error
 }
 
 func (launcher *Launcher) startInstances(instances []*runtimeInstanceInfo) {
-	var currentPriority uint64
-
-	if len(instances) > 0 {
-		currentPriority = instances[0].Priority
-
-		log.WithField("priority", currentPriority).Debug("Start instances with priority")
-	}
-
 	for _, instance := range instances {
-		if currentPriority != instance.Priority {
-			launcher.actionHandler.Wait()
-
-			currentPriority = instance.Priority
-
-			log.WithField("priority", currentPriority).Debug("Start instances with priority")
-		}
-
 		launcher.doStartAction(instance)
 	}
 
