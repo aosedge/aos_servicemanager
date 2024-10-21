@@ -256,13 +256,13 @@ func (client *SMClient) createConnection(
 
 		for {
 			if err != nil && len(client.closeChannel) == 0 {
-				log.Errorf("Error register to CM: %v", aoserrors.Wrap(err))
+				log.WithField("err", err).Warning("Error register to CM")
 			} else {
 				if err = client.processMessages(); err != nil {
 					if errors.Is(err, io.EOF) {
 						log.Debug("Connection is closed")
 					} else {
-						log.Errorf("Connection error: %v", aoserrors.Wrap(err))
+						log.WithField("err", err).Warning("Connection error")
 					}
 				}
 			}
