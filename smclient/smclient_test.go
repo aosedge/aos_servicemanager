@@ -159,6 +159,41 @@ func TestSMRegistration(t *testing.T) {
 	}
 }
 
+func TestDisconnected(t *testing.T) {
+	server, err := newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	nodeInfoProvider := &testNodeInfoProvider{nodeInfo: cloudprotocol.NodeInfo{NodeID: "nodeID", NodeType: "typeType"}}
+
+	client, err := smclient.New(&config.Config{CMServerURL: serverURL}, nodeInfoProvider, nil, nil, nil, nil,
+		&testNodeConfigProcessor{}, nil, nil, nil, nil, nil, true)
+	if err != nil {
+		t.Fatalf("Can't create SM client: %v", err)
+	}
+	defer client.Close()
+
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+
+	server.close()
+
+	server, err = newTestServer(serverURL)
+	if err != nil {
+		t.Fatalf("Can't create test server: %v", err)
+	}
+
+	defer server.close()
+
+	if err = server.waitNodeConfigStatus(nodeInfoProvider.nodeInfo.NodeID,
+		nodeInfoProvider.nodeInfo.NodeType); err != nil {
+		t.Fatalf("SM registration error: %v", err)
+	}
+}
+
 func TestMonitoringNotifications(t *testing.T) {
 	currentTime := time.Now()
 	pbCurrentTime := timestamppb.New(currentTime)
