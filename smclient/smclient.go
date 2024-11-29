@@ -77,7 +77,6 @@ type SMClient struct {
 	alertChannel         <-chan interface{}
 	monitoringChannel    <-chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
-	runStatus            *launcher.InstancesStatus
 }
 
 // NodeInfoProvider interface to get node information.
@@ -171,10 +170,6 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 	cmClient.nodeID = nodeInfo.NodeID
 	cmClient.nodeType = nodeInfo.NodeType
 
-	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
-		return nil, aoserrors.Wrap(err)
-	}
-
 	if !insecure {
 		var ch <-chan *iamanager.CertInfo
 
@@ -199,6 +194,10 @@ func New(config *config.Config, nodeInfoProvider NodeInfoProvider, certificatePr
 
 	if logsProvider != nil {
 		cmClient.logsChannel = logsProvider.GetLogsDataChannel()
+	}
+
+	if err := cmClient.createConnection(config, certificateProvider, cryptcoxontext, insecure); err != nil {
+		return nil, aoserrors.Wrap(err)
 	}
 
 	return cmClient, nil
@@ -336,14 +335,6 @@ func (client *SMClient) register(config *config.Config, provider CertificateProv
 			}},
 		}); err != nil {
 		return aoserrors.Wrap(err)
-	}
-
-	if client.runStatus != nil {
-		if err := client.sendRuntimeInstanceNotifications(launcher.RuntimeStatus{
-			RunStatus: client.runStatus,
-		}); err != nil {
-			return err
-		}
 	}
 
 	log.Debug("Registered to CM")
@@ -636,10 +627,6 @@ func (client *SMClient) handleChannels() {
 	for {
 		select {
 		case runtimeStatus := <-client.runtimeStatusChannel:
-			if runtimeStatus.RunStatus != nil {
-				client.runStatus = runtimeStatus.RunStatus
-			}
-
 			if err := client.sendRuntimeInstanceNotifications(runtimeStatus); err != nil {
 				log.Errorf("Can't send runtime instance notification: %v", err)
 
@@ -696,6 +683,8 @@ func (client *SMClient) handleChannels() {
 
 func (client *SMClient) sendRuntimeInstanceNotifications(runtimeStatus launcher.RuntimeStatus) error {
 	if runtimeStatus.RunStatus != nil {
+		log.Debug("Send run instances statuses")
+
 		runStatusNtf := &pb.SMOutgoingMessages_RunInstancesStatus{
 			RunInstancesStatus: runInstanceStatusToPB(runtimeStatus.RunStatus),
 		}
@@ -706,6 +695,8 @@ func (client *SMClient) sendRuntimeInstanceNotifications(runtimeStatus launcher.
 	}
 
 	if runtimeStatus.UpdateStatus != nil {
+		log.Debug("Send update instances statuses")
+
 		updateStatusNtf := &pb.SMOutgoingMessages_UpdateInstancesStatus{
 			UpdateInstancesStatus: updateInstanceStatusToPB(runtimeStatus.UpdateStatus),
 		}
