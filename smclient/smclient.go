@@ -77,6 +77,7 @@ type SMClient struct {
 	alertChannel         <-chan interface{}
 	monitoringChannel    <-chan aostypes.NodeMonitoring
 	logsChannel          <-chan cloudprotocol.PushLog
+	lastRuntimeStatus    launcher.RuntimeStatus
 }
 
 // NodeInfoProvider interface to get node information.
@@ -335,6 +336,10 @@ func (client *SMClient) register(config *config.Config, provider CertificateProv
 			}},
 		}); err != nil {
 		return aoserrors.Wrap(err)
+	}
+
+	if err := client.sendRuntimeInstanceNotifications(client.lastRuntimeStatus); err != nil {
+		return err
 	}
 
 	log.Debug("Registered to CM")
@@ -627,6 +632,13 @@ func (client *SMClient) handleChannels() {
 	for {
 		select {
 		case runtimeStatus := <-client.runtimeStatusChannel:
+			if runtimeStatus.RunStatus != nil {
+				client.lastRuntimeStatus.RunStatus = runtimeStatus.RunStatus
+				client.lastRuntimeStatus.UpdateStatus = nil
+			}
+
+			client.lastRuntimeStatus.UpdateStatus = runtimeStatus.UpdateStatus
+
 			if err := client.sendRuntimeInstanceNotifications(runtimeStatus); err != nil {
 				log.Errorf("Can't send runtime instance notification: %v", err)
 
