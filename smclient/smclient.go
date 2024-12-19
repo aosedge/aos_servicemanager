@@ -48,7 +48,6 @@ import (
  **********************************************************************************************************************/
 
 const (
-	cmRequestTimeout   = 30 * time.Second
 	cmReconnectTimeout = 10 * time.Second
 )
 
@@ -283,7 +282,7 @@ func (client *SMClient) openGRPCConnection(config *config.Config, provider Certi
 	log.Debug("Connecting to CM...")
 
 	if client.connection, err = grpchelpers.CreateProtectedConnection(
-		config.CertStorage, config.CMServerURL, cmRequestTimeout, cryptcoxontext, provider, insecureConn); err != nil {
+		config.CertStorage, config.CMServerURL, cryptcoxontext, provider, insecureConn); err != nil {
 		return aoserrors.Wrap(err)
 	}
 
