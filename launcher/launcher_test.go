@@ -606,7 +606,7 @@ func TestRuntimeSpec(t *testing.T) {
 				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
 				gid:         3456,
 				imageConfig: &imagespec.Image{
-					OS: "linux",
+					Platform: imagespec.Platform{OS: "linux"},
 					Config: imagespec.ImageConfig{
 						Entrypoint: []string{"entry1", "entry2", "entry3"},
 						Cmd:        []string{"cmd1", "cmd2", "cmd3"},
@@ -1109,7 +1109,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 				gid:          3456,
 				layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
 				imageConfig: &imagespec.Image{
-					OS: "linux",
+					Platform: imagespec.Platform{OS: "linux"},
 					Config: imagespec.ImageConfig{
 						ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
 					},
@@ -2524,7 +2524,7 @@ func (provider *testServiceProvider) installServices(services []serviceInfo) err
 			return aoserrors.Wrap(err)
 		}
 
-		imageConfig := &imagespec.Image{OS: "linux"}
+		imageConfig := &imagespec.Image{Platform: imagespec.Platform{OS: "linux"}}
 
 		if service.imageConfig != nil {
 			imageConfig = service.imageConfig
