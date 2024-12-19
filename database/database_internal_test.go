@@ -401,7 +401,7 @@ func TestMultiThread(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		for i := 0; i < numIterations; i++ {
+		for i := range numIterations {
 			if err := db.SetOperationVersion(uint64(i)); err != nil {
 				t.Errorf("Can't set operation version: %s", err)
 
@@ -424,7 +424,7 @@ func TestMultiThread(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		for i := 0; i < numIterations; i++ {
+		for i := range numIterations {
 			if err := db.SetJournalCursor(strconv.Itoa(i)); err != nil {
 				t.Errorf("Can't set journal cursor: %s", err)
 
@@ -436,7 +436,7 @@ func TestMultiThread(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		for i := 0; i < numIterations; i++ {
+		for range numIterations {
 			if _, err := db.GetJournalCursor(); err != nil {
 				t.Errorf("Can't get journal cursor: %s", err)
 
@@ -578,11 +578,12 @@ func TestInstances(t *testing.T) {
 	const (
 		testServiceID = "testService"
 		testSubjectID = "testSubject"
+		numInstances  = 5
 	)
 
-	var allInstances []launcher.InstanceInfo
+	allInstances := make([]launcher.InstanceInfo, 0, numInstances)
 
-	for i := 0; i < 5; i++ {
+	for i := range numInstances {
 		subjectInstance := launcher.InstanceInfo{
 			InstanceInfo: aostypes.InstanceInfo{
 				InstanceIdent: aostypes.InstanceIdent{

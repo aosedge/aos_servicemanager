@@ -497,7 +497,7 @@ func TestUpdateNetwork(t *testing.T) {
 		t.Fatalf("Can't update networks: %v", err)
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-vlanCreator.createVlanCh:
 		case <-time.After(time.Second):
@@ -505,7 +505,7 @@ func TestUpdateNetwork(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-storage.chanAddNetwork:
 		case <-time.After(time.Second):
@@ -934,7 +934,7 @@ func TestTrafficMonitoring(t *testing.T) {
 		t.Error("Unexpected system traffic")
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		iptableInterface.waitUpdateIptablesCache()
 
 		in, out, err = manager.GetInstanceTraffic("instance1")
@@ -1440,7 +1440,7 @@ func (iptables *testIPTablesInterface) ListAllRulesWithCounters(table string) ([
 	var counters []string
 
 	for chain, iptablesData := range iptables.chain {
-		for i := 0; i < iptablesData.countChain; i++ {
+		for range iptablesData.countChain {
 			counters = append(counters, fmt.Sprintf("%s -c 0 %d", chain, iptablesData.limit))
 		}
 
