@@ -588,7 +588,7 @@ func (manager *NetworkManager) createNetwork(
 
 func (manager *NetworkManager) generateVlanName() (string, error) {
 next:
-	for i := 0; i < countRetryVlanNameGeneration; i++ {
+	for range countRetryVlanNameGeneration {
 		vlanName, err := randomVlanName()
 		if err != nil {
 			return "", err

@@ -3024,8 +3024,8 @@ func compareArrays(len1, len2 int, isEqual func(index1, index2 int) bool) bool {
 	}
 
 loop1:
-	for i := 0; i < len1; i++ {
-		for j := 0; j < len2; j++ {
+	for i := range len1 {
+		for j := range len2 {
 			if isEqual(i, j) {
 				continue loop1
 			}
@@ -3036,8 +3036,8 @@ loop1:
 
 loop2:
 
-	for j := 0; j < len2; j++ {
-		for i := 0; i < len1; i++ {
+	for j := range len2 {
+		for i := range len1 {
 			if isEqual(i, j) {
 				continue loop2
 			}
@@ -3342,7 +3342,7 @@ func getSystemGroups(n int) (groups []string, err error) {
 		systemGroups = append(systemGroups, group)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		groups = append(groups, systemGroups[i%len(systemGroups)])
 	}
 
