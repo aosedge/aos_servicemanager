@@ -1,5 +1,5 @@
 run:
-  go: "1.21"
+  go: "1.22"
 
 linters:
   enable-all: true
@@ -20,8 +20,6 @@ linters:
     # deprecated
     - bodyclose
     - contextcheck
-    - execinquery
-    - gomnd
     - nilerr
     - noctx
     - rowserrcheck
@@ -42,6 +40,7 @@ linters-settings:
 
   gosec:
     excludes:
+      - G115
       - G204
 
   mnd:
