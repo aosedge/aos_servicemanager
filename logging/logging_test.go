@@ -164,7 +164,7 @@ func TestGetSystemLog(t *testing.T) {
 		till = from.Add(5 * time.Second)
 	)
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		testJournal.addMessage("Hello World", "logger", "", "2")
 	}
 
@@ -307,7 +307,7 @@ func TestMaxPartCountLog(t *testing.T) {
 		till           = from.Add(20 * time.Second)
 	)
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		testJournal.addMessage(fmt.Sprintf("Super mega log %d", i),
 			unitName, "/system.slice/system-aos@service.slice/"+unitName, "2")
 	}

@@ -50,9 +50,6 @@ var errOfflineTimeout = errors.New("offline timeout")
  **********************************************************************************************************************/
 
 func (launcher *Launcher) cacheCurrentServices(instances []InstanceInfo) {
-	launcher.runMutex.Lock()
-	defer launcher.runMutex.Unlock()
-
 	now := time.Now()
 
 	launcher.currentServices = make(map[string]*serviceInfo)

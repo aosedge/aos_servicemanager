@@ -109,9 +109,8 @@ type ResourceManager interface {
 	GetDeviceInfo(device string) (cloudprotocol.DeviceInfo, error)
 	GetResourceInfo(resource string) (cloudprotocol.ResourceInfo, error)
 	AllocateDevice(device, instanceID string) error
-	ReleaseDevice(device, instanceID string) error
 	ReleaseDevices(instanceID string) error
-	GetDeviceInstances(name string) (instanceIDs []string, err error)
+	ResetDevicesAllocation() error
 }
 
 // NetworkManager provides network access.
@@ -179,6 +178,7 @@ type Launcher struct {
 	runMutex               sync.Mutex
 	runInstancesInProgress bool
 	currentInstances       map[string]*runtimeInstanceInfo
+	errorInstances         map[string]*runtimeInstanceInfo
 	currentServices        map[string]*serviceInfo
 	currentEnvVars         []cloudprotocol.EnvVarsInstanceInfo
 	onlineTime             time.Time
@@ -416,11 +416,12 @@ func (launcher *Launcher) runInstances(runInstances []InstanceInfo) error {
 	}()
 
 	launcher.runInstancesInProgress = true
-	launcher.runMutex.Unlock()
 
 	launcher.cacheCurrentServices(runInstances)
 
 	stopInstances, startInstances := launcher.calculateInstances(runInstances)
+
+	launcher.runMutex.Unlock()
 
 	launcher.stopInstances(stopInstances)
 	launcher.startInstances(startInstances)
@@ -428,59 +429,66 @@ func (launcher *Launcher) runInstances(runInstances []InstanceInfo) error {
 	return nil
 }
 
+func (launcher *Launcher) prepareInstance(instance *runtimeInstanceInfo) (err error) {
+	if instance.service, err = launcher.getCurrentServiceInfo(instance.ServiceID); err != nil {
+		return err
+	}
+
+	if err = launcher.allocateDevices(instance); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (launcher *Launcher) calculateInstances(
 	runInstances []InstanceInfo,
 ) (stopInstances, startInstances []*runtimeInstanceInfo) {
-	launcher.runMutex.Lock()
-	defer launcher.runMutex.Unlock()
+	sort.Slice(runInstances, func(i, j int) bool { return runInstances[i].Priority > runInstances[j].Priority })
 
-	currentInstances := make([]*runtimeInstanceInfo, 0, len(launcher.currentInstances))
-
-	for _, currentInstance := range launcher.currentInstances {
-		currentInstances = append(currentInstances, currentInstance)
+	if err := launcher.resourceManager.ResetDevicesAllocation(); err != nil {
+		log.Errorf("Can't reset device allocation: %v", err)
 	}
 
-	sort.Slice(runInstances, func(i, j int) bool { return runInstances[i].Priority > runInstances[j].Priority })
-	sort.Slice(currentInstances, func(i, j int) bool {
-		return currentInstances[i].Priority > currentInstances[j].Priority
-	})
+	launcher.errorInstances = make(map[string]*runtimeInstanceInfo)
 
-	maxPriorityIncreased := len(runInstances) > 0 && len(currentInstances) > 0 &&
-		runInstances[0].Priority > currentInstances[0].Priority
-
-	var maxStartPriority uint64
-
-runInstancesLoop:
 	for _, runInstance := range runInstances {
-		for i, currentInstance := range currentInstances {
-			if currentInstance.InstanceIdent != runInstance.InstanceIdent {
+		instance := newRuntimeInstanceInfo(runInstance)
+
+		if err := launcher.prepareInstance(instance); err != nil {
+			launcher.instanceFailed(instance, err)
+
+			launcher.errorInstances[instance.InstanceID] = instance
+
+			continue
+		}
+
+		startInstances = append(startInstances, instance)
+	}
+
+currentInstanceLoop:
+	for _, currentInstance := range launcher.currentInstances {
+		for i, startInstance := range startInstances {
+			if currentInstance.InstanceID != startInstance.InstanceID {
 				continue
 			}
 
-			if currentInstance.service != nil &&
-				currentInstance.service.Version == launcher.currentServices[currentInstance.ServiceID].Version &&
-				instanceInfoEqual(currentInstance.InstanceInfo.InstanceInfo, runInstance.InstanceInfo) &&
-				currentInstance.runStatus.State == cloudprotocol.InstanceStateActive &&
-				currentInstance.Priority >= maxStartPriority && !maxPriorityIncreased {
-				currentInstances = append(currentInstances[:i], currentInstances[i+1:]...)
+			currentInstance.Priority = startInstance.Priority
 
-				continue runInstancesLoop
+			if currentInstance.service.Version != startInstance.service.Version ||
+				currentInstance.runStatus.State != cloudprotocol.InstanceStateActive ||
+				!instanceInfoEqual(currentInstance.InstanceInfo.InstanceInfo,
+					startInstance.InstanceInfo.InstanceInfo) {
+				continue
 			}
 
-			stopInstances = append(stopInstances, currentInstance)
-			currentInstances = append(currentInstances[:i], currentInstances[i+1:]...)
+			startInstances = append(startInstances[:i], startInstances[i+1:]...)
 
-			break
+			continue currentInstanceLoop
 		}
 
-		if runInstance.Priority > maxStartPriority {
-			maxStartPriority = runInstance.Priority
-		}
-
-		startInstances = append(startInstances, newRuntimeInstanceInfo(runInstance))
+		stopInstances = append(stopInstances, currentInstance)
 	}
-
-	stopInstances = append(stopInstances, currentInstances...)
 
 	return stopInstances, startInstances
 }
@@ -526,10 +534,6 @@ func (launcher *Launcher) releaseRuntime(instance *runtimeInstanceInfo) (err err
 			instance.InstanceID, instance.service.ServiceProvider); networkErr != nil && err == nil {
 			err = aoserrors.Wrap(networkErr)
 		}
-	}
-
-	if deviceErr := launcher.resourceManager.ReleaseDevices(instance.InstanceID); deviceErr != nil && err == nil {
-		err = aoserrors.Wrap(deviceErr)
 	}
 
 	return err
@@ -593,23 +597,7 @@ func (launcher *Launcher) stopInstance(instance *runtimeInstanceInfo) (err error
 }
 
 func (launcher *Launcher) startInstances(instances []*runtimeInstanceInfo) {
-	var currentPriority uint64
-
-	if len(instances) > 0 {
-		currentPriority = instances[0].Priority
-
-		log.WithField("priority", currentPriority).Debug("Start instances with priority")
-	}
-
 	for _, instance := range instances {
-		if currentPriority != instance.Priority {
-			launcher.actionHandler.Wait()
-
-			currentPriority = instance.Priority
-
-			log.WithField("priority", currentPriority).Debug("Start instances with priority")
-		}
-
 		launcher.doStartAction(instance)
 	}
 
@@ -727,10 +715,6 @@ func (launcher *Launcher) allocateDevices(instance *runtimeInstanceInfo) (err er
 }
 
 func (launcher *Launcher) setupRuntime(instance *runtimeInstanceInfo) error {
-	if err := launcher.allocateDevices(instance); err != nil {
-		return err
-	}
-
 	if instance.service.serviceConfig.Permissions != nil {
 		secret, err := launcher.instanceRegistrar.RegisterInstance(
 			instance.InstanceIdent, instance.service.serviceConfig.Permissions)
@@ -762,13 +746,6 @@ func (launcher *Launcher) startInstance(instance *runtimeInstanceInfo) error {
 		}
 
 		launcher.currentInstances[instance.InstanceID] = instance
-
-		service, err := launcher.getCurrentServiceInfo(instance.ServiceID)
-		if err != nil {
-			return err
-		}
-
-		instance.service = service
 		instance.runStatus = runner.InstanceStatus{InstanceID: instance.InstanceID}
 
 		return nil
@@ -844,6 +821,10 @@ func (launcher *Launcher) sendRunInstancesStatuses() {
 
 	for _, currentInstance := range launcher.currentInstances {
 		runInstancesStatuses = append(runInstancesStatuses, currentInstance.getCloudStatus())
+	}
+
+	for _, errorInstance := range launcher.errorInstances {
+		runInstancesStatuses = append(runInstancesStatuses, errorInstance.getCloudStatus())
 	}
 
 	launcher.runtimeStatusChannel <- RuntimeStatus{
@@ -1079,9 +1060,9 @@ func (launcher *Launcher) restartStoredInstances() error {
 		return aoserrors.Wrap(err)
 	}
 
-	launcher.cacheCurrentServices(currentInstances)
-
 	launcher.runMutex.Lock()
+
+	launcher.cacheCurrentServices(currentInstances)
 
 	for _, currentInstance := range currentInstances {
 		instance := newRuntimeInstanceInfo(currentInstance)

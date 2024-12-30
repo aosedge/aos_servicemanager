@@ -606,7 +606,7 @@ func TestRuntimeSpec(t *testing.T) {
 				ServiceInfo: aostypes.ServiceInfo{ServiceID: "service0"},
 				gid:         3456,
 				imageConfig: &imagespec.Image{
-					OS: "linux",
+					Platform: imagespec.Platform{OS: "linux"},
 					Config: imagespec.ImageConfig{
 						Entrypoint: []string{"entry1", "entry2", "entry3"},
 						Cmd:        []string{"cmd1", "cmd2", "cmd3"},
@@ -1109,7 +1109,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 				gid:          3456,
 				layerDigests: []string{layerDigest1, layerDigest2, layerDigest3, layerDigest4},
 				imageConfig: &imagespec.Image{
-					OS: "linux",
+					Platform: imagespec.Platform{OS: "linux"},
 					Config: imagespec.ImageConfig{
 						ExposedPorts: map[string]struct{}{"port0": {}, "port1": {}, "port2": {}},
 					},
@@ -1136,7 +1136,7 @@ func TestRuntimeEnvironment(t *testing.T) {
 							MinTimeout:   aostypes.Duration{Duration: 2 * time.Second},
 							MinThreshold: 20, MaxThreshold: 200,
 						},
-						UsedDisks: []aostypes.PartitionAlertRule{
+						Partitions: []aostypes.PartitionAlertRule{
 							{
 								Name: "storage",
 								AlertRulePercents: aostypes.AlertRulePercents{
@@ -1819,380 +1819,131 @@ func TestInstancePriorities(t *testing.T) {
 		}
 	}
 
+	serviceConfig := &aostypes.ServiceConfig{Devices: []aostypes.ServiceDevice{{Name: "device0", Permissions: "rw"}}}
+
 	data := []testPriorityItem{
-		// start from scratch
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 400),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 300),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 500),
-					instancePriority(9, 200),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(5, 500),
-				instancePriority(6, 500),
-				instancePriority(7, 500),
-				instancePriority(8, 500),
-				instancePriority(0, 400),
-				instancePriority(1, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(4, 300),
-				instancePriority(9, 200),
-			},
-		},
-		// change instance 4 to the highest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 400),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 500),
-					instancePriority(9, 200),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(4, 600),
-				instancePriority(5, 500),
-				instancePriority(6, 500),
-				instancePriority(7, 500),
-				instancePriority(8, 500),
-				instancePriority(0, 400),
-				instancePriority(1, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(9, 200),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(0, 400),
-				instancePriority(1, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(4, 300),
-				instancePriority(5, 500),
-				instancePriority(6, 500),
-				instancePriority(7, 500),
-				instancePriority(8, 500),
-				instancePriority(9, 200),
-			},
-		},
-		// change instance 8 to the lowest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 400),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(8, 100),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(8, 500),
-			},
-		},
-		// change instance 1 to priority 500
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(1, 500),
-				instancePriority(0, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(9, 200),
-				instancePriority(8, 100),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(0, 400),
-				instancePriority(1, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(8, 100),
-				instancePriority(9, 200),
-			},
-		},
-		// Add new instances with the highest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-					instancePriority(10, 700),
-					instancePriority(11, 700),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(10, 700),
-				instancePriority(11, 700),
-				instancePriority(4, 600),
-				instancePriority(1, 500),
-				instancePriority(5, 500),
-				instancePriority(6, 500),
-				instancePriority(7, 500),
-				instancePriority(0, 400),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(9, 200),
-				instancePriority(8, 100),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(0, 400),
-				instancePriority(1, 500),
-				instancePriority(2, 400),
-				instancePriority(3, 300),
-				instancePriority(4, 600),
-				instancePriority(5, 500),
-				instancePriority(6, 500),
-				instancePriority(7, 500),
-				instancePriority(8, 100),
-				instancePriority(9, 200),
-			},
-		},
-		// Add new instances with the lowest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-					instancePriority(10, 700),
-					instancePriority(11, 700),
-					instancePriority(13, 0),
-					instancePriority(14, 0),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(13, 0),
-				instancePriority(14, 0),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{},
-		},
-		// Add new instances with the middle priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-					instancePriority(10, 700),
-					instancePriority(11, 700),
-					instancePriority(13, 0),
-					instancePriority(14, 0),
-					instancePriority(15, 300),
-					instancePriority(16, 300),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(15, 300),
-				instancePriority(16, 300),
-				instancePriority(9, 200),
-				instancePriority(8, 100),
-				instancePriority(13, 0),
-				instancePriority(14, 0),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(8, 100),
-				instancePriority(9, 200),
-				instancePriority(13, 0),
-				instancePriority(14, 0),
-			},
-		},
-		// Remove instances with the highest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-					instancePriority(13, 0),
-					instancePriority(14, 0),
-					instancePriority(15, 300),
-					instancePriority(16, 300),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(10, 700),
-				instancePriority(11, 700),
-			},
-		},
-		// Remove instances with the lowest priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-					instancePriority(15, 300),
-					instancePriority(16, 300),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(13, 0),
-				instancePriority(14, 0),
-			},
-		},
-		// Remove instances with the middle priority
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 300),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-				},
-			},
-			startedInstances: []aostypes.InstanceInfo{},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(15, 300),
-				instancePriority(16, 300),
-			},
-		},
-		// Change instance 3 priority to the same order
-		{
-			testItem: testItem{
-				services: []serviceInfo{{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}}},
-				instances: []aostypes.InstanceInfo{
-					instancePriority(0, 400),
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 350),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
-				},
-				err: []error{nil, nil, nil, errors.New("some error")}, //nolint:goerr113
-			},
-			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(3, 350),
-				instancePriority(9, 200),
-				instancePriority(8, 100),
-			},
-			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(3, 300),
-				instancePriority(8, 100),
-				instancePriority(9, 200),
-			},
-		},
-		// Remove instances with the middle priority and there is not successfully started instance
+		// 0. Start 4 instances with different priorities
 		{
 			testItem: testItem{
 				services: []serviceInfo{
-					{ServiceInfo: aostypes.ServiceInfo{ServiceID: service}},
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: service},
+						serviceConfig: serviceConfig,
+					},
 				},
 				instances: []aostypes.InstanceInfo{
-					instancePriority(1, 500),
-					instancePriority(2, 400),
-					instancePriority(3, 350),
-					instancePriority(4, 600),
-					instancePriority(5, 500),
-					instancePriority(6, 500),
-					instancePriority(7, 500),
-					instancePriority(8, 100),
-					instancePriority(9, 200),
+					instancePriority(0, 10),
+					instancePriority(1, 10),
+					instancePriority(2, 20),
+					instancePriority(3, 20),
 				},
 			},
 			startedInstances: []aostypes.InstanceInfo{
-				instancePriority(3, 350),
-				instancePriority(9, 200),
-				instancePriority(8, 100),
+				instancePriority(2, 20),
+				instancePriority(3, 20),
+				instancePriority(0, 10),
+				instancePriority(1, 10),
+			},
+		},
+		// 1. Add instances with lower priority
+		{
+			testItem: testItem{
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: service},
+						serviceConfig: serviceConfig,
+					},
+				},
+				instances: []aostypes.InstanceInfo{
+					instancePriority(0, 10),
+					instancePriority(1, 10),
+					instancePriority(2, 20),
+					instancePriority(3, 20),
+					instancePriority(4, 0),
+					instancePriority(5, 0),
+				},
+				err: []error{
+					nil, nil, nil, nil,
+					errors.New("no device available"), errors.New("no device available"), //nolint:goerr113
+				},
+			},
+		},
+		// 2. Add instances with higher priority
+		{
+			testItem: testItem{
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: service},
+						serviceConfig: serviceConfig,
+					},
+				},
+				instances: []aostypes.InstanceInfo{
+					instancePriority(0, 10),
+					instancePriority(1, 10),
+					instancePriority(2, 20),
+					instancePriority(3, 20),
+					instancePriority(4, 30),
+					instancePriority(5, 30),
+				},
+				err: []error{
+					errors.New("no device available"), errors.New("no device available"), //nolint:goerr113
+				},
 			},
 			stoppedInstances: []aostypes.InstanceInfo{
-				instancePriority(0, 400),
-				instancePriority(3, 350),
-				instancePriority(8, 100),
-				instancePriority(9, 200),
+				instancePriority(0, 10),
+				instancePriority(1, 10),
+			},
+			startedInstances: []aostypes.InstanceInfo{
+				instancePriority(4, 30),
+				instancePriority(5, 30),
+			},
+		},
+		// 3. Change priority
+		{
+			testItem: testItem{
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: service},
+						serviceConfig: serviceConfig,
+					},
+				},
+				instances: []aostypes.InstanceInfo{
+					instancePriority(2, 30),
+					instancePriority(3, 30),
+					instancePriority(4, 20),
+					instancePriority(5, 20),
+				},
+			},
+		},
+		// 4. Change priority and add higher priority instances
+		{
+			testItem: testItem{
+				services: []serviceInfo{
+					{
+						ServiceInfo:   aostypes.ServiceInfo{ServiceID: service},
+						serviceConfig: serviceConfig,
+					},
+				},
+				instances: []aostypes.InstanceInfo{
+					instancePriority(0, 100),
+					instancePriority(1, 100),
+					instancePriority(2, 50),
+					instancePriority(3, 50),
+					instancePriority(4, 20),
+					instancePriority(5, 20),
+				},
+				err: []error{
+					nil, nil, nil, nil,
+					errors.New("no device available"), errors.New("no device available"), //nolint:goerr113
+				},
+			},
+			stoppedInstances: []aostypes.InstanceInfo{
+				instancePriority(4, 20),
+				instancePriority(5, 20),
+			},
+			startedInstances: []aostypes.InstanceInfo{
+				instancePriority(0, 100),
+				instancePriority(1, 100),
 			},
 		},
 	}
@@ -2207,6 +1958,7 @@ func TestInstancePriorities(t *testing.T) {
 	serviceProvider := newTestServiceProvider()
 	layerProvider := newTestLayerProvider()
 	storage := newTestStorage()
+	resourceManager := newTestResourceManager()
 	instanceRunner := newTestRunner(
 		func(instanceID string) runner.InstanceStatus {
 			if instance, ok := storage.instances[instanceID]; ok {
@@ -2224,8 +1976,10 @@ func TestInstancePriorities(t *testing.T) {
 		},
 	)
 
+	resourceManager.addDevice(cloudprotocol.DeviceInfo{Name: "device0", SharedCount: 4})
+
 	testLauncher, err := launcher.New(&config.Config{WorkingDir: tmpDir}, newTestNodeInfoProvider(), storage,
-		serviceProvider, layerProvider, instanceRunner, newTestResourceManager(), newTestNetworkManager(),
+		serviceProvider, layerProvider, instanceRunner, resourceManager, newTestNetworkManager(),
 		newTestRegistrar(), newTestInstanceMonitor(), newTestAlertSender())
 	if err != nil {
 		t.Fatalf("Can't create launcher: %v", err)
@@ -2269,10 +2023,6 @@ func TestInstancePriorities(t *testing.T) {
 		if err = checkRuntimeStatus(testLauncher.RuntimeStatusChannel(),
 			runtimeStatus, defaultStatusTimeout); err != nil {
 			t.Errorf("Check runtime status error: %v", err)
-		}
-
-		if err = checkInstancesByPriority(startedInstances, item.startedInstances); err != nil {
-			t.Errorf("Check instances by priority error: %v", err)
 		}
 
 		if !compareArrays(len(stoppedInstances), len(item.stoppedInstances), func(index1, index2 int) bool {
@@ -2774,7 +2524,7 @@ func (provider *testServiceProvider) installServices(services []serviceInfo) err
 			return aoserrors.Wrap(err)
 		}
 
-		imageConfig := &imagespec.Image{OS: "linux"}
+		imageConfig := &imagespec.Image{Platform: imagespec.Platform{OS: "linux"}}
 
 		if service.imageConfig != nil {
 			imageConfig = service.imageConfig
@@ -2900,7 +2650,7 @@ func (instanceRunner *testRunner) InstanceStatusChannel() <-chan []runner.Instan
 
 func newTestResourceManager() *testResourceManager {
 	return &testResourceManager{
-		allocatedDevices: map[string][]string{},
+		allocatedDevices: make(map[string][]string),
 		devices:          make(map[string]cloudprotocol.DeviceInfo),
 		resources:        make(map[string]cloudprotocol.ResourceInfo),
 	}
@@ -2912,7 +2662,7 @@ func (manager *testResourceManager) GetDeviceInfo(device string) (cloudprotocol.
 
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
-		return cloudprotocol.DeviceInfo{}, aoserrors.New("device info not found")
+		return cloudprotocol.DeviceInfo{}, aoserrors.Errorf("device %s info not found", device)
 	}
 
 	return deviceInfo, nil
@@ -2936,7 +2686,7 @@ func (manager *testResourceManager) AllocateDevice(device, instanceID string) er
 
 	deviceInfo, ok := manager.devices[device]
 	if !ok {
-		return aoserrors.New("device info not found")
+		return aoserrors.Errorf("device %s info not found", device)
 	}
 
 	for _, allocatedInstanceID := range manager.allocatedDevices[device] {
@@ -2952,26 +2702,6 @@ func (manager *testResourceManager) AllocateDevice(device, instanceID string) er
 	manager.allocatedDevices[device] = append(manager.allocatedDevices[device], instanceID)
 
 	return nil
-}
-
-func (manager *testResourceManager) ReleaseDevice(device, instanceID string) error {
-	manager.Lock()
-	defer manager.Unlock()
-
-	if _, ok := manager.devices[device]; !ok {
-		return aoserrors.New("device info not found")
-	}
-
-	for i, allocatedInstanceID := range manager.allocatedDevices[device] {
-		if allocatedInstanceID == instanceID {
-			manager.allocatedDevices[device] = append(manager.allocatedDevices[device][:i],
-				manager.allocatedDevices[device][i+1:]...)
-
-			return nil
-		}
-	}
-
-	return aoserrors.Errorf("device %s is not allocated for instance %s", device, instanceID)
 }
 
 func (manager *testResourceManager) ReleaseDevices(instanceID string) error {
@@ -2994,15 +2724,13 @@ func (manager *testResourceManager) ReleaseDevices(instanceID string) error {
 	return nil
 }
 
-func (manager *testResourceManager) GetDeviceInstances(name string) (instanceIDs []string, err error) {
-	manager.RLock()
-	defer manager.RUnlock()
+func (manager *testResourceManager) ResetDevicesAllocation() error {
+	manager.Lock()
+	defer manager.Unlock()
 
-	if _, ok := manager.devices[name]; !ok {
-		return nil, aoserrors.New("device info not found")
-	}
+	manager.allocatedDevices = make(map[string][]string)
 
-	return manager.allocatedDevices[name], nil
+	return nil
 }
 
 func (manager *testResourceManager) addDevice(device cloudprotocol.DeviceInfo) {
@@ -3296,8 +3024,8 @@ func compareArrays(len1, len2 int, isEqual func(index1, index2 int) bool) bool {
 	}
 
 loop1:
-	for i := 0; i < len1; i++ {
-		for j := 0; j < len2; j++ {
+	for i := range len1 {
+		for j := range len2 {
 			if isEqual(i, j) {
 				continue loop1
 			}
@@ -3308,8 +3036,8 @@ loop1:
 
 loop2:
 
-	for j := 0; j < len2; j++ {
-		for i := 0; i < len1; i++ {
+	for j := range len2 {
+		for i := range len1 {
 			if isEqual(i, j) {
 				continue loop2
 			}
@@ -3332,37 +3060,6 @@ func checkRuntimeStatus(statusChannel <-chan launcher.RuntimeStatus,
 
 	case <-time.After(timeout):
 		return aoserrors.New("Wait for runtime status timeout")
-	}
-
-	return nil
-}
-
-func checkInstancesByPriority(compInstances, refInstances []aostypes.InstanceInfo) error {
-	if len(compInstances) != len(refInstances) {
-		return aoserrors.New("wrong instances len")
-	}
-
-	if len(refInstances) == 0 {
-		return nil
-	}
-
-	currentPriority := refInstances[0].Priority
-	startPriorityIndex := 0
-
-	for i, instance := range refInstances {
-		if instance.Priority != currentPriority {
-			compPriorityInstances := compInstances[startPriorityIndex:i]
-			refPriorityInstances := refInstances[startPriorityIndex:i]
-
-			if !compareArrays(len(compPriorityInstances), len(refPriorityInstances), func(index1, index2 int) bool {
-				return reflect.DeepEqual(compPriorityInstances[index1], refPriorityInstances[index2])
-			}) {
-				return aoserrors.New("instance priorities mismatch")
-			}
-
-			currentPriority = instance.Priority
-			startPriorityIndex = i
-		}
 	}
 
 	return nil
@@ -3645,7 +3342,7 @@ func getSystemGroups(n int) (groups []string, err error) {
 		systemGroups = append(systemGroups, group)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		groups = append(groups, systemGroups[i%len(systemGroups)])
 	}
 
@@ -3816,8 +3513,6 @@ func compareOverrideEnvVarsStatus(status1, status2 []cloudprotocol.EnvVarsInstan
 					compareErrorInfo(status1.Statuses[index1].ErrorInfo, status2.Statuses[index2].ErrorInfo)
 			})
 		}) {
-		log.Debug("====================", status1, status2)
-
 		return aoserrors.New("override env vars status mismatch")
 	}
 

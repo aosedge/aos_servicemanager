@@ -28,6 +28,7 @@ import (
 	"syscall"
 
 	"github.com/aosedge/aos_common/aoserrors"
+	"github.com/aosedge/aos_common/iamclient"
 	"github.com/aosedge/aos_common/journalalerts"
 	"github.com/aosedge/aos_common/resourcemonitor"
 	"github.com/aosedge/aos_common/utils/cryptutils"
@@ -39,7 +40,6 @@ import (
 	"github.com/aosedge/aos_servicemanager/alerts"
 	"github.com/aosedge/aos_servicemanager/config"
 	"github.com/aosedge/aos_servicemanager/database"
-	"github.com/aosedge/aos_servicemanager/iamclient"
 	"github.com/aosedge/aos_servicemanager/launcher"
 	"github.com/aosedge/aos_servicemanager/layermanager"
 	"github.com/aosedge/aos_servicemanager/logging"
@@ -186,7 +186,8 @@ func newServiceManager(cfg *config.Config) (sm *serviceManager, err error) {
 		return sm, aoserrors.Wrap(err)
 	}
 
-	if sm.iam, err = iamclient.New(cfg, sm.cryptoContext, false); err != nil {
+	if sm.iam, err = iamclient.New(cfg.IAMPublicServerURL, cfg.IAMProtectedServerURL, cfg.CertStorage,
+		nil, sm.cryptoContext, false); err != nil {
 		return sm, aoserrors.Wrap(err)
 	}
 
